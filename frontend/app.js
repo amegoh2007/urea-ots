@@ -273,50 +273,31 @@ function updateTrend(tag){
   });
 }
 
-// ---------- Stream popup data ----------
-const STREAM_INFO = {
-  AL:{name:'NH3 from BL (AL)',rows:()=>[
-    ['Source','309E005 → 321D003'],['Composition','NH3 ~100% (liq)'],
-    ['Flow',(lastState.FI_321401||0).toFixed(2)+' t/h'],
-    ['Temperature',(lastState.TI_top2||0).toFixed(1)+' °C'],
-    ['Pressure',(lastState.PI_top1||0).toFixed(1)+' bar g'] ]},
-  SUCT:{name:'Pump Suction Header',rows:()=>[
-    ['Composition','NH3 ~100% (liq)'],
-    ['Pressure (A)',(lastState.PI_321201||0).toFixed(2)+' bar g'],
-    ['Pressure (B)',(lastState.PI_321202||0).toFixed(2)+' bar g'],
-    ['Temperature',(lastState.TI_top2||0).toFixed(1)+' °C'] ]},
-  DISCH:{name:'HP Discharge to 322F001',rows:()=>[
-    ['Composition','NH3 ~100% (liq)'],
-    ['Flow',(lastState.FI_321401||0).toFixed(2)+' t/h'],
-    ['Temperature',(lastState.TI_321020||0).toFixed(1)+' °C'],
-    ['Pressure',(lastState.PI_disch||0).toFixed(1)+' bar g (header)'],
-    ['Design disch P','165 bar a'] ]},
-  CPL:{name:'Carbamate Pump Loop (CPL)',rows:()=>[
-    ['Source','329P001A/B'],['Service','CO2 load ref to ratio'],
-    ['Ratio bal',(lastState.ratio?lastState.ratio.bal:0).toFixed(3)] ]},
-  MOTIVE:{name:'Motive HP NH3 (from 321P002 A/B)',rows:()=>{const e=lastState.EJ_322F001||{};return [
-    ['Source','321-1 → XV-322901 → 322F001'],['Composition','NH3 ~100% (liq)'],
-    ['Flow',(e.motive_kgh||0).toFixed(0)+' kg/h'],
-    ['Temperature',(lastState.TI_321020||0).toFixed(1)+' °C'],
-    ['Pressure','≈ 165 bar a (HP pump disch)'] ];}},
-  ESUCT:{name:'Suction Carbamate (322E003 overflow)',rows:()=>{const e=lastState.EJ_322F001||{};return [
-    ['Source','322E003 HP scrubber overflow'],['Composition','NH3/CO2/H2O carbamate'],
-    ['Flow',(e.suction_kgh||0).toFixed(0)+' kg/h'],
-    ['Entrainment μ',(e.mu||0).toFixed(3)+'  (↓ HV-322602 ⇒ ↑ μ)'],
-    ['Temperature','178.8 °C (design)'],['Pressure','144.2 bar a'] ];}},
-  EDISCH:{name:'Ejector Discharge → 322E002 (HPCC)',rows:()=>{
-    const e=lastState.EJ_322F001||{}; const c=e.comp_pct||{};
-    const r=[['Total flow',(e.total_th||0).toFixed(2)+' t/h ('+(e.total_kgh||0).toFixed(0)+' kg/h)'],
-      ['Molar flow',(e.mol_kmolh||0).toFixed(1)+' kmol/h'],['Avg MW',(e.MW||0).toFixed(2)+' kg/kmol'],
-      ['Temperature',(e.TT_322012||0).toFixed(1)+' °C'],['Pressure',(e.PI_disch||0).toFixed(1)+' bar a'],
-      ['Density',(e.rho||0).toFixed(1)+' kg/m³']];
-    ['NH3','CO2','H2O','CH4','N2'].forEach(k=> r.push([k+' (mass%)',(c[k]||0).toFixed(2)]));
-    return r;}},
-};
-function openStreamPopup(name){
-  const info = STREAM_INFO[name]; if(!info) return;
-  document.getElementById('stream-title').textContent = info.name;
-  document.getElementById('stream-table').innerHTML = info.rows().map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+// ---------- Stream popup (generic renderer over packet STREAMS) ----------
+const COMP_LBL = {CO2:'CO₂',CH4:'CH₄',H2:'H₂',H2O:'H₂O',N2:'N₂',
+                  NH3:'NH₃',O2:'O₂',Urea:'Urea',Biuret:'Biuret'};
+const fStrm = (v,d)=> (v==null ? '—' : (+v).toFixed(d));
+function renderStream(s){
+  const rows = [
+    ['Route', s.src+' → '+s.dst], ['Phase', s.phase],
+    ['Temperature', fStrm(s.T_C,1)+' °C'], ['Pressure', fStrm(s.P_bara,1)+' bar a'],
+    ['Mass flow', fStrm(s.mass_th,2)+' t/h ('+fStrm(s.mass_kgh,0)+' kg/h)'],
+    ['Molar flow', fStrm(s.mol_kmolh,1)+' kmol/h'], ['Avg MW', fStrm(s.MW,2)+' kg/kmol'],
+    ['Density', s.rho!=null ? fStrm(s.rho,1)+' kg/m³' : '—'],
+    ['Volum. flow', s.vol_m3h!=null ? fStrm(s.vol_m3h,1)+' m³/h' : '—'],
+    ['', ''], ['Composition', 'mol %  |  mass %'],
+  ];
+  Object.keys(COMP_LBL).forEach(k=>{
+    const mo = (s.mol_pct&&s.mol_pct[k])||0, ma = (s.mass_pct&&s.mass_pct[k])||0;
+    if(mo>0 || ma>0) rows.push([COMP_LBL[k], fStrm(mo,3)+'  |  '+fStrm(ma,3)]);
+  });
+  return rows;
+}
+function openStreamPopup(id){
+  const s = (lastState.STREAMS||{})[id]; if(!s) return;
+  document.getElementById('stream-title').textContent = s.name;
+  document.getElementById('stream-table').innerHTML =
+    renderStream(s).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
   document.getElementById('streamModal').classList.add('show');
 }
 document.getElementById('s-close').onclick = ()=> document.getElementById('streamModal').classList.remove('show');
@@ -339,9 +320,12 @@ const TAG_MAP = {
   HIC_322602:'HIC-322602'
 };
 const STREAM_TAG = {
-  AL:'NH3 EX 309E005', SUCT:'NH3 SUCTION HDR',
-  DISCH:'NH3 HP DISCHARGE', CPL:'CARBAMATE (CPL)',
-  MOTIVE:'MOTIVE NH3', ESUCT:'CARBAMATE EX 322E003', EDISCH:'CARB. LIQ. → 322E002'
+  NH3_FEED:'NH3 EX 309E005', PUMP_SUCT:'NH3 SUCTION HDR',
+  HP_DISCH:'NH3 HP DISCHARGE', CARB_RECYCLE:'CARBAMATE EX 322E003',
+  EJ_DISCH:'CARB. LIQ. → 322E002', CO2_FEED:'CO2 FEED GAS',
+  STRIP_TOP:'STRIP TOP GAS', STRIP_BOT:'STRIP BOTTOM SOLN',
+  HPCC_PROD:'HPCC PRODUCT → 322R001', HPCC_STEAM:'LP STEAM 4.4 BARA',
+  HPCC_COND:'BFW/COND → 322E002'
 };
 function tagOf(el){
   if(el.dataset && el.dataset.tip) return el.dataset.tip;
