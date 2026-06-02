@@ -89,6 +89,17 @@
       { k: 'nav-p002', t: 'nav', x: 6, y: 622, w: 98, h: 24, tag: '321P002A/B → 321-1', goto: 'screen-321-1' },
     ],
     'screen-322-1': [
+      // ===== STREAM-INSPECTOR HOTSPOTS (clickable process lines; drag in edit mode to align) =====
+      { k: 'strm-co2',   t: 'strm', stream: 'CO2_FEED',     tag: 'CO2 FEED GAS',          x: 360, y: 600, w: 160, h: 20 },
+      { k: 'strm-nh3',   t: 'strm', stream: 'NH3_FEED',     tag: 'NH3 EX 309E005',        x: 360, y: 418, w: 160, h: 18 },
+      { k: 'strm-disch', t: 'strm', stream: 'HP_DISCH',     tag: 'NH3 HP DISCHARGE',      x: 560, y: 300, w: 160, h: 18 },
+      { k: 'strm-carb',  t: 'strm', stream: 'CARB_RECYCLE', tag: 'CARBAMATE EX 322E003',  x: 560, y: 360, w: 160, h: 18 },
+      { k: 'strm-ejd',   t: 'strm', stream: 'EJ_DISCH',     tag: 'CARB. LIQ. → 322E002',  x: 760, y: 340, w: 160, h: 18 },
+      { k: 'strm-stop',  t: 'strm', stream: 'STRIP_TOP',    tag: 'STRIP TOP GAS',         x: 760, y: 200, w: 160, h: 18 },
+      { k: 'strm-sbot',  t: 'strm', stream: 'STRIP_BOT',    tag: 'STRIP BOTTOM SOLN',     x: 600, y: 660, w: 160, h: 18 },
+      { k: 'strm-prod',  t: 'strm', stream: 'HPCC_PROD',    tag: 'HPCC PRODUCT → 322R001',x: 980, y: 300, w: 160, h: 18 },
+      { k: 'strm-stm',   t: 'strm', stream: 'HPCC_STEAM',   tag: 'LP STEAM 4.4 BARA',     x: 980, y: 180, w: 160, h: 18 },
+      { k: 'strm-cond',  t: 'strm', stream: 'HPCC_COND',    tag: 'BFW/COND → 322E002',    x: 980, y: 420, w: 160, h: 18 },
       // ===== CO2 FEED LINE (Item 5) — bound to backend CO2_FEED packet =====
       { k: 'hic203', t: 'ind',    x: 100,  y: 472, tag: 'HIC-322203', bind: 'CO2_FEED.HIC_322203', u: '%',     dec: 1, face: 'hic2' },
       { k: 'pv203',  t: 'avalve', x: 197,  y: 486, tag: 'PV-322203',  bind: 'CO2_FEED.PV_322203',  u: '%',     dec: 1 },
@@ -238,6 +249,9 @@
     } else if (o.t === 'nav') {
       if (o.goto && window.otsSwitchScreen) window.otsSwitchScreen(o.goto);
       return;
+    } else if (o.t === 'strm') {
+      if (o.stream && window.openStreamPopup) window.openStreamPopup(o.stream);
+      return;
     } else if (o.t === 'ind') {
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
       if (o.fp && window.openFaceplate) { window.openFaceplate(o.fp); return; }
@@ -291,7 +305,7 @@
     for (const key in elMap) if (key.indexOf(sid + '|') === 0) delete elMap[key];
     cfg(sid).forEach(o => {
       const el = document.createElement('div');
-      el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'nav' ? 'nav' : 'ind');
+      el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'nav' ? 'nav' : o.t === 'strm' ? 'strm' : 'ind');
       if (o.t === 'ind') {
         const eo = eff(o);
         if (!eo.bind) el.classList.add('empty');
@@ -300,6 +314,10 @@
       } else if (o.t === 'nav') {
         el.style.width = (o.w || 60) + 'px';
         el.style.height = (o.h || 24) + 'px';
+      } else if (o.t === 'strm') {
+        el.style.width = (o.w || 120) + 'px';
+        el.style.height = (o.h || 16) + 'px';
+        el.dataset.stream = o.stream;
       }
       el.dataset.tip = o.tag;
       el.title = o.tag;
@@ -329,6 +347,9 @@
       '.ov.nav{background:transparent;border:1px solid transparent;border-radius:4px;}' +
       '.ov.nav:hover{border-color:rgba(127,208,216,.85);background:rgba(80,160,220,.16);box-shadow:0 0 8px rgba(127,208,216,.35) inset;}' +
       'body.ov-editing .ov.nav{border-color:rgba(255,208,0,.6);background:rgba(255,208,0,.08);}' +
+      '.ov.strm{background:transparent;border:1px solid transparent;border-radius:3px;}' +
+      '.ov.strm:hover{border-color:rgba(127,208,216,.85);background:rgba(80,160,220,.14);}' +
+      'body.ov-editing .ov.strm{border-color:rgba(255,160,60,.7);background:rgba(255,160,60,.10);}' +
       '.ov-menu{position:fixed;z-index:9100;background:#10202a;border:1px solid #2f4858;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.5);display:flex;flex-direction:column;min-width:128px;overflow:hidden;font:13px "Segoe UI",system-ui;}' +
       '.ov-menu button{text-align:left;padding:8px 12px;background:none;border:none;color:#cfe;cursor:pointer;}' +
       '.ov-menu button:hover{background:#1d3242;}' +
