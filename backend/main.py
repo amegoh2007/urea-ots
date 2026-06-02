@@ -261,7 +261,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float) -> dic
     bot_m = sum(bot_kgh.values()); bot_n = sum(bot.values())
     dTs = T_steam_C - STRIP_STEAM_T_DES_C
     return {
-        "feed_kmolh": feed, "top_kmolh": top, "bot_kmolh": bot,
+        "feed_kmolh": feed, "co2_feed_kmolh": co2_kmolh, "top_kmolh": top, "bot_kmolh": bot,
         "top_kgh": top_m, "bot_kgh": bot_m,
         "top_th": top_m / 1000.0, "bot_th": bot_m / 1000.0,
         "top_mol": top_n, "bot_mol": bot_n,
@@ -621,6 +621,45 @@ def step_sim(dt: float) -> dict:
     # Discharge header
     P_disch_header_barG = (P_SYN_DOWN_BAR - 1.0) if (s.pumpA["on"] or s.pumpB["on"]) else 7.5
 
+    # ---- uniform process-stream registry (clickable stream inspector) ----
+    MW_NH3 = MW_COMP["NH3"]
+    streams = {
+        "NH3_FEED": make_stream(
+            {"NH3": F_pump_total_th * 1000.0 / MW_NH3}, s.tank_T_C, s.tank_P_top_barG + 1.0,
+            "NH3 ex 309E005", "309E005", "321D003", "liquid", rho=NH3_RHO),
+        "PUMP_SUCT": make_stream(
+            {"NH3": F_pump_total_th * 1000.0 / MW_NH3}, s.tank_T_C, PT_A + 1.0,
+            "NH3 pump suction header", "321D003", "321P002 A/B", "liquid", rho=NH3_RHO),
+        "HP_DISCH": make_stream(
+            {"NH3": motive_nh3_kgh / MW_NH3}, TI_321020, P_SYN_DOWN_BAR,
+            "HP NH3 discharge (motive)", "321P002 A/B", "322F001", "liquid", rho=NH3_RHO),
+        "CARB_RECYCLE": make_stream(
+            {k: ej["suction_kgh"] * EJ_CARB_FRAC[k] / MW_COMP[k] for k in MW_COMP},
+            EJ_T_SUCTION_C, EJ_P_SUCTION_BARA,
+            "Carbamate recycle (322E003 overflow)", "322E003", "322F001", "liquid"),
+        "EJ_DISCH": make_stream(
+            {k: ej["comp"][k] / MW_COMP[k] for k in MW_COMP}, ej["T_C"], ej["P_bara"],
+            "Ejector discharge (carbamate liq.)", "322F001", "322E002", "liquid", rho=ej["rho"]),
+        "CO2_FEED": make_stream(
+            strip["co2_feed_kmolh"], CO2_T_FEED_C, STRIP_P_DES_BARA,
+            "CO2 feed gas", "320K002", "322E001", "gas"),
+        "STRIP_TOP": make_stream(
+            strip["top_kmolh"], strip["T_top"], STRIP_P_DES_BARA,
+            "Stripper top gas", "322E001", "322E002", "gas"),
+        "STRIP_BOT": make_stream(
+            strip["bot_kmolh"], strip["T_bot"], STRIP_P_DES_BARA,
+            "Stripper bottom solution", "322E001", "LV-322501", "liquid"),
+        "HPCC_PROD": make_stream(
+            hpcc["feed_kmolh"], hpcc["T_prod"], hpcc["P_bara"],
+            "HPCC two-phase product", "322E002", "322R001", "two-phase"),
+        "HPCC_STEAM": make_stream(
+            {"H2O": hpcc["steam_kgh"] / MW_COMP["H2O"]}, HPCC_STEAM_TSAT_C, HPCC_STEAM_P_BARA,
+            "LP steam (shell side)", "322E002 shell", "LP header", "vapor"),
+        "HPCC_COND": make_stream(
+            {"H2O": hpcc["steam_kgh"] / MW_COMP["H2O"]}, HPCC_STEAM_TSAT_C, HPCC_STEAM_P_BARA,
+            "BFW/condensate feed", "322D001 A/B", "322E002 shell", "liquid"),
+    }
+
     return {
         "t":           time.time(),
         "FI_321401":   round(F_pump_total_th, 2),   # FT-321401 live discharge flow
@@ -739,6 +778,7 @@ def step_sim(dt: float) -> dict:
                 "duty_kW":  round(hpcc["duty_kw"], 0),       # condensation duty (kW)
             },
         },
+        "STREAMS": streams,
         "ratio": {
             "SP":  round(s.ratio_SP, 3),
             "PV":  round(s.ratio_PV, 3),
