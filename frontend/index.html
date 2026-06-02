@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>321-1 NH3 Pumping Station</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  :root{
+    --bg:#1d4d52;
+    --pi-bg:#000;
+    --pi-border:#ffffff;
+    --pi-text:#ffffff;
+    --pi-alarm:#ff3030;
+    --btn-green:#22ff22;
+    --btn-off:#0aa64d;
+    --line-nh3:#ff00ff;
+    --line-cpl:#22d622;
+    --signal:#9bbabb;
+    --ratio:#2e8a8f;
+    --line-carb:#ff9a3c;
+  }
+  *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;}
+  html,body{margin:0;padding:0;background:#0a1416;color:#fff;overflow:auto;}
+  #stage{position:relative;width:1366px;height:720px;background:var(--bg);user-select:none;margin:0 auto;overflow:hidden;}
+  .screen{position:absolute;inset:0;display:none;}
+  .screen.active{display:block;}
+  /* Rev2 image-backed UI: cleaned DCS screenshot as background, generated vector hidden */
+  .screen.shot{background-position:center;background-repeat:no-repeat;background-size:100% 100%;}
+  .screen.shot > *:not(.ov-layer){display:none;}
+  .ov-layer{position:absolute;inset:0;z-index:4;}
+  .ov{position:absolute;transform:translate(-50%,-50%);z-index:5;cursor:pointer;}
+  .ov.pump{width:54px;height:54px;}
+  .ov.avalve{width:34px;height:34px;}
+  .ov.ind{min-width:30px;height:18px;padding:0 4px;background:#04110d;border:1px solid #e8f4f0;color:#d6f3e4;font:bold 11px Consolas,monospace;display:flex;align-items:center;justify-content:center;white-space:nowrap;border-radius:2px;}
+  .ov.ind .ou{color:#82b3a3;font-weight:normal;margin-left:3px;font-size:9px;}
+  .ov.ind.empty{min-width:34px;height:16px;background:rgba(8,16,14,.45);border:1px solid #ffffff;color:#eef;font:normal 8px Consolas,monospace;letter-spacing:-.3px;}
+  .ov.ind.fp{border-color:#7fd0d8;box-shadow:0 0 0 1px rgba(127,208,216,.25);}
+  body.ov-editing .ov{outline:1px dashed #ffd000;cursor:move;}
+  #ov-edit{position:fixed;top:6px;right:8px;z-index:600;background:#1b4a4f;color:#ffd000;border:1px solid #7fd0d8;padding:4px 10px;font:bold 11px Arial;cursor:pointer;border-radius:4px;}
+  body.ov-editing #ov-edit{background:#0aa64d;color:#fff;}
+  #screen-321-1.shot{background-image:url("img/screen-321-1.png");}
+  #screen-322-2.shot{background-image:url("img/screen-322-2.png");}
+  #screen-322-1.shot{background-image:url("img/screen-322-1.png");}
+  #title{position:absolute;left:0;right:0;top:8px;text-align:center;font-weight:bold;font-size:18px;color:#fff;letter-spacing:1px;}
+  /* Top screen tab bar (always visible above stage) */
+  #tabbar{width:1366px;margin:0 auto;display:flex;gap:2px;background:#0c2b2e;padding:4px 4px 0;box-sizing:border-box;}
+  #tabbar button{flex:0 0 auto;background:#1b4a4f;color:#cfeff1;border:1px solid #2f6f75;border-bottom:none;
+    padding:6px 16px;font:bold 12px Arial;cursor:pointer;letter-spacing:0.5px;border-radius:5px 5px 0 0;}
+  #tabbar button:hover{background:#27666d;color:#fff;}
+  #tabbar button.active{background:var(--bg);color:#ffd000;border-color:#7fd0d8;}
+  .trip{position:absolute;top:40px;font-weight:bold;font-size:13px;color:#22ff22;}
+  .svg-streams{position:absolute;inset:0;pointer-events:none;}
+  .svg-streams polyline,.svg-streams line{fill:none;stroke-linejoin:miter;stroke-linecap:butt;}
+  .stream-nh3{stroke:var(--line-nh3);stroke-width:3;}
+  .stream-cpl{stroke:var(--line-cpl);stroke-width:3;}
+  .stream-carb{stroke:var(--line-carb);stroke-width:3;}
+  .stream-signal{stroke:var(--signal);stroke-width:1.2;stroke-dasharray:5 3;}
+  .stream-click{pointer-events:stroke;stroke-width:14;stroke:transparent;cursor:pointer;}
+  .block{
+    position:absolute;background:#2b6168;color:#fff;border:1px solid #6da7ac;
+    padding:3px 8px;font-size:12px;text-align:center;letter-spacing:0.5px;
+  }
+  .lbl-s{position:absolute;font-size:11px;color:#fff;}
+  .pi{
+    position:absolute;background:var(--pi-bg);color:var(--pi-text);
+    border:1px solid var(--pi-border);font-size:12px;padding:2px 6px;
+    min-width:46px;text-align:right;cursor:pointer;white-space:nowrap;
+    font-family:Consolas,monospace;
+  }
+  .pi .u{color:#bbb;margin-left:4px;font-size:10px;}
+  .pi.alarm{color:var(--pi-alarm);}
+  .badge-l{
+    position:absolute;background:#22ff22;color:#000;font-weight:bold;
+    width:15px;height:15px;text-align:center;line-height:15px;font-size:10px;
+    border:1px solid #fff;
+  }
+  .badge-l1{background:#ff3030;color:#fff;}
+  .xv{
+    position:absolute;color:#fff;font-size:11px;cursor:pointer;text-align:center;
+    border:1px solid #fff;padding:2px 5px;background:#000;line-height:1.25;
+  }
+  .xv .lamp{
+    display:inline-block;width:20px;height:10px;background:var(--btn-green);
+    border:1px solid #fff;vertical-align:middle;margin-left:4px;
+  }
+  .xv.closed .lamp{background:#ff3030;}
+  .pump-btn{
+    position:absolute;color:#fff;font-size:11px;cursor:pointer;
+    border:1px solid #fff;padding:3px 6px;background:#000;
+    display:flex;align-items:center;gap:6px;white-space:nowrap;
+  }
+  .pump-btn .lamp{display:inline-block;width:18px;height:11px;background:#777;border:1px solid #fff;}
+  .pump-btn.on .lamp{background:var(--btn-green);}
+  .pump{position:absolute;width:56px;height:56px;cursor:pointer;}
+  .pump svg{width:100%;height:100%;}
+  .pump .body{fill:#0c0c0c;stroke:#777;stroke-width:2;}
+  .pump.on .body{stroke:#22ff22;}
+  .pump .tri{fill:#555;}
+  .pump.on .tri{fill:#22ff22;}
+  .ratio-panel{
+    position:absolute;background:var(--ratio);color:#fff;border:1px solid #99dadd;
+    padding:6px;font-size:12px;
+  }
+  .ratio-panel .row{display:flex;align-items:center;gap:6px;margin:4px 0;}
+  .ratio-panel .lbl{color:#cfeff1;font-size:11px;width:40px;}
+  .ratio-panel .lbl b{color:#ffdf00;font-weight:bold;}
+  .ratio-panel input{
+    background:#000;color:#fff;border:1px solid #fff;width:74px;padding:1px 4px;font-family:Consolas,monospace;
+  }
+  .ext-override{
+    position:absolute;background:#000;border:1px solid #fff;color:#fff;font-size:11px;
+    padding:4px 8px;cursor:pointer;text-align:center;line-height:1.3;
+  }
+  .ext-override .lamp{display:inline-block;width:16px;height:11px;background:#444;border:1px solid #fff;margin-left:6px;vertical-align:middle;}
+  .mode-tag{
+    position:absolute;color:var(--pi-alarm);font-weight:bold;font-size:13px;
+    font-family:Consolas,monospace;
+  }
+  .mode-tag.auto{color:#22ff22;}
+  .mode-tag.cas{color:#ffd000;}
+  /* Tank */
+  .tank{position:absolute;width:130px;height:200px;}
+  .tank svg{width:100%;height:100%;}
+  /* Context menu */
+  #ctxmenu{
+    position:absolute;background:#222;border:1px solid #ccc;color:#fff;
+    font-size:12px;padding:0;z-index:200;display:none;min-width:120px;
+  }
+  #ctxmenu div{padding:6px 10px;cursor:pointer;}
+  #ctxmenu div:hover{background:#444;}
+  /* Screen-nav dropdown (right-click empty space) */
+  #screenmenu{
+    position:absolute;background:#222;border:1px solid #ccc;color:#fff;
+    font-size:12px;padding:0;z-index:220;display:none;min-width:210px;
+  }
+  #screenmenu .hd{background:#0aa64d;color:#fff;padding:5px 10px;font-weight:bold;letter-spacing:0.5px;}
+  #screenmenu .item{padding:6px 10px;cursor:pointer;}
+  #screenmenu .item:hover{background:#444;}
+  #screenmenu .item.cur{color:#ffd000;}
+  /* HV-322602 adjustable ejector valve + HIC panel + ejector */
+  .avalve{position:absolute;color:#fff;font-size:11px;text-align:center;cursor:pointer;width:44px;}
+  .avalve .sym{display:block;width:34px;height:24px;margin:0 auto;}
+  .avalve .op{display:block;background:#000;border:1px solid #fff;font-family:Consolas,monospace;margin-top:2px;font-size:11px;}
+  .hic-panel{
+    position:absolute;background:var(--ratio);color:#fff;border:1px solid #99dadd;padding:6px;font-size:12px;width:160px;
+  }
+  .hic-panel .row{display:flex;align-items:center;gap:6px;margin:5px 0;}
+  .hic-panel input{background:#000;color:#fff;border:1px solid #fff;width:64px;padding:1px 4px;font-family:Consolas,monospace;}
+  .hic-panel button{background:#0aa64d;color:#fff;border:1px solid #aaa;padding:2px 10px;cursor:pointer;}
+  .ejector{position:absolute;}
+  .ejector svg{display:block;}
+  /* DCS replica helpers */
+  .stream-gcb{stroke:#ffd000;stroke-width:3;}
+  .tag{position:absolute;background:#000;border:1px solid #5a5a5a;color:#ff5252;font-size:11px;
+    padding:1px 4px;font-family:Consolas,monospace;white-space:nowrap;cursor:pointer;}
+  .avalve.closed .sym polygon{fill:#ff3030;stroke:#ff3030;}
+  /* Modal */
+  .modal{
+    position:fixed;inset:0;background:rgba(0,0,0,0.55);display:none;
+    align-items:center;justify-content:center;z-index:300;
+  }
+  .modal.show{display:flex;}
+  .modal .card{
+    background:#1b2a30;color:#fff;border:1px solid #888;min-width:420px;
+    padding:14px;font-size:13px;
+  }
+  .modal .card h3{margin:0 0 10px 0;font-size:14px;letter-spacing:1px;}
+  .modal .card .row{display:flex;align-items:center;gap:10px;margin:6px 0;}
+  .modal .card .row label{width:90px;}
+  .modal .card input,.modal .card select{
+    background:#000;color:#fff;border:1px solid #888;padding:3px 6px;width:120px;font-family:Consolas,monospace;
+  }
+  .modal .card input:disabled{opacity:0.3;background:#0a0a0a;color:#666;border-color:#3a3a3a;cursor:not-allowed;}
+  .modal .card input[readonly]{background:#0a0a0a;color:#7fd6ff;}
+  .modal .btns{margin-top:12px;display:flex;gap:8px;justify-content:flex-end;}
+  .modal button{
+    background:#2a4046;color:#fff;border:1px solid #aaa;padding:4px 12px;cursor:pointer;font-size:12px;
+  }
+  .modal button.primary{background:#0aa64d;}
+  .mode-group button{margin-right:4px;width:auto;}
+  .mode-group button.active{background:#0aa64d;border-color:#22ff22;}
+  #trendModal .card{min-width:640px;}
+  #trendModal .scaleRow{display:flex;gap:6px;align-items:center;margin:6px 0;}
+  #trendModal canvas{background:#000;}
+  #streamModal table{width:100%;border-collapse:collapse;font-family:Consolas,monospace;}
+  #streamModal td{border:1px solid #555;padding:3px 6px;}
+</style>
+</head>
+<body>
+<div id="tabbar"></div>
+<div id="stage">
+  <div class="screen active shot" id="screen-321-1" data-label="321-1 NH3 PUMPING STATION">
+  <div id="title">321-1 NH3 PUMPING STATION</div>
+  <div class="trip" style="left:790px;">TRIP_21_2</div>
+  <div class="trip" style="left:945px;">TRIP_21_8</div>
+  <div class="trip" style="left:1100px;">TRIP_21_10</div>
+
+  <!-- ============ STREAMS + SIGNAL LINES ============ -->
+  <svg id="svg-streams" class="svg-streams" viewBox="0 0 1366 720" preserveAspectRatio="none">
+    <!-- AL feed: 309E005 -> tank inlet -->
+    <polyline class="stream-nh3" points="145,200 450,200"/>
+    <polygon points="450,193 465,200 450,207" fill="#ff00ff"/>
+    <polyline class="stream-click" points="145,200 450,200" data-stream="AL"/>
+
+    <!-- Tank-top temp taps TT-321001 (left) / TT-321002 (right), dotted -->
+    <line class="stream-signal" x1="412" y1="162" x2="450" y2="162"/>
+    <line class="stream-signal" x1="580" y1="162" x2="592" y2="162"/>
+
+    <!-- Suction: tank bottom -> header -> two pumps -->
+    <polyline class="stream-nh3" points="515,291 515,460 1055,460"/>
+    <polyline class="stream-nh3" points="850,460 850,454"/>
+    <polyline class="stream-nh3" points="1055,460 1055,454"/>
+    <polyline class="stream-click" points="515,291 515,460 1055,460" data-stream="SUCT"/>
+    <!-- PT/PY/PDY signal chains (TT-321002 temp -> PY sat-P -> PDY margin <- PT) -->
+    <polyline class="stream-signal" points="625,170 735,162 820,206"/>
+    <polyline class="stream-signal" points="720,294 820,212"/>
+    <polyline class="stream-signal" points="625,170 745,116 995,162"/>
+    <polyline class="stream-signal" points="940,294 998,170"/>
+
+    <!-- Discharge: pump tops -> header -> XV-322901 -> 322F001 -->
+    <polyline class="stream-nh3" points="850,398 850,300 1240,300 1240,284"/>
+    <polyline class="stream-nh3" points="1055,398 1055,300"/>
+    <polygon points="1233,284 1247,284 1240,272" fill="#ff00ff"/>
+    <polyline class="stream-click" points="850,398 850,300 1240,300 1240,284" data-stream="DISCH"/>
+    <!-- discharge instrument taps (TT-321020, PI-321203) -->
+    <polyline class="stream-signal" points="1100,300 1100,248"/>
+    <polyline class="stream-signal" points="1130,300 1130,272"/>
+
+    <!-- CPL feed to ratio -->
+    <polyline class="stream-cpl" points="145,338 205,448"/>
+    <polyline class="stream-click" points="145,338 205,448" data-stream="CPL"/>
+    <!-- COO dotted signal to ratio -->
+    <polyline class="stream-signal" points="145,393 205,472"/>
+
+    <!-- Ratio output -> pump speed controllers (cascade signal, dotted) -->
+    <polyline class="stream-signal" points="285,560 285,650 1055,650"/>
+    <polyline class="stream-signal" points="850,650 850,506"/>
+    <polyline class="stream-signal" points="1055,650 1055,506"/>
+  </svg>
+
+  <!-- ============ TANK 321D003 ============ -->
+  <div class="tank" style="left:450px;top:115px;">
+    <svg viewBox="0 0 130 200">
+      <defs>
+        <linearGradient id="tankg" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#444"/>
+          <stop offset="0.45" stop-color="#cfd0d2"/>
+          <stop offset="1" stop-color="#444"/>
+        </linearGradient>
+      </defs>
+      <ellipse cx="65" cy="18" rx="60" ry="14" fill="url(#tankg)" stroke="#000"/>
+      <rect x="5" y="18" width="120" height="158" fill="url(#tankg)" stroke="#000"/>
+      <ellipse cx="65" cy="176" rx="60" ry="14" fill="url(#tankg)" stroke="#000"/>
+      <text x="65" y="100" text-anchor="middle" fill="#000" font-size="13" font-weight="bold">321D003</text>
+    </svg>
+  </div>
+  <div class="badge-l" id="tankL" style="left:560px;top:250px;">L</div>
+  <div class="pi" data-tag="LSL_321501" style="left:452px;top:255px;">OK</div>
+
+  <!-- ============ SOURCE / SINK BLOCKS ============ -->
+  <div class="block" style="left:55px;top:185px;width:85px;">309E005</div>
+  <div class="lbl-s" style="left:148px;top:190px;">AL</div>
+  <div class="block" style="left:55px;top:325px;width:85px;">329P001A/B</div>
+  <div class="lbl-s" style="left:148px;top:328px;">CPL</div>
+  <div class="block" style="left:55px;top:380px;width:85px;">FI-322402</div>
+  <div class="lbl-s" style="left:148px;top:383px;">COO</div>
+  <div class="block" data-goto="screen-322-2" style="left:1245px;top:255px;width:58px;cursor:pointer;">322F001</div>
+
+  <!-- ============ FEED INDICATORS ============ -->
+  <div class="pi" data-tag="FI_321401" style="left:245px;top:210px;">43.79 <span class="u">T/H</span></div>
+  <div class="pi" data-tag="totalizer" style="left:245px;top:258px;">177001.09 <span class="u">T</span></div>
+
+  <!-- ============ TANK-TOP INSTRUMENTS ============ -->
+  <div class="pi" data-tag="TI_top1" style="left:358px;top:150px;">25.8 <span class="u">C</span></div>
+  <div class="pi" data-tag="TI_top2" style="left:590px;top:150px;">25.8 <span class="u">C</span></div>
+  <div class="pi" data-tag="PI_top1" style="left:528px;top:64px;display:none;">12.3 <span class="u">BAR G</span></div>
+  <div class="pi" data-tag="PI_top2" style="left:620px;top:64px;display:none;">12.3 <span class="u">BAR G</span></div>
+  <div class="pi" data-tag="PI_header" style="left:712px;top:64px;display:none;">7.3 <span class="u">BAR G</span></div>
+
+  <!-- ============ SUCTION VALVE + PIs ============ -->
+  <div class="xv" id="xv-321901" data-id="321901" style="left:648px;top:196px;">OPEN<br>XV-321901<span class="lamp"></span></div>
+  <div class="lbl-s" style="left:636px;top:236px;">FC</div>
+
+  <div class="pi" data-tag="PY_321202" style="left:742px;top:100px;">10.0 <span class="u">BAR A</span></div>
+  <div class="pi" data-tag="PY_321201" style="left:735px;top:150px;">10.0 <span class="u">BAR A</span></div>
+  <div class="pi" data-tag="PDY_321204" style="left:995px;top:150px;">9.9 <span class="u">BAR</span></div>
+  <div class="pi" data-tag="PDY_321203" style="left:820px;top:196px;">9.9 <span class="u">BAR</span></div>
+  <div class="pi alarm" data-tag="PI_321201" style="left:685px;top:286px;">12.3 <span class="u">BAR G</span></div>
+  <div class="badge-l badge-l1" style="left:666px;top:287px;">L1</div>
+  <div class="pi alarm" data-tag="PI_321202" style="left:905px;top:286px;">12.3 <span class="u">BAR G</span></div>
+  <div class="badge-l badge-l1" style="left:886px;top:287px;">L1</div>
+
+  <!-- ============ PUMP A 321P002A ============ -->
+  <div class="pump-btn off" id="pa-btn" data-pump="A" style="left:700px;top:352px;">321P002A&nbsp;OFF<span class="lamp"></span></div>
+  <div class="pump off" id="pa-icon" data-pump="A" style="left:822px;top:398px;">
+    <svg viewBox="0 0 56 56">
+      <circle cx="28" cy="32" r="20" class="body"/>
+      <polygon points="20,22 20,42 40,32" class="tri"/>
+      <rect x="23" y="6" width="10" height="12" fill="#000" stroke="#22ff22"/>
+      <text x="28" y="15" text-anchor="middle" fill="#22ff22" font-size="9">M</text>
+    </svg>
+  </div>
+  <div class="pi" data-tag="PA_current" style="left:862px;top:452px;">0.2 <span class="u">A</span></div>
+  <div class="mode-tag" id="pa-mode" style="left:826px;top:488px;">M</div>
+  <div class="pi" data-tag="PA_speed" style="left:850px;top:488px;">0.0 <span class="u">RPM</span></div>
+
+  <!-- ============ PUMP B 321P002B ============ -->
+  <div class="pump-btn off" id="pb-btn" data-pump="B" style="left:905px;top:352px;">321P002B&nbsp;OFF<span class="lamp"></span></div>
+  <div class="pump off" id="pb-icon" data-pump="B" style="left:1027px;top:398px;">
+    <svg viewBox="0 0 56 56">
+      <circle cx="28" cy="32" r="20" class="body"/>
+      <polygon points="20,22 20,42 40,32" class="tri"/>
+      <rect x="23" y="6" width="10" height="12" fill="#000" stroke="#22ff22"/>
+      <text x="28" y="15" text-anchor="middle" fill="#22ff22" font-size="9">M</text>
+    </svg>
+  </div>
+  <div class="pi" data-tag="PB_current" style="left:1067px;top:452px;">43.9 <span class="u">A</span></div>
+  <div class="mode-tag" id="pb-mode" style="left:1031px;top:488px;">M</div>
+  <div class="pi" data-tag="PB_speed" style="left:1055px;top:488px;">131.0 <span class="u">RPM</span></div>
+
+  <!-- ============ DISCHARGE INSTRUMENTS + VALVE ============ -->
+  <div class="pi" data-tag="TI_321020" style="left:1078px;top:224px;">29.7 <span class="u">C</span></div>
+  <div class="pi" data-tag="PI_disch" style="left:1078px;top:258px;">7.5 <span class="u">BAR G</span></div>
+  <div class="xv" id="xv-322901" data-id="322901" style="left:1150px;top:300px;">OPEN<br>XV-322901<span class="lamp"></span></div>
+  <div class="lbl-s" style="left:1165px;top:345px;">FC</div>
+
+  <!-- ============ RATIO PANEL ============ -->
+  <div class="ratio-panel" style="left:205px;top:430px;width:175px;">
+    <div style="text-align:center;font-weight:bold;letter-spacing:1px;">RATIO NH3 / CO2</div>
+    <div class="row"><span class="lbl">X <b>Bal</b></span><input id="ratioBal" value="1.928" readonly></div>
+    <div class="row"><span class="lbl">SP</span><input id="ratioSP" value="1.928"></div>
+    <div class="row"><span class="lbl">N/C 002A</span><input id="ncA" value="0.964" readonly></div>
+    <div class="row"><span class="lbl">N/C 002B</span><input id="ncB" value="0.964" readonly></div>
+  </div>
+
+  <!-- ============ EXT OVERRIDE ============ -->
+  <div class="ext-override" id="extOverride" style="left:860px;top:528px;">EXT. OVERRIDE<br>of 321P002A/B RS<span class="lamp"></span></div>
+  </div><!-- /screen-321-1 -->
+
+  <!-- ================= SCREEN 322-2 : HP-SCRUBBER (exact DCS replica) ================= -->
+  <div class="screen shot" id="screen-322-2" data-label="322-2 HP SCRUBBER">
+    <div id="title">322-2 UREA SYNTHESIS HP-SCRUBBER</div>
+
+    <!-- ============ STREAMS ============ -->
+    <svg class="svg-streams" viewBox="0 0 1366 720" preserveAspectRatio="none">
+      <!-- CPL (329P001A/B -> 329P002 pumps) magenta -->
+      <polyline class="stream-nh3" points="104,42 520,42"/>
+      <polyline class="stream-nh3" points="300,42 300,80 520,80"/>
+      <!-- 329P002 discharge -> gas valve -> down-arrow into GCB -->
+      <polyline class="stream-cpl" points="576,42 660,42 660,58"/>
+      <polyline class="stream-cpl" points="576,80 660,80"/>
+      <polyline class="stream-cpl" points="700,58 815,58 815,96"/>
+      <polygon points="808,96 822,96 815,108" fill="#22d622"/>
+      <!-- GCB gas main: 322R001 -> HV-322604 -> 322C001 (yellow) -->
+      <polyline class="stream-gcb" points="98,100 1186,100"/>
+      <polygon points="1186,93 1200,100 1186,107" fill="#ffd000"/>
+      <polyline class="stream-gcb" points="391,138 391,100"/>
+      <!-- ACA carbamate: 322E002 / vessel -> 323P001A/B (magenta) -->
+      <polyline class="stream-nh3" points="40,160 98,160"/>
+      <polygon points="40,153 26,160 40,167" fill="#ff00ff"/>
+      <polyline class="stream-nh3" points="455,140 455,122 1170,122"/>
+      <polygon points="1170,115 1184,122 1170,129" fill="#ff00ff"/>
+      <!-- vessel suction/overflow -> 322F001 ejector (magenta, LIVE) -->
+      <polyline class="stream-nh3" points="330,360 330,505 252,505"/>
+      <polyline class="stream-click" points="330,360 330,505 252,505" data-stream="ESUCT"/>
+      <!-- motive HP NH3: 321P002A/B -> ejector (magenta, LIVE) -->
+      <polyline class="stream-nh3" points="100,565 175,565 175,514"/>
+      <polyline class="stream-click" points="100,565 175,565 175,514" data-stream="MOTIVE"/>
+      <!-- ejector discharge -> up to vessel (magenta, LIVE) -->
+      <polyline class="stream-nh3" points="252,492 320,492 320,366"/>
+      <polyline class="stream-click" points="252,492 320,492 320,366" data-stream="EDISCH"/>
+      <polygon points="313,373 320,361 327,373" fill="#ff00ff"/>
+      <!-- ===== green process network (329P006 / 329P004 / cooling) ===== -->
+      <polyline class="stream-cpl" points="430,270 700,270 700,222"/>
+      <polygon points="423,263 409,270 423,277" fill="#22d622"/>
+      <polyline class="stream-cpl" points="430,305 700,305 700,288"/>
+      <polygon points="423,298 409,305 423,312" fill="#22d622"/>
+      <polyline class="stream-cpl" points="664,196 730,196"/>
+      <polyline class="stream-cpl" points="730,206 730,360 952,360 952,330"/>
+      <polyline class="stream-cpl" points="952,250 952,200 900,200"/>
+      <polyline class="stream-cpl" points="952,296 1012,296 1012,360 730,360"/>
+      <polyline class="stream-cpl" points="320,420 320,470 778,470"/>
+      <polyline class="stream-cpl" points="778,432 778,420 824,420"/>
+      <polyline class="stream-cpl" points="824,432 1140,432"/>
+      <polygon points="1140,425 1154,432 1140,439" fill="#22d622"/>
+      <polyline class="stream-cpl" points="824,470 1140,470 1140,556 1190,556"/>
+      <polygon points="1190,549 1204,556 1190,563" fill="#22d622"/>
+      <!-- ===== dotted signals ===== -->
+      <polyline class="stream-signal" points="95,492 175,492 175,470"/>
+      <polyline class="stream-signal" points="935,80 935,100"/>
+      <polyline class="stream-signal" points="520,250 716,210"/>
+      <polyline class="stream-signal" points="520,300 716,278"/>
+    </svg>
+
+    <!-- ============ VESSEL 322E003 HP SCRUBBER ============ -->
+    <div data-tip="322E003" style="position:absolute;left:345px;top:138px;width:92px;height:230px;cursor:pointer;">
+      <svg viewBox="0 0 92 230" style="width:100%;height:100%;">
+        <defs><linearGradient id="vesg" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#3a3a3a"/><stop offset="0.45" stop-color="#cfd0d2"/><stop offset="1" stop-color="#3a3a3a"/>
+        </linearGradient></defs>
+        <circle cx="46" cy="40" r="40" fill="#16243f" stroke="#9fb6d6"/>
+        <text x="46" y="44" text-anchor="middle" fill="#fff" font-size="12" font-weight="bold">322E003</text>
+        <rect x="30" y="80" width="32" height="142" fill="url(#vesg)" stroke="#000"/>
+        <ellipse cx="46" cy="222" rx="16" ry="6" fill="url(#vesg)" stroke="#000"/>
+      </svg>
+    </div>
+    <div data-tip="LT-329501" style="position:absolute;left:300px;top:262px;width:16px;height:80px;background:#000;border:1px solid #fff;">
+      <div style="position:absolute;left:0;right:0;bottom:0;height:38%;background:#22ff22;"></div>
+    </div>
+
+    <!-- ============ TOP BAND: CPL source + 329P002 pumps + gas valve ============ -->
+    <div class="block" data-tip="329P001A/B" style="left:8px;top:33px;width:96px;">329P001A/B</div>
+    <div class="lbl-s" style="left:112px;top:36px;color:#ff00ff;">CPL</div>
+    <div class="lbl-s" style="left:455px;top:30px;">329P002A</div>
+    <div class="lbl-s" style="left:455px;top:78px;">329P002B</div>
+    <div class="lbl-s" style="left:512px;top:34px;">M</div>
+    <div class="lbl-s" style="left:512px;top:82px;">M</div>
+    <div class="pump on" data-tip="329P002A" style="left:528px;top:26px;width:46px;height:46px;">
+      <svg viewBox="0 0 56 56"><circle cx="28" cy="32" r="20" class="body"/><polygon points="20,22 20,42 40,32" class="tri"/></svg>
+    </div>
+    <div class="pump on" data-tip="329P002B" style="left:528px;top:72px;width:46px;height:46px;">
+      <svg viewBox="0 0 56 56"><circle cx="28" cy="32" r="20" class="body"/><polygon points="20,22 20,42 40,32" class="tri"/></svg>
+    </div>
+    <div class="pi" data-tip="329P002A" style="left:608px;top:30px;">0 <span class="u">A</span></div>
+    <div class="pi" data-tip="329P002B" style="left:608px;top:74px;">0 <span class="u">A</span></div>
+    <div class="lbl-s" style="left:688px;top:22px;color:#22ff22;">X MCp</div>
+    <div class="pi" data-tip="PI-329MCp" style="left:686px;top:38px;">0.9 <span class="u">Bar</span></div>
+    <div class="avalve" data-tip="LV-329MCp" style="left:752px;top:34px;">
+      <svg class="sym" viewBox="0 0 34 24"><polygon points="2,2 17,12 2,22" fill="#0c0c0c" stroke="#22ff22"/><polygon points="32,2 17,12 32,22" fill="#0c0c0c" stroke="#22ff22"/><line x1="17" y1="0" x2="17" y2="6" stroke="#22ff22"/></svg>
+    </div>
+    <div class="lbl-s" style="left:792px;top:40px;">FO</div>
+    <div class="pi" data-tip="LV-329MCp" style="left:756px;top:70px;">100.0 <span class="u">%</span></div>
+    <div class="trip" style="left:892px;top:28px;">TRIP_21_2</div>
+    <div class="tag" data-tip="HIC-322604" style="left:892px;top:55px;">HIC-322604</div>
+    <div class="pi" data-tip="PI-322G" style="left:1168px;top:22px;">3.2 <span class="u">BAR G</span></div>
+    <div class="pi" data-tip="TI-322G" style="left:1168px;top:58px;">41.4 <span class="u">C</span></div>
+
+    <!-- ============ GCB gas line: 322R001 -> HV-322604 -> 322C001 ============ -->
+    <div class="block" data-tip="322R001" style="left:8px;top:100px;width:88px;">322R001</div>
+    <div class="lbl-s" style="left:100px;top:95px;color:#ffd000;">GCB</div>
+    <div class="avalve" data-tip="HV-322604" style="left:920px;top:88px;">
+      <svg class="sym" viewBox="0 0 34 24"><polygon points="2,2 17,12 2,22" fill="#0c0c0c" stroke="#ffd000"/><polygon points="32,2 17,12 32,22" fill="#0c0c0c" stroke="#ffd000"/><line x1="17" y1="0" x2="17" y2="6" stroke="#ffd000"/></svg>
+    </div>
+    <div class="lbl-s" style="left:962px;top:92px;">FO</div>
+    <div class="tag" data-tip="HV-322604" style="left:898px;top:118px;">HV-322604</div>
+    <div class="lbl-s" style="left:1095px;top:92px;color:#ffd000;">GCB</div>
+    <div class="block" data-tip="322C001" style="left:1188px;top:100px;width:70px;">322C001</div>
+
+    <!-- ============ vessel-side instruments + ACA ============ -->
+    <div class="tag" data-tip="TI-322009" style="left:205px;top:56px;">TI-322009</div>
+    <div class="tag" data-tip="TT-322011" style="left:362px;top:56px;">TT-322011</div>
+    <div class="lbl-s" style="left:432px;top:58px;">C</div>
+    <div class="tag" data-tip="TI-322012" style="left:112px;top:130px;">TI-322012</div>
+    <div class="tag" data-tip="PI-329201" style="left:205px;top:130px;">PI-329201</div>
+    <div class="lbl-s" style="left:285px;top:130px;">BAR G</div>
+    <div class="block" data-tip="322E002" style="left:8px;top:150px;width:96px;">322E002</div>
+    <div class="lbl-s" style="left:112px;top:150px;color:#ff00ff;">ACA</div>
+    <div class="pi" data-tag="TI_322002" data-tip="TI-322002" style="left:232px;top:206px;">178.8 <span class="u">C</span></div>
+    <div class="tag" data-tip="LT-329501" style="left:112px;top:270px;">LT-329501</div>
+    <div class="lbl-s" style="left:192px;top:270px;">%</div>
+    <div class="lbl-s" style="left:1095px;top:128px;color:#ff00ff;">ACA</div>
+    <div class="block" data-tip="323P001A/B" style="left:1175px;top:130px;width:84px;">323P001A/B</div>
+
+    <!-- ============ center process: CW / cooler / TIC / valves ============ -->
+    <div class="block" data-tip="CW" style="left:572px;top:166px;width:34px;background:#0d3b1e;border-color:#22ff22;color:#9f9;">CW</div>
+    <div data-tip="322-COOLER" style="position:absolute;left:625px;top:176px;width:40px;height:40px;cursor:pointer;">
+      <svg viewBox="0 0 40 40" style="width:100%;height:100%;"><circle cx="20" cy="20" r="18" fill="#2b6168" stroke="#bfe9ec"/><line x1="7" y1="7" x2="33" y2="33" stroke="#bfe9ec"/><line x1="33" y1="7" x2="7" y2="33" stroke="#bfe9ec"/></svg>
+    </div>
+    <div class="tag" data-tip="TIC-329505" style="left:470px;top:240px;">TIC-329505</div>
+    <div class="lbl-s" style="left:547px;top:240px;">C</div>
+    <div class="avalve" data-tip="TV-329005" style="left:700px;top:190px;">
+      <svg class="sym" viewBox="0 0 34 24"><polygon points="2,2 17,12 2,22" fill="#0c0c0c" stroke="#22ff22"/><polygon points="32,2 17,12 32,22" fill="#0c0c0c" stroke="#22ff22"/></svg>
+    </div>
+    <div class="lbl-s" style="left:752px;top:194px;">FC</div>
+    <div class="tag" data-tip="TV-329005" style="left:680px;top:222px;">TV-329005</div>
+    <div class="avalve" data-tip="FV-329409" style="left:700px;top:258px;">
+      <svg class="sym" viewBox="0 0 34 24"><polygon points="2,2 17,12 2,22" fill="#0c0c0c" stroke="#22ff22"/><polygon points="32,2 17,12 32,22" fill="#0c0c0c" stroke="#22ff22"/></svg>
+    </div>
+    <div class="lbl-s" style="left:752px;top:262px;">FO</div>
+    <div class="tag" data-tip="FV-329409" style="left:685px;top:288px;">FV-329409</div>
+    <div class="tag" data-tip="FIC-329409" style="left:560px;top:298px;">FIC-329409</div>
+    <div class="lbl-s" style="left:634px;top:298px;">M3/H</div>
+    <div class="tag" data-tip="TDY-329125" style="left:468px;top:307px;">TDY-329125</div>
+
+    <!-- ============ 329P006 A/B recycle pumps ============ -->
+    <div class="lbl-s" style="left:852px;top:198px;">329P006</div>
+    <div class="lbl-s" style="left:905px;top:210px;">A</div>
+    <div class="lbl-s" style="left:878px;top:300px;">B</div>
+    <div class="pump on" data-tip="329P006A" style="left:935px;top:205px;width:46px;height:46px;">
+      <svg viewBox="0 0 56 56"><circle cx="28" cy="32" r="20" class="body"/><polygon points="20,22 20,42 40,32" class="tri"/></svg>
+    </div>
+    <div class="pump on" data-tip="329P006B" style="left:935px;top:282px;width:46px;height:46px;">
+      <svg viewBox="0 0 56 56"><circle cx="28" cy="32" r="20" class="body"/><polygon points="20,22 20,42 40,32" class="tri"/></svg>
+    </div>
+    <div class="tag" data-tip="IT-329007" style="left:962px;top:203px;">IT-329007</div>
+    <div class="lbl-s" style="left:1018px;top:203px;">A</div>
+    <div class="tag" data-tip="IT-329008" style="left:962px;top:305px;">IT-329008</div>
+    <div class="lbl-s" style="left:1018px;top:305px;">A</div>
+    <div class="tag" data-tip="TI-329125" style="left:952px;top:356px;">TI-329125</div>
+    <div class="lbl-s" style="left:1022px;top:356px;">C</div>
+
+    <!-- ============ XV-322903 + external override ============ -->
+    <div class="tag" data-tip="XV-322903" style="left:232px;top:430px;">XV-322903</div>
+    <div class="avalve" data-tip="XV-322903" style="left:298px;top:428px;">
+      <svg class="sym" viewBox="0 0 34 24"><polygon points="2,2 17,12 2,22" fill="#0c0c0c" stroke="#22ff22"/><polygon points="32,2 17,12 32,22" fill="#0c0c0c" stroke="#22ff22"/></svg>
+    </div>
+    <div class="lbl-s" style="left:330px;top:412px;">FC</div>
+    <div class="lbl-s" style="left:345px;top:430px;">A</div>
+    <div class="ext-override" style="left:352px;top:414px;width:140px;">OPEN<br>XV-322903<span class="lamp" style="background:#22ff22;"></span></div>
+    <div class="ext-override" style="left:352px;top:452px;width:140px;">EXT. OVERRIDE<br>of XVSL-322903 CLOSED</div>
+
+    <!-- ============ 329P004 A/B pumps ============ -->
+    <div class="lbl-s" style="left:685px;top:408px;">329P004A</div>
+    <div class="lbl-s" style="left:685px;top:476px;">329P004B</div>
+    <div class="lbl-s" style="left:768px;top:400px;">M</div>
+    <div class="lbl-s" style="left:768px;top:455px;">M</div>
+    <div class="pump on" data-tip="329P004A" style="left:778px;top:408px;width:46px;height:46px;">
+      <svg viewBox="0 0 56 56"><circle cx="28" cy="32" r="20" class="body"/><polygon points="20,22 20,42 40,32" class="tri"/></svg>
+    </div>
+    <div class="pump on" data-tip="329P004B" style="left:778px;top:462px;width:46px;height:46px;">
+      <svg viewBox="0 0 56 56"><circle cx="28" cy="32" r="20" class="body"/><polygon points="20,22 20,42 40,32" class="tri"/></svg>
+    </div>
+    <div class="pi" data-tip="329P004A" style="left:782px;top:356px;">0.0 <span class="u">%</span></div>
+    <div class="pi" data-tip="329P004B" style="left:835px;top:476px;">0.02 <span class="u">A</span></div>
+    <div class="pi" data-tip="329P004B" style="left:782px;top:520px;">0.0 <span class="u">%</span></div>
+    <div class="lbl-s" style="left:1142px;top:430px;color:#22ff22;">CPH</div>
+    <div class="block" data-tip="329P001A/B" style="left:1172px;top:432px;width:90px;">329P001A/B</div>
+    <div class="lbl-s" style="left:1142px;top:552px;color:#22ff22;">CPH</div>
+    <div class="block" data-tip="322Y001" style="left:1190px;top:554px;width:70px;">322Y001</div>
+
+    <!-- ============ 322F001 EJECTOR subsystem (LIVE — one-unit rule) ============ -->
+    <div class="tag" id="hic-box" data-tip="HIC-322602" style="left:62px;top:470px;">HIC-322602</div>
+    <div style="position:absolute;left:142px;top:471px;width:12px;height:12px;background:#ff00ff;"></div>
+    <div class="lbl-s" style="left:190px;top:470px;">FO</div>
+    <div class="lbl-s" style="left:228px;top:466px;">322F001</div>
+    <div class="ejector" data-tip="322F001" style="left:188px;top:478px;width:60px;height:46px;">
+      <svg viewBox="0 0 60 46" style="width:100%;height:100%;"><circle cx="30" cy="23" r="20" fill="#e85ac0" stroke="#fff"/><polygon points="14,13 14,33 30,23" fill="#7a1f63"/></svg>
+    </div>
+    <div class="pi" data-tag="HIC_322602" data-tip="HV-322602" style="left:112px;top:508px;">74.0 <span class="u">%</span></div>
+    <div class="avalve closed" id="xv-322901b" data-tip="XV-322901" style="left:200px;top:536px;">
+      <svg class="sym" viewBox="0 0 34 24"><polygon points="2,2 17,12 2,22" fill="#0c0c0c" stroke="#22ff22"/><polygon points="32,2 17,12 32,22" fill="#0c0c0c" stroke="#22ff22"/></svg>
+    </div>
+    <div class="lbl-s" style="left:188px;top:540px;">FC</div>
+    <div class="tag" data-tip="XV-322901" style="left:245px;top:548px;">XV-322901</div>
+    <div class="block" data-goto="screen-321-1" style="left:8px;top:558px;width:92px;cursor:pointer;">321P002A/B</div>
+    <div class="lbl-s" style="left:108px;top:553px;">AL</div>
+    <div class="pi" data-tag="TI_321020" data-tip="TI-321020" style="left:108px;top:578px;">28.9 <span class="u">C</span></div>
+  </div><!-- /screen-322-2 -->
+  <div class="screen shot" id="screen-322-1" data-label="322-1 UREA SYNTHESIS"></div>
+</div>
+
+<!-- Context menu -->
+<div id="ctxmenu"><div id="ctx-trend">Trend</div></div>
+
+<!-- Screen-nav dropdown (right-click empty space) -->
+<div id="screenmenu"></div>
+
+<!-- HIC-322602 controller faceplate (HV-322602 manual opening) -->
+<div class="modal" id="hicModal"><div class="card">
+  <h3>HIC-322602 &rarr; HV-322602 (MANUAL)</h3>
+  <div class="row"><label>Opening %</label><input id="hic-inp" type="number" step="0.1" min="0" max="100" value="74.0"></div>
+  <div style="font-size:11px;color:#cfeff1;margin:4px 0;">&darr; opening &rArr; &uarr; 322E003 suction (&uarr; &mu;)</div>
+  <div class="btns"><button id="hic-close">Close</button><button class="primary" id="hic-set-btn">SET</button></div>
+</div></div>
+
+<!-- PIC-322203 CO2 feed line pressure controller -> PV-322203 -->
+<div class="modal" id="picModal"><div class="card">
+  <h3>PIC-322203 &rarr; PV-322203 (CO2 FEED PRESS)</h3>
+  <div class="row"><label>PV (BAR A)</label><input id="pic-pv" type="number" step="0.1" readonly></div>
+  <div class="row"><label>SP (BAR A)</label><input id="pic-sp" type="number" step="0.1"></div>
+  <div class="row"><label>Output / PV-322203 (%)</label><input id="pic-op" type="number" step="0.1" min="0" max="100"></div>
+  <div class="row"><label>Mode</label>
+    <div class="mode-group">
+      <button data-mode="MAN" id="pic-man">MAN</button>
+      <button data-mode="AUTO" id="pic-auto">AUTO</button>
+    </div>
+  </div>
+  <div style="font-size:11px;color:#cfeff1;margin:4px 0;">&uarr; PV-322203 opening &rArr; &darr; CO2 feed flow (more vent)</div>
+  <div class="btns"><button id="pic-close">Close</button><button class="primary" id="pic-set-btn">SET</button></div>
+</div></div>
+
+<!-- HIC-322203 minimum opening of PV-322203 -->
+<div class="modal" id="hic2Modal"><div class="card">
+  <h3>HIC-322203 &rarr; PV-322203 MIN OPENING</h3>
+  <div class="row"><label>Min Opening %</label><input id="hic2-inp" type="number" step="0.1" min="0" max="100" value="0.0"></div>
+  <div style="font-size:11px;color:#cfeff1;margin:4px 0;">PV-322203 forced &ge; this minimum</div>
+  <div class="btns"><button id="hic2-close">Close</button><button class="primary" id="hic2-set-btn">SET</button></div>
+</div></div>
+
+<!-- Generic controller faceplate (any *IC-3* without a dedicated model) -->
+<div class="modal" id="ctlModal"><div class="card">
+  <h3 id="ctl-title">CONTROLLER</h3>
+  <div class="row"><label>PV</label><input id="ctl-pv" type="text" readonly></div>
+  <div class="row"><label>SP</label><input id="ctl-sp" type="number" step="0.1"></div>
+  <div class="row"><label>Output (%)</label><input id="ctl-op" type="number" step="0.1" min="0" max="100"></div>
+  <div class="row"><label>Mode</label>
+    <div class="mode-group">
+      <button data-mode="MAN" id="ctl-man">MAN</button>
+      <button data-mode="AUTO" id="ctl-auto">AUTO</button>
+      <button data-mode="CAS" id="ctl-cas">CAS</button>
+    </div>
+  </div>
+  <div id="ctl-note" style="font-size:11px;color:#ffd27f;margin:4px 0;"></div>
+  <div class="btns"><button id="ctl-close">Close</button><button class="primary" id="ctl-set-btn">SET</button></div>
+</div></div>
+
+<!-- Faceplate modal -->
+<div class="modal" id="faceplate">
+  <div class="card">
+    <h3 id="fp-title">SIC FACEPLATE</h3>
+    <div class="row"><label>PV (%)</label><input id="fp-pv" type="number" step="0.1"></div>
+    <div class="row"><label id="fp-sp-label">SP (%)</label><input id="fp-sp" type="number" step="0.1"></div>
+    <div class="row"><label>MV (%)</label><input id="fp-mv" type="number" step="0.1" readonly></div>
+    <div class="row"><label>N/C bias (%)</label><input id="fp-nc" type="number" step="0.1"></div>
+    <div class="row"><label>Mode</label>
+      <div class="mode-group">
+        <button data-mode="MAN" id="fp-man">MAN</button>
+        <button data-mode="AUTO" id="fp-auto">AUTO</button>
+        <button data-mode="CAS" id="fp-cas">CAS</button>
+      </div>
+    </div>
+    <div class="btns">
+      <button class="primary" id="fp-apply">Apply</button>
+      <button id="fp-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- Trend modal -->
+<div class="modal" id="trendModal">
+  <div class="card">
+    <h3 id="trend-title">Trend</h3>
+    <div class="scaleRow">
+      <span>Time span:</span>
+      <button id="t-dec">-</button>
+      <span id="t-span">60 s</span>
+      <button id="t-inc">+</button>
+    </div>
+    <canvas id="trendChart" width="600" height="280"></canvas>
+    <div class="btns"><button id="t-close">Close</button></div>
+  </div>
+</div>
+
+<!-- Stream modal -->
+<div class="modal" id="streamModal">
+  <div class="card">
+    <h3 id="stream-title">Stream</h3>
+    <table id="stream-table"></table>
+    <div class="btns"><button id="s-close">Close</button></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+<script src="overlays.js"></script>
+</body>
+</html>

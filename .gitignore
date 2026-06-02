@@ -1,0 +1,40 @@
+# --- source datasheets / descriptions / diagrams (not versioned) ---
+New folder/
+
+# --- images / binaries ---
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.ico
+*.svg
+*.webp
+
+# --- documents / datasheets ---
+*.pdf
+*.xlsx
+*.xls
+*.docx
+*.doc
+*.pptx
+
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+
+# --- node ---
+node_modules/
+
+# --- os / editor ---
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
+.vscode/
+.idea/
