@@ -336,6 +336,26 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
     }
 
 
+def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None):
+    """Uniform process-stream object. Derives BOTH mol % and mass % from the same
+    per-component kmol/h vector, so the two bases can never drift. rho unknown -> None
+    -> density/volumetric flow render as '—' (no fabricated numbers)."""
+    n = {k: comp_kmolh.get(k, 0.0) for k in MW_COMP}
+    m = {k: n[k] * MW_COMP[k] for k in MW_COMP}
+    n_tot = sum(n.values()); m_tot = sum(m.values())
+    return {
+        "name": name, "src": src, "dst": dst, "phase": phase,
+        "T_C": round(T, 1), "P_bara": round(P, 1),
+        "mass_kgh": round(m_tot, 1), "mass_th": round(m_tot / 1000.0, 3),
+        "mol_kmolh": round(n_tot, 2),
+        "MW": round(m_tot / n_tot, 3) if n_tot else 0.0,
+        "rho": (round(rho, 1) if rho else None),
+        "vol_m3h": (round(m_tot / rho, 2) if rho else None),
+        "mol_pct":  {k: round(n[k] / n_tot * 100.0, 3) if n_tot else 0.0 for k in MW_COMP},
+        "mass_pct": {k: round(m[k] / m_tot * 100.0, 3) if m_tot else 0.0 for k in MW_COMP},
+    }
+
+
 # ----- PID -----
 class PID:
     def __init__(self, Kc=2.0, Ti=8.0, Td=0.0, op_lo=0.0, op_hi=100.0):
