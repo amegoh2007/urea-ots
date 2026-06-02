@@ -200,7 +200,7 @@
     <!-- AL feed: 309E005 -> tank inlet -->
     <polyline class="stream-nh3" points="145,200 450,200"/>
     <polygon points="450,193 465,200 450,207" fill="#ff00ff"/>
-    <polyline class="stream-click" points="145,200 450,200" data-stream="AL"/>
+    <polyline class="stream-click" points="145,200 450,200" data-stream="NH3_FEED"/>
 
     <!-- Tank-top temp taps TT-321001 (left) / TT-321002 (right), dotted -->
     <line class="stream-signal" x1="412" y1="162" x2="450" y2="162"/>
@@ -210,7 +210,7 @@
     <polyline class="stream-nh3" points="515,291 515,460 1055,460"/>
     <polyline class="stream-nh3" points="850,460 850,454"/>
     <polyline class="stream-nh3" points="1055,460 1055,454"/>
-    <polyline class="stream-click" points="515,291 515,460 1055,460" data-stream="SUCT"/>
+    <polyline class="stream-click" points="515,291 515,460 1055,460" data-stream="PUMP_SUCT"/>
     <!-- PT/PY/PDY signal chains (TT-321002 temp -> PY sat-P -> PDY margin <- PT) -->
     <polyline class="stream-signal" points="625,170 735,162 820,206"/>
     <polyline class="stream-signal" points="720,294 820,212"/>
@@ -221,14 +221,14 @@
     <polyline class="stream-nh3" points="850,398 850,300 1240,300 1240,284"/>
     <polyline class="stream-nh3" points="1055,398 1055,300"/>
     <polygon points="1233,284 1247,284 1240,272" fill="#ff00ff"/>
-    <polyline class="stream-click" points="850,398 850,300 1240,300 1240,284" data-stream="DISCH"/>
+    <polyline class="stream-click" points="850,398 850,300 1240,300 1240,284" data-stream="HP_DISCH"/>
     <!-- discharge instrument taps (TT-321020, PI-321203) -->
     <polyline class="stream-signal" points="1100,300 1100,248"/>
     <polyline class="stream-signal" points="1130,300 1130,272"/>
 
     <!-- CPL feed to ratio -->
     <polyline class="stream-cpl" points="145,338 205,448"/>
-    <polyline class="stream-click" points="145,338 205,448" data-stream="CPL"/>
+    <polyline class="stream-click" points="145,338 205,448" data-stream="CARB_RECYCLE"/>
     <!-- COO dotted signal to ratio -->
     <polyline class="stream-signal" points="145,393 205,472"/>
 
@@ -362,13 +362,13 @@
       <polygon points="1170,115 1184,122 1170,129" fill="#ff00ff"/>
       <!-- vessel suction/overflow -> 322F001 ejector (magenta, LIVE) -->
       <polyline class="stream-nh3" points="330,360 330,505 252,505"/>
-      <polyline class="stream-click" points="330,360 330,505 252,505" data-stream="ESUCT"/>
+      <polyline class="stream-click" points="330,360 330,505 252,505" data-stream="CARB_RECYCLE"/>
       <!-- motive HP NH3: 321P002A/B -> ejector (magenta, LIVE) -->
       <polyline class="stream-nh3" points="100,565 175,565 175,514"/>
-      <polyline class="stream-click" points="100,565 175,565 175,514" data-stream="MOTIVE"/>
+      <polyline class="stream-click" points="100,565 175,565 175,514" data-stream="HP_DISCH"/>
       <!-- ejector discharge -> up to vessel (magenta, LIVE) -->
       <polyline class="stream-nh3" points="252,492 320,492 320,366"/>
-      <polyline class="stream-click" points="252,492 320,492 320,366" data-stream="EDISCH"/>
+      <polyline class="stream-click" points="252,492 320,492 320,366" data-stream="EJ_DISCH"/>
       <polygon points="313,373 320,361 327,373" fill="#ff00ff"/>
       <!-- ===== green process network (329P006 / 329P004 / cooling) ===== -->
       <polyline class="stream-cpl" points="430,270 700,270 700,222"/>
