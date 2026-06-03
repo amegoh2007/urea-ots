@@ -100,6 +100,8 @@
       { k: 'strm-prod',  t: 'strm', stream: 'HPCC_PROD',    tag: 'HPCC PRODUCT → 322R001',x: 980, y: 300, w: 160, h: 18 },
       { k: 'strm-stm',   t: 'strm', stream: 'HPCC_STEAM',   tag: 'LP STEAM 4.4 BARA',     x: 980, y: 180, w: 160, h: 18 },
       { k: 'strm-cond',  t: 'strm', stream: 'HPCC_COND',    tag: 'BFW/COND → 322E002',    x: 980, y: 420, w: 160, h: 18 },
+      { k: 'strm-rov',   t: 'strm', stream: 'REACT_OVERFLOW', tag: 'OVERFLOW → 322E001',    x: 1080, y: 420, w: 170, h: 18 },
+      { k: 'strm-rog',   t: 'strm', stream: 'REACT_OFFGAS',   tag: 'REACTOR GAS → 322E003', x: 1080, y: 170, w: 170, h: 18 },
       // ===== CO2 FEED LINE (Item 5) — bound to backend CO2_FEED packet =====
       { k: 'hic203', t: 'ind',    x: 100,  y: 472, tag: 'HIC-322203', bind: 'CO2_FEED.HIC_322203', u: '%',     dec: 1, face: 'hic2' },
       { k: 'pv203',  t: 'avalve', x: 197,  y: 486, tag: 'PV-322203',  bind: 'CO2_FEED.PV_322203',  u: '%',     dec: 1 },
@@ -125,23 +127,23 @@
       { k: 'nav-f001', t: 'nav', x: 1283, y: 113, w: 80, h: 22, tag: '322F001 → 322-2', goto: 'screen-322-2' },
       // ---- white-frame (unbound: downstream 322 reactor/scrubber/condenser, bind when modelled) ----
       { k: 'at701',  t: 'ind', x: 209,  y: 285, tag: 'AT-322701' },
-      { k: 'lt504',  t: 'ind', x: 354,  y: 326, tag: 'LT-322504' },
+      { k: 'lt504',  t: 'ind', x: 354,  y: 326, tag: 'LT-322504', bind: 'REACT_322R001.LT_322504', u: '%', dec: 1 },
       { k: 'pt9201', t: 'ind', x: 740,  y: 42,  tag: 'PT-329201', bind: 'EJ_322F001.PI_329201', u: 'BAR A', dec: 1 },   // same loop 329201 as 322-2 PI-329201 (322E003 overflow P); PT=field xmtr, PI=indicator, one backend key
-      { k: 'tt009',  t: 'ind', x: 595,  y: 105, tag: 'TT-322009' },
-      { k: 'tt005',  t: 'ind', x: 543,  y: 145, tag: 'TT-322005' },
+      { k: 'tt009',  t: 'ind', x: 595,  y: 105, tag: 'TT-322009', bind: 'REACT_322R001.TT_322009', u: 'C', dec: 1 },
+      { k: 'tt005',  t: 'ind', x: 543,  y: 145, tag: 'TT-322005', bind: 'REACT_322R001.TT_322005', u: 'C', dec: 1 },
       { k: 'tt012b', t: 'ind', x: 735,  y: 145, tag: 'TT-322012', bind: 'HPCC_322E002.TT_322012', u: 'C', dec: 1 },   // 322F001 ejector-disch liquid feed -> 322E002
       { k: 'tt013',  t: 'ind', x: 864,  y: 143, tag: 'TT-322013', bind: 'STRIP_322E001.TT_322013', u: 'C', dec: 1 },
-      { k: 'tt006',  t: 'ind', x: 543,  y: 195, tag: 'TT-322006' },
+      { k: 'tt006',  t: 'ind', x: 543,  y: 195, tag: 'TT-322006', bind: 'REACT_322R001.TT_322006', u: 'C', dec: 1 },
       { k: 'ft9407', t: 'ind', x: 807,  y: 212, tag: 'FT-329407' },
-      { k: 'tt007',  t: 'ind', x: 543,  y: 247, tag: 'TT-322007' },
-      { k: 'tt008',  t: 'ind', x: 543,  y: 297, tag: 'TT-322008' },
+      { k: 'tt007',  t: 'ind', x: 543,  y: 247, tag: 'TT-322007', bind: 'REACT_322R001.TT_322007', u: 'C', dec: 1 },
+      { k: 'tt008',  t: 'ind', x: 543,  y: 297, tag: 'TT-322008', bind: 'REACT_322R001.TT_322008', u: 'C', dec: 1 },
       { k: 'tt010',  t: 'ind', x: 597,  y: 335, tag: 'TT-322010', bind: 'HPCC_322E002.TT_322010', u: 'C', dec: 1 },   // 322E002 liquid product temp -> 322R001
-      { k: 'h605',   t: 'ind', x: 830,  y: 325, tag: 'HIC-322605' },
+      { k: 'h605',   t: 'ind', x: 830,  y: 325, tag: 'HIC-322605', bind: 'REACT_322R001.HIC_322605', u: '%', dec: 1 },
       { k: 'pt9206', t: 'ind', x: 1242, y: 145, tag: 'PT-329206' },
       { k: 'tt9001', t: 'ind', x: 1048, y: 259, tag: 'TT-329001', bind: 'HPCC_322E002.TT_329001', u: 'C', dec: 1 },   // 322D001 A/B condensate -> 322E002 shell (BFW feed)
       { k: 'py9207', t: 'ind', x: 1094, y: 208, tag: 'PY-329207B' },
       { k: 'tt014',  t: 'ind', x: 638,  y: 398, tag: 'TT-322014', bind: 'STRIP_322E001.TT_322014', u: 'C', dec: 1 },
-      { k: 'hv605',  t: 'ind', x: 823,  y: 392, tag: 'HV-322605' },
+      { k: 'hv605',  t: 'ind', x: 823,  y: 392, tag: 'HV-322605', bind: 'REACT_322R001.HV_322605', u: '%', dec: 1 },
       { k: 'lic501', t: 'ind', x: 861,  y: 471, tag: 'LIC-322501', bind: 'STRIP_322E001.LIC_322501.pv', u: '%', dec: 1 },
       { k: 'pic9204',t: 'ind', x: 1113, y: 380, tag: 'PIC-329204' },
       { k: 'hic9601',t: 'ind', x: 1127, y: 489, tag: 'HIC-329601' },
