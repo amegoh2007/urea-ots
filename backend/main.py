@@ -639,7 +639,10 @@ def step_sim(dt: float) -> dict:
 
     # ----- HP Stripper 322E001: reactor effluent + live CO2 strip gas -> top gas (322E002)
     #   + bottom solution (LV-322501).  Shell = condensing 329D005 MP steam (boundary T).
-    strip = stripper_322e001(s.F_CO2_th, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA)
+    # Stripper consumes the previous step's reactor overflow (tear stream of the synthesis
+    # recycle); at design this equals the frozen STRIP_FEED207_KMOLH -> output unchanged.
+    strip = stripper_322e001(s.F_CO2_th, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA,
+                             overflow_kmolh=s.react_overflow_kmolh)
 
     # LIC-322501 bottom-solution level control, DIRECT-acting on the FC LV-322501:
     #   level^ -> op^ -> air-to-open valve opens -> drain^ -> level v  (neg. feedback).
@@ -664,6 +667,10 @@ def step_sim(dt: float) -> dict:
 
     # HP carbamate condenser 322E002: strip gas + ejector liquid -> two-phase product to 322R001
     hpcc = hpcc_322e002(strip, ej)
+
+    # 322R001 HP urea reactor: pinned products from hpcc feed, throughput s, valve φ.
+    react = react_322r001(hpcc, s.F_CO2_th, s.HIC_322605)
+    s.react_overflow_kmolh = react["overflow_kmolh"]   # tear -> next step's stripper feed
 
     # Trips
     s.trips["21_2"]  = (s.tank_level_frac < 0.05)
@@ -710,6 +717,14 @@ def step_sim(dt: float) -> dict:
         "HPCC_COND": make_stream(
             {"H2O": hpcc["steam_kgh"] / MW_COMP["H2O"]}, HPCC_STEAM_TSAT_C, HPCC_STEAM_P_BARA,
             "BFW/condensate feed", "322D001 A/B", "322E002 shell", "liquid"),
+        "REACT_OVERFLOW": make_stream(
+            react["overflow_kmolh"], react["T_overflow"], react["P_bara"],
+            "Reactor overflow (urea soln.)", "322R001", "322E001", "liquid",
+            rho=REACT_OVERFLOW_RHO),
+        "REACT_OFFGAS": make_stream(
+            react["offgas_kmolh"], react["T_offgas"], react["P_offgas"],
+            "Reactor off-gas", "322R001", "322E003", "vapor",
+            rho=REACT_OFFGAS_RHO),
     }
 
     return {
@@ -829,6 +844,19 @@ def step_sim(dt: float) -> dict:
                 "kgh":      round(hpcc["steam_kgh"], 0),     # LP steam produced (kg/h)
                 "duty_kW":  round(hpcc["duty_kw"], 0),       # condensation duty (kW)
             },
+        },
+        "REACT_322R001": {                       # HP Urea Reactor 322R001 -> 322E001 / 322E003
+            "TT_322005":   round(REACT_TEMP_HEIGHTS_C, 1),   # bottom-zone temp (height 1)
+            "TT_322006":   round(REACT_TEMP_HEIGHTS_C, 1),   # height 2
+            "TT_322007":   round(REACT_TEMP_HEIGHTS_C, 1),   # height 3
+            "TT_322008":   round(REACT_TEMP_HEIGHTS_C, 1),   # top-zone temp (height 4)
+            "TT_322009":   round(react["T_offgas"], 1),      # off-gas line -> 322E003 (C)
+            "LT_322504":   round(REACT_LEVEL_NLL_PCT, 1),    # top liquid level (%)
+            "HIC_322605":  round(s.HIC_322605, 1),           # overflow valve controller (%)
+            "HV_322605":   round(s.HIC_322605, 1),           # HV-322605 opening (tracks HIC 1:1)
+            "P_bara":      round(react["P_bara"], 1),        # reactor pressure (bar a)
+            "P_offgas":    round(react["P_offgas"], 1),      # off-gas line pressure (bar a)
+            "closure_resid": round(react["closure_resid"], 2),  # mass-closure diag (kmol/h, not injected)
         },
         "STREAMS": streams,
         "ratio": {

@@ -89,6 +89,28 @@ def test_stripper_coupling_regression():
         assert abs(a[key] - b[key]) < 1e-9, key          # design overflow == frozen constant
 
 
+def test_packet_tags_and_streams():
+    pkt = main.step_sim(1.0)
+    assert "REACT_322R001" in pkt
+    blk = pkt["REACT_322R001"]
+    for tag in ("TT_322005", "TT_322006", "TT_322007", "TT_322008", "TT_322009",
+                "LT_322504", "HIC_322605", "HV_322605", "P_bara", "P_offgas",
+                "closure_resid"):
+        assert tag in blk, tag
+    assert abs(blk["TT_322005"] - 183.0) < 0.1
+    assert abs(blk["HIC_322605"] - 60.0) < 0.1
+    assert abs(blk["HV_322605"] - 60.0) < 0.1
+    st = pkt["STREAMS"]
+    assert "REACT_OVERFLOW" in st and "REACT_OFFGAS" in st
+    # at the design default state, overflow ≡ stream 207
+    assert abs(st["REACT_OVERFLOW"]["mol_kmolh"]
+               - sum(main.STRIP_FEED207_KMOLH.values())) < 0.5
+    # off-gas stream composition closes
+    assert abs(sum(st["REACT_OFFGAS"]["mol_pct"].values()) - 100.0) < 0.2
+    assert st["REACT_OVERFLOW"]["dst"] == "322E001"
+    assert st["REACT_OFFGAS"]["dst"] == "322E003"
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
