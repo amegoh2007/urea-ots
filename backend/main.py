@@ -217,7 +217,8 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float) -> dict:
+def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
+                     overflow_kmolh: dict = None) -> dict:
     """HP Stripper 322E001 reduced steady-state model.
     Top liquid feed = 322R001 overflow (boundary constant, stream 207).
     Bottom strip gas = live CO2 feed (co2_feed_th, t/h).  Shell = condensing MP steam.
@@ -225,10 +226,12 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float) -> dic
     design strip fractions modulated by steam T, CO2 strip-gas ratio and pressure.  Reactions
     (urea hydrolysis + biuret formation) carry the component-balance deltas.  At design
     conditions reproduces the shared HMB exactly.  Returns both product streams + props."""
-    # 1. component molar feed (kmol/h): reactor effluent (const) + live CO2 strip gas
+    # 1. component molar feed (kmol/h): reactor effluent (live overflow, 1-step lag) + CO2 strip gas
+    if overflow_kmolh is None:
+        overflow_kmolh = STRIP_FEED207_KMOLH          # frozen design vector (backward-compat)
     co2_scale = co2_feed_th / (CO2_DES_KGH / 1000.0)                     # 1.0 at design
     co2_kmolh = {k: CO2_FEED_MOLFRAC.get(k, 0.0) * CO2_DES_KMOLH * co2_scale for k in MW_COMP}
-    feed = {k: STRIP_FEED207_KMOLH.get(k, 0.0) + co2_kmolh.get(k, 0.0) for k in MW_COMP}
+    feed = {k: overflow_kmolh.get(k, 0.0) + co2_kmolh.get(k, 0.0) for k in MW_COMP}
 
     # 2. reactions (scale with steam heat: hotter film -> more hydrolysis/biuret)
     eta_T  = clamp(T_steam_C / STRIP_STEAM_T_DES_C, 0.0, 1.15)           # 1.0 at design

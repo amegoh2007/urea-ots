@@ -79,6 +79,16 @@ def test_valve_phi048():
     assert abs(r["offgas_kmolh"]["NH3"] - main.REACT_OFFGAS_DES["NH3"]) < 1e-6
 
 
+def test_stripper_coupling_regression():
+    co2 = main.CO2_DES_KGH / 1000.0
+    a = main.stripper_322e001(co2, main.STRIP_STEAM_T_DES_C, main.STRIP_P_DES_BARA)
+    r = main.react_322r001(_design_hpcc(), co2, main.REACT_HIC605_DES_PCT)
+    b = main.stripper_322e001(co2, main.STRIP_STEAM_T_DES_C, main.STRIP_P_DES_BARA,
+                              overflow_kmolh=r["overflow_kmolh"])
+    for key in ("top_th", "bot_th", "top_MW", "bot_MW"):
+        assert abs(a[key] - b[key]) < 1e-9, key          # design overflow == frozen constant
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
