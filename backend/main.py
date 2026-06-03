@@ -358,6 +358,28 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
     }
 
 
+def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float) -> dict:
+    """322R001 HP urea reactor — reduced calibrated split-fraction, pinned to design HMB.
+    overflow_i = nu_overflow_i,des * co2_scale * (phi/phi_des);  offgas_i = nu_offgas_i,des * co2_scale.
+    closure_resid is reported as a diagnostic only (NOT injected back into any stream)."""
+    s   = co2_feed_th / (CO2_DES_KGH / 1000.0)
+    phi = hic_322605_pct / 100.0
+    phi_des = REACT_HIC605_DES_PCT / 100.0
+    overflow = {k: REACT_OVERFLOW_DES.get(k, 0.0) * s * (phi / phi_des) for k in MW_COMP}
+    offgas   = {k: REACT_OFFGAS_DES.get(k, 0.0) * s for k in MW_COMP}
+    xi_urea  = REACT_XI_UREA_DES * s
+    xi_biu   = REACT_XI_BIU_DES * s
+    feed     = hpcc["feed_kmolh"]
+    closure_resid = (sum(feed.values())
+                     - (sum(overflow.values()) + sum(offgas.values()))
+                     - xi_urea)
+    return {"overflow_kmolh": overflow, "offgas_kmolh": offgas, "feed_kmolh": feed,
+            "xi_urea": xi_urea, "xi_biu": xi_biu, "closure_resid": closure_resid,
+            "T_overflow": REACT_OVERFLOW_T_C, "T_offgas": REACT_OFFGAS_T_C,
+            "P_bara": REACT_P_BARA, "P_offgas": REACT_OFFGAS_P_BARA,
+            "phi": phi, "phi_des": phi_des, "co2_scale": s}
+
+
 def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None):
     """Uniform process-stream object. Derives BOTH mol % and mass % from the same
     per-component kmol/h vector, so the two bases can never drift. rho unknown -> None

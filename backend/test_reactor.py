@@ -23,3 +23,69 @@ def test_constants_present():
     assert isinstance(main.state.react_overflow_kmolh, dict)
     assert abs(sum(main.state.react_overflow_kmolh.values())
                - sum(main.STRIP_FEED207_KMOLH.values())) < 1e-6
+
+
+def _design_hpcc(feed_tot=None):
+    """Minimal hpcc stand-in: feed_kmolh dict only (closure probe)."""
+    feed = {k: 0.0 for k in MW_COMP}
+    if feed_tot is not None:
+        feed["H2O"] = feed_tot          # lump total onto one key; only the sum matters
+    return {"feed_kmolh": feed}
+
+
+def test_design_identity_overflow():
+    r = main.react_322r001(_design_hpcc(), main.CO2_DES_KGH / 1000.0,
+                           main.REACT_HIC605_DES_PCT)
+    for k in MW_COMP:
+        assert abs(r["overflow_kmolh"][k] - main.STRIP_FEED207_KMOLH.get(k, 0.0)) < 1e-6, k
+    assert abs(r["phi"] - r["phi_des"]) < 1e-9
+    assert abs(r["co2_scale"] - 1.0) < 1e-9
+
+
+def test_offgas_hmb():
+    r = main.react_322r001(_design_hpcc(), main.CO2_DES_KGH / 1000.0,
+                           main.REACT_HIC605_DES_PCT)
+    og = r["offgas_kmolh"]
+    n_tot = sum(og.values())
+    assert abs(n_tot - 963.85) < 0.2, n_tot                       # Σ kmol/h
+    mass = sum(og[k] * MW_COMP[k] for k in MW_COMP)
+    assert abs(mass - 22355.0) < 50.0, mass                       # kg/h
+    assert abs(mass / n_tot - 23.20) < 0.05, mass / n_tot         # MW
+    assert abs(og["NH3"] / n_tot * 100.0 - 69.08) < 0.1           # mol % NH3
+    assert abs(og["CO2"] / n_tot * 100.0 - 20.51) < 0.1           # mol % CO2
+
+
+def test_closure_resid():
+    feed_tot = 10943.7                                            # design Σ feed (kmol/h)
+    r = main.react_322r001(_design_hpcc(feed_tot), main.CO2_DES_KGH / 1000.0,
+                           main.REACT_HIC605_DES_PCT)
+    assert 240.0 < r["closure_resid"] < 260.0, r["closure_resid"] # ≈ +250.56
+    assert r["closure_resid"] / feed_tot < 0.03                   # bounded < 3 %
+
+
+def test_scale_s080():
+    r = main.react_322r001(_design_hpcc(), 0.8 * main.CO2_DES_KGH / 1000.0,
+                           main.REACT_HIC605_DES_PCT)
+    assert abs(r["co2_scale"] - 0.8) < 1e-9
+    assert abs(r["overflow_kmolh"]["NH3"] - main.REACT_OVERFLOW_DES["NH3"] * 0.8) < 1e-6
+    assert abs(r["offgas_kmolh"]["NH3"] - main.REACT_OFFGAS_DES["NH3"] * 0.8) < 1e-6
+    assert abs(r["xi_urea"] - main.REACT_XI_UREA_DES * 0.8) < 1e-6
+
+
+def test_valve_phi048():
+    # HIC-322605 = 48 % (−20 % of 60) -> φ/φ_des = 0.8 -> overflow ×0.8, off-gas unchanged
+    r = main.react_322r001(_design_hpcc(), main.CO2_DES_KGH / 1000.0, 48.0)
+    assert abs(r["overflow_kmolh"]["NH3"] - main.REACT_OVERFLOW_DES["NH3"] * 0.8) < 1e-6
+    assert abs(r["offgas_kmolh"]["NH3"] - main.REACT_OFFGAS_DES["NH3"]) < 1e-6
+
+
+if __name__ == "__main__":
+    tests = [v for k, v in sorted(globals().items())
+             if k.startswith("test_") and callable(v)]
+    fails = 0
+    for t in tests:
+        try:
+            t(); print("PASS", t.__name__)
+        except Exception:
+            fails += 1; print("FAIL", t.__name__); traceback.print_exc()
+    raise SystemExit(1 if fails else 0)
