@@ -297,6 +297,28 @@ HPCC_DH_CARB_KJMOL = 160.0       # carbamate exotherm 2NH3+CO2->NH2COONH4 (kJ/mo
 HPCC_CP_GAS        = 2.0         # mean strip-gas cp for sensible duty (kJ/kg.K)
 HPCC_LATENT_4BAR   = 2120.0      # latent heat of 4.4 bar a steam (kJ/kg)
 
+# ----- 322R001 HP Urea Reactor (reduced calibrated split-fraction, pinned to design HMB) -----
+#   Products pinned to shared HMB:  ṅᵒᵛ_i = νᵒᵛ_des,i · s · (φ/φ_des) ;  ṅᵒᵍ_i = νᵒᵍ_des,i · s
+#   s  = CO₂ throughput ratio (= stripper co2_scale);  φ = HV-322605 opening fraction.
+# Overflow design vector IS stream 207 (322R001 overflow = 322E001 feed) -> derive from the
+# single source of truth so the design point is bit-identical and DRY.
+#   Documented literals (kmol/h): Urea 1302.6, Biuret 2.414, NH3 4002.4, CO2 897.7, H2O 2222.0.
+REACT_OVERFLOW_DES = {k: STRIP_FEED207_KMOLH.get(k, 0.0) for k in MW_COMP}   # Σ ≈ 8427.11
+REACT_OFFGAS_DES   = {"NH3": 665.73, "CO2": 197.69, "N2": 44.53, "H2O": 42.51,
+                      "O2": 7.42, "CH4": 3.86, "H2": 2.02, "Urea": 0.0, "Biuret": 0.0}  # Σ ≈ 963.76
+REACT_XI_UREA_DES  = 1302.27     # urea-formation extent at design (kmol/h)
+REACT_XI_BIU_DES   = 2.414       # biuret-formation extent at design (kmol/h)
+REACT_HIC605_DES_PCT = 60.0      # φ_des: HV-322605 design opening (Kv_req/Kvs, linear trim)
+REACT_OVERFLOW_T_C = 183.0       # TT-322014 overflow temp -> 322E001
+REACT_OFFGAS_T_C   = 183.0       # TT-322009 gas-line temp -> 322E003
+REACT_P_BARA       = 144.9       # reactor operating pressure (bar a)
+REACT_OFFGAS_P_BARA = 141.3      # off-gas line pressure -> 322E003 (bar a)
+REACT_OVERFLOW_RHO = 990.0       # urea solution density (kg/m³)
+REACT_OFFGAS_RHO   = 113.30      # off-gas density (kg/m³)
+REACT_TEMP_HEIGHTS_C = 183.0     # TT-322005/6/7/8 uniform height temps (datasheet)
+REACT_LEVEL_NLL_PCT  = 80.0      # LT-322504 top normal liquid level (%)
+# statics (display only): H 25000 mm, ID 2950 mm, 11 sieve trays, volume 191 m³
+
 
 def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
     """HP Carbamate Condenser 322E002 reduced model.
@@ -444,6 +466,11 @@ class State:
         self.XV_322901 = True
         # 322F001 ejector spindle opening (HIC-322602 -> HV-322602), % open
         self.HIC_322602 = 74.0
+        # 322R001 HP urea reactor: HIC-322605 -> HV-322605 overflow valve opening (%)
+        self.HIC_322605 = REACT_HIC605_DES_PCT          # φ_des = 60 %
+        # reactor-overflow tear stream (synthesis recycle): the stripper feed consumes the
+        # previous step's value (initialised to the design vector -> design = bit-identical).
+        self.react_overflow_kmolh = dict(REACT_OVERFLOW_DES)
         # pumps: open_act = torque-converter valve opening %
         self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M"}
         self.pumpB = {"on": True,  "open_act": 86.2, "speed_act": 131.0, "current": 43.9, "mode": "M"}
