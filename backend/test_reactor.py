@@ -111,6 +111,18 @@ def test_packet_tags_and_streams():
     assert st["REACT_OFFGAS"]["dst"] == "322E003"
 
 
+def test_hic605_command():
+    main.state.HIC_322605 = 60.0
+    main.handle_cmd({"type": "hic605_set", "id": "HIC-322605", "mode": "MAN", "op": 48.0})
+    assert abs(main.state.HIC_322605 - 48.0) < 1e-9
+    # clamp
+    main.handle_cmd({"type": "hic605_set", "id": "HIC-322605", "mode": "MAN", "op": 130.0})
+    assert abs(main.state.HIC_322605 - 100.0) < 1e-9
+    main.handle_cmd({"type": "hic605_set", "id": "HIC-322605", "mode": "MAN", "op": -5.0})
+    assert abs(main.state.HIC_322605 - 0.0) < 1e-9
+    main.state.HIC_322605 = 60.0                       # restore design default for later tests
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

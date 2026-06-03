@@ -940,6 +940,10 @@ def handle_cmd(cmd: dict):
     elif t == "hic2_set":                      # HIC-322203 -> PV-322203 minimum opening
         s.HIC_322203 = clamp(float(cmd["value"]), 0.0, 100.0)
 
+    elif t == "hic605_set":                    # HIC-322605 -> HV-322605 reactor overflow valve
+        if "op" in cmd:
+            s.HIC_322605 = clamp(float(cmd["op"]), 0.0, 100.0)
+
     elif t == "pic_set":                       # PIC-322203 CO2 line-pressure controller
         pic = s.PIC_322203
         if "mode" in cmd:
