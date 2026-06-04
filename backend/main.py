@@ -169,6 +169,22 @@ STRIP_P_DES_BARA    = 144.0       # bar a, tube-side (synthesis-loop) pressure
 # --- Design product temperatures (C):
 STRIP_T_TOPGAS_DES_C = 187.0      # TT-322013 top gas -> 322E002
 STRIP_T_BOTTOM_DES_C = 172.0      # TT-322004 bottom solution -> LV-322501 (pre-flash)
+# --- N/C + H/C stripping-efficiency penalty + Arrhenius biuret (live reactor-effluent coupling) ---
+#   Design stripper feed = stream-207 overflow + CO2 strip gas (molfrac x design CO2 rate).  L0/W0/U0
+#   anchors are DERIVED from existing design constants (no fabricated numbers); differ from the
+#   reactor-feed N/C because the stripper feed includes the CO2 sweep gas.
+_STRIP_FEED_DES = {k: STRIP_FEED207_KMOLH.get(k, 0.0)
+                   + CO2_FEED_MOLFRAC.get(k, 0.0) * CO2_DES_KMOLH for k in MW_COMP}
+STRIP_L0    = _STRIP_FEED_DES["NH3"] / _STRIP_FEED_DES["CO2"]    # 1.9045  design feed N/C
+STRIP_W0    = _STRIP_FEED_DES["H2O"] / _STRIP_FEED_DES["CO2"]    # 1.0610  design feed H/C
+STRIP_UREA0 = _STRIP_FEED_DES["Urea"]                           # 1302.6  design feed urea (kmol/h)
+STRIP_ETA_KN    = 1.50     # eta_T penalty per unit reactor-feed N/C above design (excess NH3 chokes)
+STRIP_ETA_KW    = 1.50     # eta_T penalty per unit reactor-feed H/C above design (dilution chokes)
+STRIP_ETA_FLOOR = 0.50     # min penalty factor (g_NC, g_HC clamp floor)
+STRIP_SLIP_GAIN = 4.0      # NH3/CO2 overhead breakthrough gain per unit choke (vapour pushed to HPCC)
+STRIP_BIU_EA    = 85000.0  # J/mol  biuret-formation activation energy (Arrhenius)
+STRIP_R_GAS_J   = 8.314    # J/mol-K  gas constant
+STRIP_T_BIU_DES_K = STRIP_T_BOTTOM_DES_C + 273.15   # 445.15 K  biuret Arrhenius ref (design bottom T)
 STRIP_T_DOWN_DES_C   = 119.0      # TT-323001 post-LV flash -> 323C003
 STRIP_BOT_DES_KGH    = 130482.0   # kg/h design bottom-solution flow (= model design bottom)
 # --- Bottom-sump level (LIC-322501 -> LV-322501): bottom head ID 2430 mm:
@@ -235,7 +251,8 @@ def clamp(x, lo, hi):
 
 
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
-                     overflow_kmolh: dict = None) -> dict:
+                     overflow_kmolh: dict = None, L_feed: float = None,
+                     W_feed: float = None) -> dict:
     """HP Stripper 322E001 reduced steady-state model.
     Top liquid feed = 322R001 overflow (boundary constant, stream 207).
     Bottom strip gas = live CO2 feed (co2_feed_th, t/h).  Shell = condensing MP steam.
@@ -250,10 +267,27 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     co2_kmolh = {k: CO2_FEED_MOLFRAC.get(k, 0.0) * CO2_DES_KMOLH * co2_scale for k in MW_COMP}
     feed = {k: overflow_kmolh.get(k, 0.0) + co2_kmolh.get(k, 0.0) for k in MW_COMP}
 
-    # 2. reactions (scale with steam heat: hotter film -> more hydrolysis/biuret)
-    eta_T  = clamp(T_steam_C / STRIP_STEAM_T_DES_C, 0.0, 1.15)           # 1.0 at design
+    # 2. stripping efficiency: steam heat, PENALIZED by feed N/C and H/C.  Excess NH3 (high N/C) and
+    #    dilution (high H/C) make the solution harder to thermally strip without a CO2 sweep.
+    #    The reduced reactor PINS its overflow N/C (atom-conserving ripple), so the disturbance is
+    #    carried by the REACTOR-FEED N/C / H/C (1-step lag) -- the same ratios that drop conversion
+    #    and load the stripper.  Anchored to reactor design (L0_DES / W0_DES) -> g=1.0 at design.
+    dTs = T_steam_C - STRIP_STEAM_T_DES_C
+    eta_T_steam = clamp(T_steam_C / STRIP_STEAM_T_DES_C, 0.0, 1.15)      # thermal part (1.0 at design)
+    L_react = reactor.L0_DES if L_feed is None else L_feed              # reactor-feed N/C
+    W_react = reactor.W0_DES if W_feed is None else W_feed              # reactor-feed H/C
+    g_NC = clamp(1.0 - STRIP_ETA_KN * (L_react - reactor.L0_DES), STRIP_ETA_FLOOR, 1.05)
+    g_HC = clamp(1.0 - STRIP_ETA_KW * (W_react - reactor.W0_DES), STRIP_ETA_FLOOR, 1.05)
+    eta_T = clamp(eta_T_steam * g_NC * g_HC, 0.0, 1.15)                  # reported strip efficiency
+    L_strip = (feed["NH3"] / feed["CO2"]) if feed["CO2"] else STRIP_L0   # stripper-feed N/C (diag)
+    W_strip = (feed["H2O"] / feed["CO2"]) if feed["CO2"] else STRIP_W0   # stripper-feed H/C (diag)
+
+    # 3. reactions: hydrolysis scales with penalized eta_T; biuret = Arrhenius k0 exp(-Ea/RT)*[Urea].
+    T_bot_K = (STRIP_T_BOTTOM_DES_C + 0.7 * dTs) + 273.15
     xi_hyd = STRIP_XI_HYD_DES * eta_T
-    xi_biu = STRIP_XI_BIU_DES * eta_T
+    xi_biu = (STRIP_XI_BIU_DES
+              * math.exp((STRIP_BIU_EA / STRIP_R_GAS_J) * (1.0 / STRIP_T_BIU_DES_K - 1.0 / T_bot_K))
+              * (feed["Urea"] / STRIP_UREA0))                           # 0.667 at design (ratio=1)
     avail = dict(feed)
     avail["Urea"]   -= (xi_hyd + 2.0 * xi_biu)
     avail["Biuret"] += xi_biu
@@ -263,23 +297,26 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     for k in avail:
         avail[k] = max(avail[k], 0.0)
 
-    # 3. strip-fraction modulation: steam heat (eta_T) x CO2 strip-gas dilution (eta_co2)
-    #    x synthesis-pressure (lower P -> more flashing -> more strip).  =1.0 at design.
+    # 4. strip-fraction modulation: thermal steam heat x CO2 strip-gas dilution x synthesis-pressure
+    #    (=1.0 at design).  The N/C+H/C choke does NOT cut the thermal split; instead it forces
+    #    volatile NH3/CO2 BREAKTHROUGH to the overhead (slip), raising the vapour load back to HPCC.
     eta_co2 = clamp(0.5 + 0.5 * co2_scale, 0.4, 1.05)
     eta_P   = clamp(2.0 - P_bara / STRIP_P_DES_BARA, 0.85, 1.15)
-    mod = clamp(eta_T * eta_co2 * eta_P, 0.0, 1.12)
+    mod = clamp(eta_T_steam * eta_co2 * eta_P, 0.0, 1.12)
+    slip = max(1.0 - g_NC, 0.0) + max(1.0 - g_HC, 0.0)                  # 0.0 at design
     top = {}; bot = {}
     for k in MW_COMP:
         f = clamp(STRIP_FRAC_DES.get(k, 0.0) * mod, 0.0, 0.999)
+        if k in ("NH3", "CO2"):
+            f = clamp(f + STRIP_SLIP_GAIN * slip * (1.0 - f), 0.0, 0.999)  # volatile breakthrough
         top[k] = avail[k] * f
         bot[k] = avail[k] * (1.0 - f)
 
-    # 4. stream totals (kg/h) + intensive props
+    # 5. stream totals (kg/h) + intensive props
     top_kgh = {k: top[k] * MW_COMP[k] for k in MW_COMP}
     bot_kgh = {k: bot[k] * MW_COMP[k] for k in MW_COMP}
     top_m = sum(top_kgh.values()); top_n = sum(top.values())
     bot_m = sum(bot_kgh.values()); bot_n = sum(bot.values())
-    dTs = T_steam_C - STRIP_STEAM_T_DES_C
     return {
         "feed_kmolh": feed, "co2_feed_kmolh": co2_kmolh, "top_kmolh": top, "bot_kmolh": bot,
         "top_kgh": top_m, "bot_kgh": bot_m,
@@ -292,6 +329,8 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "T_top": STRIP_T_TOPGAS_DES_C + 0.6 * dTs,
         "T_bot": STRIP_T_BOTTOM_DES_C + 0.7 * dTs,
         "xi_hyd": xi_hyd, "xi_biu": xi_biu, "eta_T": eta_T, "T_steam": T_steam_C,
+        "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC,
+        "L_strip": L_strip, "W_strip": W_strip, "slip": slip,
     }
 
 
@@ -693,6 +732,8 @@ class State:
         # reactor-overflow tear stream (synthesis recycle): the stripper feed consumes the
         # previous step's value (initialised to the design vector -> design = bit-identical).
         self.react_overflow_kmolh = dict(REACT_OVERFLOW_DES)
+        self.react_L_feed = reactor.L0_DES   # 1-step-lag reactor-feed N/C -> stripper eta_T penalty
+        self.react_W_feed = reactor.W0_DES   # 1-step-lag reactor-feed H/C -> stripper eta_T penalty
         # LT-322504 reactor liquid level (%) — DYNAMIC inventory state (mass balance, open-loop:
         # HV-322605 is hand/auto and does NOT control level). dV/dt = Q_in - Q_out(φ).
         self.react_level_pct = REACT_LEVEL_NLL_PCT      # init at design NLL = 80 %
@@ -855,7 +896,8 @@ def step_sim(dt: float) -> dict:
     # recycle); at design this equals the frozen STRIP_FEED207_KMOLH -> output unchanged.
     T_steam_live = tsat_steam(STRIP_STEAM_P_BARA)     # live sat-steam shell T from supply pressure
     strip = stripper_322e001(s.F_CO2_th, T_steam_live, STRIP_P_DES_BARA,
-                             overflow_kmolh=s.react_overflow_kmolh)
+                             overflow_kmolh=s.react_overflow_kmolh,
+                             L_feed=s.react_L_feed, W_feed=s.react_W_feed)
 
     # LIC-322501 bottom-solution level control, DIRECT-acting on the FC LV-322501:
     #   level^ -> op^ -> air-to-open valve opens -> drain^ -> level v  (neg. feedback).
@@ -884,6 +926,8 @@ def step_sim(dt: float) -> dict:
     # 322R001 HP urea reactor: pinned products from hpcc feed, throughput s, valve φ.
     react = react_322r001(hpcc, s.F_CO2_th, s.HIC_322605)
     s.react_overflow_kmolh = react["overflow_kmolh"]   # tear -> next step's stripper feed
+    s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
+    s.react_W_feed = react["W_feed"]
 
     # LT-322504 dynamic level — inventory mass balance (open-loop; HV-322605 sets only Q_out):
     #   Q_in  = V̇_des·s              (HPCC product fill, scales with CO₂ throughput)
@@ -1086,7 +1130,12 @@ def step_sim(dt: float) -> dict:
             "bot_MW":      round(strip["bot_MW"], 2),
             "bot_mass_pct":{k: round(strip["bot_mass_pct"][k], 3) for k in MW_COMP},
             "xi_hyd":      round(strip["xi_hyd"], 2),     # urea hydrolysis extent (kmol/h)
-            "xi_biu":      round(strip["xi_biu"], 3),     # biuret formation extent (kmol/h)
+            "xi_biu":      round(strip["xi_biu"], 3),     # biuret formation extent (Arrhenius, kmol/h)
+            "eta_T":       round(strip["eta_T"], 4),      # strip efficiency (steam x N/C x H/C penalty)
+            "g_NC":        round(strip["g_NC"], 4),       # feed-N/C penalty factor (1.0 = no penalty)
+            "g_HC":        round(strip["g_HC"], 4),       # feed-H/C penalty factor (1.0 = no penalty)
+            "L_strip":     round(strip["L_strip"], 4),    # live stripper-feed N/C
+            "W_strip":     round(strip["W_strip"], 4),    # live stripper-feed H/C
             "LI_322501":   round(s.strip_level, 1),       # LT-322501 bottom-sump level (%)
             "LV_322501":   round(lv_open, 1),             # LV-322501 opening (%)
             "drain_th":    round(drain_kgh / 1000.0, 2),  # bottom drain -> 323C003 (t/h)
