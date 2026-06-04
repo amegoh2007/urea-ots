@@ -421,7 +421,38 @@ SCRUB_CCW_RHO_IN     = 971.8     # kg/m³, water @ 80 C
 SCRUB_CCW_RHO_OUT    = 961.9     # kg/m³, water @ 95 C
 SCRUB_FV409_DES_PCT  = 60.0      # %, FV-329409 design opening (FIC-329409 -> CCW flow)
 SCRUB_TV005_DES_PCT  = 50.0      # %, TV-329005 design opening (TIC-329005 -> 329E002 branch)
+# ---- Synthesis-loop pressure coupling (322E002 bubble-P  +  PT-329201 reverse Q->P) ----------
+# (1) HPCC 322E002 bubble-point: P_bub(T, N/C, H/C) replaces the pinned synthesis-loop outlet P.
+#     Reduced Clausius-Clapeyron T-slope x separable N/C, H/C modifiers, anchored bit-exact to the
+#     design combined feed (reactor.L0_DES/W0_DES @ HPCC_T_PROD_DES_C) so that
+#     bubble_p_322e002(170, L0_DES, W0_DES) == HPCC_P_DES_BARA (144.2).  Free NH3 (N/C) lifts the
+#     melt vapour pressure (kN>0); water (H/C) dilutes the volatiles (kW<0).
+HPCC_BUB_DHVAP_JMOL = 23000.0    # J/mol, effective NH3-dominated vaporisation enthalpy (C-C slope)
+HPCC_BUB_KN         = 0.18       # 1/(N/C), bubble-P sensitivity to feed N/C (free NH3)   -- calib
+HPCC_BUB_KW         = -0.25      # 1/(H/C), bubble-P sensitivity to feed H/C (dilution)    -- calib
+_HPCC_BUB_T0_K      = HPCC_T_PROD_DES_C + 273.15
+# (2) PT-329201 reverse heat->pressure: the synthesis-loop top pressure is a DYNAMIC state.  CCW
+#     flow sets the off-gas condensation capacity; when capacity < vent demand the uncondensed
+#     vapour accumulates and lifts PT-329201.  rho_cond = (m_ccw/m_ccw_des)/(s*nu), nu = PT/PT_des.
+#     First-order accumulation:  tau dPT/dt = PT_fwd + K_def*max(1-rho_cond,0)*PT_des - PT.
+SYN_P_DES_BARA      = SCRUB_OVERFLOW_P_BARA   # 140.7 bar a, PT-329201 design (322E003 overflow line)
+SYN_P_DEFICIT_GAIN  = 0.30       # bar/bar, PT lift per unit condensation deficit (1-rho_cond)  -- calib
+SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant (vapour inventory)
+SYN_P_MIN_BARA      = 120.0      # bar a, PT clamp floor
+SYN_P_MAX_BARA      = 175.0      # bar a, PT clamp ceiling (relief margin)
 SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) / 3600.0  # ≈5329 kW
+
+
+def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
+    """322E002 HPCC carbamate-melt bubble-point synthesis pressure (bar a) = f(T, N/C=L, H/C=W).
+    Reduced Clausius-Clapeyron T-slope x separable N/C, H/C modifiers, anchored bit-exact at the
+    design combined feed:  bubble_p_322e002(HPCC_T_PROD_DES_C, reactor.L0_DES, reactor.W0_DES)
+    == HPCC_P_DES_BARA.  Monotone: dP/dT>0, dP/dL>0 (free NH3 volatility), dP/dW<0 (water dilution)."""
+    cc = math.exp((HPCC_BUB_DHVAP_JMOL / reactor.R_GAS)
+                  * (1.0 / _HPCC_BUB_T0_K - 1.0 / (T_c + 273.15)))
+    fN = 1.0 + HPCC_BUB_KN * (L - reactor.L0_DES)      # free-NH3 (N/C) volatility lift
+    fW = 1.0 + HPCC_BUB_KW * (W - reactor.W0_DES)      # water (H/C) dilution
+    return HPCC_P_DES_BARA * cc * max(fN, 0.0) * max(fW, 0.0)
 
 
 def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
@@ -447,6 +478,12 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
     q_sens_kw = gas_m * HPCC_CP_GAS * max(gas_feed["T_top"] - HPCC_T_PROD_DES_C, 0.0) / 3600.0
     duty_kw   = q_carb_kw + q_sens_kw
     steam_kgh = duty_kw * 3600.0 / HPCC_LATENT_4BAR
+    # bubble-point synthesis pressure of the combined carbamate feed (N/C, H/C molar); replaces the
+    # pinned HPCC_P_DES_BARA.  At design this feed's N/C, H/C == reactor.L0_DES/W0_DES -> P=144.2 exact.
+    _co2   = feed.get("CO2", 0.0)
+    L_hpcc = feed.get("NH3", 0.0) / _co2 if _co2 > 1e-9 else reactor.L0_DES
+    W_hpcc = feed.get("H2O", 0.0) / _co2 if _co2 > 1e-9 else reactor.W0_DES
+    p_bub  = bubble_p_322e002(HPCC_T_PROD_DES_C, L_hpcc, W_hpcc)
     return {
         "feed_kmolh": feed,
         "gas_kmolh": gas, "liq_kmolh": liq,
@@ -457,7 +494,8 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
         "liq_MW": (liq_m / liq_n if liq_n else 0.0),
         "gas_mol_pct":  {k: (gas[k] / gas_n * 100.0 if gas_n else 0.0) for k in MW_COMP},   # mol %
         "liq_mass_pct": {k: (liq_kgh[k] / liq_m * 100.0 if liq_m else 0.0) for k in MW_COMP},# mass %
-        "T_prod": HPCC_T_PROD_DES_C, "P_bara": HPCC_P_DES_BARA,
+        "T_prod": HPCC_T_PROD_DES_C, "P_bara": p_bub,
+        "P_bub": p_bub, "L_hpcc": L_hpcc, "W_hpcc": W_hpcc,
         "duty_kw": duty_kw, "steam_kgh": steam_kgh,
     }
 
@@ -690,6 +728,9 @@ class State:
                             "sp": SCRUB_CCW_KGH_DES / 1000.0, "pv": SCRUB_CCW_KGH_DES / 1000.0}  # t/h
         self.TIC_329005  = {"mode": "AUTO", "op": SCRUB_TV005_DES_PCT,
                             "sp": SCRUB_CCW_T_IN_DES, "pv": SCRUB_CCW_T_IN_DES}                  # C
+        # PT-329201 synthesis-loop top pressure (DYNAMIC state, reverse Q->P accumulation):
+        #   CCW condensation deficit lifts it; first-order relax to the forward stripper-set target.
+        self.p_syn_bara  = SYN_P_DES_BARA                # init at design PT-329201 = 140.7 bar a
         # ext override
         self.ext_override = False
         # trips
@@ -874,12 +915,22 @@ def step_sim(dt: float) -> dict:
                           - (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) * (tic["op"] / SCRUB_TV005_DES_PCT),
                           20.0, SCRUB_CCW_T_OUT_DES)
     m_ccw_kgh  = max(fic["pv"], 1e-6) * 1000.0    # CCW circulation (t/h -> kg/h)
-    # Synthesis-loop vent load (= PT-329201 ratio) drives BOTH the scrubber duty and the loop pressure.
-    top_ratio = (strip["top_mol"] / STRIP_TOP_MOL_DES) if STRIP_TOP_MOL_DES else 1.0
+    top_ratio  = (strip["top_mol"] / STRIP_TOP_MOL_DES) if STRIP_TOP_MOL_DES else 1.0  # stripper overhead push
+    nu = s.p_syn_bara / SYN_P_DES_BARA            # vent ratio = PT-329201/PT_des (prior-step state; breaks the algebraic loop)
     scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
-                          vent_ratio=top_ratio)
-    # PT-329201 synthesis-pressure closure: stripper overhead molar load drives loop pressure.
-    scrub["P_overflow"] = SCRUB_OVERFLOW_P_BARA * (1.0 + SYN_P_COUPLING * (top_ratio - 1.0))
+                          vent_ratio=nu)
+    # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
+    #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
+    #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation
+    #   over tau (min -> s).  Design: m_ccw=des, s=1, nu=1, top_ratio=1 -> rho=1 -> PT holds 140.7.
+    rho_cond  = (m_ccw_kgh / SCRUB_CCW_KGH_DES) / max(react["co2_scale"] * nu, 1e-6)
+    pt_fwd    = SYN_P_DES_BARA * (1.0 + SYN_P_COUPLING * (top_ratio - 1.0))
+    pt_target = pt_fwd + SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * SYN_P_DES_BARA
+    s.p_syn_bara = clamp(s.p_syn_bara + (dt / (SYN_P_TAU_MIN * 60.0)) * (pt_target - s.p_syn_bara),
+                         SYN_P_MIN_BARA, SYN_P_MAX_BARA)
+    scrub["P_overflow"] = s.p_syn_bara            # PT-329201 dynamic synthesis pressure (bar a)
+    scrub["rho_cond"]   = rho_cond                # condensation capacity/demand (diag; <1 -> PT rises)
+    scrub["P_bub_hpcc"] = hpcc["P_bub"]           # 322E002 bubble-point synthesis P (bar a, diag)
     hv604 = hv_322604(scrub["offgas_kmolh"], scrub["T_offgas"], s.HIC_322604)
     TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 − TIC-329005 (condensation quality)
     q_e004_kw  = scrub["q_ccw_kw"]                # 329E004 tempered-water-cooler duty (loop closure)
@@ -1112,7 +1163,9 @@ def step_sim(dt: float) -> dict:
             "ccw": {                              # shell-side CCW loop (329P006 A/B pump + 329E004 cooler)
                 "TT_329125":  round(scrub["t_ccw_out"], 2),     # CCW return temp out of shell (C)
                 "TDY_329125": round(TDY_329125, 2),             # TT-329125 − TIC-329005 (cond. quality, C) — live PT-329201 cascade
-                "vent_ratio": round(scrub["vent_ratio"], 4),    # synthesis-vent load PT-329201/PT_des (drives Q_scrubber)
+                "vent_ratio": round(scrub["vent_ratio"], 4),    # synthesis-vent load PT-329201/PT_des (= nu, prior-step state)
+                "rho_cond":   round(scrub["rho_cond"], 4),      # condensation capacity/demand (CCW flow / vent load); <1 -> PT-329201 rises
+                "PI_322E002": round(scrub["P_bub_hpcc"], 1),    # 322E002 HPCC bubble-point synthesis P (bar a)
                 "Q_ccw_kW":   round(scrub["q_ccw_kw"], 0),      # heat removed by CCW (kW)
                 "Q_carb_kW":  round(scrub["q_carb_kw"], 0),     # carbamate exotherm (diag, kW)
                 "co2_abs":    round(scrub["co2_abs"], 2),       # CO2 absorbed gas->carbamate (kmol/h)
