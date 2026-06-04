@@ -337,9 +337,13 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
 # Design-point stripper top-gas molar flow + synthesis-pressure coupling gain (PT-329201).
 # Higher steam Tsat -> higher stripping efficiency -> more overhead (off-gas) returned to the
 # HP synthesis loop -> higher synthesis pressure (plant reference, carbamate-condenser path).
-STRIP_TOP_MOL_DES = stripper_322e001(CO2_DES_KGH / 1000.0,
-                                     STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA)["top_mol"]
-SYN_P_COUPLING = 1.0              # synthesis-P sensitivity to stripper overhead molar ratio
+_STRIP_TOP_DES    = stripper_322e001(CO2_DES_KGH / 1000.0,
+                                     STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA)["top_kmolh"]
+STRIP_TOP_MOL_DES = sum(_STRIP_TOP_DES.values())                # 5789.4018 design overhead (kmol/h)
+STRIP_TOP_NH3_DES = _STRIP_TOP_DES["NH3"]                       # 3571.6 design overhead NH3 (condensable)
+# Pressure-building acid anchor = design CO2 NOT paired into carbamate (2 NH3 + CO2 -> carbamate):
+STRIP_TOP_CO2FREE_DES = max(_STRIP_TOP_DES["CO2"] - 0.5 * _STRIP_TOP_DES["NH3"], 0.0)  # 98.6 free CO2
+SYN_P_COUPLING = 1.0              # synthesis-P sensitivity to pressure-building (free-CO2) overhead push
 
 # ---- HP Carbamate Condenser 322E002 (HPCC) -------------------------------
 # Reduced split-fraction condensation model, calibrated EXACT to the design HMB.
@@ -968,12 +972,25 @@ def step_sim(dt: float) -> dict:
     #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation
     #   over tau (min -> s).  Design: m_ccw=des, s=1, nu=1, top_ratio=1 -> rho=1 -> PT holds 140.7.
     rho_cond  = (m_ccw_kgh / SCRUB_CCW_KGH_DES) / max(react["co2_scale"] * nu, 1e-6)
-    pt_fwd    = SYN_P_DES_BARA * (1.0 + SYN_P_COUPLING * (top_ratio - 1.0))
+    # PT-329201 vapour differentiation: NH3 + H2O overhead are CONDENSABLE solvents (absorbed into
+    # carbamate/condensate, NOT pressure-building); only ACID CO2 unpaired by NH3 (free CO2 =
+    # CO2 - NH3/2, from 2 NH3 + CO2 -> carbamate) plus NH3 that exceeds condensation capacity
+    # (rho_cond < 1) builds synthesis pressure.  Normalised by TOTAL design overhead (not the small
+    # free-CO2 anchor) for numerical stability.  Design: co2_free=98.6, slip=0 -> pb_push=0.
+    n_top     = strip["top_kmolh"]
+    co2_free  = max(n_top["CO2"] - 0.5 * n_top["NH3"], 0.0)                           # free acid CO2
+    nh3_slip  = max(1.0 - rho_cond, 0.0) * max(n_top["NH3"] - STRIP_TOP_NH3_DES, 0.0)  # un-absorbed NH3
+    n_pb      = co2_free + nh3_slip                                                   # pressure-building load
+    pb_push   = (n_pb - STRIP_TOP_CO2FREE_DES) / STRIP_TOP_MOL_DES if STRIP_TOP_MOL_DES else 0.0
+    pt_fwd    = SYN_P_DES_BARA * (1.0 + SYN_P_COUPLING * pb_push)
     pt_target = pt_fwd + SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * SYN_P_DES_BARA
     s.p_syn_bara = clamp(s.p_syn_bara + (dt / (SYN_P_TAU_MIN * 60.0)) * (pt_target - s.p_syn_bara),
                          SYN_P_MIN_BARA, SYN_P_MAX_BARA)
     scrub["P_overflow"] = s.p_syn_bara            # PT-329201 dynamic synthesis pressure (bar a)
     scrub["rho_cond"]   = rho_cond                # condensation capacity/demand (diag; <1 -> PT rises)
+    scrub["co2_free"]   = co2_free                # free acid CO2 overhead (pressure-building, kmol/h)
+    scrub["pb_push"]    = pb_push                 # PT forward push (pressure-building overhead deviation)
+    scrub["top_ratio"]  = top_ratio              # total overhead ratio (diag only; superseded by pb_push)
     scrub["P_bub_hpcc"] = hpcc["P_bub"]           # 322E002 bubble-point synthesis P (bar a, diag)
     hv604 = hv_322604(scrub["offgas_kmolh"], scrub["T_offgas"], s.HIC_322604)
     TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 − TIC-329005 (condensation quality)
@@ -1214,6 +1231,8 @@ def step_sim(dt: float) -> dict:
                 "TDY_329125": round(TDY_329125, 2),             # TT-329125 − TIC-329005 (cond. quality, C) — live PT-329201 cascade
                 "vent_ratio": round(scrub["vent_ratio"], 4),    # synthesis-vent load PT-329201/PT_des (= nu, prior-step state)
                 "rho_cond":   round(scrub["rho_cond"], 4),      # condensation capacity/demand (CCW flow / vent load); <1 -> PT-329201 rises
+                "co2_free":   round(scrub["co2_free"], 1),      # free acid CO2 overhead (pressure-building, kmol/h)
+                "pb_push":    round(scrub["pb_push"], 5),       # PT forward push = pressure-building overhead deviation (0 at design)
                 "PI_322E002": round(scrub["P_bub_hpcc"], 1),    # 322E002 HPCC bubble-point synthesis P (bar a)
                 "Q_ccw_kW":   round(scrub["q_ccw_kw"], 0),      # heat removed by CCW (kW)
                 "Q_carb_kW":  round(scrub["q_carb_kw"], 0),     # carbamate exotherm (diag, kW)
