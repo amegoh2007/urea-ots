@@ -28,8 +28,24 @@ import os
 import time
 from typing import Set
 
+import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+
+
+def tsat_steam(p_bara: float) -> float:
+    """Saturated-steam temperature [deg C] from absolute pressure [bar a].
+
+    Antoine equation for water (valid 100-374 C), pressure in mmHg:
+        log10(P_mmHg) = 8.14019 - 1810.94 / (244.485 + T_C)
+    inverted for temperature, with P_mmHg = P_bara * 750.0617.  Reproduces the
+    steam tables and the plant reference (saturated-steam T-vs-P, Fig. 9) to
+    <0.2 % over the 18-23 bar a HP-steam band.
+    """
+    p_mmhg = max(p_bara, 0.01) * 750.0616827
+    return 1810.94 / (8.14019 - math.log10(p_mmhg)) - 244.485
+
 
 # ----- Constants -----
 NH3_RHO         = 604.8          # kg/m^3, design (eff. density NH3 feed @ 25 C)
@@ -145,8 +161,9 @@ STRIP_FRAC_DES = {"NH3": 0.8546, "CO2": 0.8606, "H2O": 0.1313, "N2": 0.9987, "O2
                   "Urea": 0.0, "Biuret": 0.0, "CH4": 0.999, "H2": 0.999}
 # --- Shell steam side (329D005 HP steam drum) + duty:
 STRIP_STEAM_KGH_DES = 75300.0     # kg/h saturated MP steam (design)
-STRIP_STEAM_T_DES_C = 214.0       # C, condensing temp at ~20 bar a
-STRIP_STEAM_P_BARA  = 19.7        # bar a, 329D005 steam supply pressure
+STRIP_STEAM_P_DES_BARA = 19.7     # bar a, design 329D005 steam supply (eta_T normalization ref)
+STRIP_STEAM_P_BARA  = 19.7        # bar a, LIVE 329D005 steam supply pressure (sensitivity lever)
+STRIP_STEAM_T_DES_C = tsat_steam(STRIP_STEAM_P_DES_BARA)  # C, sat-steam T at design P (= 211.6)
 STRIP_DUTY_DES_KW   = 39400.0     # kW, design heat duty
 STRIP_P_DES_BARA    = 144.0       # bar a, tube-side (synthesis-loop) pressure
 # --- Design product temperatures (C):
@@ -274,9 +291,16 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "bot_mass_pct": {k: (bot_kgh[k] / bot_m * 100.0 if bot_m else 0.0) for k in MW_COMP},# mass %
         "T_top": STRIP_T_TOPGAS_DES_C + 0.6 * dTs,
         "T_bot": STRIP_T_BOTTOM_DES_C + 0.7 * dTs,
-        "xi_hyd": xi_hyd, "xi_biu": xi_biu,
+        "xi_hyd": xi_hyd, "xi_biu": xi_biu, "eta_T": eta_T, "T_steam": T_steam_C,
     }
 
+
+# Design-point stripper top-gas molar flow + synthesis-pressure coupling gain (PT-329201).
+# Higher steam Tsat -> higher stripping efficiency -> more overhead (off-gas) returned to the
+# HP synthesis loop -> higher synthesis pressure (plant reference, carbamate-condenser path).
+STRIP_TOP_MOL_DES = stripper_322e001(CO2_DES_KGH / 1000.0,
+                                     STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA)["top_mol"]
+SYN_P_COUPLING = 1.0              # synthesis-P sensitivity to stripper overhead molar ratio
 
 # ---- HP Carbamate Condenser 322E002 (HPCC) -------------------------------
 # Reduced split-fraction condensation model, calibrated EXACT to the design HMB.
@@ -318,9 +342,86 @@ REACT_P_BARA       = 144.9       # reactor operating pressure (bar a)
 REACT_OFFGAS_P_BARA = 141.3      # off-gas line pressure -> 322E003 (bar a)
 REACT_OVERFLOW_RHO = 990.0       # urea solution density (kg/m³)
 REACT_OFFGAS_RHO   = 113.30      # off-gas density (kg/m³)
-REACT_TEMP_HEIGHTS_C = 183.0     # TT-322005/6/7/8 uniform height temps (datasheet)
-REACT_LEVEL_NLL_PCT  = 80.0      # LT-322504 top normal liquid level (%)
+# --- TT-322005/6/7/8 axial temperature profile (residence-time model, datasheet N6 A/B/C/D) ---
+# Liquid plug-flow rises from bottom T.L (+0); thermowell elevations (mm) traced from nozzles
+# N6 A/B/C/D on Reactor Datasheet2.  tau(z)=(z/H_L)*tau_tot ; first-order thermal approach to the
+# outlet temp:  T(tau)=T_out-(T_out-T_in)*exp(-tau/tau_T).  T_in=HPCC feed 170 C (TT-322010/012),
+# T_out=overflow 183 C (TT-322014); tau_T = carbamate-exotherm thermal time constant.
+REACT_ID_MM          = 2950.0    # reactor inside diameter (datasheet shell 2950 ID)
+REACT_LIQ_H_MM       = 25000.0   # liquid height bottom T.L -> top T.L (overflow zone)
+REACT_THERM_TAU_MIN  = 8.0       # carbamate-exotherm thermal time constant (min)
+REACT_TT_EL_MM = {"TT_322005": 21700.0, "TT_322006": 14800.0,    # N6 A (top), N6 B
+                  "TT_322007": 7900.0,  "TT_322008": 1000.0}      # N6 C, N6 D (bottom)
+_react_area_m2   = (math.pi / 4.0) * (REACT_ID_MM / 1000.0) ** 2
+_react_mdot_kgh  = sum(REACT_OVERFLOW_DES[k] * MW_COMP[k] for k in MW_COMP)   # design overflow kg/h
+_react_vdot_m3h  = _react_mdot_kgh / REACT_OVERFLOW_RHO
+REACT_TAU_TOT_MIN = (_react_area_m2 * (REACT_LIQ_H_MM / 1000.0) / _react_vdot_m3h) * 60.0  # ~44.9 min
+
+
+def _react_tt_temp(el_mm: float) -> float:
+    """Liquid temperature at thermowell elevation el_mm (mm above bottom T.L)."""
+    tau = (el_mm / REACT_LIQ_H_MM) * REACT_TAU_TOT_MIN               # residence time to elevation
+    return REACT_OVERFLOW_T_C - (REACT_OVERFLOW_T_C - HPCC_T_PROD_DES_C) * math.exp(-tau / REACT_THERM_TAU_MIN)
+
+
+REACT_TT_TEMPS_C = {tag: _react_tt_temp(el) for tag, el in REACT_TT_EL_MM.items()}  # 182.9/182.5/180.8/172.6
+REACT_LEVEL_NLL_PCT  = 80.0      # LT-322504 top normal liquid level (% at design φ=φ_des)
+REACT_V_SPAN_M3      = _react_area_m2 * (REACT_LIQ_H_MM / 1000.0)   # liquid-span volume LT 0->100 %
+# AT-322701 analyzer: atom-count N/C molar ratio of 322R001 overflow (Σnᵢ·#Nᵢ)/(Σnᵢ·#Cᵢ)
+REACT_N_ATOMS = {"NH3": 1, "Urea": 2, "Biuret": 3, "N2": 2}
+REACT_C_ATOMS = {"CO2": 1, "Urea": 1, "Biuret": 2, "CH4": 1}
 # statics (display only): H 25000 mm, ID 2950 mm, 11 sieve trays, volume 191 m³
+
+# ----- 322E003 HP Scrubber (reactive falling-film absorber, pinned split-fraction) -----------
+#   Tube side, counter-current: inert-rich reactor off-gas (322R001 -> TT-322009, live
+#   react["offgas_kmolh"]) rises through the tubes; cold weak carbamate wash (323P001 A/B,
+#   design vector) falls as a film.  NH3/CO2/H2O are recovered by instantaneous carbamate
+#   formation 2NH3(aq)+CO2(aq) <=> NH2COONH4(l), dH≈-160 kJ/mol; inerts (N2/O2/CH4/H2) slip to
+#   the off-gas.  BOTH discharges are PINNED to the shared design HMB (proven IDENTICAL by
+#   compare_scrubber.py); closure_resid is a diagnostic only (NOT injected into any stream):
+#     off-gas  322E003 -> TT-322011 -> HV-322604 -> 322C001 LP absorber  (img1, MOL%, 64.78 kmol/h)
+#     overflow 322E003 -> PT-329201/TT-322002/LT-329501 -> 322F001       (= EJ_SUCTION, ejector suction)
+#       off-gasᵢ = νᵒᵍ_des,i · s ;  overflowᵢ = νᵒᵛ_des,i · s ;  s = react co2_scale.
+SCRUB_CARB_KGH_DES   = 36915.0   # kg/h design weak-carbamate wash (323P001 A/B -> 322E003)
+SCRUB_CARB_MASSPCT   = {"CO2": 38.49, "H2O": 30.83, "NH3": 30.61, "Urea": 0.07}   # img2 MASS%
+SCRUB_CARB_KMOLH_DES = {k: SCRUB_CARB_MASSPCT.get(k, 0.0) / 100.0 * SCRUB_CARB_KGH_DES / MW_COMP[k]
+                        for k in MW_COMP}                            # Σ ≈ 1618.5 kmol/h
+SCRUB_OFFGAS_MOLPCT  = {"N2": 68.81, "O2": 11.39, "NH3": 8.26, "CH4": 5.93,       # img1 MOL%
+                        "H2": 3.14, "CO2": 2.22, "H2O": 0.26}
+SCRUB_OFFGAS_MOL_DES = 64.78     # kmol/h design off-gas total (322E003 -> 322C001)
+SCRUB_OFFGAS_KMOLH_DES = {k: SCRUB_OFFGAS_MOLPCT.get(k, 0.0) / 100.0 * SCRUB_OFFGAS_MOL_DES
+                          for k in MW_COMP}
+# Overflow design vector IS the 322F001 ejector suction (single source of truth -> DRY, bit-identical):
+SCRUB_OVERFLOW_KMOLH_DES = {k: EJ_SUCTION_KGH[k] / MW_COMP[k] for k in MW_COMP}   # Σ ≈ 2519.4 kmol/h
+SCRUB_CARB_T_C       = 74.0      # C, weak-carbamate wash inlet (323P001 A/B)
+SCRUB_CARB_P_BARA    = 140.7     # bar a, carbamate feed line
+SCRUB_CARB_RHO       = 1226.0    # kg/m³, carbamate density (74 C)
+SCRUB_OFFGAS_T_C     = 114.0     # C, TT-322011 off-gas temp -> HV-322604 (design)
+SCRUB_OFFGAS_P_BARA  = 140.7     # bar a, off-gas line pressure (synthesis)
+SCRUB_OFFGAS_RHO     = 111.0     # kg/m³, off-gas density (114 C, 140.7 bar a)
+SCRUB_OVERFLOW_T_C   = 178.8     # C, TT-322002 overflow temp -> 322F001 (= EJ_T_SUCTION_C)
+SCRUB_OVERFLOW_P_BARA = 140.7    # bar a, PT-329201 overflow-line pressure
+SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exotherm (diagnostic)
+# --- HV-322604 off-gas valve (choked isenthalpic letdown 322E003 -> 322C001) ---
+SCRUB_HIC604_DES_PCT = 50.0      # %, HIC-322604 design opening (HV-322604, inert purge)
+SCRUB_HV604_P_OUT    = 4.0       # bar a, 322C001 LP-absorber downstream pressure
+SCRUB_HV604_MU_JT    = 0.55      # C/bar, mixture Joule-Thomson coeff (NH3/CO2-rich off-gas)
+# --- Shell-side CCW (Conditioning Cooling Water) closed loop: 329P006 A/B pump + 329E004 cooler ---
+#   322E003 shell -- TT-329125 -- 329P006 A/B -- FV-329409/FIC-329409 -- TIC-329005 -- shell in;
+#   branch after 329P006: TV-329005 -- 329E002 -- main CCW header (heat rejected via 329E004).
+#   Q_ccw = ṁ_ccw·cp·ΔT removes the condensation/reaction heat; design-pinned, throughput-scaled.
+#   TT-329125 = TIC-329005 + Q_ccw/(ṁ_ccw·cp);  TDY-329125 = TT-329125 − TIC-329005 (cond. quality).
+SCRUB_CCW_KGH_DES    = 306000.0  # kg/h design CCW circulation (329P006 A/B, 306 t/h)
+SCRUB_CCW_CP         = 4.18      # kJ/kg.K, water
+SCRUB_CCW_T_IN_DES   = 80.0      # C, TIC-329005 supply into shell (design SP)
+SCRUB_CCW_T_OUT_DES  = 95.0      # C, TT-329125 return out of shell (design)
+SCRUB_CCW_P_IN_BARA  = 9.0       # bar a, CCW supply (stream 1111)
+SCRUB_CCW_P_OUT_BARA = 8.0       # bar a, CCW return (stream 1112)
+SCRUB_CCW_RHO_IN     = 971.8     # kg/m³, water @ 80 C
+SCRUB_CCW_RHO_OUT    = 961.9     # kg/m³, water @ 95 C
+SCRUB_FV409_DES_PCT  = 60.0      # %, FV-329409 design opening (FIC-329409 -> CCW flow)
+SCRUB_TV005_DES_PCT  = 50.0      # %, TV-329005 design opening (TIC-329005 -> 329E002 branch)
+SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) / 3600.0  # ≈5329 kW
 
 
 def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
@@ -370,9 +471,12 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float) -> dict
     phi_des = REACT_HIC605_DES_PCT / 100.0
     overflow = {k: REACT_OVERFLOW_DES.get(k, 0.0) * s * (phi / phi_des) for k in MW_COMP}
     offgas   = {k: REACT_OFFGAS_DES.get(k, 0.0) * s for k in MW_COMP}
-    xi_urea  = REACT_XI_UREA_DES * s
     xi_biu   = REACT_XI_BIU_DES * s
     feed     = hpcc["feed_kmolh"]
+    # Modified Inoue-Kanai conversion coupling: shifts xi_urea + overflow by f(N/C, H/C, T),
+    # atom-conserving, == design when feed is at (L0,W0,T0). closure_resid stays invariant.
+    xi_urea, overflow, X_conv, L_feed, W_feed = reactor.react_couple(
+        feed, overflow, REACT_XI_UREA_DES * s, REACT_OVERFLOW_T_C)
     closure_resid = (sum(feed.values())
                      - (sum(overflow.values()) + sum(offgas.values()))
                      - xi_urea)
@@ -380,7 +484,62 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float) -> dict
             "xi_urea": xi_urea, "xi_biu": xi_biu, "closure_resid": closure_resid,
             "T_overflow": REACT_OVERFLOW_T_C, "T_offgas": REACT_OFFGAS_T_C,
             "P_bara": REACT_P_BARA, "P_offgas": REACT_OFFGAS_P_BARA,
-            "phi": phi, "phi_des": phi_des, "co2_scale": s}
+            "phi": phi, "phi_des": phi_des, "co2_scale": s,
+            "X_conv": X_conv, "L_feed": L_feed, "W_feed": W_feed}
+
+
+def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
+                  m_ccw_kgh: float, vent_ratio: float = 1.0) -> dict:
+    """322E003 HP scrubber — reduced calibrated split-fraction, pinned to the shared design HMB.
+    Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
+    wash (323P001 A/B design vector × s).  Both discharges PINNED (proven IDENTICAL):
+        offgasᵢ   = SCRUB_OFFGAS_KMOLH_DES_i   · s   (322E003 -> HV-322604 -> 322C001)
+        overflowᵢ = SCRUB_OVERFLOW_KMOLH_DES_i · s   (322E003 -> 322F001, ejector suction)
+    closure_resid is a diagnostic only (NOT injected).  Shell-side CCW removes the carbamate
+    exotherm.  Boundary-coupled duty: in a closed synthesis loop a rise in reactor-top pressure
+    (PT-329201) lifts the uncondensed off-gas vent load into 322E003, so the carbamate-
+    condensation exotherm Q_scrubber scales with the synthesis-vent ratio:
+        Q_scrubber = q_ccw = SCRUB_Q_CCW_DES_KW · s · vent_ratio   (vent_ratio = PT-329201/PT_des)
+    With ṁ_ccw constant the sensible-heat balance then lifts TT-329125 proportionally:
+        TT-329125 = t_ccw_in + Q_scrubber/(ṁ_ccw·cp).  vent_ratio defaults to 1.0 (design-exact)."""
+    s = co2_scale
+    carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}      # 323P001 A/B wash
+    feed     = {k: offgas_feed.get(k, 0.0) + carb[k] for k in MW_COMP}         # combined tube feed
+    offgas   = {k: SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}    # pinned -> img1
+    overflow = {k: SCRUB_OVERFLOW_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}  # pinned -> EJ suction
+    closure_resid = sum(feed.values()) - sum(offgas.values()) - sum(overflow.values())
+    co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)          # kmol/h gas->carbamate
+    q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0                # full exotherm (diag)
+    q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s × synthesis-vent load PT-329201)
+    dT_ccw    = q_ccw_kw * 3600.0 / (m_ccw_kgh * SCRUB_CCW_CP) if m_ccw_kgh > 0 else 0.0
+    t_ccw_out = t_ccw_in + dT_ccw                                              # TT-329125
+    return {"feed_kmolh": feed, "carb_kmolh": carb,
+            "offgas_kmolh": offgas, "overflow_kmolh": overflow,
+            "closure_resid": closure_resid, "co2_abs": co2_abs,
+            "q_carb_kw": q_carb_kw, "q_ccw_kw": q_ccw_kw,
+            "t_ccw_in": t_ccw_in, "t_ccw_out": t_ccw_out, "dT_ccw": dT_ccw,
+            "m_ccw_kgh": m_ccw_kgh, "co2_scale": s, "vent_ratio": vent_ratio,
+            "T_offgas": SCRUB_OFFGAS_T_C, "P_offgas": SCRUB_OFFGAS_P_BARA,
+            "T_overflow": SCRUB_OVERFLOW_T_C, "P_overflow": SCRUB_OVERFLOW_P_BARA}
+
+
+def hv_322604(offgas: dict, T_in: float, hic_pct: float) -> dict:
+    """HV-322604 HP-scrubber off-gas valve — choked isenthalpic letdown 322E003 -> 322C001.
+    Inert purge to the LP absorber.  P drops ~140.7 -> 4 bar a (sonic/choked); Joule-Thomson
+    cooling T_out = T_in − μ_JT·ΔP.  Steam-traced -> single gas phase preserved (no carbamate
+    desublimation at healthy op); composition unchanged.  HIC-322604 sets the opening 1:1."""
+    dP    = max(SCRUB_OFFGAS_P_BARA - SCRUB_HV604_P_OUT, 0.0)
+    T_out = T_in - SCRUB_HV604_MU_JT * dP
+    m_kgh = sum(offgas.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+    return {"comp_kmolh": dict(offgas), "T_out": round(T_out, 1),
+            "P_out": SCRUB_HV604_P_OUT, "open_pct": hic_pct, "mass_kgh": m_kgh}
+
+
+def react_nc_ratio(comp_kmolh: dict) -> float:
+    """AT-322701: molar N/C ratio (Σ nᵢ·#Nᵢ)/(Σ nᵢ·#Cᵢ) of a stream on an atom basis."""
+    n = sum(comp_kmolh.get(k, 0.0) * a for k, a in REACT_N_ATOMS.items())
+    c = sum(comp_kmolh.get(k, 0.0) * a for k, a in REACT_C_ATOMS.items())
+    return (n / c) if c else 0.0
 
 
 def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None):
@@ -496,6 +655,9 @@ class State:
         # reactor-overflow tear stream (synthesis recycle): the stripper feed consumes the
         # previous step's value (initialised to the design vector -> design = bit-identical).
         self.react_overflow_kmolh = dict(REACT_OVERFLOW_DES)
+        # LT-322504 reactor liquid level (%) — DYNAMIC inventory state (mass balance, open-loop:
+        # HV-322605 is hand/auto and does NOT control level). dV/dt = Q_in - Q_out(φ).
+        self.react_level_pct = REACT_LEVEL_NLL_PCT      # init at design NLL = 80 %
         # pumps: open_act = torque-converter valve opening %
         self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M"}
         self.pumpB = {"on": True,  "open_act": 86.2, "speed_act": 131.0, "current": 43.9, "mode": "M"}
@@ -519,6 +681,15 @@ class State:
         self.strip_level = STRIP_LEVEL_SP_DES
         self.LIC_322501  = {"mode": "AUTO", "op": LV322501_OPEN_DES,
                             "sp": STRIP_LEVEL_SP_DES, "pv": STRIP_LEVEL_SP_DES, "e_prev": 0.0}
+        # 322E003 HP scrubber off-gas valve: HIC-322604 -> HV-322604 (inert purge to 322C001).
+        self.HIC_322604  = SCRUB_HIC604_DES_PCT          # % opening (automatic hand valve)
+        # 322E003 shell-side CCW loop controllers (329P006 A/B pump + 329E004 tempered-water cooler):
+        #   FIC-329409 -> FV-329409 (CCW circulation flow);  TIC-329005 -> TV-329005 (CCW supply T).
+        #   Boundary-controlled tempered loop -> AUTO holds PV at SP at the design openings.
+        self.FIC_329409  = {"mode": "AUTO", "op": SCRUB_FV409_DES_PCT,
+                            "sp": SCRUB_CCW_KGH_DES / 1000.0, "pv": SCRUB_CCW_KGH_DES / 1000.0}  # t/h
+        self.TIC_329005  = {"mode": "AUTO", "op": SCRUB_TV005_DES_PCT,
+                            "sp": SCRUB_CCW_T_IN_DES, "pv": SCRUB_CCW_T_IN_DES}                  # C
         # ext override
         self.ext_override = False
         # trips
@@ -641,7 +812,8 @@ def step_sim(dt: float) -> dict:
     #   + bottom solution (LV-322501).  Shell = condensing 329D005 MP steam (boundary T).
     # Stripper consumes the previous step's reactor overflow (tear stream of the synthesis
     # recycle); at design this equals the frozen STRIP_FEED207_KMOLH -> output unchanged.
-    strip = stripper_322e001(s.F_CO2_th, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA,
+    T_steam_live = tsat_steam(STRIP_STEAM_P_BARA)     # live sat-steam shell T from supply pressure
+    strip = stripper_322e001(s.F_CO2_th, T_steam_live, STRIP_P_DES_BARA,
                              overflow_kmolh=s.react_overflow_kmolh)
 
     # LIC-322501 bottom-solution level control, DIRECT-acting on the FC LV-322501:
@@ -672,6 +844,46 @@ def step_sim(dt: float) -> dict:
     react = react_322r001(hpcc, s.F_CO2_th, s.HIC_322605)
     s.react_overflow_kmolh = react["overflow_kmolh"]   # tear -> next step's stripper feed
 
+    # LT-322504 dynamic level — inventory mass balance (open-loop; HV-322605 sets only Q_out):
+    #   Q_in  = V̇_des·s              (HPCC product fill, scales with CO₂ throughput)
+    #   Q_out = V̇_des·s·(φ/φ_des)    (overflow letdown through HV-322605)
+    #   dV/dt = Q_in - Q_out = V̇_des·s·(1 - φ/φ_des)  ->  level FALLS when φ>φ_des (valve opened).
+    q_in_m3h  = _react_vdot_m3h * react["co2_scale"]
+    q_out_m3h = q_in_m3h * (react["phi"] / react["phi_des"]) if react["phi_des"] else q_in_m3h
+    dV_m3     = (q_in_m3h - q_out_m3h) * dt / 3600.0
+    s.react_level_pct = clamp(s.react_level_pct + dV_m3 / REACT_V_SPAN_M3 * 100.0, 0.0, 100.0)
+
+    # ----- 322E003 HP Scrubber: reactor off-gas + weak carbamate (323P001 A/B) -> off-gas line
+    #   (322C001 via HV-322604) + overflow line (322F001).  Shell-side CCW loop (329P006 A/B
+    #   circulation + 329E004 tempered-water cooler) removes the carbamate-formation exotherm.
+    fic = s.FIC_329409                           # CCW circulation flow controller (FV-329409)
+    tic = s.TIC_329005                           # CCW supply-temperature controller (TV-329005)
+    if fic["mode"] == "AUTO":                     # boundary loop holds PV at SP; valve tracks SP
+        fic["pv"] = fic["sp"]                      #   op = inverse of MAN valve char. (line below)
+        fic["op"] = clamp(SCRUB_FV409_DES_PCT * fic["sp"] / max(SCRUB_CCW_KGH_DES / 1000.0, 1e-6),
+                          0.0, 100.0)
+    else:                                         # MAN: CCW flow follows FV-329409 opening
+        fic["pv"] = (SCRUB_CCW_KGH_DES / 1000.0) * (fic["op"] / SCRUB_FV409_DES_PCT)
+    if tic["mode"] == "AUTO":                      # boundary loop holds PV at SP; valve tracks SP
+        tic["pv"] = tic["sp"]                      #   op = inverse of MAN valve char. (line below)
+        tic["op"] = clamp(SCRUB_TV005_DES_PCT * (SCRUB_CCW_T_OUT_DES - tic["sp"])
+                          / max(SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES, 1e-6),
+                          0.0, 100.0)
+    else:                                         # MAN: supply T follows TV-329005 (cooler) opening
+        tic["pv"] = clamp(SCRUB_CCW_T_OUT_DES
+                          - (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) * (tic["op"] / SCRUB_TV005_DES_PCT),
+                          20.0, SCRUB_CCW_T_OUT_DES)
+    m_ccw_kgh  = max(fic["pv"], 1e-6) * 1000.0    # CCW circulation (t/h -> kg/h)
+    # Synthesis-loop vent load (= PT-329201 ratio) drives BOTH the scrubber duty and the loop pressure.
+    top_ratio = (strip["top_mol"] / STRIP_TOP_MOL_DES) if STRIP_TOP_MOL_DES else 1.0
+    scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
+                          vent_ratio=top_ratio)
+    # PT-329201 synthesis-pressure closure: stripper overhead molar load drives loop pressure.
+    scrub["P_overflow"] = SCRUB_OVERFLOW_P_BARA * (1.0 + SYN_P_COUPLING * (top_ratio - 1.0))
+    hv604 = hv_322604(scrub["offgas_kmolh"], scrub["T_offgas"], s.HIC_322604)
+    TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 − TIC-329005 (condensation quality)
+    q_e004_kw  = scrub["q_ccw_kw"]                # 329E004 tempered-water-cooler duty (loop closure)
+
     # Trips
     s.trips["21_2"]  = (s.tank_level_frac < 0.05)
     s.trips["21_8"]  = (P_suct_barG < 17.0 and s.pumpA["on"])
@@ -693,8 +905,7 @@ def step_sim(dt: float) -> dict:
             {"NH3": motive_nh3_kgh / MW_NH3}, TI_321020, P_SYN_DOWN_BAR,
             "HP NH3 discharge (motive)", "321P002 A/B", "322F001", "liquid", rho=NH3_RHO),
         "CARB_RECYCLE": make_stream(
-            {k: ej["suction_kgh"] * EJ_CARB_FRAC[k] / MW_COMP[k] for k in MW_COMP},
-            EJ_T_SUCTION_C, EJ_P_SUCTION_BARA,
+            scrub["overflow_kmolh"], scrub["T_overflow"], scrub["P_overflow"],
             "Carbamate recycle (322E003 overflow)", "322E003", "322F001", "liquid"),
         "EJ_DISCH": make_stream(
             {k: ej["comp"][k] / MW_COMP[k] for k in MW_COMP}, ej["T_C"], ej["P_bara"],
@@ -725,6 +936,21 @@ def step_sim(dt: float) -> dict:
             react["offgas_kmolh"], react["T_offgas"], react["P_offgas"],
             "Reactor off-gas", "322R001", "322E003", "vapor",
             rho=REACT_OFFGAS_RHO),
+        "SCRUB_OFFGAS": make_stream(
+            scrub["offgas_kmolh"], scrub["T_offgas"], scrub["P_offgas"],
+            "HP scrubber off-gas (to HV-322604)", "322E003", "HV-322604", "vapor",
+            rho=SCRUB_OFFGAS_RHO),
+        "SCRUB_OFFGAS_LP": make_stream(
+            hv604["comp_kmolh"], hv604["T_out"], hv604["P_out"],
+            "HP scrubber off-gas (LP, JT-cooled)", "HV-322604", "322C001", "vapor"),
+        "CCW_SUPPLY": make_stream(
+            {"H2O": m_ccw_kgh / MW_COMP["H2O"]}, tic["pv"], SCRUB_CCW_P_IN_BARA,
+            "CCW supply (shell side, cold)", "329P006 A/B", "322E003", "liquid",
+            rho=SCRUB_CCW_RHO_IN),
+        "CCW_RETURN": make_stream(
+            {"H2O": m_ccw_kgh / MW_COMP["H2O"]}, scrub["t_ccw_out"], SCRUB_CCW_P_OUT_BARA,
+            "CCW return (shell side, warm)", "322E003", "329P006 A/B", "liquid",
+            rho=SCRUB_CCW_RHO_OUT),
     }
 
     return {
@@ -771,8 +997,8 @@ def step_sim(dt: float) -> dict:
             "mu":          round(ej["mu"], 4),       # entrainment ratio m_suc/m_motive
             "TT_322012":   round(ej["T_C"], 1),      # discharge temp (C) -> 322E002 HPCC
             "PI_disch":    round(ej["P_bara"], 1),   # discharge pressure (bar a)
-            "TI_322002":   round(EJ_T_SUCTION_C, 1),    # suction-B temp (C): 322E003 overflow
-            "PI_329201":   round(EJ_P_SUCTION_BARA, 1), # suction-B line P (bar a): 322E003->322F001
+            "TI_322002":   round(scrub["T_overflow"], 1), # TT-322002 = 322E003 overflow temp (C, live)
+            "PI_329201":   round(scrub["P_overflow"], 1), # PT-329201 = 322E003 overflow line P (bar a, live)
             "total_kgh":   round(ej["total_kgh"], 1),
             "total_th":    round(ej["total_kgh"]/1000.0, 2),
             "mol_kmolh":   round(ej["mol_kmolh"], 2),
@@ -820,7 +1046,7 @@ def step_sim(dt: float) -> dict:
                 "mode": lic["mode"],
             },
             "steam": {                            # shell side: 329D005 MP steam (boundary)
-                "TI_shell": round(STRIP_STEAM_T_DES_C, 1),   # condensing temp (C)
+                "TI_shell": round(strip["T_steam"], 1),      # live sat-steam condensing temp (C)
                 "P_bara":   round(STRIP_STEAM_P_BARA, 1),    # steam pressure (bar a)
                 "kgh":      round(STRIP_STEAM_KGH_DES, 0),   # steam flow (kg/h)
                 "duty_kW":  round(STRIP_DUTY_DES_KW, 0),     # heat duty (kW)
@@ -846,17 +1072,58 @@ def step_sim(dt: float) -> dict:
             },
         },
         "REACT_322R001": {                       # HP Urea Reactor 322R001 -> 322E001 / 322E003
-            "TT_322005":   round(REACT_TEMP_HEIGHTS_C, 1),   # bottom-zone temp (height 1)
-            "TT_322006":   round(REACT_TEMP_HEIGHTS_C, 1),   # height 2
-            "TT_322007":   round(REACT_TEMP_HEIGHTS_C, 1),   # height 3
-            "TT_322008":   round(REACT_TEMP_HEIGHTS_C, 1),   # top-zone temp (height 4)
+            "TT_322005":   round(REACT_TT_TEMPS_C["TT_322005"], 1),  # N6 A top (EL +21700, tau 38.9 min)
+            "TT_322006":   round(REACT_TT_TEMPS_C["TT_322006"], 1),  # N6 B     (EL +14800, tau 26.6 min)
+            "TT_322007":   round(REACT_TT_TEMPS_C["TT_322007"], 1),  # N6 C     (EL  +7900, tau 14.2 min)
+            "TT_322008":   round(REACT_TT_TEMPS_C["TT_322008"], 1),  # N6 D bot (EL  +1000, tau  1.8 min)
             "TT_322009":   round(react["T_offgas"], 1),      # off-gas line -> 322E003 (C)
-            "LT_322504":   round(REACT_LEVEL_NLL_PCT, 1),    # top liquid level (%)
+            "LT_322504":   round(s.react_level_pct, 1),      # top liquid level (%) — DYNAMIC
+            "AT_322701":   round(react_nc_ratio(react["overflow_kmolh"]), 3),  # N/C molar ratio ->322E001
             "HIC_322605":  round(s.HIC_322605, 1),           # overflow valve controller (%)
             "HV_322605":   round(s.HIC_322605, 1),           # HV-322605 opening (tracks HIC 1:1)
             "P_bara":      round(react["P_bara"], 1),        # reactor pressure (bar a)
             "P_offgas":    round(react["P_offgas"], 1),      # off-gas line pressure (bar a)
             "closure_resid": round(react["closure_resid"], 2),  # mass-closure diag (kmol/h, not injected)
+            "X_conv":      round(react["X_conv"] * 100.0, 2),    # per-pass CO2->urea conversion (%) — Inoue-Kanai
+            "L_feed":      round(react["L_feed"], 3),            # reactor-feed N/C molar (NH3/CO2)
+            "W_feed":      round(react["W_feed"], 4),            # reactor-feed H/C molar (H2O/CO2) — water-penalty driver
+            "xi_urea":     round(react["xi_urea"], 2),           # urea-formation extent (kmol/h, conversion-coupled)
+        },
+        "SCRUB_322E003": {                       # HP Scrubber 322E003 -> 322C001 (off-gas) / 322F001 (overflow)
+            "TT_322009":   round(react["T_offgas"], 1),      # reactor off-gas feed in (C)
+            "TT_322011":   round(scrub["T_offgas"], 1),      # off-gas temp -> HV-322604 (C)
+            "off_th":      streams["SCRUB_OFFGAS"]["mass_th"],   # off-gas mass flow (t/h)
+            "off_mol":     streams["SCRUB_OFFGAS"]["mol_kmolh"], # off-gas molar flow (kmol/h)
+            "off_MW":      streams["SCRUB_OFFGAS"]["MW"],        # off-gas mean MW
+            "off_mol_pct": streams["SCRUB_OFFGAS"]["mol_pct"],   # off-gas composition (mol %)
+            "ov_th":       streams["CARB_RECYCLE"]["mass_th"],   # overflow mass flow (t/h)
+            "ov_mol":      streams["CARB_RECYCLE"]["mol_kmolh"], # overflow molar flow (kmol/h)
+            "ov_MW":       streams["CARB_RECYCLE"]["MW"],        # overflow mean MW
+            "ov_mass_pct": streams["CARB_RECYCLE"]["mass_pct"],  # overflow composition (mass %)
+            "carb_th":     round(sum(scrub["carb_kmolh"][k] * MW_COMP[k] for k in MW_COMP) / 1000.0, 3),  # 323P001 wash (t/h)
+            "closure_resid": round(scrub["closure_resid"], 2),  # tube-side mole-balance diag (kmol/h, not injected)
+            "HV_322604":   round(s.HIC_322604, 1),           # HV-322604 opening (tracks HIC 1:1)
+            "HIC_322604":  round(s.HIC_322604, 1),           # off-gas valve controller (%)
+            "TT_322011_lp":round(hv604["T_out"], 1),         # off-gas T after HV-322604 (JT-cooled, C)
+            "P_offgas":    round(scrub["P_offgas"], 1),      # off-gas line P (bar a)
+            "P_overflow":  round(scrub["P_overflow"], 1),    # PT-329201 overflow line P (bar a)
+            "TT_322002":   round(scrub["T_overflow"], 1),    # overflow temp -> 322F001 (C)
+            "LT_329501":   50.0,                             # overflow seal-leg level (% — design NLL, pinned)
+            "ccw": {                              # shell-side CCW loop (329P006 A/B pump + 329E004 cooler)
+                "TT_329125":  round(scrub["t_ccw_out"], 2),     # CCW return temp out of shell (C)
+                "TDY_329125": round(TDY_329125, 2),             # TT-329125 − TIC-329005 (cond. quality, C) — live PT-329201 cascade
+                "vent_ratio": round(scrub["vent_ratio"], 4),    # synthesis-vent load PT-329201/PT_des (drives Q_scrubber)
+                "Q_ccw_kW":   round(scrub["q_ccw_kw"], 0),      # heat removed by CCW (kW)
+                "Q_carb_kW":  round(scrub["q_carb_kw"], 0),     # carbamate exotherm (diag, kW)
+                "co2_abs":    round(scrub["co2_abs"], 2),       # CO2 absorbed gas->carbamate (kmol/h)
+                "FIC_329409": {"pv": round(fic["pv"], 1), "sp": round(fic["sp"], 1),
+                               "op": round(fic["op"], 1), "mode": fic["mode"]},  # CCW flow (t/h) -> FV-329409
+                "TIC_329005": {"pv": round(tic["pv"], 1), "sp": round(tic["sp"], 1),
+                               "op": round(tic["op"], 1), "mode": tic["mode"]},  # CCW supply T (C) -> TV-329005
+                "P329P006_in":  round(SCRUB_CCW_P_OUT_BARA, 1), # 329P006 A/B suction P (CCW return)
+                "P329P006_out": round(SCRUB_CCW_P_IN_BARA, 1),  # 329P006 A/B discharge P (CCW supply)
+                "E004_duty_kW": round(q_e004_kw, 0),            # 329E004 tempered-water-cooler duty (kW)
+            },
         },
         "STREAMS": streams,
         "ratio": {
@@ -961,6 +1228,28 @@ def handle_cmd(cmd: dict):
             lic["op"] = clamp(float(cmd["op"]), 0.0, 100.0)
         if "sp" in cmd:                            # level setpoint (%)
             lic["sp"] = clamp(float(cmd["sp"]), 0.0, 100.0)
+
+    elif t == "hic604_set":                    # HIC-322604 -> HV-322604 scrubber off-gas valve
+        if "op" in cmd:
+            s.HIC_322604 = clamp(float(cmd["op"]), 0.0, 100.0)
+
+    elif t == "fic_set":                       # FIC-329409 CCW circulation-flow controller -> FV-329409
+        fic = s.FIC_329409
+        if "mode" in cmd:
+            fic["mode"] = cmd["mode"]
+        if "op" in cmd and fic["mode"] == "MAN":   # MAN: operator sets FV-329409 opening (%)
+            fic["op"] = clamp(float(cmd["op"]), 0.0, 100.0)
+        if "sp" in cmd:                            # CCW flow setpoint (t/h)
+            fic["sp"] = max(float(cmd["sp"]), 0.0)
+
+    elif t == "tic_set":                       # TIC-329005 CCW supply-temp controller -> TV-329005
+        tic = s.TIC_329005
+        if "mode" in cmd:
+            tic["mode"] = cmd["mode"]
+        if "op" in cmd and tic["mode"] == "MAN":   # MAN: operator sets TV-329005 opening (%)
+            tic["op"] = clamp(float(cmd["op"]), 0.0, 100.0)
+        if "sp" in cmd:                            # CCW supply-temp setpoint (C)
+            tic["sp"] = float(cmd["sp"])
 
 
 # ----- FastAPI app -----

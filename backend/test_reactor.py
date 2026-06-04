@@ -10,8 +10,8 @@ def test_constants_present():
     for name in ("REACT_OVERFLOW_DES", "REACT_OFFGAS_DES", "REACT_XI_UREA_DES",
                  "REACT_XI_BIU_DES", "REACT_HIC605_DES_PCT", "REACT_OVERFLOW_T_C",
                  "REACT_OFFGAS_T_C", "REACT_P_BARA", "REACT_OFFGAS_P_BARA",
-                 "REACT_OFFGAS_RHO", "REACT_OVERFLOW_RHO", "REACT_TEMP_HEIGHTS_C",
-                 "REACT_LEVEL_NLL_PCT"):
+                 "REACT_OFFGAS_RHO", "REACT_OVERFLOW_RHO", "REACT_TT_TEMPS_C",
+                 "REACT_TT_EL_MM", "REACT_TAU_TOT_MIN", "REACT_LEVEL_NLL_PCT"):
         assert hasattr(main, name), "missing constant %s" % name
     # overflow design vector IS stream 207 (reactor overflow = stripper feed)
     for k in MW_COMP:
@@ -90,14 +90,19 @@ def test_stripper_coupling_regression():
 
 
 def test_packet_tags_and_streams():
+    main.state = main.State()          # snapshot design SS (live overflow now loop-coupled; isolate)
     pkt = main.step_sim(1.0)
     assert "REACT_322R001" in pkt
     blk = pkt["REACT_322R001"]
     for tag in ("TT_322005", "TT_322006", "TT_322007", "TT_322008", "TT_322009",
-                "LT_322504", "HIC_322605", "HV_322605", "P_bara", "P_offgas",
-                "closure_resid"):
+                "LT_322504", "AT_322701", "HIC_322605", "HV_322605", "P_bara",
+                "P_offgas", "closure_resid"):
         assert tag in blk, tag
-    assert abs(blk["TT_322005"] - 183.0) < 0.1
+    assert abs(blk["AT_322701"] - 3.000) < 0.01           # N/C atom ratio of overflow
+    # residence-time axial T profile: rises with elevation toward 183 C overflow
+    assert abs(blk["TT_322005"] - 182.9) < 0.1     # N6 A top  (EL +21700)
+    assert abs(blk["TT_322008"] - 172.6) < 0.1     # N6 D bot  (EL +1000, near feed inlet)
+    assert blk["TT_322005"] > blk["TT_322006"] > blk["TT_322007"] > blk["TT_322008"]
     assert abs(blk["HIC_322605"] - 60.0) < 0.1
     assert abs(blk["HV_322605"] - 60.0) < 0.1
     st = pkt["STREAMS"]
@@ -121,6 +126,39 @@ def test_hic605_command():
     main.handle_cmd({"type": "hic605_set", "id": "HIC-322605", "mode": "MAN", "op": -5.0})
     assert abs(main.state.HIC_322605 - 0.0) < 1e-9
     main.state.HIC_322605 = 60.0                       # restore design default for later tests
+
+
+def test_at322701_nc_ratio():
+    # AT-322701: molar N/C of 322R001 overflow. Design N = 4002.4·1 + 1302.6·2 + 2.414·3 = 6614.84;
+    #            C = 897.7·1 + 1302.6·1 + 2.414·2 = 2205.13;  N/C = 3.000.
+    r = main.react_322r001(_design_hpcc(), main.CO2_DES_KGH / 1000.0,
+                           main.REACT_HIC605_DES_PCT)
+    nc = main.react_nc_ratio(r["overflow_kmolh"])
+    assert abs(nc - 3.000) < 0.01, nc
+    # invariant to throughput s and valve φ (pinned overflow scales uniformly)
+    r2 = main.react_322r001(_design_hpcc(), 0.7 * main.CO2_DES_KGH / 1000.0, 48.0)
+    assert abs(main.react_nc_ratio(r2["overflow_kmolh"]) - nc) < 1e-6
+
+
+def test_dynamic_level_responds_to_hv605():
+    s = main.state
+    # φ=φ_des -> Q_in=Q_out -> dV/dt=0 -> level holds (steady inventory)
+    s.HIC_322605 = main.REACT_HIC605_DES_PCT; s.react_level_pct = 80.0
+    for _ in range(20):
+        main.step_sim(1.0)
+    assert abs(s.react_level_pct - 80.0) < 0.5, s.react_level_pct
+    # OPEN HV-322605 (φ=90 % > φ_des) -> Q_out>Q_in -> level FALLS (user-reported requirement)
+    s.HIC_322605 = 90.0; s.react_level_pct = 80.0
+    for _ in range(120):
+        main.step_sim(1.0)
+    assert s.react_level_pct < 79.0, s.react_level_pct
+    # THROTTLE below design (φ=30 % < φ_des) -> Q_in>Q_out -> level RISES
+    s.HIC_322605 = 30.0; s.react_level_pct = 50.0
+    for _ in range(120):
+        main.step_sim(1.0)
+    assert s.react_level_pct > 51.0, s.react_level_pct
+    s.HIC_322605 = main.REACT_HIC605_DES_PCT             # restore design defaults
+    s.react_level_pct = main.REACT_LEVEL_NLL_PCT
 
 
 if __name__ == "__main__":
