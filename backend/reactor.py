@@ -77,7 +77,7 @@ def conversion_factor(L: float, W: float, T_c: float = T0_DES_C) -> float:
 
 
 def react_couple(feed: dict, overflow_scaled: dict, xi_urea_scaled: float,
-                 T_c: float = T0_DES_C):
+                 T_c: float = T0_DES_C, L_override: float = None):
     """Couple conversion to the pinned split-fraction overflow, atom-conserving.
 
     Inputs (from react_322r001):
@@ -85,6 +85,8 @@ def react_couple(feed: dict, overflow_scaled: dict, xi_urea_scaled: float,
         overflow_scaled : pinned overflow = REACT_OVERFLOW_DES * s * (phi/phi_des), kmol/h
         xi_urea_scaled  : pinned urea extent = REACT_XI_UREA_DES * s, kmol/h
         T_c             : reactor bulk temperature, deg C (design-pinned today)
+        L_override      : if given, drive f_L off this N/C (loop-coupled L_drive) instead of the
+                          raw feed N/C; W still from feed. None -> pure feed N/C (unit-test path).
 
     Returns (xi_urea, overflow_adjusted, X, L, W):
         xi_urea          = xi_urea_scaled * conversion_factor(L, W, T)
@@ -95,7 +97,7 @@ def react_couple(feed: dict, overflow_scaled: dict, xi_urea_scaled: float,
     co2 = feed.get("CO2", 0.0)
     if co2 <= 0.0:                                            # degenerate guard
         return xi_urea_scaled, dict(overflow_scaled), X_DES_RAW, L0_DES, W0_DES
-    L = feed.get("NH3", 0.0) / co2
+    L = (feed.get("NH3", 0.0) / co2) if L_override is None else L_override
     W = feed.get("H2O", 0.0) / co2
     xi_urea = xi_urea_scaled * conversion_factor(L, W, T_c)
     d = xi_urea - xi_urea_scaled                             # extra urea vs pinned design

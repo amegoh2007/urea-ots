@@ -380,6 +380,12 @@ REACT_XI_UREA_DES  = 1302.27     # urea-formation extent at design (kmol/h)
 REACT_XI_BIU_DES   = 2.414       # biuret-formation extent at design (kmol/h)
 REACT_HIC605_DES_PCT = 60.0      # φ_des: HV-322605 design opening (Kv_req/Kvs, linear trim)
 REACT_OVERFLOW_T_C = 183.0       # TT-322014 overflow temp -> 322E001
+RATIO_PV_DES       = 2.0231315310702604   # design fresh-feed N/C (live-probed settled ratio.PV)
+REACT_NC_LOOP_GAIN = 0.50        # f_L loop N/C gain: maps the EXOGENOUS fresh-feed N/C deviation
+                                 # (ratio.PV, set by pump speeds — feedback-free) onto the reactor-feed
+                                 # N/C that drives Inoue-Kanai f_L.  The pinned recycle otherwise
+                                 # suppresses loop NH3-enrichment; this restores it.  ==L0 at design
+                                 # (ratio.PV=RATIO_PV_DES -> conv=1) -> bit-exact, AT-322701 invariant.
 REACT_OFFGAS_T_C   = 183.0       # TT-322009 gas-line temp -> 322E003
 REACT_P_BARA       = 144.9       # reactor operating pressure (bar a)
 REACT_OFFGAS_P_BARA = 141.3      # off-gas line pressure -> 322E003 (bar a)
@@ -543,7 +549,8 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
     }
 
 
-def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float) -> dict:
+def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
+                  L_drive: float = None) -> dict:
     """322R001 HP urea reactor — reduced calibrated split-fraction, pinned to design HMB.
     overflow_i = nu_overflow_i,des * co2_scale * (phi/phi_des);  offgas_i = nu_offgas_i,des * co2_scale.
     closure_resid is reported as a diagnostic only (NOT injected back into any stream)."""
@@ -557,7 +564,7 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float) -> dict
     # Modified Inoue-Kanai conversion coupling: shifts xi_urea + overflow by f(N/C, H/C, T),
     # atom-conserving, == design when feed is at (L0,W0,T0). closure_resid stays invariant.
     xi_urea, overflow, X_conv, L_feed, W_feed = reactor.react_couple(
-        feed, overflow, REACT_XI_UREA_DES * s, REACT_OVERFLOW_T_C)
+        feed, overflow, REACT_XI_UREA_DES * s, REACT_OVERFLOW_T_C, L_override=L_drive)
     closure_resid = (sum(feed.values())
                      - (sum(overflow.values()) + sum(offgas.values()))
                      - xi_urea)
@@ -928,7 +935,15 @@ def step_sim(dt: float) -> dict:
     hpcc = hpcc_322e002(strip, ej)
 
     # 322R001 HP urea reactor: pinned products from hpcc feed, throughput s, valve φ.
-    react = react_322r001(hpcc, s.F_CO2_th, s.HIC_322605)
+    # f_L loop coupling: the reduced model pins the recycle overflow, so the endogenous feed N/C
+    # (hpcc L_hpcc) is dominated by the atom-conserving ripple (conv^ -> NH3 -2d -> feed N/C v):
+    # a strong NEGATIVE loop that cannot be amplified.  Drive f_L instead off the EXOGENOUS
+    # fresh-feed N/C (s.ratio_PV, set by pump speeds — feedback-free): L_drive maps its deviation
+    # onto the reactor-feed N/C, == L0 at design (ratio.PV=RATIO_PV_DES -> conv=1, bit-exact).
+    # Drives Inoue-Kanai f_L only; overflow ripple keeps AT-322701 atom-invariant; PT-329201
+    # (L_hpcc bubble-point) untouched.
+    L_drive = reactor.L0_DES * (1.0 + REACT_NC_LOOP_GAIN * (s.ratio_PV / RATIO_PV_DES - 1.0))
+    react   = react_322r001(hpcc, s.F_CO2_th, s.HIC_322605, L_drive=L_drive)
     s.react_overflow_kmolh = react["overflow_kmolh"]   # tear -> next step's stripper feed
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
