@@ -1391,6 +1391,85 @@ def handle_cmd(cmd: dict):
 app = FastAPI()
 
 
+# ----- Controller REST API -----
+
+class _TuningPayload(BaseModel):
+    Kc: Optional[float] = None
+    Ti: Optional[float] = None
+    Td: Optional[float] = None
+
+
+class CtrlCommand(BaseModel):
+    set_mode:   Optional[str]            = None
+    set_sp:     Optional[float]          = None
+    set_op:     Optional[float]          = None
+    set_bias:   Optional[float]          = None
+    set_tuning: Optional[_TuningPayload] = None
+
+
+@app.post("/api/ctrl/{tag}")
+async def ctrl_post(tag: str, cmd: CtrlCommand):
+    """Apply operator command to a named controller. 409 if mode-illegal."""
+    with _ctrl_lock:
+        ctrl = state.controllers.get(tag)
+        if ctrl is None:
+            raise HTTPException(status_code=404, detail=f"unknown tag {tag!r}")
+
+        reason = None
+
+        if cmd.set_mode is not None:
+            if cmd.set_mode not in ("MAN", "AUTO", "CAS", "OOS"):
+                raise HTTPException(status_code=422,
+                                    detail=f"invalid mode {cmd.set_mode!r}")
+            ctrl.set_mode(cmd.set_mode)
+
+        if cmd.set_sp is not None:
+            if ctrl.mode != "AUTO":
+                raise HTTPException(status_code=409,
+                                    detail="set_sp requires AUTO mode")
+            ctrl.set_sp(cmd.set_sp)
+            reason = "clamped" if (ctrl.sp != cmd.set_sp) else None
+
+        if cmd.set_op is not None:
+            if ctrl.mode != "MAN":
+                raise HTTPException(status_code=409,
+                                    detail="set_op requires MAN mode")
+            ctrl.set_op(cmd.set_op)
+
+        if cmd.set_bias is not None:
+            if ctrl.mode != "CAS":
+                raise HTTPException(status_code=409,
+                                    detail="set_bias requires CAS mode")
+            ctrl.set_bias(cmd.set_bias)
+
+        if cmd.set_tuning is not None:
+            ctrl.set_tuning(
+                Kc=cmd.set_tuning.Kc,
+                Ti=cmd.set_tuning.Ti,
+                Td=cmd.set_tuning.Td,
+            )
+
+        return {"ok": True, "tag": tag, "mode": ctrl.mode, "reason": reason}
+
+
+@app.get("/api/ctrl")
+async def ctrl_get_all():
+    """Return to_packet() for every registered controller."""
+    with _ctrl_lock:
+        return {tag: ctrl.to_packet()
+                for tag, ctrl in state.controllers.items()}
+
+
+@app.get("/api/ctrl/{tag}")
+async def ctrl_get(tag: str):
+    """Return to_packet() for a single controller."""
+    with _ctrl_lock:
+        ctrl = state.controllers.get(tag)
+        if ctrl is None:
+            raise HTTPException(status_code=404, detail=f"unknown tag {tag!r}")
+        return ctrl.to_packet()
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
