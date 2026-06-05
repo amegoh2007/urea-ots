@@ -26,12 +26,15 @@ import json
 import math
 import os
 import time
-from typing import Set
+import threading
+from typing import Optional, Set
 
 import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
+from controllers import Controller
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 
 def tsat_steam(p_bara: float) -> float:
@@ -672,60 +675,6 @@ def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None):
     }
 
 
-# ----- PID -----
-class PID:
-    def __init__(self, Kc=2.0, Ti=8.0, Td=0.0, op_lo=0.0, op_hi=100.0):
-        self.Kc, self.Ti, self.Td = Kc, Ti, Td
-        self.op_lo, self.op_hi = op_lo, op_hi
-        self.integ, self.prev_e = 0.0, 0.0
-
-    def step(self, sp, pv, dt):
-        e = sp - pv
-        self.integ += e * dt / max(self.Ti, 1e-6)
-        self.integ = clamp(self.integ, -self.op_hi, self.op_hi)   # anti-windup
-        d = (e - self.prev_e) / dt if dt > 0 else 0.0
-        op = self.Kc * (e + self.integ + self.Td * d)
-        op = clamp(op, self.op_lo, self.op_hi)
-        self.prev_e = e
-        return op
-
-
-# ----- Controller / SIC faceplate -----
-class Controller:
-    """SIC on torque-converter valve opening (%).
-       MAN : operator sets opening directly (PV entry -> op).
-       AUTO: local SP% with PID.
-       CAS : opening SP from ratio block + operator N/C bias (%).
-       PV, SP, MV(op), N/C are all in percent."""
-
-    def __init__(self, sp=80.0, op=0.0):
-        self.mode = "MAN"
-        self.sp   = sp     # % opening setpoint
-        self.op   = op     # % opening output  (MV)
-        self.pv   = 0.0    # % opening actual
-        self.nc   = 0.0    # % cascade bias
-        self.pid  = PID(Kc=2.0, Ti=8.0, op_lo=0.0, op_hi=100.0)
-
-    def set_mode(self, mode, current_pv):
-        if mode == "AUTO" and self.mode == "MAN":
-            self.sp = current_pv          # bumpless: adopt current opening
-        if mode == "CAS" and self.mode != "CAS":
-            self.nc = 0.0                 # reset bias on cascade entry
-        self.mode = mode
-
-    def step(self, pv, dt, cas_sp=None):
-        self.pv = pv
-        if self.mode == "MAN":
-            pass                          # op held by operator
-        elif self.mode == "AUTO":
-            self.op = self.pid.step(self.sp, pv, dt)
-        elif self.mode == "CAS":
-            if cas_sp is not None:
-                self.sp = clamp(cas_sp + self.nc, 0.0, 100.0)
-            self.op = self.pid.step(self.sp, pv, dt)
-        return self.op
-
-
 # ----- Pump model -----
 def pump_flow_m3h(N_rpm: float) -> float:
     return max(0.0, N_rpm) * PUMP_V_PER_REV * PUMP_ETA_V * 60.0
@@ -743,7 +692,7 @@ def pump_current_A(N_rpm: float, on: bool) -> float:
 
 
 def mode_tag(c: "Controller") -> str:
-    return {"MAN": "M", "AUTO": "A", "CAS": "C"}.get(c.mode, "M")
+    return {"MAN": "M", "AUTO": "A", "CAS": "C", "OOS": "O"}.get(c.mode, "M")
 
 
 # ----- Plant state -----
@@ -775,8 +724,14 @@ class State:
         self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M"}
         self.pumpB = {"on": True,  "open_act": 86.2, "speed_act": 131.0, "current": 43.9, "mode": "M"}
         # controllers (percent)
-        self.SIC_321950 = Controller(sp=80.0, op=0.0)
-        self.SIC_321951 = Controller(sp=86.2, op=86.2)   # MAN holds B at 86 %
+        self.SIC_321950 = Controller("SIC_321950", Kc=2.0, Ti=8.0,
+                                     sp=80.0, mv=0.0)
+        self.SIC_321951 = Controller("SIC_321951", Kc=2.0, Ti=8.0,
+                                     sp=86.2, mv=86.2)   # MAN holds B at 86 %
+        self.controllers: dict = {
+            "SIC_321950": self.SIC_321950,
+            "SIC_321951": self.SIC_321951,
+        }
         # ratio
         self.ratio_mode = "MAN"
         self.ratio_SP   = 1.928    # design molar N/C = (40.756/54.618)*2.584 (attached eq)
@@ -813,6 +768,7 @@ class State:
 
 
 state = State()
+_ctrl_lock = threading.Lock()
 clients: Set[WebSocket] = set()
 last_packet: dict = {}
 
@@ -857,7 +813,7 @@ def step_sim(dt: float) -> dict:
         if (not p["on"]) or (not suct_open) or (not disch_open):
             target = 0.0
         else:
-            target = ctrl.op
+            target = ctrl.mv
         alpha = min(1.0, dt / 2.0)                         # tau ~ 2 s
         p["open_act"] += (target - p["open_act"]) * alpha
         p["open_act"]  = clamp(p["open_act"], 0.0, 100.0)
@@ -1315,19 +1271,21 @@ def step_sim(dt: float) -> dict:
             "pv":     round(s.SIC_321950.pv, 1),
             "sp":     round(s.SIC_321950.sp, 1),
             "sp_rpm": round(s.SIC_321950.sp / 100.0 * PUMP_RATED_RPM, 0),
-            "mv":     round(s.SIC_321950.op, 1),
-            "nc":     round(s.SIC_321950.nc, 1),
+            "mv":     round(s.SIC_321950.mv, 1),
+            "nc":     round(s.SIC_321950.bias, 1),
             "mode":   s.SIC_321950.mode,
         },
         "SIC_321951": {
             "pv":     round(s.SIC_321951.pv, 1),
             "sp":     round(s.SIC_321951.sp, 1),
             "sp_rpm": round(s.SIC_321951.sp / 100.0 * PUMP_RATED_RPM, 0),
-            "mv":     round(s.SIC_321951.op, 1),
-            "nc":     round(s.SIC_321951.nc, 1),
+            "mv":     round(s.SIC_321951.mv, 1),
+            "nc":     round(s.SIC_321951.bias, 1),
             "mode":   s.SIC_321951.mode,
         },
         "trips": s.trips,
+        "controllers": {tag: ctrl.to_packet()
+                        for tag, ctrl in s.controllers.items()},
     }
 
 
@@ -1357,19 +1315,19 @@ def handle_cmd(cmd: dict):
         if ctrl is None:
             return
         if "mode" in cmd:
-            ctrl.set_mode(cmd["mode"], current_pv=ctrl.pv)
+            ctrl.set_mode(cmd["mode"])
             if cmd["mode"] == "CAS":
                 # ui_guidelines rule 6: master (ratio) -> AUTO, adopt current value as SP
                 s.ratio_mode = "AUTO"
                 s.ratio_SP   = round(s.ratio_PV, 3)
-        if "op" in cmd and ctrl.mode == "MAN":      # PV entry drives opening
-            ctrl.op = clamp(float(cmd["op"]), 0.0, 100.0)
+        if "op" in cmd and ctrl.mode == "MAN":
+            ctrl.set_op(float(cmd["op"]))
         if "sp_rpm" in cmd and ctrl.mode == "AUTO":     # AUTO setpoint entered as RPM
-            ctrl.sp = clamp(float(cmd["sp_rpm"]) / PUMP_RATED_RPM * 100.0, 0.0, 100.0)
+            ctrl.set_sp(float(cmd["sp_rpm"]) / PUMP_RATED_RPM * 100.0)
         elif "sp" in cmd and ctrl.mode == "AUTO":
-            ctrl.sp = clamp(float(cmd["sp"]), 0.0, 100.0)
+            ctrl.set_sp(float(cmd["sp"]))
         if "nc" in cmd and ctrl.mode == "CAS":
-            ctrl.nc = float(cmd["nc"])
+            ctrl.set_bias(float(cmd["nc"]))
 
     elif t == "ratio_set":
         if "sp" in cmd:
