@@ -99,6 +99,9 @@ EJ_SUCTION_KGH = {k: _EJ_DES_MASS[k] - (EJ_MOTIVE_NH3_DES if k == "NH3" else 0.0
                   for k in MW_COMP}
 EJ_MU          = sum(EJ_SUCTION_KGH.values()) / EJ_MOTIVE_NH3_DES   # entrainment ~1.4125
 EJ_OPEN_DES    = 74.0            # %, HV-322602 design opening (HIC-322602 design SP)
+EJ_STALL_PHI   = 0.35            # motive-fraction (phi_m) jet-stall knee: below this the ejector
+                                 # can no longer entrain -> mu collapses.  f_stall==1.0 at design
+                                 # motive (phi_m=1) so mu == spindle value (design bit-exact).
 EJ_SUC_TOT_DES = sum(EJ_SUCTION_KGH.values())                      # kg/h, design suction
 EJ_CARB_FRAC   = {k: EJ_SUCTION_KGH[k] / EJ_SUC_TOT_DES for k in MW_COMP}  # 322E003 overflow comp
 EJ_CP_N, EJ_CP_C, EJ_CP_D = 4.74, 3.10, 3.50    # kJ/kg.K  motive / carbamate / discharge
@@ -223,7 +226,11 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
                 "rho": 0.0, "vol_m3h": 0.0, "mu": 0.0}
     # HV-322602 (HIC-322602) sets entrainment: decreasing opening -> more 322E003 suction.
     open_eff = clamp(hv_open_pct, 10.0, 100.0)
-    mu       = EJ_MU * (EJ_OPEN_DES / open_eff)          # = EJ_MU at design opening (74 %)
+    # motive-linked entrainment stall: a jet pump can no longer entrain below a critical motive
+    # momentum -> suction chokes.  Linear ramp on motive fraction phi_m, knee EJ_STALL_PHI.
+    phi_m    = motive_nh3_kgh / EJ_MOTIVE_NH3_DES
+    f_stall  = clamp((phi_m - EJ_STALL_PHI) / (1.0 - EJ_STALL_PHI), 0.0, 1.0)
+    mu       = EJ_MU * (EJ_OPEN_DES / open_eff) * f_stall   # spindle entrainment x motive stall
     m_suc    = mu * motive_nh3_kgh
     suction  = {k: m_suc * EJ_CARB_FRAC[k] for k in MW_COMP}
     disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
@@ -549,6 +556,21 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
     }
 
 
+# ----- 322E002 HPCC liquid inventory (Euler level state) -------------------------------------
+# Dynamic liquid level driven by the hydraulic ODE:
+#   d(HPCC_Level)/dt = (carbamate condensation/recycle in) - (ejector-driven forward flow out).
+# Forward flow (HPCC -> 322R001) is pushed by the ejector developed head (PI_disch ~ phi_m^2, the
+# loop circulator); inflow is the live carbamate condensation make.  Both fractions == 1 at design
+# -> dLevel/dt == 0 (holds NLL, bit-exact).  On motive (ejector) stall the forward flow collapses
+# as phi_m^2 faster than the condensation inflow (stripper top gas keeps condensing, motive-
+# independent) -> the HPCC level SWELLS (accumulates).
+HPCC_LEVEL_NLL_PCT = 50.0        # LT-322E002 design normal liquid level (% of sump span)
+HPCC_TAU_FILL_MIN  = 6.0         # carbamate-condenser liquid holdup time (level fill const, min)
+HPCC_LIQ_DES_KGH   = hpcc_322e002(
+    stripper_322e001(CO2_DES_KGH / 1000.0, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA),
+    ejector_322f001(EJ_MOTIVE_NH3_DES, HPCC_T_PROD_DES_C, EJ_OPEN_DES))["liq_kgh"]  # design make
+
+
 def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
                   L_drive: float = None) -> dict:
     """322R001 HP urea reactor — reduced calibrated split-fraction, pinned to design HMB.
@@ -748,6 +770,7 @@ class State:
         # LT-322504 reactor liquid level (%) — DYNAMIC inventory state (mass balance, open-loop:
         # HV-322605 is hand/auto and does NOT control level). dV/dt = Q_in - Q_out(φ).
         self.react_level_pct = REACT_LEVEL_NLL_PCT      # init at design NLL = 80 %
+        self.hpcc_level_pct  = HPCC_LEVEL_NLL_PCT       # 322E002 liquid inventory, init design NLL
         # pumps: open_act = torque-converter valve opening %
         self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M"}
         self.pumpB = {"on": True,  "open_act": 86.2, "speed_act": 131.0, "current": 43.9, "mode": "M"}
@@ -893,6 +916,11 @@ def step_sim(dt: float) -> dict:
     #   -> discharge stream to 322E002 (TT-322012). Motive temp = TI-321020.
     motive_nh3_kgh = (F_pump_total_th * 1000.0) if disch_open else 0.0
     ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602)
+    # motive fraction (PD pump -> flow ~ speed) and ejector developed-head forward-flow fraction.
+    # phi_fwd ~ phi_m^2 (affinity head curve): drives the HPCC->reactor liquid circulation and the
+    # discharge-header pressure.  ==1 at design motive -> all hydraulic states hold design.
+    phi_m   = clamp(motive_nh3_kgh / EJ_MOTIVE_NH3_DES, 0.0, 1.5)
+    phi_fwd = phi_m * phi_m
 
     # Ratio block PV = molar N/C per feed-ratio eq:  N/C = (m_NH3/m_CO2)*2.584.
     m_CO2 = max(s.F_CO2_th, 1e-6)
@@ -948,14 +976,23 @@ def step_sim(dt: float) -> dict:
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
 
-    # LT-322504 dynamic level — inventory mass balance (open-loop; HV-322605 sets only Q_out):
-    #   Q_in  = V̇_des·s              (HPCC product fill, scales with CO₂ throughput)
-    #   Q_out = V̇_des·s·(φ/φ_des)    (overflow letdown through HV-322605)
-    #   dV/dt = Q_in - Q_out = V̇_des·s·(1 - φ/φ_des)  ->  level FALLS when φ>φ_des (valve opened).
-    q_in_m3h  = _react_vdot_m3h * react["co2_scale"]
-    q_out_m3h = q_in_m3h * (react["phi"] / react["phi_des"]) if react["phi_des"] else q_in_m3h
+    # LT-322504 dynamic level — inventory mass balance:
+    #   Q_in  = V̇_des·s·φ_fwd        (ACTUAL ejector-driven forward feed from HPCC, NOT design tput)
+    #   Q_out = V̇_des·s·(φ/φ_des)    (gravity overflow letdown through HV-322605)
+    #   dV/dt = V̇_des·s·(φ_fwd - φ/φ_des) -> FALLS when valve opened (φ>φ_des) OR ejector stalls.
+    q_in_m3h  = _react_vdot_m3h * react["co2_scale"] * phi_fwd
+    q_out_m3h = _react_vdot_m3h * react["co2_scale"] * (react["phi"] / react["phi_des"]
+                                                        if react["phi_des"] else 1.0)
     dV_m3     = (q_in_m3h - q_out_m3h) * dt / 3600.0
     s.react_level_pct = clamp(s.react_level_pct + dV_m3 / REACT_V_SPAN_M3 * 100.0, 0.0, 100.0)
+
+    # LT-322E002 HPCC liquid inventory (Euler): carbamate condensation make in - ejector fwd out.
+    #   phi_in  = live HPCC liquid make / design make  (stripper-gas condensation is motive-indep)
+    #   phi_fwd = phi_m^2 forward circulation out (ejector developed head)
+    #   dLevel/dt = (phi_in - phi_fwd)·100/(tau·60)  ->  SWELLS on ejector stall (in > out).
+    phi_in_hpcc = (hpcc["liq_kgh"] / HPCC_LIQ_DES_KGH) if HPCC_LIQ_DES_KGH else phi_fwd
+    dL_hpcc     = (phi_in_hpcc - phi_fwd) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
+    s.hpcc_level_pct = clamp(s.hpcc_level_pct + dL_hpcc, 0.0, 100.0)
 
     # ----- 322E003 HP Scrubber: reactor off-gas + weak carbamate (323P001 A/B) -> off-gas line
     #   (322C001 via HV-322604) + overflow line (322F001).  Shell-side CCW loop (329P006 A/B
@@ -1017,7 +1054,10 @@ def step_sim(dt: float) -> dict:
     s.trips["21_10"] = (P_suct_barG < 17.0 and s.pumpB["on"])
 
     # Discharge header
-    P_disch_header_barG = (P_SYN_DOWN_BAR - 1.0) if (s.pumpA["on"] or s.pumpB["on"]) else 7.5
+    # Discharge header: affinity-law developed head droops with motive (pump-speed) fraction.
+    #   P = P_idle + (P_design - P_idle)·phi_m^2 ;  == 164.0 at design (phi_m=1), 7.5 idle (phi_m=0).
+    P_disch_header_barG = (7.5 + ((P_SYN_DOWN_BAR - 1.0) - 7.5) * phi_fwd) \
+        if (s.pumpA["on"] or s.pumpB["on"]) else 7.5
 
     # ---- uniform process-stream registry (clickable stream inspector) ----
     MW_NH3 = MW_COMP["NH3"]
@@ -1195,6 +1235,7 @@ def step_sim(dt: float) -> dict:
             "liq_th":      round(hpcc["liq_th"], 2),     # liquid product (t/h)
             "liq_MW":      round(hpcc["liq_MW"], 2),
             "liq_mass_pct":{k: round(hpcc["liq_mass_pct"][k], 3) for k in MW_COMP},  # mass %
+            "LT_322E002":  round(s.hpcc_level_pct, 1),   # liquid level (%) — DYNAMIC inventory (swells on stall)
             "P_bara":      round(hpcc["P_bara"], 1),
             "steam": {                            # shell side: 4.4 bar a LP steam (heat recovery)
                 "TI_shell": round(HPCC_STEAM_TSAT_C, 1),     # T_sat(4.4 bar a) condensing temp (C)
