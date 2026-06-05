@@ -22,12 +22,13 @@ CALIBRATION (anchored to as-built design HMB, no fabrication):
     W0 = 0.407828   (live reactor-feed H2O/CO2 molar at design steady state)
     T0 = 183.0 C    (REACT_OVERFLOW_T_C)
     X_des = 0.543   (xi_urea / CO2_feed = 1302.27 / 2397.7, CO2 per-pass)
-    X_inf = 0.85    (high-NH3 low-water equilibrium ceiling)
-    b = 0.60        (water-penalty strength)
-    a = 3.6180      solved so X(L0,W0,T0) = X_des exactly:
-                    f_W(W0) = 1/(1+0.60*0.407828)           = 0.803405
-                    f_L(L0) = (X_des/X_inf)/f_W(W0)          = 0.795144
-                    a = (1/(L0-2)) * f_L(L0)/(1-f_L(L0))     = 3.6180
+    a = 3.6180      NH3-excess saturation coeff -- FROZEN: sets the f_L N/C slope (test_1_nc_shift).
+                    f_L(L0) = a*(L0-2)/(1+a*(L0-2))          = 0.795165
+    b = 0.85        water-penalty strength -- calibrated UP from 0.60 for an aggressive Stamicarbon
+                    H/C penalty.  f_W(W0) = 1/(1+0.85*0.407828) = 0.742582
+    X_inf = 0.9196  high-NH3 low-water ceiling -- now SOLVED (was 0.85) to hold the anchor with a,b
+                    fixed, giving f_W the headroom a stronger b needs (else f_L/f_W fight one budget):
+                    X_inf = X_des/(f_L(L0)*f_W(W0)) = 0.543/(0.795165*0.742582) = 0.9196
     Ea = 10 kJ/mol  gentle T-sensitivity; real conversion has a T-optimum -> parabolic cap is
                     future scope (YAGNI now). T0-pinned in engine (no live bulk-T), so f_T == 1
                     today; Ea is a forward hook for when live bulk-T is wired.
@@ -44,9 +45,9 @@ R_GAS      = 8.314          # J/(mol*K)
 L0_DES     = 3.072961       # design reactor-feed N/C molar  (NH3/CO2), live-probed
 W0_DES     = 0.407828       # design reactor-feed H/C molar  (H2O/CO2), live-probed
 T0_DES_C   = 183.0          # design reactor bulk temperature, C  (REACT_OVERFLOW_T_C)
-X_INF      = 0.85           # thermodynamic conversion ceiling (high NH3, low water)
-ALPHA_NC   = 3.6180         # NH3-excess saturation coefficient  (solved to anchor X_des)
-BETA_HC    = 0.60           # water-penalty coefficient
+X_INF      = 0.9196         # thermodynamic conversion ceiling -- SOLVED to hold X_des with a,b fixed (was 0.85)
+ALPHA_NC   = 3.6180         # NH3-excess saturation coefficient  (FROZEN -- sets f_L slope, see test_1)
+BETA_HC    = 0.85           # water-penalty coefficient (aggressive Stamicarbon H/C penalty; was 0.60)
 EA_JMOL    = 10_000.0       # apparent activation energy, J/mol (gentle f_T; forward hook)
 X_DES      = 0.543          # as-built design per-pass CO2 conversion (display anchor)
 
