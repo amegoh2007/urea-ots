@@ -500,6 +500,14 @@ SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant
 SYN_P_MIN_BARA      = 120.0      # bar a, PT clamp floor
 SYN_P_MAX_BARA      = 175.0      # bar a, PT clamp ceiling (relief margin)
 SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) / 3600.0  # ≈5329 kW
+# 322E003 shell-side effective conductance (ε-NTU). Back-calibrated so the design
+# carbamate-condensation duty pins BOTH the design overflow temp and CCW outlet EXACTLY:
+#   UA_eff,des = Q_des/(T_overflow,des − T_ccw,in,des) = 5329/(178.8−80) = 53.94 kW/K
+#   C_ccw,des  = ṁ_ccw,des·cp/3600 = 355.3 kW/K ;  ε_des = UA_eff/C_ccw = 0.1518
+#   UA = −C_ccw·ln(1−ε_des) = 58.5 kW/K  (constant; ε floats with CCW flow off-design)
+_SCRUB_C_CCW_DES_KWK = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP / 3600.0                                  # ≈355.3 kW/K
+_SCRUB_UAEFF_DES_KWK = SCRUB_Q_CCW_DES_KW / (SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES)             # ≈53.94 kW/K
+SCRUB_UA_KWK         = -_SCRUB_C_CCW_DES_KWK * math.log(1.0 - _SCRUB_UAEFF_DES_KWK / _SCRUB_C_CCW_DES_KWK)  # ≈58.5 kW/K
 
 
 def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
@@ -626,14 +634,24 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s × synthesis-vent load PT-329201)
     dT_ccw    = q_ccw_kw * 3600.0 / (m_ccw_kgh * SCRUB_CCW_CP) if m_ccw_kgh > 0 else 0.0
     t_ccw_out = t_ccw_in + dT_ccw                                              # TT-329125
+    # ε-NTU process↔CCW thermal bridge: the carbamate-condensation duty q_ccw_kw must cross to the
+    # shell-side CCW through finite conductance UA.  CCW capacity rate falling OR inlet warming
+    # shrinks UA_eff, so the process overflow liquid leaves HOTTER (dynamic energy balance):
+    #   C_ccw = ṁ_ccw·cp ; ε = 1−exp(−UA/C_ccw) ; UA_eff = ε·C_ccw
+    #   T_overflow = t_ccw_in + q_ccw_kw/UA_eff   (design 80 + 5329/53.94 = 178.8 C, pinned)
+    C_ccw_kwk  = m_ccw_kgh * SCRUB_CCW_CP / 3600.0
+    eps_ht     = 1.0 - math.exp(-SCRUB_UA_KWK / max(C_ccw_kwk, 1e-6))
+    ua_eff_kwk = max(eps_ht * C_ccw_kwk, 1e-6)
+    t_overflow = t_ccw_in + q_ccw_kw / ua_eff_kwk                              # TT-322002 (dynamic)
     return {"feed_kmolh": feed, "carb_kmolh": carb,
             "offgas_kmolh": offgas, "overflow_kmolh": overflow,
             "closure_resid": closure_resid, "co2_abs": co2_abs,
             "q_carb_kw": q_carb_kw, "q_ccw_kw": q_ccw_kw,
             "t_ccw_in": t_ccw_in, "t_ccw_out": t_ccw_out, "dT_ccw": dT_ccw,
             "m_ccw_kgh": m_ccw_kgh, "co2_scale": s, "vent_ratio": vent_ratio,
+            "eps_ht": eps_ht, "ua_eff_kwk": ua_eff_kwk,                        # ε-NTU bridge diag
             "T_offgas": SCRUB_OFFGAS_T_C, "P_offgas": SCRUB_OFFGAS_P_BARA,
-            "T_overflow": SCRUB_OVERFLOW_T_C, "P_overflow": SCRUB_OVERFLOW_P_BARA}
+            "T_overflow": t_overflow, "P_overflow": SCRUB_OVERFLOW_P_BARA}
 
 
 def hv_322604(offgas: dict, T_in: float, hic_pct: float) -> dict:
@@ -979,7 +997,11 @@ def step_sim(dt: float) -> dict:
     #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
     #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation
     #   over tau (min -> s).  Design: m_ccw=des, s=1, nu=1, top_ratio=1 -> rho=1 -> PT holds 140.7.
-    rho_cond  = (m_ccw_kgh / SCRUB_CCW_KGH_DES) / max(react["co2_scale"] * nu, 1e-6)
+    #   Thermal factor f_th = (T_cond − T_ccw_in)/(T_cond − T_ccw_in,des): a WARMER CCW supply
+    #   shrinks the condensation driving force -> capacity falls -> rho_cond drops -> PT-329201 rises.
+    #   f_th ≡ 1 at design T_ccw_in=80 C, so a pure CCW-flow move reduces to the prior calibration.
+    f_th      = (SCRUB_OVERFLOW_T_C - tic["pv"]) / max(SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES, 1e-6)
+    rho_cond  = (m_ccw_kgh / SCRUB_CCW_KGH_DES) * max(f_th, 0.0) / max(react["co2_scale"] * nu, 1e-6)
     # PT-329201 vapour differentiation: NH3 + H2O overhead are CONDENSABLE solvents (absorbed into
     # carbamate/condensate, NOT pressure-building); only ACID CO2 unpaired by NH3 (free CO2 =
     # CO2 - NH3/2, from 2 NH3 + CO2 -> carbamate) plus NH3 that exceeds condensation capacity
