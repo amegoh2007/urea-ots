@@ -184,6 +184,16 @@ _STRIP_FEED_DES = {k: STRIP_FEED207_KMOLH.get(k, 0.0)
 STRIP_L0    = _STRIP_FEED_DES["NH3"] / _STRIP_FEED_DES["CO2"]    # 1.9045  design feed N/C
 STRIP_W0    = _STRIP_FEED_DES["H2O"] / _STRIP_FEED_DES["CO2"]    # 1.0610  design feed H/C
 STRIP_UREA0 = _STRIP_FEED_DES["Urea"]                           # 1302.6  design feed urea (kmol/h)
+# --- Stripper liquid-side energy balance (fixed reboiler duty spread over LIVE feed mass) ---
+#   The 329D005 MP-steam reboiler delivers ~Q_steam,des; the per-unit-mass heating available to
+#   the descending liquid is Q_steam/(ṁ_feed·cp).  A reactor-overflow feed spike at constant steam
+#   duty dilutes that specific heating, so the bottom solution leaves COLDER.  ΔT_steam,des is the
+#   design steam specific heating; the carbamate-decomposition endotherm (∝ feed) cancels its own
+#   per-mass term, leaving this steam-dilution swing as the net bottom-temperature response.
+STRIP_CP_BOTTOM      = 2.93     # kJ/kg·K, bottom-solution (urea/carbamate/NH3 melt) mean cp ~175 °C
+STRIP_FEED_DES_KGH   = sum(_STRIP_FEED_DES[k] * MW_COMP[k] for k in MW_COMP)   # 280797 kg/h design feed
+STRIP_DT_STEAM_DES_C = STRIP_DUTY_DES_KW * 3600.0 / (STRIP_FEED_DES_KGH * STRIP_CP_BOTTOM)  # ΔT_steam,des ≈172.4 °C
+STRIP_ETA_KT    = 1.50     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
 STRIP_ETA_KN    = 1.50     # eta_T penalty per unit reactor-feed N/C above design (excess NH3 chokes)
 STRIP_ETA_KW    = 1.50     # eta_T penalty per unit reactor-feed H/C above design (dilution chokes)
 STRIP_ETA_FLOOR = 0.50     # min penalty factor (g_NC, g_HC clamp floor)
@@ -284,16 +294,23 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     #    and load the stripper.  Anchored to reactor design (L0_DES / W0_DES) -> g=1.0 at design.
     dTs = T_steam_C - STRIP_STEAM_T_DES_C
     eta_T_steam = clamp(T_steam_C / STRIP_STEAM_T_DES_C, 0.0, 1.15)      # thermal part (1.0 at design)
+    # liquid-side ENERGY BALANCE: fixed steam duty diluted across the LIVE feed mass (kg/h).  More
+    # feed (reactor overflow valve opened) at constant duty -> less specific heating -> COLDER bottom.
+    #   dT_load = ΔT_steam,des·(ṁ_feed,des/ṁ_feed − 1)   (=0 at design, <0 on a feed spike)
+    m_feed_kgh = sum(feed[k] * MW_COMP[k] for k in MW_COMP)             # live stripper feed mass
+    dT_load    = STRIP_DT_STEAM_DES_C * (STRIP_FEED_DES_KGH / max(m_feed_kgh, 1e-6) - 1.0)
+    g_T        = clamp(1.0 + STRIP_ETA_KT * dT_load / STRIP_T_BOTTOM_DES_C, STRIP_ETA_FLOOR, 1.05)
     L_react = reactor.L0_DES if L_feed is None else L_feed              # reactor-feed N/C
     W_react = reactor.W0_DES if W_feed is None else W_feed              # reactor-feed H/C
     g_NC = clamp(1.0 - STRIP_ETA_KN * (L_react - reactor.L0_DES), STRIP_ETA_FLOOR, 1.05)
     g_HC = clamp(1.0 - STRIP_ETA_KW * (W_react - reactor.W0_DES), STRIP_ETA_FLOOR, 1.05)
-    eta_T = clamp(eta_T_steam * g_NC * g_HC, 0.0, 1.15)                  # reported strip efficiency
+    eta_T = clamp(eta_T_steam * g_NC * g_HC * g_T, 0.0, 1.15)            # reported strip efficiency (incl. feed-load thermal)
     L_strip = (feed["NH3"] / feed["CO2"]) if feed["CO2"] else STRIP_L0   # stripper-feed N/C (diag)
     W_strip = (feed["H2O"] / feed["CO2"]) if feed["CO2"] else STRIP_W0   # stripper-feed H/C (diag)
 
     # 3. reactions: hydrolysis scales with penalized eta_T; biuret = Arrhenius k0 exp(-Ea/RT)*[Urea].
-    T_bot_K = (STRIP_T_BOTTOM_DES_C + 0.7 * dTs) + 273.15
+    T_bot_C = STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_load                 # TT-322004 dynamic bottom temp
+    T_bot_K = T_bot_C + 273.15
     xi_hyd = STRIP_XI_HYD_DES * eta_T
     xi_biu = (STRIP_XI_BIU_DES
               * math.exp((STRIP_BIU_EA / STRIP_R_GAS_J) * (1.0 / STRIP_T_BIU_DES_K - 1.0 / T_bot_K))
@@ -313,7 +330,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     eta_co2 = clamp(0.5 + 0.5 * co2_scale, 0.4, 1.05)
     eta_P   = clamp(2.0 - P_bara / STRIP_P_DES_BARA, 0.85, 1.15)
     mod = clamp(eta_T_steam * eta_co2 * eta_P, 0.0, 1.12)
-    slip = max(1.0 - g_NC, 0.0) + max(1.0 - g_HC, 0.0)                  # 0.0 at design
+    slip = max(1.0 - g_NC, 0.0) + max(1.0 - g_HC, 0.0) + max(1.0 - g_T, 0.0)  # +feed-load thermal breakthrough
     top = {}; bot = {}
     for k in MW_COMP:
         f = clamp(STRIP_FRAC_DES.get(k, 0.0) * mod, 0.0, 0.999)
@@ -337,9 +354,10 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "top_comp_pct": {k: (top[k] / top_n * 100.0 if top_n else 0.0) for k in MW_COMP},   # mol %
         "bot_mass_pct": {k: (bot_kgh[k] / bot_m * 100.0 if bot_m else 0.0) for k in MW_COMP},# mass %
         "T_top": STRIP_T_TOPGAS_DES_C + 0.6 * dTs,
-        "T_bot": STRIP_T_BOTTOM_DES_C + 0.7 * dTs,
+        "T_bot": T_bot_C,
         "xi_hyd": xi_hyd, "xi_biu": xi_biu, "eta_T": eta_T, "T_steam": T_steam_C,
-        "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC,
+        "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC, "g_T": g_T,
+        "dT_load": dT_load, "m_feed_kgh": m_feed_kgh,                    # liquid-side energy-balance diag
         "L_strip": L_strip, "W_strip": W_strip, "slip": slip,
     }
 
