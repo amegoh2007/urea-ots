@@ -193,6 +193,12 @@ STRIP_UREA0 = _STRIP_FEED_DES["Urea"]                           # 1302.6  design
 STRIP_CP_BOTTOM      = 2.93     # kJ/kg·K, bottom-solution (urea/carbamate/NH3 melt) mean cp ~175 °C
 STRIP_FEED_DES_KGH   = sum(_STRIP_FEED_DES[k] * MW_COMP[k] for k in MW_COMP)   # 280797 kg/h design feed
 STRIP_DT_STEAM_DES_C = STRIP_DUTY_DES_KW * 3600.0 / (STRIP_FEED_DES_KGH * STRIP_CP_BOTTOM)  # ΔT_steam,des ≈172.4 °C
+# --- CO2 stripping-gas endotherm (Stamicarbon G/L): the bottom CO2 sweep is held by the compressor while
+#   the reactor liquid feed varies.  When ṁ_feed collapses at constant CO2, the Gas/Liquid ratio spikes,
+#   forcing carbamate decomposition + NH3/CO2 evaporation -- a strong ENDOTHERM that OVERPOWERS the steam
+#   heat and pulls the bottom COLDER.  Acts only on EXCESS G/L (feed-lean / CO2-rich); saturates (no pole).
+STRIP_STRIPCOOL_MAX  = 72.0     # °C, max forced-decomposition/evaporation endotherm (G/L -> ∞ asymptote)
+STRIP_STRIPCOOL_KGL  = 1.80     # cooling ramp per unit excess G/L ratio ((G/L)/(G/L)_des − 1)
 STRIP_ETA_KT    = 1.50     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
 STRIP_ETA_KN    = 1.50     # eta_T penalty per unit reactor-feed N/C above design (excess NH3 chokes)
 STRIP_ETA_KW    = 1.50     # eta_T penalty per unit reactor-feed H/C above design (dilution chokes)
@@ -308,6 +314,13 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     cap        = max(STRIP_STEAM_T_DES_C - STRIP_T_BOTTOM_DES_C + 0.3 * dTs, 1e-6)
     dT_load    = cap * (1.0 - math.exp(-raw_load / cap)) if raw_load > 0.0 else raw_load
     g_T        = clamp(1.0 + STRIP_ETA_KT * dT_load / STRIP_T_BOTTOM_DES_C, STRIP_ETA_FLOOR, 1.05)
+    # CO2 STRIPPING ENDOTHERM (G/L cooling): excess strip gas per liquid forces carbamate decomposition +
+    # NH3/CO2 flash -> endothermic.  r_GL = (G/L)/(G/L)_des − 1 = co2_scale·ṁ_feed,des/ṁ_feed − 1 (=0 at
+    # design).  Only feed-lean / CO2-rich (r_GL>0) cools; the feed-spike branch (r_GL<0) is left untouched.
+    # Saturates at STRIP_STRIPCOOL_MAX as G/L -> ∞ (no 1/ṁ_feed pole).  This term OVERPOWERS the dT_load
+    # steam-heating spike on a low-feed / constant-CO2 excursion -> bottom goes COLDER, not toward steam sat.
+    r_GL     = co2_scale * STRIP_FEED_DES_KGH / max(m_feed_kgh, 1e-6) - 1.0
+    dT_strip = -STRIP_STRIPCOOL_MAX * (1.0 - math.exp(-STRIP_STRIPCOOL_KGL * max(r_GL, 0.0)))
     L_react = reactor.L0_DES if L_feed is None else L_feed              # reactor-feed N/C
     W_react = reactor.W0_DES if W_feed is None else W_feed              # reactor-feed H/C
     g_NC = clamp(1.0 - STRIP_ETA_KN * (L_react - reactor.L0_DES), STRIP_ETA_FLOOR, 1.05)
@@ -317,7 +330,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     W_strip = (feed["H2O"] / feed["CO2"]) if feed["CO2"] else STRIP_W0   # stripper-feed H/C (diag)
 
     # 3. reactions: hydrolysis scales with penalized eta_T; biuret = Arrhenius k0 exp(-Ea/RT)*[Urea].
-    T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_load, T_steam_C) # TT-322004 dynamic bottom temp (≤ steam sat)
+    T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_load + dT_strip, T_steam_C) # TT-322004 (steam-heat + G/L strip-cool, ≤ steam sat)
     T_bot_K = T_bot_C + 273.15
     xi_hyd = STRIP_XI_HYD_DES * eta_T
     xi_biu = (STRIP_XI_BIU_DES
@@ -365,7 +378,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "T_bot": T_bot_C,
         "xi_hyd": xi_hyd, "xi_biu": xi_biu, "eta_T": eta_T, "T_steam": T_steam_C,
         "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC, "g_T": g_T,
-        "dT_load": dT_load, "m_feed_kgh": m_feed_kgh,                    # liquid-side energy-balance diag
+        "dT_load": dT_load, "dT_strip": dT_strip, "r_GL": r_GL, "m_feed_kgh": m_feed_kgh,  # energy-balance + G/L strip-cool diag
         "L_strip": L_strip, "W_strip": W_strip, "slip": slip,
     }
 
