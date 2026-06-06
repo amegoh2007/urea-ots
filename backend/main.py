@@ -296,9 +296,17 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     eta_T_steam = clamp(T_steam_C / STRIP_STEAM_T_DES_C, 0.0, 1.15)      # thermal part (1.0 at design)
     # liquid-side ENERGY BALANCE: fixed steam duty diluted across the LIVE feed mass (kg/h).  More
     # feed (reactor overflow valve opened) at constant duty -> less specific heating -> COLDER bottom.
-    #   dT_load = ΔT_steam,des·(ṁ_feed,des/ṁ_feed − 1)   (=0 at design, <0 on a feed spike)
+    #   raw_load = ΔT_steam,des·(ṁ_feed,des/ṁ_feed − 1)   (=0 at design, <0 on a feed spike)
     m_feed_kgh = sum(feed[k] * MW_COMP[k] for k in MW_COMP)             # live stripper feed mass
-    dT_load    = STRIP_DT_STEAM_DES_C * (STRIP_FEED_DES_KGH / max(m_feed_kgh, 1e-6) - 1.0)
+    raw_load   = STRIP_DT_STEAM_DES_C * (STRIP_FEED_DES_KGH / max(m_feed_kgh, 1e-6) - 1.0)
+    # THERMAL CEILING (NTU effectiveness): the bottom liquid can never out-heat the condensing shell
+    # steam, so the raw 1/ṁ_feed pole must NOT diverge as ṁ_feed -> 0; T_bot asymptotes to T_steam.
+    # cap = live head-room below steam sat (T_steam − T_bot,des = gap_des + 0.3·dTs).  The low-feed
+    # (heating) branch saturates as  dT_load = cap·(1 − e^{−raw/cap}) -> cap  (T_bot -> T_steam),
+    # staying slope-1 near design.  The feed-spike COOLING branch (raw<0) is the committed, validated
+    # behaviour -> left untouched.  A hard min(…, T_steam) on T_bot below backstops the invariant.
+    cap        = max(STRIP_STEAM_T_DES_C - STRIP_T_BOTTOM_DES_C + 0.3 * dTs, 1e-6)
+    dT_load    = cap * (1.0 - math.exp(-raw_load / cap)) if raw_load > 0.0 else raw_load
     g_T        = clamp(1.0 + STRIP_ETA_KT * dT_load / STRIP_T_BOTTOM_DES_C, STRIP_ETA_FLOOR, 1.05)
     L_react = reactor.L0_DES if L_feed is None else L_feed              # reactor-feed N/C
     W_react = reactor.W0_DES if W_feed is None else W_feed              # reactor-feed H/C
@@ -309,7 +317,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     W_strip = (feed["H2O"] / feed["CO2"]) if feed["CO2"] else STRIP_W0   # stripper-feed H/C (diag)
 
     # 3. reactions: hydrolysis scales with penalized eta_T; biuret = Arrhenius k0 exp(-Ea/RT)*[Urea].
-    T_bot_C = STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_load                 # TT-322004 dynamic bottom temp
+    T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_load, T_steam_C) # TT-322004 dynamic bottom temp (≤ steam sat)
     T_bot_K = T_bot_C + 273.15
     xi_hyd = STRIP_XI_HYD_DES * eta_T
     xi_biu = (STRIP_XI_BIU_DES
