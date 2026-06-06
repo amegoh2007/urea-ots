@@ -1267,22 +1267,6 @@ def step_sim(dt: float) -> dict:
             "NC_B": round(NC_B, 3),           # N/C ratio 321P002B (molar)
         },
         "ext_override": s.ext_override,
-        "SIC_321950": {
-            "pv":     round(s.SIC_321950.pv, 1),
-            "sp":     round(s.SIC_321950.sp, 1),
-            "sp_rpm": round(s.SIC_321950.sp / 100.0 * PUMP_RATED_RPM, 0),
-            "mv":     round(s.SIC_321950.mv, 1),
-            "nc":     round(s.SIC_321950.bias, 1),
-            "mode":   s.SIC_321950.mode,
-        },
-        "SIC_321951": {
-            "pv":     round(s.SIC_321951.pv, 1),
-            "sp":     round(s.SIC_321951.sp, 1),
-            "sp_rpm": round(s.SIC_321951.sp / 100.0 * PUMP_RATED_RPM, 0),
-            "mv":     round(s.SIC_321951.mv, 1),
-            "nc":     round(s.SIC_321951.bias, 1),
-            "mode":   s.SIC_321951.mode,
-        },
         "trips": s.trips,
         "controllers": {tag: ctrl.to_packet()
                         for tag, ctrl in s.controllers.items()},

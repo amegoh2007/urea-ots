@@ -38,8 +38,8 @@
       { k: 'pt2',  t: 'ind', x: 949,  y: 317, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
       { k: 'i61',  t: 'ind', x: 894,  y: 469, tag: 'IT-321961', bind: 'pumpA.current',u: 'A',    dec: 1 },
       { k: 'i62',  t: 'ind', x: 1119, y: 469, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
-      { k: 's50',  t: 'ind', x: 862,  y: 528, tag: 'SIC-321950',bind: 'SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950' },
-      { k: 's51',  t: 'ind', x: 1104, y: 528, tag: 'SIC-321951',bind: 'SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951' },
+      { k: 's50',  t: 'ind', x: 862,  y: 528, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950' },
+      { k: 's51',  t: 'ind', x: 1104, y: 528, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951' },
       { k: 'nca',  t: 'ind', x: 296,  y: 522, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
       { k: 'ncb',  t: 'ind', x: 300,  y: 587, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
       { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LI_321501',  u: '%',     dec: 1 },
@@ -53,22 +53,22 @@
     ],
     'screen-322-2': [
       // ---- indicators: ALL tags positioned; only 3 bound, rest = white-frame empty slots ----
-      { k: 'ti09',  t: 'ind', x: 225, y: 68,  tag: 'TI-322009'  },
-      { k: 'tt11',  t: 'ind', x: 390, y: 65,  tag: 'TT-322011'  },
-      { k: 'h604',  t: 'ind', x: 929, y: 63,  tag: 'HIC-322604' },
-      { k: 'hv604', t: 'ind', x: 928, y: 137, tag: 'HV-322604'  },
+      { k: 'ti09',  t: 'ind', x: 225, y: 68,  tag: 'TI-322009',  bind: 'SCRUB_322E003.TT_322009',  u: 'C', dec: 1 },
+      { k: 'tt11',  t: 'ind', x: 390, y: 65,  tag: 'TT-322011',  bind: 'SCRUB_322E003.TT_322011',  u: 'C', dec: 1 },
+      { k: 'h604',  t: 'ind', x: 929, y: 63,  tag: 'HIC-322604', bind: 'SCRUB_322E003.HIC_322604', u: '%', dec: 1 },
+      { k: 'hv604', t: 'ind', x: 928, y: 137, tag: 'HV-322604',  bind: 'SCRUB_322E003.HV_322604',  u: '%', dec: 1 },
       { k: 'ti12',  t: 'ind', x: 143, y: 152, tag: 'TT-322012', bind: 'EJ_322F001.TT_322012', u: 'C',     dec: 1 },
       { k: 'pi2',   t: 'ind', x: 239, y: 151, tag: 'PI-329201', bind: 'EJ_322F001.PI_329201', u: 'BAR A', dec: 1 },
       { k: 'i007',  t: 'ind', x: 995, y: 227, tag: 'IT-329007'  },
       { k: 'ti02',  t: 'ind', x: 255, y: 243, tag: 'TI-322002', bind: 'EJ_322F001.TI_322002', u: 'C',     dec: 1 },
-      { k: 'tv05',  t: 'ind', x: 714, y: 253, tag: 'TV-329005'  },
-      { k: 'tic05', t: 'ind', x: 497, y: 277, tag: 'TIC-329005' },
-      { k: 'lt01',  t: 'ind', x: 142, y: 306, tag: 'LT-329501'  },
-      { k: 'fic09', t: 'ind', x: 590, y: 334, tag: 'FIC-329409' },
-      { k: 'fv09',  t: 'ind', x: 714, y: 327, tag: 'FV-329409'  },
-      { k: 'tdy25', t: 'ind', x: 494, y: 344, tag: 'TDY-329125' },
+      { k: 'tv05',  t: 'ind', x: 714, y: 253, tag: 'TV-329005',  bind: 'SCRUB_322E003.ccw.TIC_329005.op', u: '%',   dec: 1 },
+      { k: 'tic05', t: 'ind', x: 497, y: 277, tag: 'TIC-329005', bind: 'SCRUB_322E003.ccw.TIC_329005.pv', u: 'C',   dec: 1 },
+      { k: 'lt01',  t: 'ind', x: 142, y: 306, tag: 'LT-329501',  bind: 'SCRUB_322E003.LT_329501',        u: '%',   dec: 1 },
+      { k: 'fic09', t: 'ind', x: 590, y: 334, tag: 'FIC-329409', bind: 'SCRUB_322E003.ccw.FIC_329409.pv', u: 'T/H', dec: 1 },
+      { k: 'fv09',  t: 'ind', x: 714, y: 327, tag: 'FV-329409',  bind: 'SCRUB_322E003.ccw.FIC_329409.op', u: '%',   dec: 1 },
+      { k: 'tdy25', t: 'ind', x: 494, y: 344, tag: 'TDY-329125', bind: 'SCRUB_322E003.ccw.TDY_329125',   u: 'C',   dec: 1 },
       { k: 'i008',  t: 'ind', x: 995, y: 351, tag: 'IT-329008'  },
-      { k: 'ti25',  t: 'ind', x: 988, y: 402, tag: 'TI-329125'  },
+      { k: 'ti25',  t: 'ind', x: 988, y: 402, tag: 'TI-329125',  bind: 'SCRUB_322E003.ccw.TT_329125',    u: 'C', dec: 1 },
       { k: 'h602',  t: 'ind', x: 103, y: 531, tag: 'HIC-322602',bind: 'HIC_322602', u: '%',     dec: 1, face: 'hic' },
       { k: 't21',   t: 'ind', x: 148, y: 652, tag: 'TI-321020', bind: 'TI_321020',  u: 'C',     dec: 1 },
       // pumps (state-only: no backend toggle handler yet -> local toggle)
@@ -83,6 +83,11 @@
       { k: 'xv1', t: 'xv',   x: 214, y: 593, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
       // HV-322602 opening (driven by HIC-322602) — placed below h602 per updated 322-2 tagged
       { k: 'hv602', t: 'ind', x: 128, y: 578, tag: 'HV-322602', bind: 'HIC_322602', u: '%', dec: 1 },
+      // ---- stream-inspector hotspots (click = composition/properties popup; drag in edit mode to align) ----
+      { k: 'strm-soffg', t: 'strm', stream: 'SCRUB_OFFGAS',    tag: 'SCRUBBER OFF-GAS → HV-322604', x: 560,  y: 60,  w: 230, h: 16 },
+      { k: 'strm-soglp', t: 'strm', stream: 'SCRUB_OFFGAS_LP', tag: 'OFF-GAS LP → 322C001',         x: 1005, y: 150, w: 150, h: 16 },
+      { k: 'strm-ccws',  t: 'strm', stream: 'CCW_SUPPLY',      tag: 'CCW SUPPLY → 322E003',         x: 840,  y: 285, w: 90,  h: 16 },
+      { k: 'strm-ccwr',  t: 'strm', stream: 'CCW_RETURN',      tag: 'CCW RETURN → 329P006 A/B',     x: 1010, y: 430, w: 80,  h: 16 },
       // ---- screen-nav hotspots (Item 3): jump to equipment's home screen ----
       { k: 'nav-r001', t: 'nav', x: 6, y: 104, w: 78, h: 24, tag: '322R001 → 322-1', goto: 'screen-322-1' },
       { k: 'nav-e002', t: 'nav', x: 6, y: 164, w: 96, h: 26, tag: '322E002 → 322-1', goto: 'screen-322-1' },
@@ -96,12 +101,12 @@
       { k: 'strm-carb',  t: 'strm', stream: 'CARB_RECYCLE', tag: 'CARBAMATE EX 322E003',  x: 560, y: 360, w: 160, h: 18 },
       { k: 'strm-ejd',   t: 'strm', stream: 'EJ_DISCH',     tag: 'CARB. LIQ. → 322E002',  x: 760, y: 340, w: 160, h: 18 },
       { k: 'strm-stop',  t: 'strm', stream: 'STRIP_TOP',    tag: 'STRIP TOP GAS',         x: 760, y: 200, w: 160, h: 18 },
-      { k: 'strm-sbot',  t: 'strm', stream: 'STRIP_BOT',    tag: 'STRIP BOTTOM SOLN',     x: 600, y: 660, w: 160, h: 18 },
+      { k: 'strm-sbot',  t: 'strm', stream: 'STRIP_BOT',    tag: 'STRIP BOTTOM SOLN',     x: 1012, y: 518, w: 40, h: 110 },
       { k: 'strm-prod',  t: 'strm', stream: 'HPCC_PROD',    tag: 'HPCC PRODUCT → 322R001',x: 980, y: 300, w: 160, h: 18 },
       { k: 'strm-stm',   t: 'strm', stream: 'HPCC_STEAM',   tag: 'LP STEAM 4.4 BARA',     x: 980, y: 180, w: 160, h: 18 },
       { k: 'strm-cond',  t: 'strm', stream: 'HPCC_COND',    tag: 'BFW/COND → 322E002',    x: 980, y: 420, w: 160, h: 18 },
-      { k: 'strm-rov',   t: 'strm', stream: 'REACT_OVERFLOW', tag: 'OVERFLOW → 322E001',    x: 1080, y: 420, w: 170, h: 18 },
-      { k: 'strm-rog',   t: 'strm', stream: 'REACT_OFFGAS',   tag: 'REACTOR GAS → 322E003', x: 1080, y: 170, w: 170, h: 18 },
+      { k: 'strm-rov',   t: 'strm', stream: 'REACT_OVERFLOW', tag: 'OVERFLOW → 322E001',    x: 650, y: 376, w: 220, h: 20 },
+      { k: 'strm-rog',   t: 'strm', stream: 'REACT_OFFGAS',   tag: 'REACTOR GAS → 322E003', x: 840, y: 84, w: 240, h: 20 },
       // ===== CO2 FEED LINE (Item 5) — bound to backend CO2_FEED packet =====
       { k: 'hic203', t: 'ind',    x: 100,  y: 472, tag: 'HIC-322203', bind: 'CO2_FEED.HIC_322203', u: '%',     dec: 1, face: 'hic2' },
       { k: 'pv203',  t: 'avalve', x: 197,  y: 486, tag: 'PV-322203',  bind: 'CO2_FEED.PV_322203',  u: '%',     dec: 1 },
@@ -117,8 +122,8 @@
       { k: 'pa', t: 'pump', x: 58, y: 57,  bind: 'pumpA', id: 'A', tag: '321P002A' },
       { k: 'pb', t: 'pump', x: 58, y: 121, bind: 'pumpB', id: 'B', tag: '321P002B' },
       // ---- pump speed / ratio controllers (modelled in 321) ----
-      { k: 's950b', t: 'ind', x: 491, y: 443, tag: 'SIC-321950',    bind: 'SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950' },
-      { k: 's951b', t: 'ind', x: 497, y: 492, tag: 'SIC-321951',    bind: 'SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951' },
+      { k: 's950b', t: 'ind', x: 491, y: 443, tag: 'SIC-321950',    bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950' },
+      { k: 's951b', t: 'ind', x: 497, y: 492, tag: 'SIC-321951',    bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951' },
       { k: 'nca2',  t: 'ind', x: 419, y: 448, tag: 'N/C 321P002A',  bind: 'ratio.NC_A', u: '', dec: 3 },
       { k: 'ncb2',  t: 'ind', x: 414, y: 497, tag: 'N/C 321P002B',  bind: 'ratio.NC_B', u: '', dec: 3 },
       // ---- screen-nav hotspots (Item 3) ----
@@ -126,7 +131,7 @@
       { k: 'nav-e003', t: 'nav', x: 1271, y: 78,  w: 80, h: 22, tag: '322E003 → 322-2', goto: 'screen-322-2' },
       { k: 'nav-f001', t: 'nav', x: 1283, y: 113, w: 80, h: 22, tag: '322F001 → 322-2', goto: 'screen-322-2' },
       // ---- white-frame (unbound: downstream 322 reactor/scrubber/condenser, bind when modelled) ----
-      { k: 'at701',  t: 'ind', x: 209,  y: 285, tag: 'AT-322701' },
+      { k: 'at701',  t: 'ind', x: 209,  y: 285, tag: 'AT-322701', bind: 'REACT_322R001.AT_322701', u: 'N/C', dec: 3 },
       { k: 'lt504',  t: 'ind', x: 354,  y: 326, tag: 'LT-322504', bind: 'REACT_322R001.LT_322504', u: '%', dec: 1 },
       { k: 'pt9201', t: 'ind', x: 740,  y: 42,  tag: 'PT-329201', bind: 'EJ_322F001.PI_329201', u: 'BAR A', dec: 1 },   // same loop 329201 as 322-2 PI-329201 (322E003 overflow P); PT=field xmtr, PI=indicator, one backend key
       { k: 'tt009',  t: 'ind', x: 595,  y: 105, tag: 'TT-322009', bind: 'REACT_322R001.TT_322009', u: 'C', dec: 1 },
@@ -256,7 +261,8 @@
       return;
     } else if (o.t === 'ind') {
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
-      if (o.fp && window.openFaceplate) { window.openFaceplate(o.fp); return; }
+      if (o.fp === 'SIC_321950' && window.openF50) { window.openF50(); return; }   // SIC_321950 REST faceplate
+      if (o.fp === 'SIC_321951' && window.openF51) { window.openF51(); return; }   // SIC_321951 REST faceplate
       if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); return; }   // any *IC-3* -> generic faceplate
       return;
     }

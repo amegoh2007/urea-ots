@@ -35,6 +35,8 @@
   .ov.ind .ou{color:#82b3a3;font-weight:normal;margin-left:3px;font-size:9px;}
   .ov.ind.empty{min-width:34px;height:16px;background:rgba(8,16,14,.45);border:1px solid #ffffff;color:#eef;font:normal 8px Consolas,monospace;letter-spacing:-.3px;}
   .ov.ind.fp{border-color:#7fd0d8;box-shadow:0 0 0 1px rgba(127,208,216,.25);}
+  .ov.strm{background:rgba(64,224,255,.06);border:1px dashed rgba(64,224,255,.45);border-radius:2px;}
+  .ov.strm:hover{background:rgba(64,224,255,.22);border-color:#41e0ff;box-shadow:0 0 0 1px rgba(64,224,255,.4);}
   body.ov-editing .ov{outline:1px dashed #ffd000;cursor:move;}
   #ov-edit{position:fixed;top:6px;right:8px;z-index:600;background:#1b4a4f;color:#ffd000;border:1px solid #7fd0d8;padding:4px 10px;font:bold 11px Arial;cursor:pointer;border-radius:4px;}
   body.ov-editing #ov-edit{background:#0aa64d;color:#fff;}
@@ -184,6 +186,16 @@
   #trendModal canvas{background:#000;}
   #streamModal table{width:100%;border-collapse:collapse;font-family:Consolas,monospace;}
   #streamModal td{border:1px solid #555;padding:3px 6px;}
+  /* SIC-321951 faceplate (isolated mode buttons + live mode tag) */
+  .mg51 button{margin-right:4px;width:auto;}
+  .mg51 button.active{background:#0aa64d;border-color:#22ff22;}
+  .f51mode{font-weight:bold;font-family:Consolas,monospace;color:var(--pi-alarm);margin-left:6px;}
+  .f51mode.auto{color:#22ff22;} .f51mode.cas{color:#ffd000;} .f51mode.oos{color:#ff8a3d;}
+  /* SIC-321950 faceplate (isolated mode buttons + live mode tag) */
+  .mg50 button{margin-right:4px;width:auto;}
+  .mg50 button.active{background:#0aa64d;border-color:#22ff22;}
+  .f50mode{font-weight:bold;font-family:Consolas,monospace;color:var(--pi-alarm);margin-left:6px;}
+  .f50mode.auto{color:#22ff22;} .f50mode.cas{color:#ffd000;} .f50mode.oos{color:#ff8a3d;}
 </style>
 </head>
 <body>
@@ -604,24 +616,52 @@
   <div class="btns"><button id="ctl-close">Close</button><button class="primary" id="ctl-set-btn">SET</button></div>
 </div></div>
 
-<!-- Faceplate modal -->
-<div class="modal" id="faceplate">
+<!-- SIC-321950 faceplate (REST /api/ctrl/SIC_321950 + controllers WS block) -->
+<div class="modal" id="f50">
   <div class="card">
-    <h3 id="fp-title">SIC FACEPLATE</h3>
-    <div class="row"><label>PV (%)</label><input id="fp-pv" type="number" step="0.1"></div>
-    <div class="row"><label id="fp-sp-label">SP (%)</label><input id="fp-sp" type="number" step="0.1"></div>
-    <div class="row"><label>MV (%)</label><input id="fp-mv" type="number" step="0.1" readonly></div>
-    <div class="row"><label>N/C bias (%)</label><input id="fp-nc" type="number" step="0.1"></div>
+    <h3>SIC-321950 &mdash; 321P002A SPEED<span id="f50-mode" class="f50mode man">MAN</span></h3>
+    <div class="row"><label>PV (%)</label><input id="f50-pv" type="number" step="0.1" readonly></div>
+    <div class="row"><label>SP (%)</label><input id="f50-sp" type="number" step="0.1"></div>
+    <div class="row"><label>MV (%)</label><input id="f50-mv" type="number" step="0.1"></div>
+    <div class="row"><label>N/C bias (%)</label><input id="f50-bias" type="number" step="0.1"></div>
     <div class="row"><label>Mode</label>
-      <div class="mode-group">
-        <button data-mode="MAN" id="fp-man">MAN</button>
-        <button data-mode="AUTO" id="fp-auto">AUTO</button>
-        <button data-mode="CAS" id="fp-cas">CAS</button>
+      <div class="mg50">
+        <button data-mode="MAN"  id="f50-man">MAN</button>
+        <button data-mode="AUTO" id="f50-auto">AUTO</button>
+        <button data-mode="CAS"  id="f50-cas">CAS</button>
+        <button data-mode="OOS"  id="f50-oos">OOS</button>
       </div>
     </div>
+    <div id="f50-status" style="font-size:11px;color:#ff5252;min-height:14px;margin:2px 0;"></div>
+    <div id="f50-msg" style="font-size:11px;min-height:14px;margin:2px 0;"></div>
     <div class="btns">
-      <button class="primary" id="fp-apply">Apply</button>
-      <button id="fp-close">Close</button>
+      <button class="primary" id="f50-set">SET</button>
+      <button id="f50-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- SIC-321951 faceplate (REST /api/ctrl/SIC_321951 + controllers WS block) -->
+<div class="modal" id="f51">
+  <div class="card">
+    <h3>SIC-321951 &mdash; 321P002B SPEED<span id="f51-mode" class="f51mode man">MAN</span></h3>
+    <div class="row"><label>PV (%)</label><input id="f51-pv" type="number" step="0.1" readonly></div>
+    <div class="row"><label>SP (%)</label><input id="f51-sp" type="number" step="0.1"></div>
+    <div class="row"><label>MV (%)</label><input id="f51-mv" type="number" step="0.1"></div>
+    <div class="row"><label>N/C bias (%)</label><input id="f51-bias" type="number" step="0.1"></div>
+    <div class="row"><label>Mode</label>
+      <div class="mg51">
+        <button data-mode="MAN"  id="f51-man">MAN</button>
+        <button data-mode="AUTO" id="f51-auto">AUTO</button>
+        <button data-mode="CAS"  id="f51-cas">CAS</button>
+        <button data-mode="OOS"  id="f51-oos">OOS</button>
+      </div>
+    </div>
+    <div id="f51-status" style="font-size:11px;color:#ff5252;min-height:14px;margin:2px 0;"></div>
+    <div id="f51-msg" style="font-size:11px;min-height:14px;margin:2px 0;"></div>
+    <div class="btns">
+      <button class="primary" id="f51-set">SET</button>
+      <button id="f51-close">Close</button>
     </div>
   </div>
 </div>

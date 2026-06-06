@@ -15,7 +15,8 @@ function connect(){
     pushHistory(s);
     render(s);
     render322(s);
-    refreshFaceplate(s);
+    if(window.refreshF50) window.refreshF50(s);
+    if(window.refreshF51) window.refreshF51(s);
     if(window.OV_apply) window.OV_apply(s);
   };
   ws.onclose = () => setTimeout(connect, 1000);
@@ -24,7 +25,6 @@ function connect(){
 function send(msg){ if(ws && ws.readyState===1) ws.send(JSON.stringify(msg)); }
 window.otsSend = send;
 window.openTrend = (tag)=>openTrend(tag);
-window.openFaceplate = (id)=>openFaceplate(id);
 
 function pushHistory(s){
   const tnow = s.t || (Date.now()/1000);
@@ -153,82 +153,21 @@ document.getElementById('ratioSP').addEventListener('change', e=>{
   const v=parseFloat(e.target.value); if(!isNaN(v)) send({type:'ratio_set',sp:v});
 });
 
-// ---------- Faceplate (SIC) ----------
+// ---------- Faceplate routing (SIC controllers -> dedicated REST modals) ----------
 const FP_MAP = {
   PA_speed:'SIC_321950', PA_current:'SIC_321950',
   PB_speed:'SIC_321951', PB_current:'SIC_321951'
 };
-let fpTag=null;
 const $ = id => document.getElementById(id);
-
-// MAN -> PV active | AUTO -> SP active | CAS -> N/C active (PV & MV inactive)
-function fpEnable(mode){
-  const m = {
-    MAN: {pv:true, sp:false, nc:false},
-    AUTO:{pv:false,sp:true, nc:false},
-    CAS: {pv:false,sp:false,nc:true }
-  }[mode] || {};
-  $('fp-pv').disabled = !m.pv;
-  $('fp-sp').disabled = !m.sp;
-  $('fp-mv').disabled = true;     // MV = output, always read-only
-  $('fp-nc').disabled = !m.nc;
-  fpRelabelSP(mode);
-}
-// AUTO setpoint is entered/displayed in RPM; MAN/CAS keep % opening
-function fpRelabelSP(mode){
-  const auto = (mode==='AUTO');
-  $('fp-sp-label').textContent = auto ? 'SP (RPM)' : 'SP (%)';
-  const d = (fpTag && lastState[fpTag]) || {};
-  if(document.activeElement!==$('fp-sp'))
-    $('fp-sp').value = auto ? fmt(d.sp_rpm) : fmt(d.sp);
-}
-function openFaceplate(id){
-  fpTag=id;
-  const s = lastState[id] || {};
-  $('fp-title').textContent = id.replace('_','-')+' FACEPLATE';
-  $('fp-pv').value = fmt(s.pv);
-  $('fp-sp').value = fmt(s.sp);
-  $('fp-mv').value = fmt(s.mv);
-  $('fp-nc').value = fmt(s.nc);
-  ['MAN','AUTO','CAS'].forEach(m=>{
-    $('fp-'+m.toLowerCase()).classList.toggle('active', (s.mode||'MAN')===m);
-  });
-  fpEnable(s.mode||'MAN');
-  $('faceplate').classList.add('show');
-}
-function fpActiveMode(){
-  return ['MAN','AUTO','CAS'].find(m=>$('fp-'+m.toLowerCase()).classList.contains('active')) || 'MAN';
-}
-function refreshFaceplate(s){
-  if(!$('faceplate').classList.contains('show') || !fpTag) return;
-  const d=s[fpTag]; if(!d) return;
-  if(document.activeElement!==$('fp-mv')) $('fp-mv').value = fmt(d.mv);
-  if($('fp-pv').disabled && document.activeElement!==$('fp-pv')) $('fp-pv').value = fmt(d.pv);
-  if($('fp-sp').disabled && document.activeElement!==$('fp-sp'))
-    $('fp-sp').value = (fpActiveMode()==='AUTO') ? fmt(d.sp_rpm) : fmt(d.sp);
-}
-document.querySelectorAll('.mode-group button').forEach(b=>{
-  b.onclick = ()=>{
-    document.querySelectorAll('.mode-group button').forEach(x=>x.classList.remove('active'));
-    b.classList.add('active');
-    fpEnable(b.dataset.mode);
-  };
-});
-$('fp-apply').onclick = ()=>{
-  if(!fpTag) return;
-  const mode = fpActiveMode();
-  const msg = {type:'controller_set', id:fpTag, mode};
-  if(mode==='MAN'){ const v=parseFloat($('fp-pv').value); if(!isNaN(v)) msg.op=v; }   // PV entry = direct opening
-  if(mode==='AUTO'){ const v=parseFloat($('fp-sp').value); if(!isNaN(v)) msg.sp_rpm=v; }   // AUTO SP in RPM
-  if(mode==='CAS'){ const v=parseFloat($('fp-nc').value); if(!isNaN(v)) msg.nc=v; }
-  send(msg);
-};
-$('fp-close').onclick = ()=>{ $('faceplate').classList.remove('show'); fpTag=null; };
 
 // ---------- Indicators: left=faceplate, right=trend menu ----------
 document.querySelectorAll('.pi[data-tag]').forEach(el=>{
   const tag = el.dataset.tag;
-  el.addEventListener('click', ()=>{ if(FP_MAP[tag]) openFaceplate(FP_MAP[tag]); });
+  el.addEventListener('click', ()=>{
+    const fp = FP_MAP[tag];
+    if(fp==='SIC_321950') { if(window.openF50) window.openF50(); }        // SIC_321950 REST faceplate
+    else if(fp==='SIC_321951') { if(window.openF51) window.openF51(); }   // SIC_321951 REST faceplate
+  });
   el.addEventListener('contextmenu', e=>{ e.preventDefault(); openCtxMenu(e.pageX,e.pageY,tag); });
 });
 
@@ -325,7 +264,10 @@ const STREAM_TAG = {
   EJ_DISCH:'CARB. LIQ. → 322E002', CO2_FEED:'CO2 FEED GAS',
   STRIP_TOP:'STRIP TOP GAS', STRIP_BOT:'STRIP BOTTOM SOLN',
   HPCC_PROD:'HPCC PRODUCT → 322R001', HPCC_STEAM:'LP STEAM 4.4 BARA',
-  HPCC_COND:'BFW/COND → 322E002'
+  HPCC_COND:'BFW/COND → 322E002',
+  REACT_OVERFLOW:'OVERFLOW → 322E001', REACT_OFFGAS:'REACTOR GAS → 322E003',
+  SCRUB_OFFGAS:'SCRUBBER OFF-GAS → HV-322604', SCRUB_OFFGAS_LP:'OFF-GAS LP → 322C001',
+  CCW_SUPPLY:'CCW SUPPLY → 322E003', CCW_RETURN:'CCW RETURN → 329P006 A/B'
 };
 function tagOf(el){
   if(el.dataset && el.dataset.tip) return el.dataset.tip;
@@ -489,7 +431,7 @@ function render322(s){
     const st=load(), o=parseFloat(op.value), p=parseFloat(sp.value);
     st[cur.tag]={ mode, op:isNaN(o)?null:o, sp:isNaN(p)?null:p };
     save(st);
-    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
+    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
     const msg={type:T[cur.tag]||'controller_set', id:cur.tag, mode};
     if(mode==='MAN'  && !isNaN(o)) msg.op=o;
     if(mode==='AUTO' && !isNaN(p)) msg.sp=p;
@@ -547,3 +489,254 @@ document.querySelectorAll('[data-goto]').forEach(el=>{
 });
 
 connect();
+
+// ---------- SIC_321951 faceplate: REST /api/ctrl write + controllers WS read ----------
+// Single source of truth = backend. Buttons POST commands; WS controllers block renders state.
+// Gating mirrors backend transition rules: SP editable AUTO-only, MV editable MAN-only,
+// N/C bias editable CAS-only, nothing editable OOS.
+(function(){
+  const TAG = 'SIC_321951';
+  const URL = '/api/ctrl/' + TAG;
+  const f = id => document.getElementById(id);
+  const modal = f('f51');
+  if(!modal) return;
+
+  // mode -> which REST verb the SET button issues (null = SET disabled)
+  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:'set_bias', OOS:null };
+  // mode -> which input element backs the active verb
+  const INPUT = { set_op:'f51-mv', set_sp:'f51-sp', set_bias:'f51-bias' };
+  let curMode = 'MAN';
+
+  const cdata = s => (s && s.controllers && s.controllers[TAG]) || null;
+
+  function setMsg(txt, ok){
+    const el = f('f51-msg');
+    el.textContent = txt || '';
+    el.style.color = ok ? '#7fffae' : '#ff7f7f';
+  }
+
+  // toggle disabled/active state of inputs + mode buttons for a mode
+  function applyGates(mode){
+    curMode = mode;
+    f('f51-sp').disabled   = (mode !== 'AUTO');   // SP: AUTO only
+    f('f51-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
+    f('f51-bias').disabled = (mode !== 'CAS');    // N/C bias: CAS only
+    f('f51-set').disabled  = (VERB[mode] == null);
+    ['MAN','AUTO','CAS','OOS'].forEach(m =>
+      f('f51-' + m.toLowerCase()).classList.toggle('active', m === mode));
+    const mt = f('f51-mode');
+    mt.textContent = mode;
+    mt.className = 'f51mode ' + mode.toLowerCase();
+  }
+
+  // write field values from a controller packet, respecting focus (don't clobber typing)
+  function fillFields(d){
+    const ae = document.activeElement;
+    f('f51-pv').value = fmt(d.pv);                                  // PV: always read-only/live
+    if(ae !== f('f51-mv'))   f('f51-mv').value   = fmt(d.mv);
+    if(ae !== f('f51-sp'))   f('f51-sp').value   = fmt(d.sp);
+    if(ae !== f('f51-bias')) f('f51-bias').value = fmt(d.bias);
+    const st = d.status || {};
+    const flags = [];
+    if(st.pv_bad)      flags.push('PV BAD');
+    if(st.mv_hi_clamp) flags.push('MV @ HI');
+    if(st.mv_lo_clamp) flags.push('MV @ LO');
+    f('f51-status').textContent = flags.join('   ');
+  }
+
+  // authoritative GET (used after mode change to capture bumpless SP immediately)
+  async function syncFromServer(){
+    try{
+      const r = await fetch(URL);
+      if(!r.ok) return;
+      const d = await r.json();
+      applyGates(d.mode);
+      fillFields(d);
+    }catch(e){ /* WS refresh will catch up */ }
+  }
+
+  async function post(body){
+    try{
+      const r = await fetch(URL, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok){
+        const detail = (j && j.detail) || r.statusText || ('HTTP ' + r.status);
+        setMsg(r.status + ': ' + detail, false);   // 404 tag / 422 mode / 409 illegal
+        return null;
+      }
+      setMsg(j.reason === 'clamped' ? 'set (clamped to limit)' : 'OK', true);
+      return j;
+    }catch(err){
+      setMsg('network error: ' + err.message, false);
+      return null;
+    }
+  }
+
+  function open(){
+    const d = cdata(lastState);
+    if(d){ applyGates(d.mode); fillFields(d); setMsg('', true); }
+    else { setMsg('waiting for controller data...', false); }
+    modal.classList.add('show');
+    syncFromServer();
+  }
+  window.openF51 = open;
+
+  // live render from WS controllers block (called every packet while open)
+  window.refreshF51 = function(s){
+    if(!modal.classList.contains('show')) return;
+    const d = cdata(s);
+    if(!d) return;
+    if(d.mode !== curMode) applyGates(d.mode);   // backend-driven mode change (e.g. bad-PV -> MAN)
+    fillFields(d);
+  };
+
+  // mode buttons -> POST set_mode, then pull authoritative state
+  ['MAN','AUTO','CAS','OOS'].forEach(m => {
+    f('f51-' + m.toLowerCase()).onclick = async () => {
+      const j = await post({ set_mode: m });
+      if(j){ applyGates(j.mode); syncFromServer(); }
+    };
+  });
+
+  // SET -> POST the active mode's value
+  f('f51-set').onclick = async () => {
+    const verb = VERB[curMode];
+    if(!verb) return;
+    const v = parseFloat(f(INPUT[verb]).value);
+    if(isNaN(v)){ setMsg('enter a numeric value', false); return; }
+    await post({ [verb]: v });
+  };
+
+  // Enter in any editable field triggers SET
+  ['f51-sp','f51-mv','f51-bias'].forEach(id =>
+    f(id).addEventListener('keydown', e => { if(e.key === 'Enter') f('f51-set').click(); }));
+
+  f('f51-close').onclick = () => modal.classList.remove('show');
+})();
+
+// ---------- SIC_321950 faceplate: REST /api/ctrl write + controllers WS read ----------
+// Single source of truth = backend. Buttons POST commands; WS controllers block renders state.
+// Gating mirrors backend transition rules: SP editable AUTO-only, MV editable MAN-only,
+// N/C bias editable CAS-only, nothing editable OOS.
+(function(){
+  const TAG = 'SIC_321950';
+  const URL = '/api/ctrl/' + TAG;
+  const f = id => document.getElementById(id);
+  const modal = f('f50');
+  if(!modal) return;
+
+  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:'set_bias', OOS:null };
+  const INPUT = { set_op:'f50-mv', set_sp:'f50-sp', set_bias:'f50-bias' };
+  let curMode = 'MAN';
+
+  const cdata = s => (s && s.controllers && s.controllers[TAG]) || null;
+
+  function setMsg(txt, ok){
+    const el = f('f50-msg');
+    el.textContent = txt || '';
+    el.style.color = ok ? '#7fffae' : '#ff7f7f';
+  }
+
+  function applyGates(mode){
+    curMode = mode;
+    f('f50-sp').disabled   = (mode !== 'AUTO');   // SP: AUTO only
+    f('f50-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
+    f('f50-bias').disabled = (mode !== 'CAS');    // N/C bias: CAS only
+    f('f50-set').disabled  = (VERB[mode] == null);
+    ['MAN','AUTO','CAS','OOS'].forEach(m =>
+      f('f50-' + m.toLowerCase()).classList.toggle('active', m === mode));
+    const mt = f('f50-mode');
+    mt.textContent = mode;
+    mt.className = 'f50mode ' + mode.toLowerCase();
+  }
+
+  function fillFields(d){
+    const ae = document.activeElement;
+    f('f50-pv').value = fmt(d.pv);                                  // PV: always read-only/live
+    if(ae !== f('f50-mv'))   f('f50-mv').value   = fmt(d.mv);
+    if(ae !== f('f50-sp'))   f('f50-sp').value   = fmt(d.sp);
+    if(ae !== f('f50-bias')) f('f50-bias').value = fmt(d.bias);
+    const st = d.status || {};
+    const flags = [];
+    if(st.pv_bad)      flags.push('PV BAD');
+    if(st.mv_hi_clamp) flags.push('MV @ HI');
+    if(st.mv_lo_clamp) flags.push('MV @ LO');
+    f('f50-status').textContent = flags.join('   ');
+  }
+
+  async function syncFromServer(){
+    try{
+      const r = await fetch(URL);
+      if(!r.ok) return;
+      const d = await r.json();
+      applyGates(d.mode);
+      fillFields(d);
+    }catch(e){ /* WS refresh will catch up */ }
+  }
+
+  async function post(body){
+    try{
+      const r = await fetch(URL, {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+      });
+      const j = await r.json().catch(() => ({}));
+      if(!r.ok){
+        const detail = (j && j.detail) || r.statusText || ('HTTP ' + r.status);
+        setMsg(r.status + ': ' + detail, false);   // 404 tag / 422 mode / 409 illegal
+        return null;
+      }
+      setMsg(j.reason === 'clamped' ? 'set (clamped to limit)' : 'OK', true);
+      return j;
+    }catch(err){
+      setMsg('network error: ' + err.message, false);
+      return null;
+    }
+  }
+
+  function open(){
+    const d = cdata(lastState);
+    if(d){ applyGates(d.mode); fillFields(d); setMsg('', true); }
+    else { setMsg('waiting for controller data...', false); }
+    modal.classList.add('show');
+    syncFromServer();
+  }
+  window.openF50 = open;
+
+  // live render from WS controllers block (called every packet while open)
+  window.refreshF50 = function(s){
+    if(!modal.classList.contains('show')) return;
+    const d = cdata(s);
+    if(!d) return;
+    if(d.mode !== curMode) applyGates(d.mode);   // backend-driven mode change (e.g. bad-PV -> MAN)
+    fillFields(d);
+  };
+
+  // mode buttons -> POST set_mode, then pull authoritative state
+  ['MAN','AUTO','CAS','OOS'].forEach(m => {
+    f('f50-' + m.toLowerCase()).onclick = async () => {
+      const j = await post({ set_mode: m });
+      if(j){ applyGates(j.mode); syncFromServer(); }
+    };
+  });
+
+  // SET -> POST the active mode's value
+  f('f50-set').onclick = async () => {
+    const verb = VERB[curMode];
+    if(!verb) return;
+    const v = parseFloat(f(INPUT[verb]).value);
+    if(isNaN(v)){ setMsg('enter a numeric value', false); return; }
+    await post({ [verb]: v });
+  };
+
+  // Enter in any editable field triggers SET
+  ['f50-sp','f50-mv','f50-bias'].forEach(id =>
+    f(id).addEventListener('keydown', e => { if(e.key === 'Enter') f('f50-set').click(); }));
+
+  f('f50-close').onclick = () => modal.classList.remove('show');
+})();
