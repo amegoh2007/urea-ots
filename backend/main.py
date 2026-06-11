@@ -175,6 +175,9 @@ STRIP_P_DES_BARA    = 144.0       # bar a, tube-side (synthesis-loop) pressure
 # --- Design product temperatures (C):
 STRIP_T_TOPGAS_DES_C = 187.0      # TT-322013 top gas -> 322E002
 STRIP_T_BOTTOM_DES_C = 172.0      # TT-322004 bottom solution -> LV-322501 (pre-flash)
+STRIP_T_FLOOD_ANCHOR_C = reactor.T0_DES_C   # 183.0 °C (= REACT_OVERFLOW_T_C, fwd-defined): hot reactor
+#   liquor T the bottom asymptotes UP to when the stripper floods (GAP #1 ceiling). reactor.T0_DES_C is
+#   import-time available (REACT_OVERFLOW_T_C is defined after this module's design-point self-call).
 # --- N/C + H/C stripping-efficiency penalty + Arrhenius biuret (live reactor-effluent coupling) ---
 #   Design stripper feed = stream-207 overflow + CO2 strip gas (molfrac x design CO2 rate).  L0/W0/U0
 #   anchors are DERIVED from existing design constants (no fabricated numbers); differ from the
@@ -309,11 +312,22 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # steam, so the raw 1/ṁ_feed pole must NOT diverge as ṁ_feed -> 0; T_bot asymptotes to T_steam.
     # cap = live head-room below steam sat (T_steam − T_bot,des = gap_des + 0.3·dTs).  The low-feed
     # (heating) branch saturates as  dT_load = cap·(1 − e^{−raw/cap}) -> cap  (T_bot -> T_steam),
-    # staying slope-1 near design.  The feed-spike COOLING branch (raw<0) is the committed, validated
-    # behaviour -> left untouched.  A hard min(…, T_steam) on T_bot below backstops the invariant.
+    # staying slope-1 near design.  dT_load remains the EFFICIENCY driver (g_T below): on the high-feed
+    # (flood) branch it stays the RAW negative load so η_T keeps choking and volatile slip keeps rising.
     cap        = max(STRIP_STEAM_T_DES_C - STRIP_T_BOTTOM_DES_C + 0.3 * dTs, 1e-6)
     dT_load    = cap * (1.0 - math.exp(-raw_load / cap)) if raw_load > 0.0 else raw_load
     g_T        = clamp(1.0 + STRIP_ETA_KT * dT_load / STRIP_T_BOTTOM_DES_C, STRIP_ETA_FLOOR, 1.05)
+    # GAP #1 fix — SEPARATE T_bot driver (dT_bot), decoupled from the g_T driver (dT_load).  The OLD
+    # code fed the raw linear dT_load straight into T_bot, so a feed spike (raw<0) drove the bottom T
+    # DOWN without bound (ṁ_feed→∞ ⇒ raw→−ΔT_steam,des ⇒ T_bot→−0.4 °C, absurd & wrong sign).
+    # Physics: a flooded stripper is STEAM-LIMITED — carbamate decomposition stalls, its endotherm fades,
+    # and the already-hot reactor liquor (STRIP_T_FLOOD_ANCHOR_C ≈ REACT_OVERFLOW_T_C) falls through the
+    # tubes untouched.  So T_bot must RISE and asymptote UP to the reactor overflow T, never crash:
+    #   dT_bot = D·(1 − e^{raw/D}),  D = anchor − T_bot,des ;  raw≤0 ⇒ dT_bot ∈ [0, D)  (→ +D as ṁ→∞)
+    # Low-feed branch keeps dT_bot = dT_load (heat toward steam sat).  g_T (above) is UNTOUCHED — still on
+    # the raw load — so η_T / slip stay choked: a flood gives HOT but UNSTRIPPED bottoms, slip still climbs.
+    strip_flood_gap = max(STRIP_T_FLOOD_ANCHOR_C - STRIP_T_BOTTOM_DES_C, 1e-6)
+    dT_bot = dT_load if raw_load > 0.0 else strip_flood_gap * (1.0 - math.exp(raw_load / strip_flood_gap))
     # CO2 STRIPPING ENDOTHERM (G/L cooling): excess strip gas per liquid forces carbamate decomposition +
     # NH3/CO2 flash -> endothermic.  r_GL = (G/L)/(G/L)_des − 1 = co2_scale·ṁ_feed,des/ṁ_feed − 1 (=0 at
     # design).  Only feed-lean / CO2-rich (r_GL>0) cools; the feed-spike branch (r_GL<0) is left untouched.
@@ -330,7 +344,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     W_strip = (feed["H2O"] / feed["CO2"]) if feed["CO2"] else STRIP_W0   # stripper-feed H/C (diag)
 
     # 3. reactions: hydrolysis scales with penalized eta_T; biuret = Arrhenius k0 exp(-Ea/RT)*[Urea].
-    T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_load + dT_strip, T_steam_C) # TT-322004 (steam-heat + G/L strip-cool, ≤ steam sat)
+    T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_bot + dT_strip, T_steam_C) # TT-322004 (steam-heat + G/L strip-cool, ≤ steam sat; dT_bot flood-anchored to reactor T)
     T_bot_K = T_bot_C + 273.15
     xi_hyd = STRIP_XI_HYD_DES * eta_T
     xi_biu = (STRIP_XI_BIU_DES
@@ -378,7 +392,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "T_bot": T_bot_C,
         "xi_hyd": xi_hyd, "xi_biu": xi_biu, "eta_T": eta_T, "T_steam": T_steam_C,
         "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC, "g_T": g_T,
-        "dT_load": dT_load, "dT_strip": dT_strip, "r_GL": r_GL, "m_feed_kgh": m_feed_kgh,  # energy-balance + G/L strip-cool diag
+        "dT_load": dT_load, "dT_bot": dT_bot, "dT_strip": dT_strip, "r_GL": r_GL, "m_feed_kgh": m_feed_kgh,  # energy-balance + G/L strip-cool diag
         "L_strip": L_strip, "W_strip": W_strip, "slip": slip,
     }
 

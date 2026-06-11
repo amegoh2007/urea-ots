@@ -103,6 +103,16 @@ def react_couple(feed: dict, overflow_scaled: dict, xi_urea_scaled: float,
     xi_urea = xi_urea_scaled * conversion_factor(L, W, T_c)
     d = xi_urea - xi_urea_scaled                             # extra urea vs pinned design
     ov = dict(overflow_scaled)
+    # GAP #5 fix: bound the stoichiometric shift by what the overflow tear stream actually holds.
+    # overflow_scaled shrinks with phi (HV-322605), but d scales only with co2_scale -> at phi -> 0
+    # the unclamped shift drove ov["NH3"]/ov["CO2"] NEGATIVE (phantom mass into the stripper feed).
+    # The shift consumes CO2 + 2 NH3 when d>0 (forward) or Urea + H2O when d<0 (reverse): cap d so
+    # every touched component stays >= 0.  Atom closure is preserved (same stoichiometric vector).
+    if d > 0.0:
+        d = min(d, ov.get("CO2", 0.0), 0.5 * ov.get("NH3", 0.0))
+    elif d < 0.0:
+        d = max(d, -ov.get("Urea", 0.0), -ov.get("H2O", 0.0))
+    xi_urea = xi_urea_scaled + d                             # report the extent actually realized
     ov["Urea"] = ov.get("Urea", 0.0) + d
     ov["CO2"]  = ov.get("CO2",  0.0) - d
     ov["NH3"]  = ov.get("NH3",  0.0) - 2.0 * d
