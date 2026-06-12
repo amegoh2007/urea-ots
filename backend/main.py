@@ -242,6 +242,7 @@ LV322501_KVS        = 36.0        # m3/h flow coefficient (full open) [reference
 LV322501_OPEN_DES   = 82.0        # %, opening at the design bottom-solution flow
 LV322501_DP_DES_BAR = 139.8       # bar, design pressure drop (144.0 - 4.2)
 STRIP_P_DOWN_BARA   = 4.2         # bar a, downstream of LV-322501 (-> 323C003)
+LV322501_P_DOWN_BARA = 4.0        # bar a, L3-1 LP-loop downstream ref for live-P_syn drain head
 
 
 def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float) -> dict:
@@ -928,7 +929,8 @@ class State:
         # L3 phase-boundary diagnostics (mushy-zone / crystallization detection, Batch 2)
         self.flags = {"SCRUBBER_SOLIDIFICATION": False,
                       "STRIPPER_SOLIDIFICATION": False,
-                      "CARBAMATE_DEPOSITION":    False}
+                      "CARBAMATE_DEPOSITION":    False,
+                      "RATIO_PV_BAD":            False}   # L3-3 N/C measurement-validity (Batch 3)
 
 
 state = State()
@@ -1044,11 +1046,19 @@ def step_sim(dt: float) -> dict:
     phi_fwd = phi_m * phi_m
 
     # Ratio block PV = molar N/C per feed-ratio eq:  N/C = (m_NH3/m_CO2)*2.584.
-    m_CO2 = max(s.F_CO2_th, 1e-6)
-    NC_A  = (F_A_th / m_CO2) * NC_FACTOR      # N/C contributed by pump A
-    NC_B  = (F_B_th / m_CO2) * NC_FACTOR      # N/C contributed by pump B
-    s.ratio_PV  = NC_A + NC_B                 # total system N/C = (m_NH3_tot/m_CO2)*2.584
-    s.ratio_bal = s.ratio_PV
+    # L3-3 measurement-validity gate: below 5% of design CO2 feed the divisor collapses and the molar
+    #   N/C is numerically meaningless -> hold the last-good ratio and raise RATIO_PV_BAD to freeze the
+    #   cascade (no garbage SP propagation on black-start / CO2-feed loss).
+    NC_A = NC_B = 0.5 * s.ratio_PV            # telemetry default = held last-good split (gated branch)
+    if s.F_CO2_th < 0.05 * (CO2_DES_KGH / 1000.0):
+        s.flags["RATIO_PV_BAD"] = True        # s.ratio_PV / s.ratio_bal hold last-good (not recomputed)
+    else:
+        s.flags["RATIO_PV_BAD"] = False
+        m_CO2 = max(s.F_CO2_th, 1e-6)
+        NC_A  = (F_A_th / m_CO2) * NC_FACTOR      # N/C contributed by pump A
+        NC_B  = (F_B_th / m_CO2) * NC_FACTOR      # N/C contributed by pump B
+        s.ratio_PV  = NC_A + NC_B                 # total system N/C = (m_NH3_tot/m_CO2)*2.584
+        s.ratio_bal = s.ratio_PV
 
     # ----- HP Stripper 322E001: reactor effluent + live CO2 strip gas -> top gas (322E002)
     #   + bottom solution (LV-322501).  Shell = condensing 329D005 MP steam (boundary T).
@@ -1073,9 +1083,14 @@ def step_sim(dt: float) -> dict:
                               0.0, 100.0)
     lic["e_prev"] = e_lvl                       # track for bumpless MAN->AUTO
     lv_open = clamp(lic["op"], 0.0, 100.0)
-    # LV-322501 linear characteristic anchored at design; mild sqrt(dP) synthesis coupling.
-    dP_lv = max(STRIP_P_DES_BARA - STRIP_P_DOWN_BARA, 0.0)
-    drain_kgh = STRIP_BOT_DES_KGH * (lv_open / LV322501_OPEN_DES) * (dP_lv / LV322501_DP_DES_BAR) ** 0.5
+    # L3-1 LV-322501 letdown driven by the LIVE synthesis pressure (PT-329201 = s.p_syn_bara), not a
+    #   frozen design ΔP.  As the loop depressurizes (black-start / blowdown) the drain head collapses
+    #   -> drain -> 0, no spurious letdown from an empty vessel.  Uses prior-step p_syn (same loop-break
+    #   convention as nu / dP_vent).  P_down = 4.0 bar a (LP loop downstream of LV-322501).
+    #       m_drain = m_drain_des * (Op_LV/Op_LV_des) * sqrt(max(P_syn - P_down,0)/(P_syn_des - P_down))
+    dP_lv = max(s.p_syn_bara - LV322501_P_DOWN_BARA, 0.0)
+    drain_kgh = STRIP_BOT_DES_KGH * (lv_open / LV322501_OPEN_DES) \
+                * (dP_lv / max(SYN_P_DES_BARA - LV322501_P_DOWN_BARA, 1e-6)) ** 0.5
     # L3-6 stripper-bottoms mushy-zone: urea-melt crystallization (T_cryst=132.7 C) throttles the
     #   LV-322501 drain as T_bot falls; the un-drained mass stays in the LT-322501 ODE -> level rises.
     f_drain = _f_flow(strip["T_bot"], 132.7)
@@ -1185,8 +1200,16 @@ def step_sim(dt: float) -> dict:
     pt_fwd    = SYN_P_DES_BARA * (1.0 + SYN_P_COUPLING * pb_push)
     pt_target = pt_fwd + SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * SYN_P_DES_BARA \
                        + SYN_P_VENT_GAIN * max(1.0 - vent_frac, 0.0) * SYN_P_DES_BARA   # HV-322604 vent deficit
+    # L3-2 inventory-aware PT floor: a totally empty loop must be able to bottom out at atmospheric,
+    #   not a hard 120 bar.  Loop-mass fraction = mean of the three HP liquid inventories vs their design
+    #   NLL (LT-322504 80%, LT-322E002 50%, LT-322501 50%); == 1.0 at design -> P_min == 120 bar (the
+    #   static SYN_P_MIN_BARA preserved exactly), -> 1.0 atm as the loop empties.
+    #       P_min = 1.0 + 119.0 * clamp(M_loop / M_loop_des, 0, 1)
+    m_loop_frac = clamp((s.react_level_pct + s.hpcc_level_pct + s.strip_level)
+                        / (REACT_LEVEL_NLL_PCT + HPCC_LEVEL_NLL_PCT + STRIP_LEVEL_SP_DES), 0.0, 1.0)
+    p_syn_min   = 1.0 + 119.0 * m_loop_frac
     s.p_syn_bara = clamp(s.p_syn_bara + (dt / (SYN_P_TAU_MIN * 60.0)) * (pt_target - s.p_syn_bara),
-                         SYN_P_MIN_BARA, SYN_P_MAX_BARA)
+                         p_syn_min, SYN_P_MAX_BARA)
     scrub["P_overflow"] = s.p_syn_bara            # PT-329201 dynamic synthesis pressure (bar a)
     scrub["P_offgas"]   = s.p_syn_bara            # off-gas line rides the live synthesis P (HV-322604 P_up)
     scrub["vent_frac"]  = vent_frac               # HV-322604 vent capacity / required purge (<1 -> PT rises)
@@ -1746,6 +1769,10 @@ def _pin_hpcc_ua():
         step_sim(0.1)
     hpcc_322e002 = _orig
     r = _cap["r"]
+    # L3-4 boot-pin domain assert: the UA back-calc log requires 0 < (T_prod_des - T_sat)/(T_adb - T_sat)
+    #   < 1, i.e. T_adb > T_prod_des > T_sat_shell.  A failed warm-up settle (bad steam/feed) would feed
+    #   a non-positive or >1 argument -> ValueError/NaN at import.  Fail loud here instead of hiding it.
+    assert r["T_adb"] > HPCC_T_PROD_DES_C > HPCC_STEAM_TSAT_C, "HPCC UA back-calc domain error"
     HPCC_UA = -r["m_dot"] * HPCC_CP_GAS * math.log(
         (HPCC_T_PROD_DES_C - HPCC_STEAM_TSAT_C) / (r["T_adb"] - HPCC_STEAM_TSAT_C))
     state = State()                                  # discard the warm-up transient (fresh design seed)
