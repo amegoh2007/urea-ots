@@ -109,6 +109,14 @@ EJ_SUC_TOT_DES = sum(EJ_SUCTION_KGH.values())                      # kg/h, desig
 EJ_CARB_FRAC   = {k: EJ_SUCTION_KGH[k] / EJ_SUC_TOT_DES for k in MW_COMP}  # 322E003 overflow comp
 EJ_CP_N, EJ_CP_C, EJ_CP_D = 4.74, 3.10, 3.50    # kJ/kg.K  motive / carbamate / discharge
 EJ_T_SUCTION_C  = 178.8          # C, carbamate suction (322E003 overflow; dH_mix lumped in)
+# design motive-NH3 temp at the ejector nozzle (TI-321020) reconstructed from the live pump-thermal
+# path at the design tank state (T=25 C, level=0.65, P_top=12.3 barg) so the HPCC UA back-calc below
+# sees the SAME cold motive (~28.93 C) the running loop actually feeds, NOT 170 C:
+#   dT_pump = dP/(rho*cp)*(beta*T + (1-eta_h)/eta_h);  EJ_MOTIVE_T_DES_C = T_BL_FEED_C + dT_pump.
+_EJ_P_SUCT_DES  = 12.3 + (NH3_RHO * G * 0.65 * TANK_H) / 1e5 - 0.15
+_EJ_DP_DES_PA   = max(0.0, P_SYN_DOWN_BAR - (_EJ_P_SUCT_DES + P_ATM_BAR)) * 1e5
+EJ_MOTIVE_T_DES_C = T_BL_FEED_C + _EJ_DP_DES_PA / (NH3_RHO * CP_NH3) \
+                    * (BETA_NH3 * (T_BL_FEED_C + 273.15) + (1.0 - ETA_PUMP_HYD) / ETA_PUMP_HYD)
 EJ_P_DISCH_BARA = 144.2          # bar a, diffuser pressure recovery (design)
 EJ_RHO_DISCH    = 877.9          # kg/m3, discharge eff. density (design, comp-invariant)
 EJ_P_SUCTION_BARA = 140.0        # bar a, 322E003 overflow -> 322F001 suction-B line (PI-329201).
@@ -277,6 +285,31 @@ def psat_nh3_bara(T_C: float) -> float:
 
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
+
+
+# ----- L3 boundary guards (Level-3 audit, Batch 1) -----
+def _finite(x, tag: str = "operator input") -> float:
+    """L3-8: reject (raise) a non-finite operator write before casting/clamping.
+    Raises ValueError on NaN/+/-Inf so handle_cmd's caller drops the whole frame."""
+    v = float(x)
+    if not math.isfinite(v):
+        raise ValueError(f"non-finite {tag}: {x!r}")
+    return v
+
+
+def _reject_nonfinite(const: str):
+    """json.loads parse_constant hook: reject NaN / Infinity / -Infinity literals (L3-8)."""
+    raise ValueError(f"non-finite literal in command frame: {const}")
+
+
+def _loads_cmd(msg: str) -> dict:
+    """Parse a WebSocket command frame; reject any non-finite literal at ingress (L3-8 gate)."""
+    return json.loads(msg, parse_constant=_reject_nonfinite)
+
+
+def _pv_ok(*vals) -> bool:
+    """L3-9: True iff every value is a finite real number (hand-rolled-loop bad-PV guard)."""
+    return all(isinstance(v, (int, float)) and math.isfinite(v) for v in vals)
 
 
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
@@ -606,21 +639,27 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
     q_sens_kw = gas_m * HPCC_CP_GAS * max(gas_feed["T_top"] - HPCC_T_PROD_DES_C, 0.0) / 3600.0
     duty_kw   = q_carb_kw + q_sens_kw
     steam_kgh = duty_kw * 3600.0 / HPCC_LATENT_4BAR
-    # 4. design-pinned single-stream effectiveness-NTU two-phase outlet temp (mass-energy coupled):
-    #       T_prod = T_sat_shell + (T_feed_mix - T_sat_shell) * exp(-UA / (m_dot * cp))
-    #    T_feed_mix = mass-weighted mix of strip-gas (T_top) + ejector-carbamate (T_C) tube-side feeds;
-    #    m_dot = total tube-side throughput.  UA back-calculated at module load so T_prod == 170.0 C
-    #    exactly at m_dot_des.  flow->0 => NTU->inf => T_prod->T_sat_shell (146.3, full quench to shell);
-    #    flow->inf => NTU->0 => T_prod->T_feed_mix (no condensing duty reaches the stream).
+    # 4. adiabatic carbamate-exotherm spike, THEN design-pinned single-stream effectiveness-NTU
+    #    quench against the shell saturation limit (mass-energy coupled, two-phase outlet temp):
+    #       T_adb  = T_feed_mix + q_carb*3600/(m_dot*cp)                 (reaction-heated stream)
+    #       T_prod = T_sat_shell + (T_adb - T_sat_shell)*exp(-UA/(m_dot*cp))   (NTU quench)
+    #    T_feed_mix = mass-weighted mix of strip-gas (T_top) + ejector-carbamate (T_C, COLD motive ~29 C)
+    #    tube-side feeds; m_dot = total tube-side throughput.  The carbamate-formation exotherm q_carb
+    #    lifts the cold mixed feed (~156 C) above the 170 C pin; the shell then quenches it back down.
+    #    q_carb ~ throughput and m_dot ~ throughput, so the spike is INTENSIVE (~const vs flow), keeping
+    #    the asymptotes physical.  UA back-calculated at module load so T_prod == 170.0 C exactly at
+    #    m_dot_des.  flow->0 => NTU->inf => T_prod->T_sat_shell (146.3, full quench to shell);
+    #    flow->inf => NTU->0 => T_prod->T_adb (full adiabatic reaction temp, no shell duty reaches it).
     m_gas_in   = sum(gas_feed["top_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
     m_liq_in   = sum(liq_feed["comp"].get(k, 0.0) for k in MW_COMP)
     m_dot      = m_gas_in + m_liq_in
     T_feed_mix = ((m_gas_in * gas_feed["T_top"] + m_liq_in * liq_feed["T_C"]) / m_dot
                   if m_dot > 1e-9 else HPCC_STEAM_TSAT_C)
+    T_adb      = T_feed_mix + q_carb_kw * 3600.0 / max(m_dot * HPCC_CP_GAS, 1e-9)
     if HPCC_UA is None:                       # module-load back-calc pass: hold the design pin
         T_prod = HPCC_T_PROD_DES_C
     else:
-        T_prod = HPCC_STEAM_TSAT_C + (T_feed_mix - HPCC_STEAM_TSAT_C) \
+        T_prod = HPCC_STEAM_TSAT_C + (T_adb - HPCC_STEAM_TSAT_C) \
                  * math.exp(-HPCC_UA / max(m_dot * HPCC_CP_GAS, 1e-9))
     # bubble-point synthesis pressure of the combined carbamate feed (N/C, H/C molar); replaces the
     # pinned HPCC_P_DES_BARA.  At design this feed's N/C, H/C == reactor.L0_DES/W0_DES -> P=144.2 exact.
@@ -638,7 +677,7 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
         "liq_MW": (liq_m / liq_n if liq_n else 0.0),
         "gas_mol_pct":  {k: (gas[k] / gas_n * 100.0 if gas_n else 0.0) for k in MW_COMP},   # mol %
         "liq_mass_pct": {k: (liq_kgh[k] / liq_m * 100.0 if liq_m else 0.0) for k in MW_COMP},# mass %
-        "T_prod": T_prod, "T_feed_mix": T_feed_mix, "m_dot": m_dot, "P_bara": p_bub,
+        "T_prod": T_prod, "T_feed_mix": T_feed_mix, "T_adb": T_adb, "m_dot": m_dot, "P_bara": p_bub,
         "P_bub": p_bub, "L_hpcc": L_hpcc, "W_hpcc": W_hpcc,
         "duty_kw": duty_kw, "steam_kgh": steam_kgh,
     }
@@ -656,14 +695,15 @@ HPCC_LEVEL_NLL_PCT = 50.0        # LT-322E002 design normal liquid level (% of s
 HPCC_TAU_FILL_MIN  = 6.0         # carbamate-condenser liquid holdup time (level fill const, min)
 _HPCC_DES = hpcc_322e002(
     stripper_322e001(CO2_DES_KGH / 1000.0, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA),
-    ejector_322f001(EJ_MOTIVE_NH3_DES, HPCC_T_PROD_DES_C, EJ_OPEN_DES))            # design (UA=None pass)
+    ejector_322f001(EJ_MOTIVE_NH3_DES, EJ_MOTIVE_T_DES_C, EJ_OPEN_DES))            # design make ref
 HPCC_LIQ_DES_KGH   = _HPCC_DES["liq_kgh"]                                          # design make
-# back-calculate shell conductance UA (kJ/h.K) to pin the effectiveness-NTU outlet to 170.0 C at
-# m_dot_des:  170 = Tsat + (T_feed_mix_des - Tsat)*exp(-UA/(m_dot_des*cp))
-#   => UA = -m_dot_des*cp*ln((T_prod_des - Tsat)/(T_feed_mix_des - Tsat)).
-# T_feed_mix_des (187.46) > T_prod_des (170) > Tsat (146.3) -> argument in (0,1) -> UA > 0 (valid).
-HPCC_UA = -_HPCC_DES["m_dot"] * HPCC_CP_GAS * math.log(
-    (HPCC_T_PROD_DES_C - HPCC_STEAM_TSAT_C) / (_HPCC_DES["T_feed_mix"] - HPCC_STEAM_TSAT_C))
+# HPCC_UA (shell conductance, kJ/h.K) is design-pinned AFTER step_sim is defined, by a one-shot
+# settle warm-up on the LIVE loop (see _pin_hpcc_ua() near the module tail).  The synthetic single-
+# call construction above understates the tube throughput by ~2 % (its stripper sees CO2_DES_KGH
+# directly, not the SETTLED reactor-overflow recycle tear), and with the steep adiabatic-exotherm
+# spike (T_adb_des ~600 C) that 2 % m_dot error displaces the NTU-pinned outlet by ~0.4 C.  Pinning
+# on the settled live design state instead anchors TT-322010 to exactly 170.0 C.  HPCC_UA stays None
+# until that pass runs (None => hpcc_322e002 holds the 170.0 C design pin every tick).
 
 
 def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
@@ -898,7 +938,8 @@ def step_sim(dt: float) -> dict:
     #   (reverse-acting) opens the vent when CO2 line P rises above SP.  Venting bleeds
     #   CO2 to safe location so the feed to 322E001 drops -> N/C ratio + Load follow.
     pic = s.PIC_322203
-    if pic["mode"] == "AUTO":
+    pic["pv_bad"] = not _pv_ok(pic["pv"], pic["sp"])        # L3-9 freeze-last-good on bad PV/SP
+    if pic["mode"] == "AUTO" and not pic["pv_bad"]:
         pic["op"] = clamp(pic["op"] + 0.5 * (pic["pv"] - pic["sp"]) * dt, 0.0, 100.0)
     pv_open = clamp(max(s.HIC_322203, pic["op"]), 0.0, 100.0)
     feed_factor = 1.0 if s.XV_322902 else 0.0          # isolation shut -> no feed
@@ -1011,11 +1052,15 @@ def step_sim(dt: float) -> dict:
     # LIC-322501 bottom-solution level control, DIRECT-acting on the FC LV-322501:
     #   level^ -> op^ -> air-to-open valve opens -> drain^ -> level v  (neg. feedback).
     lic = s.LIC_322501
-    e_lvl = s.strip_level - lic["sp"]          # direct-acting error (level above SP -> open)
-    if lic["mode"] == "AUTO":                  # velocity-form PI (proportional-dominant)
-        lic["op"] = clamp(lic["op"]
-                          + LIC_322501_KC * ((e_lvl - lic["e_prev"]) + (dt / LIC_322501_TI) * e_lvl),
-                          0.0, 100.0)
+    lic["pv_bad"] = not _pv_ok(s.strip_level, lic["sp"])    # L3-9 freeze-last-good on bad PV/SP
+    if lic["pv_bad"]:
+        e_lvl = lic["e_prev"]                  # hold last-good error; op frozen (update skipped)
+    else:
+        e_lvl = s.strip_level - lic["sp"]      # direct-acting error (level above SP -> open)
+        if lic["mode"] == "AUTO":              # velocity-form PI (proportional-dominant)
+            lic["op"] = clamp(lic["op"]
+                              + LIC_322501_KC * ((e_lvl - lic["e_prev"]) + (dt / LIC_322501_TI) * e_lvl),
+                              0.0, 100.0)
     lic["e_prev"] = e_lvl                       # track for bumpless MAN->AUTO
     lv_open = clamp(lic["op"], 0.0, 100.0)
     # LV-322501 linear characteristic anchored at design; mild sqrt(dP) synthesis coupling.
@@ -1069,13 +1114,21 @@ def step_sim(dt: float) -> dict:
     #   circulation + 329E004 tempered-water cooler) removes the carbamate-formation exotherm.
     fic = s.FIC_329409                           # CCW circulation flow controller (FV-329409)
     tic = s.TIC_329005                           # CCW supply-temperature controller (TV-329005)
-    if fic["mode"] == "AUTO":                     # boundary loop holds PV at SP; valve tracks SP
+    fic["pv_bad"] = not _pv_ok(fic["sp"], fic["op"], fic["pv"])   # L3-9 freeze-last-good on bad PV
+    if fic["pv_bad"]:                             # bad PV -> hold design CCW flow; op held last-good
+        if not math.isfinite(fic["op"]):  fic["op"] = SCRUB_FV409_DES_PCT
+        fic["pv"] = SCRUB_CCW_KGH_DES / 1000.0    # coerce finite so no NaN enters m_ccw below
+    elif fic["mode"] == "AUTO":                   # boundary loop holds PV at SP; valve tracks SP
         fic["pv"] = fic["sp"]                      #   op = inverse of MAN valve char. (line below)
         fic["op"] = clamp(SCRUB_FV409_DES_PCT * fic["sp"] / max(SCRUB_CCW_KGH_DES / 1000.0, 1e-6),
                           0.0, 100.0)
     else:                                         # MAN: CCW flow follows FV-329409 opening
         fic["pv"] = (SCRUB_CCW_KGH_DES / 1000.0) * (fic["op"] / SCRUB_FV409_DES_PCT)
-    if tic["mode"] == "AUTO":                      # boundary loop holds PV at SP; valve tracks SP
+    tic["pv_bad"] = not _pv_ok(tic["sp"], tic["op"], tic["pv"])   # L3-9 freeze-last-good on bad PV
+    if tic["pv_bad"]:                             # bad PV -> hold design CCW supply T; op held last-good
+        if not math.isfinite(tic["op"]):  tic["op"] = SCRUB_TV005_DES_PCT
+        tic["pv"] = SCRUB_CCW_T_IN_DES            # coerce finite so no NaN propagates downstream
+    elif tic["mode"] == "AUTO":                    # boundary loop holds PV at SP; valve tracks SP
         tic["pv"] = tic["sp"]                      #   op = inverse of MAN valve char. (line below)
         tic["op"] = clamp(SCRUB_TV005_DES_PCT * (SCRUB_CCW_T_OUT_DES - tic["sp"])
                           / max(SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES, 1e-6),
@@ -1434,70 +1487,70 @@ def handle_cmd(cmd: dict):
                 s.ratio_mode = "AUTO"
                 s.ratio_SP   = round(s.ratio_PV, 3)
         if "op" in cmd and ctrl.mode == "MAN":
-            ctrl.set_op(float(cmd["op"]))
+            ctrl.set_op(_finite(cmd["op"], "op"))
         if "sp_rpm" in cmd and ctrl.mode == "AUTO":     # AUTO setpoint entered as RPM
-            ctrl.set_sp(float(cmd["sp_rpm"]) / PUMP_RATED_RPM * 100.0)
+            ctrl.set_sp(_finite(cmd["sp_rpm"], "sp_rpm") / PUMP_RATED_RPM * 100.0)
         elif "sp" in cmd and ctrl.mode == "AUTO":
-            ctrl.set_sp(float(cmd["sp"]))
+            ctrl.set_sp(_finite(cmd["sp"], "sp"))
         if "nc" in cmd and ctrl.mode == "CAS":
-            ctrl.set_bias(float(cmd["nc"]))
+            ctrl.set_bias(_finite(cmd["nc"], "nc"))
 
     elif t == "ratio_set":
         if "sp" in cmd:
-            s.ratio_SP = float(cmd["sp"])
+            s.ratio_SP = clamp(_finite(cmd["sp"], "ratio_SP"), 2.0, 5.0)
 
     elif t == "co2_set":                       # raw CO2 from 320K002 compressor (t/h)
-        s.F_CO2_raw_th = max(0.0, float(cmd["value"]))
+        s.F_CO2_raw_th = max(0.0, _finite(cmd["value"], "co2"))
 
     elif t == "hic_set":                       # HIC-322602 -> HV-322602 ejector opening
-        s.HIC_322602 = clamp(float(cmd["value"]), 0.0, 100.0)
+        s.HIC_322602 = clamp(_finite(cmd["value"], "value"), 0.0, 100.0)
 
     elif t == "hic2_set":                      # HIC-322203 -> PV-322203 minimum opening
-        s.HIC_322203 = clamp(float(cmd["value"]), 0.0, 100.0)
+        s.HIC_322203 = clamp(_finite(cmd["value"], "value"), 0.0, 100.0)
 
     elif t == "hic605_set":                    # HIC-322605 -> HV-322605 reactor overflow valve
         if "op" in cmd:
-            s.HIC_322605 = clamp(float(cmd["op"]), 0.0, 100.0)
+            s.HIC_322605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
     elif t == "pic_set":                       # PIC-322203 CO2 line-pressure controller
         pic = s.PIC_322203
         if "mode" in cmd:
             pic["mode"] = cmd["mode"]
         if "op" in cmd and pic["mode"] == "MAN":
-            pic["op"] = clamp(float(cmd["op"]), 0.0, 100.0)
+            pic["op"] = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
         if "sp" in cmd:
-            pic["sp"] = float(cmd["sp"])
+            pic["sp"] = clamp(_finite(cmd["sp"], "pic_sp"), 120.0, 175.0)
 
     elif t == "lic_set":                       # LIC-322501 bottom-solution level controller
         lic = s.LIC_322501
         if "mode" in cmd:
             lic["mode"] = cmd["mode"]
         if "op" in cmd and lic["mode"] == "MAN":   # MAN: operator sets LV-322501 opening (%)
-            lic["op"] = clamp(float(cmd["op"]), 0.0, 100.0)
+            lic["op"] = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
         if "sp" in cmd:                            # level setpoint (%)
-            lic["sp"] = clamp(float(cmd["sp"]), 0.0, 100.0)
+            lic["sp"] = clamp(_finite(cmd["sp"], "lic_sp"), 0.0, 100.0)
 
     elif t == "hic604_set":                    # HIC-322604 -> HV-322604 scrubber off-gas valve
         if "op" in cmd:
-            s.HIC_322604 = clamp(float(cmd["op"]), 0.0, 100.0)
+            s.HIC_322604 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
     elif t == "fic_set":                       # FIC-329409 CCW circulation-flow controller -> FV-329409
         fic = s.FIC_329409
         if "mode" in cmd:
             fic["mode"] = cmd["mode"]
         if "op" in cmd and fic["mode"] == "MAN":   # MAN: operator sets FV-329409 opening (%)
-            fic["op"] = clamp(float(cmd["op"]), 0.0, 100.0)
+            fic["op"] = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
         if "sp" in cmd:                            # CCW flow setpoint (t/h)
-            fic["sp"] = max(float(cmd["sp"]), 0.0)
+            fic["sp"] = clamp(_finite(cmd["sp"], "fic_sp"), 0.0, 2.0 * SCRUB_CCW_KGH_DES / 1000.0)
 
     elif t == "tic_set":                       # TIC-329005 CCW supply-temp controller -> TV-329005
         tic = s.TIC_329005
         if "mode" in cmd:
             tic["mode"] = cmd["mode"]
         if "op" in cmd and tic["mode"] == "MAN":   # MAN: operator sets TV-329005 opening (%)
-            tic["op"] = clamp(float(cmd["op"]), 0.0, 100.0)
+            tic["op"] = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
         if "sp" in cmd:                            # CCW supply-temp setpoint (C)
-            tic["sp"] = float(cmd["sp"])
+            tic["sp"] = clamp(_finite(cmd["sp"], "tic_sp"), 20.0, SCRUB_CCW_T_OUT_DES)
 
 
 # ----- FastAPI app -----
@@ -1591,7 +1644,7 @@ async def ws_endpoint(ws: WebSocket):
         while True:
             msg = await ws.receive_text()
             try:
-                handle_cmd(json.loads(msg))
+                handle_cmd(_loads_cmd(msg))
             except Exception as ex:
                 print("cmd error:", ex)
     except WebSocketDisconnect:
@@ -1643,6 +1696,40 @@ class _NoCacheStatic(StaticFiles):
         return resp
 
 app.mount("/", _NoCacheStatic(directory=_FRONTEND, html=True), name="static")
+
+
+def _pin_hpcc_ua():
+    """Design-pin HPCC_UA on the SETTLED live design steady state (not the synthetic single-call
+    _HPCC_DES, which understates tube throughput ~2 %).  With HPCC_UA is None, hpcc_322e002 holds
+    T_prod == 170.0 C every tick, so the mass loop settles to the SAME m_dot/T_adb the NTU run would
+    converge to (T_prod does NOT feed back into any mass: reactor uses fixed REACT_OVERFLOW_T_C, and
+    the ejector/stripper masses are T_prod-independent).  We capture that settled (m_dot, T_adb),
+    back-calc UA from the design NTU pin, then discard the warm-up transient by re-seeding state.
+
+        UA = -m_dot*cp * ln[(T_prod_des - T_sat) / (T_adb - T_sat)]
+
+    This anchors TT-322010 to exactly 170.0 C at 100 % live design steady state."""
+    global HPCC_UA, state, last_packet, hpcc_322e002
+    state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
+    _orig = hpcc_322e002
+    _cap = {}
+    def _cap_hpcc(gas_feed, liq_feed):
+        r = _orig(gas_feed, liq_feed)
+        _cap["r"] = r
+        return r
+    hpcc_322e002 = _cap_hpcc
+    for _ in range(18000):                           # 30 sim-min @ dt=0.1 s -> settled design steady state
+        step_sim(0.1)
+    hpcc_322e002 = _orig
+    r = _cap["r"]
+    HPCC_UA = -r["m_dot"] * HPCC_CP_GAS * math.log(
+        (HPCC_T_PROD_DES_C - HPCC_STEAM_TSAT_C) / (r["T_adb"] - HPCC_STEAM_TSAT_C))
+    state = State()                                  # discard the warm-up transient (fresh design seed)
+    last_packet = {}
+
+
+if HPCC_UA is None:
+    _pin_hpcc_ua()
 
 
 if __name__ == "__main__":
