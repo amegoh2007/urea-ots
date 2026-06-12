@@ -518,6 +518,7 @@ SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exot
 SCRUB_HIC604_DES_PCT = 50.0      # %, HIC-322604 design opening (HV-322604, inert purge)
 SCRUB_HV604_P_OUT    = 4.0       # bar a, 322C001 LP-absorber downstream pressure
 SCRUB_HV604_MU_JT    = 0.55      # C/bar, mixture Joule-Thomson coeff (NH3/CO2-rich off-gas)
+SCRUB_HV604_DP_DES   = SCRUB_OFFGAS_P_BARA - SCRUB_HV604_P_OUT   # 136.7 bar, design ΔP across HV-322604 (dP_des)
 # --- Shell-side CCW (Conditioning Cooling Water) closed loop: 329P006 A/B pump + 329E004 cooler ---
 #   322E003 shell -- TT-329125 -- 329P006 A/B -- FV-329409/FIC-329409 -- TIC-329005 -- shell in;
 #   branch after 329P006: TV-329005 -- 329E002 -- main CCW header (heat rejected via 329E004).
@@ -549,6 +550,7 @@ _HPCC_BUB_T0_K      = HPCC_T_PROD_DES_C + 273.15
 #     First-order accumulation:  tau dPT/dt = PT_fwd + K_def*max(1-rho_cond,0)*PT_des - PT.
 SYN_P_DES_BARA      = SCRUB_OVERFLOW_P_BARA   # 140.7 bar a, PT-329201 design (322E003 overflow line)
 SYN_P_DEFICIT_GAIN  = 0.30       # bar/bar, PT lift per unit condensation deficit (1-rho_cond)  -- calib
+SYN_P_VENT_GAIN     = 0.30       # bar/bar, PT lift per unit HV-322604 vent deficit (1-vent_frac) -- calib
 SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant (vapour inventory)
 SYN_P_MIN_BARA      = 120.0      # bar a, PT clamp floor
 SYN_P_MAX_BARA      = 175.0      # bar a, PT clamp ceiling (relief margin)
@@ -561,6 +563,9 @@ SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES -
 _SCRUB_C_CCW_DES_KWK = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP / 3600.0                                  # ≈355.3 kW/K
 _SCRUB_UAEFF_DES_KWK = SCRUB_Q_CCW_DES_KW / (SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES)             # ≈53.94 kW/K
 SCRUB_UA_KWK         = -_SCRUB_C_CCW_DES_KWK * math.log(1.0 - _SCRUB_UAEFF_DES_KWK / _SCRUB_C_CCW_DES_KWK)  # ≈58.5 kW/K
+SCRUB_T_PROC_C       = 185.0     # C, process-gas (carbamate) condensation ceiling — the absolute max T
+#   the shell side can reach.  GAP #2 ε-NTU anchor: as ṁ_ccw -> 0 (FIC-329409 shut) both TT-329125 and
+#   TT-322002 asymptote here instead of +inf.  > SCRUB_OVERFLOW_T_C design 178.8 (synthesis-P headroom).
 
 
 def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
@@ -573,6 +578,9 @@ def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
     fN = 1.0 + HPCC_BUB_KN * (L - reactor.L0_DES)      # free-NH3 (N/C) volatility lift
     fW = 1.0 + HPCC_BUB_KW * (W - reactor.W0_DES)      # water (H/C) dilution
     return HPCC_P_DES_BARA * cc * max(fN, 0.0) * max(fW, 0.0)
+
+
+HPCC_UA = None       # shell conductance (kJ/h.K); back-calculated at module load (design-pinned)
 
 
 def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
@@ -598,6 +606,22 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
     q_sens_kw = gas_m * HPCC_CP_GAS * max(gas_feed["T_top"] - HPCC_T_PROD_DES_C, 0.0) / 3600.0
     duty_kw   = q_carb_kw + q_sens_kw
     steam_kgh = duty_kw * 3600.0 / HPCC_LATENT_4BAR
+    # 4. design-pinned single-stream effectiveness-NTU two-phase outlet temp (mass-energy coupled):
+    #       T_prod = T_sat_shell + (T_feed_mix - T_sat_shell) * exp(-UA / (m_dot * cp))
+    #    T_feed_mix = mass-weighted mix of strip-gas (T_top) + ejector-carbamate (T_C) tube-side feeds;
+    #    m_dot = total tube-side throughput.  UA back-calculated at module load so T_prod == 170.0 C
+    #    exactly at m_dot_des.  flow->0 => NTU->inf => T_prod->T_sat_shell (146.3, full quench to shell);
+    #    flow->inf => NTU->0 => T_prod->T_feed_mix (no condensing duty reaches the stream).
+    m_gas_in   = sum(gas_feed["top_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+    m_liq_in   = sum(liq_feed["comp"].get(k, 0.0) for k in MW_COMP)
+    m_dot      = m_gas_in + m_liq_in
+    T_feed_mix = ((m_gas_in * gas_feed["T_top"] + m_liq_in * liq_feed["T_C"]) / m_dot
+                  if m_dot > 1e-9 else HPCC_STEAM_TSAT_C)
+    if HPCC_UA is None:                       # module-load back-calc pass: hold the design pin
+        T_prod = HPCC_T_PROD_DES_C
+    else:
+        T_prod = HPCC_STEAM_TSAT_C + (T_feed_mix - HPCC_STEAM_TSAT_C) \
+                 * math.exp(-HPCC_UA / max(m_dot * HPCC_CP_GAS, 1e-9))
     # bubble-point synthesis pressure of the combined carbamate feed (N/C, H/C molar); replaces the
     # pinned HPCC_P_DES_BARA.  At design this feed's N/C, H/C == reactor.L0_DES/W0_DES -> P=144.2 exact.
     _co2   = feed.get("CO2", 0.0)
@@ -614,7 +638,7 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
         "liq_MW": (liq_m / liq_n if liq_n else 0.0),
         "gas_mol_pct":  {k: (gas[k] / gas_n * 100.0 if gas_n else 0.0) for k in MW_COMP},   # mol %
         "liq_mass_pct": {k: (liq_kgh[k] / liq_m * 100.0 if liq_m else 0.0) for k in MW_COMP},# mass %
-        "T_prod": HPCC_T_PROD_DES_C, "P_bara": p_bub,
+        "T_prod": T_prod, "T_feed_mix": T_feed_mix, "m_dot": m_dot, "P_bara": p_bub,
         "P_bub": p_bub, "L_hpcc": L_hpcc, "W_hpcc": W_hpcc,
         "duty_kw": duty_kw, "steam_kgh": steam_kgh,
     }
@@ -630,9 +654,16 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict) -> dict:
 # independent) -> the HPCC level SWELLS (accumulates).
 HPCC_LEVEL_NLL_PCT = 50.0        # LT-322E002 design normal liquid level (% of sump span)
 HPCC_TAU_FILL_MIN  = 6.0         # carbamate-condenser liquid holdup time (level fill const, min)
-HPCC_LIQ_DES_KGH   = hpcc_322e002(
+_HPCC_DES = hpcc_322e002(
     stripper_322e001(CO2_DES_KGH / 1000.0, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA),
-    ejector_322f001(EJ_MOTIVE_NH3_DES, HPCC_T_PROD_DES_C, EJ_OPEN_DES))["liq_kgh"]  # design make
+    ejector_322f001(EJ_MOTIVE_NH3_DES, HPCC_T_PROD_DES_C, EJ_OPEN_DES))            # design (UA=None pass)
+HPCC_LIQ_DES_KGH   = _HPCC_DES["liq_kgh"]                                          # design make
+# back-calculate shell conductance UA (kJ/h.K) to pin the effectiveness-NTU outlet to 170.0 C at
+# m_dot_des:  170 = Tsat + (T_feed_mix_des - Tsat)*exp(-UA/(m_dot_des*cp))
+#   => UA = -m_dot_des*cp*ln((T_prod_des - Tsat)/(T_feed_mix_des - Tsat)).
+# T_feed_mix_des (187.46) > T_prod_des (170) > Tsat (146.3) -> argument in (0,1) -> UA > 0 (valid).
+HPCC_UA = -_HPCC_DES["m_dot"] * HPCC_CP_GAS * math.log(
+    (HPCC_T_PROD_DES_C - HPCC_STEAM_TSAT_C) / (_HPCC_DES["T_feed_mix"] - HPCC_STEAM_TSAT_C))
 
 
 def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
@@ -685,17 +716,22 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)          # kmol/h gas->carbamate
     q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0                # full exotherm (diag)
     q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s × synthesis-vent load PT-329201)
-    dT_ccw    = q_ccw_kw * 3600.0 / (m_ccw_kgh * SCRUB_CCW_CP) if m_ccw_kgh > 0 else 0.0
-    t_ccw_out = t_ccw_in + dT_ccw                                              # TT-329125
-    # ε-NTU process↔CCW thermal bridge: the carbamate-condensation duty q_ccw_kw must cross to the
-    # shell-side CCW through finite conductance UA.  CCW capacity rate falling OR inlet warming
-    # shrinks UA_eff, so the process overflow liquid leaves HOTTER (dynamic energy balance):
-    #   C_ccw = ṁ_ccw·cp ; ε = 1−exp(−UA/C_ccw) ; UA_eff = ε·C_ccw
-    #   T_overflow = t_ccw_in + q_ccw_kw/UA_eff   (design 80 + 5329/53.94 = 178.8 C, pinned)
-    C_ccw_kwk  = m_ccw_kgh * SCRUB_CCW_CP / 3600.0
-    eps_ht     = 1.0 - math.exp(-SCRUB_UA_KWK / max(C_ccw_kwk, 1e-6))
+    # GAP #2 — ε-NTU condenser bridge bounds BOTH the CCW outlet and the process overflow against the
+    # condensation ceiling T_proc, killing the ṁ_ccw -> 0 (FIC-329409 shut) divide-by-zero pole.  Old
+    # code blew up two ways: the raw sensible rise q_ccw/(ṁ_ccw·cp) AND q_ccw/UA_eff both -> ~1e9 C.
+    #   C_ccw = max(ṁ_ccw·cp/3600, 1e-6) ; ε = 1−exp(−UA/C_ccw) ; UA_eff = max(ε·C_ccw, 1e-6)
+    #   T_overflow = min(t_ccw_in + q_ccw/UA_eff, T_proc)        (design 80 + 5329/53.94 = 178.8, pinned)
+    #   T_ccw_out  = t_ccw_in + (T_overflow − t_ccw_in)·ε        (CCW rides the SAME ε toward the LIVE
+    #     condensing temp T_overflow, itself ≤ T_proc).  Because 98.8·UA_eff,des ≡ q_ccw,des, design
+    #     ε·98.8 = q_ccw/C_ccw = 15.0 -> TT-329125 = 95.0 EXACT (holds the line-557 pin); ṁ_ccw -> 0 ->
+    #     ε -> 1 -> T_overflow, T_ccw_out -> T_proc (185) instead of +inf.  Anchoring T_ccw_out's
+    #     gradient to T_overflow (not raw T_proc) is what preserves the 95.0 pin — raw T_proc drifts 95.9.
+    C_ccw_kwk  = max(m_ccw_kgh * SCRUB_CCW_CP / 3600.0, 1e-6)                  # floored heat-capacity rate
+    eps_ht     = 1.0 - math.exp(-SCRUB_UA_KWK / C_ccw_kwk)                     # single-stream effectiveness
     ua_eff_kwk = max(eps_ht * C_ccw_kwk, 1e-6)
-    t_overflow = t_ccw_in + q_ccw_kw / ua_eff_kwk                              # TT-322002 (dynamic)
+    t_overflow = min(t_ccw_in + q_ccw_kw / ua_eff_kwk, SCRUB_T_PROC_C)        # TT-322002 (capped at T_proc)
+    t_ccw_out  = t_ccw_in + (t_overflow - t_ccw_in) * eps_ht                  # TT-329125 (bounded, pinned)
+    dT_ccw     = t_ccw_out - t_ccw_in                                         # TDY-329125 (cond. quality)
     return {"feed_kmolh": feed, "carb_kmolh": carb,
             "offgas_kmolh": offgas, "overflow_kmolh": overflow,
             "closure_resid": closure_resid, "co2_abs": co2_abs,
@@ -707,16 +743,23 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
             "T_overflow": t_overflow, "P_overflow": SCRUB_OVERFLOW_P_BARA}
 
 
-def hv_322604(offgas: dict, T_in: float, hic_pct: float) -> dict:
-    """HV-322604 HP-scrubber off-gas valve — choked isenthalpic letdown 322E003 -> 322C001.
-    Inert purge to the LP absorber.  P drops ~140.7 -> 4 bar a (sonic/choked); Joule-Thomson
-    cooling T_out = T_in − μ_JT·ΔP.  Steam-traced -> single gas phase preserved (no carbamate
-    desublimation at healthy op); composition unchanged.  HIC-322604 sets the opening 1:1."""
-    dP    = max(SCRUB_OFFGAS_P_BARA - SCRUB_HV604_P_OUT, 0.0)
-    T_out = T_in - SCRUB_HV604_MU_JT * dP
-    m_kgh = sum(offgas.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
-    return {"comp_kmolh": dict(offgas), "T_out": round(T_out, 1),
-            "P_out": SCRUB_HV604_P_OUT, "open_pct": hic_pct, "mass_kgh": m_kgh}
+def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float) -> dict:
+    """HV-322604 HP-scrubber off-gas valve — dynamic isenthalpic letdown 322E003 -> 322C001.
+    Inert purge to the LP absorber.  Flow follows the valve hydraulic characteristic, driven by
+    the live controller opening θ (HIC-322604) and √ΔP across the seat:
+        m_og = m_og_des·s · (θ/θ_des) · √(max(P_up−P_down,0)/ΔP_des)   (θ_des = design opening 50%)
+    The incoming `offgas` vector is already the design purge × s, so the valve factor scales it
+    1:1 (composition held; θ=θ_des & P_up=design -> factor=1 -> bit-exact design HMB).  Dynamic
+    Joule-Thomson cooling on the ACTUAL pressure drop:  T_out = T_in − μ_JT·ΔP."""
+    dP    = max(p_up - SCRUB_HV604_P_OUT, 0.0)
+    theta = max(hic_pct, 0.0)
+    valve = (theta / SCRUB_HIC604_DES_PCT) * math.sqrt(dP / SCRUB_HV604_DP_DES)   # θ-opening × √ΔP-ratio
+    comp  = {k: offgas.get(k, 0.0) * valve for k in MW_COMP}                      # throttled flow, comp held
+    T_out = T_in - SCRUB_HV604_MU_JT * dP                                         # dynamic JT letdown
+    m_kgh = sum(comp.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)                   # = m_og_des·s·valve
+    return {"comp_kmolh": comp, "T_out": round(T_out, 1),
+            "P_out": SCRUB_HV604_P_OUT, "P_in": round(p_up, 1), "open_pct": hic_pct,
+            "mass_kgh": m_kgh, "valve_frac": valve, "dP": round(dP, 1)}
 
 
 def react_nc_ratio(comp_kmolh: dict) -> float:
@@ -1044,6 +1087,12 @@ def step_sim(dt: float) -> dict:
     m_ccw_kgh  = max(fic["pv"], 1e-6) * 1000.0    # CCW circulation (t/h -> kg/h)
     top_ratio  = (strip["top_mol"] / STRIP_TOP_MOL_DES) if STRIP_TOP_MOL_DES else 1.0  # stripper overhead push
     nu = s.p_syn_bara / SYN_P_DES_BARA            # vent ratio = PT-329201/PT_des (prior-step state; breaks the algebraic loop)
+    # HV-322604 back-pressure penalty — valve vent capacity vs the scrubber's required inert purge:
+    #   vent_frac = m_og/(m_og_des·s) = (θ/θ_des)·√(ΔP/ΔP_des);  θ_des = design opening (50%, demand-met).
+    #   Pinch below design (vent_frac<1) starves the inert vent -> uncondensed inerts accumulate and
+    #   integrate PT-329201 up.  Uses prior-step p_syn for ΔP (same loop-break convention as nu).
+    dP_vent   = max(s.p_syn_bara - SCRUB_HV604_P_OUT, 0.0)
+    vent_frac = (s.HIC_322604 / SCRUB_HIC604_DES_PCT) * math.sqrt(dP_vent / SCRUB_HV604_DP_DES)
     scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
                           vent_ratio=nu)
     # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
@@ -1066,16 +1115,19 @@ def step_sim(dt: float) -> dict:
     n_pb      = co2_free + nh3_slip                                                   # pressure-building load
     pb_push   = (n_pb - STRIP_TOP_CO2FREE_DES) / STRIP_TOP_MOL_DES if STRIP_TOP_MOL_DES else 0.0
     pt_fwd    = SYN_P_DES_BARA * (1.0 + SYN_P_COUPLING * pb_push)
-    pt_target = pt_fwd + SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * SYN_P_DES_BARA
+    pt_target = pt_fwd + SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * SYN_P_DES_BARA \
+                       + SYN_P_VENT_GAIN * max(1.0 - vent_frac, 0.0) * SYN_P_DES_BARA   # HV-322604 vent deficit
     s.p_syn_bara = clamp(s.p_syn_bara + (dt / (SYN_P_TAU_MIN * 60.0)) * (pt_target - s.p_syn_bara),
                          SYN_P_MIN_BARA, SYN_P_MAX_BARA)
     scrub["P_overflow"] = s.p_syn_bara            # PT-329201 dynamic synthesis pressure (bar a)
+    scrub["P_offgas"]   = s.p_syn_bara            # off-gas line rides the live synthesis P (HV-322604 P_up)
+    scrub["vent_frac"]  = vent_frac               # HV-322604 vent capacity / required purge (<1 -> PT rises)
     scrub["rho_cond"]   = rho_cond                # condensation capacity/demand (diag; <1 -> PT rises)
     scrub["co2_free"]   = co2_free                # free acid CO2 overhead (pressure-building, kmol/h)
     scrub["pb_push"]    = pb_push                 # PT forward push (pressure-building overhead deviation)
     scrub["top_ratio"]  = top_ratio              # total overhead ratio (diag only; superseded by pb_push)
     scrub["P_bub_hpcc"] = hpcc["P_bub"]           # 322E002 bubble-point synthesis P (bar a, diag)
-    hv604 = hv_322604(scrub["offgas_kmolh"], scrub["T_offgas"], s.HIC_322604)
+    hv604 = hv_322604(scrub["offgas_kmolh"], scrub["T_offgas"], s.HIC_322604, scrub["P_offgas"])
     TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 − TIC-329005 (condensation quality)
     q_e004_kw  = scrub["q_ccw_kw"]                # 329E004 tempered-water-cooler duty (loop closure)
 
@@ -1309,6 +1361,8 @@ def step_sim(dt: float) -> dict:
             "HV_322604":   round(s.HIC_322604, 1),           # HV-322604 opening (tracks HIC 1:1)
             "HIC_322604":  round(s.HIC_322604, 1),           # off-gas valve controller (%)
             "TT_322011_lp":round(hv604["T_out"], 1),         # off-gas T after HV-322604 (JT-cooled, C)
+            "og_lp_th":    round(hv604["mass_kgh"] / 1000.0, 3),  # HV-322604 vented off-gas mass flow (t/h, live)
+            "vent_frac":   round(scrub["vent_frac"], 4),     # HV-322604 vent capacity / required purge (<1 -> PT rises)
             "P_offgas":    round(scrub["P_offgas"], 1),      # off-gas line P (bar a)
             "P_overflow":  round(scrub["P_overflow"], 1),    # PT-329201 overflow line P (bar a)
             "TT_322002":   round(scrub["T_overflow"], 1),    # overflow temp -> 322F001 (C)
