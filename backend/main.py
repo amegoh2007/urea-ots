@@ -312,6 +312,12 @@ def _pv_ok(*vals) -> bool:
     return all(isinstance(v, (int, float)) and math.isfinite(v) for v in vals)
 
 
+def _f_flow(T: float, T_cryst: float, dT_mush: float = 5.0) -> float:
+    """L3 generic mushy-zone flow factor (Batch 2): 1.0 fully molten, ramps linearly to 0.0 at the
+    crystallization solidus.  f = clamp((T - T_cryst)/dT_mush, 0, 1) -> liquidus at T_cryst+dT_mush."""
+    return clamp((T - T_cryst) / dT_mush, 0.0, 1.0)
+
+
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
                      overflow_kmolh: dict = None, L_feed: float = None,
                      W_feed: float = None) -> dict:
@@ -919,6 +925,10 @@ class State:
         self.ext_override = False
         # trips
         self.trips = {"21_2": False, "21_8": False, "21_10": False}
+        # L3 phase-boundary diagnostics (mushy-zone / crystallization detection, Batch 2)
+        self.flags = {"SCRUBBER_SOLIDIFICATION": False,
+                      "STRIPPER_SOLIDIFICATION": False,
+                      "CARBAMATE_DEPOSITION":    False}
 
 
 state = State()
@@ -1066,6 +1076,11 @@ def step_sim(dt: float) -> dict:
     # LV-322501 linear characteristic anchored at design; mild sqrt(dP) synthesis coupling.
     dP_lv = max(STRIP_P_DES_BARA - STRIP_P_DOWN_BARA, 0.0)
     drain_kgh = STRIP_BOT_DES_KGH * (lv_open / LV322501_OPEN_DES) * (dP_lv / LV322501_DP_DES_BAR) ** 0.5
+    # L3-6 stripper-bottoms mushy-zone: urea-melt crystallization (T_cryst=132.7 C) throttles the
+    #   LV-322501 drain as T_bot falls; the un-drained mass stays in the LT-322501 ODE -> level rises.
+    f_drain = _f_flow(strip["T_bot"], 132.7)
+    drain_kgh *= f_drain
+    s.flags["STRIPPER_SOLIDIFICATION"] = (f_drain < 1.0)
     # bottom-sump mass balance -> LT-322501 level (%)
     m_span_kg = STRIP_SUMP_AREA_M2 * STRIP_LEVEL_SPAN_M * STRIP_RHO_BOTTOM
     s.strip_level = clamp(s.strip_level
@@ -1180,7 +1195,16 @@ def step_sim(dt: float) -> dict:
     scrub["pb_push"]    = pb_push                 # PT forward push (pressure-building overhead deviation)
     scrub["top_ratio"]  = top_ratio              # total overhead ratio (diag only; superseded by pb_push)
     scrub["P_bub_hpcc"] = hpcc["P_bub"]           # 322E002 bubble-point synthesis P (bar a, diag)
+    # L3-5 scrubber-overflow mushy-zone: carbamate crystallization (T_cryst=60 C) throttles the
+    #   322F001 overflow as T_overflow falls.  No vessel inventory ODE here (scrubber is a tear) ->
+    #   raise SCRUBBER_SOLIDIFICATION as the accumulation proxy when flow is choked.
+    f_ovf = _f_flow(scrub["T_overflow"], 60.0)
+    scrub["overflow_kmolh"] = {k: v * f_ovf for k, v in scrub["overflow_kmolh"].items()}
+    s.flags["SCRUBBER_SOLIDIFICATION"] = (f_ovf < 1.0)
     hv604 = hv_322604(scrub["offgas_kmolh"], scrub["T_offgas"], s.HIC_322604, scrub["P_offgas"])
+    # L3-7 HV-322604 off-gas: external steam-tracing holds the 60 C baseline; flag only when extreme JT
+    #   cooling overwhelms the jacket (T_out < 20 C).  Flow NOT restricted (gas line) -> fouling warning.
+    s.flags["CARBAMATE_DEPOSITION"] = (hv604["T_out"] < 20.0)
     TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 − TIC-329005 (condensation quality)
     q_e004_kw  = scrub["q_ccw_kw"]                # 329E004 tempered-water-cooler duty (loop closure)
 
