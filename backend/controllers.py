@@ -16,6 +16,7 @@ from typing import Optional
 
 BAD_PV_LO = -5.0    # % — below this PV is declared bad/failed
 BAD_PV_HI = 105.0   # % — above this PV is declared bad/failed
+CAS_BIAS_LIM = 100.0  # % — max |CAS bias| (full SP-span offset; P1-1 anti-saturation clamp)
 
 
 def _clamp(x: float, lo: float, hi: float) -> float:
@@ -141,8 +142,9 @@ class Controller:
         self.mv = _clamp(v, self.op_lo, self.op_hi)
 
     def set_bias(self, v: float) -> None:
-        """CAS bias n_c (%). Legal in CAS only (enforced by route handler)."""
-        self.bias = v
+        """CAS bias n_c (%). Clamped to +/-CAS_BIAS_LIM (P1-1 anti-saturation).
+        Legal in CAS only (enforced by route handler)."""
+        self.bias = _clamp(v, -CAS_BIAS_LIM, CAS_BIAS_LIM)
 
     def set_tuning(self, *, Kc: Optional[float] = None,
                    Ti: Optional[float] = None, Td: Optional[float] = None) -> None:

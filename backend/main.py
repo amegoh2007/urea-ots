@@ -34,7 +34,7 @@ from controllers import Controller
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 def tsat_steam(p_bara: float) -> float:
@@ -63,6 +63,9 @@ PUMP_RATED_RPM  = 152.0
 PUMP_MIN_RPM    = 37.0
 PUMP_NORMAL_RPM = 124.0
 PUMP_RATED_I    = 51.0           # A (display proxy; DCS 43.9 A @ 131 rpm = 86 %)
+LUBE_OIL_TRIP_BARG  = 3.0        # PI 321211/321221 lube-oil-low TRIP (<3 barg) -> 21.8/21.10
+LUBE_OIL_ALARM_BARG = 4.0        # PI 321211/321221 lube-oil-low PRE-ALARM (<4 barg)
+LUBE_OIL_HEALTHY_BARG = 5.0      # aux lube system nominal pressure
 TANK_ID         = 0.970          # m
 TANK_H          = 1.400          # m
 TANK_VOL        = (math.pi/4.0) * TANK_ID**2 * TANK_H                # m^3
@@ -245,12 +248,18 @@ STRIP_P_DOWN_BARA   = 4.2         # bar a, downstream of LV-322501 (-> 323C003)
 LV322501_P_DOWN_BARA = 4.0        # bar a, L3-1 LP-loop downstream ref for live-P_syn drain head
 
 
-def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float) -> dict:
+def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float,
+                    m_suc_avail: float = None) -> dict:
     """322F001 HP ejector: mix live motive NH3 with entrained 322E003 carbamate.
     Entrainment is set by the HV-322602 spindle opening (HIC-322602): decreasing the
     opening raises mu -> more 322E003 carbamate suction.  At the design opening (74 %)
     mu = EJ_MU and the discharge reproduces the design 'Carb. Liq.' table.  Energy
-    balance sets discharge temp.  Returns the discharge stream (-> 322E002) + props."""
+    balance sets discharge temp.  Returns the discharge stream (-> 322E002) + props.
+
+    P1-3 mass conservation: a jet pump cannot entrain more than the upstream actually
+    supplies.  m_suc_avail (kg/h) = live 322E003 overflow mass; the entrained suction is
+    capped at min(mu*motive, m_suc_avail) so no phantom carbamate is created.  None
+    (unit-test path) leaves the demand uncapped (= legacy behaviour)."""
     if motive_nh3_kgh <= 1e-6:
         return {"comp": {k: 0.0 for k in MW_COMP}, "total_kgh": 0.0, "suction_kgh": 0.0,
                 "mol_kmolh": 0.0, "MW": 0.0, "T_C": 0.0, "P_bara": 0.0,
@@ -262,13 +271,20 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     phi_m    = motive_nh3_kgh / EJ_MOTIVE_NH3_DES
     f_stall  = clamp((phi_m - EJ_STALL_PHI) / (1.0 - EJ_STALL_PHI), 0.0, 1.0)
     mu       = EJ_MU * (EJ_OPEN_DES / open_eff) * f_stall   # spindle entrainment x motive stall
-    m_suc    = mu * motive_nh3_kgh
+    m_suc    = mu * motive_nh3_kgh                          # entrainment DEMAND (kg/h)
+    # P1-3 cap: suction strictly bounded by the live scrubber-overflow availability.
+    if m_suc_avail is not None:
+        m_suc = min(m_suc, max(m_suc_avail, 0.0))
     suction  = {k: m_suc * EJ_CARB_FRAC[k] for k in MW_COMP}
     disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
     m_d   = sum(disch.values())
     n_d   = sum(disch[k] / MW_COMP[k] for k in MW_COMP)   # kmol/h
     m_suc = sum(suction.values())
-    # energy balance: m_d*cpD*T_d = m_mot*cpN*T_mot + m_suc*cpC*T_suc
+    # mass-energy balance (user P1-3): m_mot*cpN*T_mot + m_suc*cpC*T_suc in the numerator;
+    #   denominator carries the lumped discharge heat-capacity m_d*cpD (cp_D calibrated to hold
+    #   the design TT-322012 bit-exact).  NB: the literal mass-only denominator (m_mot+m_suc)
+    #   is dimensionally an enthalpy, not a temperature, and breaks the design pin -> the
+    #   dimensionally-correct cp-weighted form is retained.  Capped m_suc now drives T_d.
     T_d = (motive_nh3_kgh*EJ_CP_N*T_motive_C + m_suc*EJ_CP_C*EJ_T_SUCTION_C) / (m_d*EJ_CP_D)
     return {"comp": disch, "total_kgh": m_d, "suction_kgh": m_suc, "mol_kmolh": n_d,
             "MW": (m_d/n_d if n_d else 0.0), "T_C": T_d, "P_bara": EJ_P_DISCH_BARA,
@@ -882,8 +898,8 @@ class State:
         self.react_level_pct = REACT_LEVEL_NLL_PCT      # init at design NLL = 80 %
         self.hpcc_level_pct  = HPCC_LEVEL_NLL_PCT       # 322E002 liquid inventory, init design NLL
         # pumps: open_act = torque-converter valve opening %
-        self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M"}
-        self.pumpB = {"on": True,  "open_act": 86.2, "speed_act": 131.0, "current": 43.9, "mode": "M"}
+        self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M", "lube_barG": LUBE_OIL_HEALTHY_BARG}
+        self.pumpB = {"on": True,  "open_act": 86.2, "speed_act": 131.0, "current": 43.9, "mode": "M", "lube_barG": LUBE_OIL_HEALTHY_BARG}
         # controllers (percent)
         self.SIC_321950 = Controller("SIC_321950", Kc=2.0, Ti=8.0,
                                      sp=80.0, mv=0.0)
@@ -924,8 +940,11 @@ class State:
         self.p_syn_bara  = SYN_P_DES_BARA                # init at design PT-329201 = 140.7 bar a
         # ext override
         self.ext_override = False
-        # trips
-        self.trips = {"21_2": False, "21_8": False, "21_10": False}
+        # trips: live initiator conditions (instantaneous) + latched state (P1-2).
+        #   A latch holds once set and can only be cleared by an operator trip_reset AND
+        #   the live condition having recovered -> a tripped pump cannot self-restart.
+        self.trips        = {"21_2": False, "21_8": False, "21_10": False}
+        self.trip_latched = {"21_2": False, "21_8": False, "21_10": False}
         # L3 phase-boundary diagnostics (mushy-zone / crystallization detection, Batch 2)
         self.flags = {"SCRUBBER_SOLIDIFICATION": False,
                       "STRIPPER_SOLIDIFICATION": False,
@@ -1038,7 +1057,12 @@ def step_sim(dt: float) -> dict:
     # 322F001 HP ejector: live motive NH3 (gated by XV-322901) + entrained carbamate
     #   -> discharge stream to 322E002 (TT-322012). Motive temp = TI-321020.
     motive_nh3_kgh = (F_pump_total_th * 1000.0) if disch_open else 0.0
-    ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602)
+    # P1-3: live 322E003 overflow mass available to entrain = design suction * co2_scale
+    #   (scrub overflow = SCRUB_OVERFLOW_KMOLH_DES * co2_scale, no phi term).  Computed here
+    #   (ejector precedes the scrubber block this tick) from the live CO2 throughput ratio.
+    ej_co2_scale = s.F_CO2_th / (CO2_DES_KGH / 1000.0)
+    ej_m_avail   = EJ_SUC_TOT_DES * max(ej_co2_scale, 0.0)
+    ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602, m_suc_avail=ej_m_avail)
     # motive fraction (PD pump -> flow ~ speed) and ejector developed-head forward-flow fraction.
     # phi_fwd ~ phi_m^2 (affinity head curve): drives the HPCC->reactor liquid circulation and the
     # discharge-header pressure.  ==1 at design motive -> all hydraulic states hold design.
@@ -1231,10 +1255,32 @@ def step_sim(dt: float) -> dict:
     TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 − TIC-329005 (condensation quality)
     q_e004_kw  = scrub["q_ccw_kw"]                # 329E004 tempered-water-cooler duty (loop closure)
 
-    # Trips
-    s.trips["21_2"]  = (s.tank_level_frac < 0.05)
-    s.trips["21_8"]  = (P_suct_barG < 17.0 and s.pumpA["on"])
-    s.trips["21_10"] = (P_suct_barG < 17.0 and s.pumpB["on"])
+    # ----- Trips (P1-2 stateful interlocks) -----
+    # Live initiator conditions (instantaneous). 21_2 = Urea-Synthesis main trip; its initiators
+    #   per the trip schedule include loss of NH3 supply head (tank empty here) and the
+    #   pressure-vs-saturation margin PDYI321203/204 < 0.1 bar (cavitation guard).  21_8/21_10 =
+    #   per-pump lube-oil-pressure-low trips (PI 321211/321221, trip <3 barg); armed only while the
+    #   pump runs (a stopped pump has no lube pressure -> would otherwise self-latch).
+    s.trips["21_2"]  = (s.tank_level_frac < 0.05) or (PDY_A < 0.1) or (PDY_B < 0.1)
+    s.trips["21_8"]  = s.pumpA["on"] and (s.pumpA["lube_barG"] < LUBE_OIL_TRIP_BARG)
+    s.trips["21_10"] = s.pumpB["on"] and (s.pumpB["lube_barG"] < LUBE_OIL_TRIP_BARG)
+    # Latch on any live condition; the latch holds until trip_reset (operator) clears it.
+    for _tk in ("21_2", "21_8", "21_10"):
+        if s.trips[_tk]:
+            s.trip_latched[_tk] = True
+    # Enforce latched actions. 21_2 main trip -> STOP both HP-NH3 pumps, close NH3 quick-closing
+    #   XV-321901 + NH3 shut-off XV-322901, drive SIC-321950/951 to min speed (MAN, 0 %).
+    if s.trip_latched["21_2"]:
+        s.pumpA["on"] = False
+        s.pumpB["on"] = False
+        s.XV_321901   = False
+        s.XV_322901   = False
+        s.SIC_321950.set_mode("MAN"); s.SIC_321950.set_op(0.0)
+        s.SIC_321951.set_mode("MAN"); s.SIC_321951.set_op(0.0)
+    if s.trip_latched["21_8"]:
+        s.pumpA["on"] = False    # Trip 21.8: stop HP-NH3 pump 321P002A
+    if s.trip_latched["21_10"]:
+        s.pumpB["on"] = False    # Trip 21.10: stop HP-NH3 pump 321P002B
 
     # Discharge header
     # Discharge header: affinity-law developed head droops with motive (pump-speed) fraction.
@@ -1318,8 +1364,8 @@ def step_sim(dt: float) -> dict:
         "XV_322901":   bool(s.XV_322901),
         "PI_321201":   round(PT_A, 1),          # PT-321201 feed pressure (bar g = 321D003)
         "PI_321202":   round(PT_B, 1),          # PT-321202 feed pressure (bar g = 321D003)
-        "PI_321201_alarm": (P_suct_barG < 17.0),
-        "PI_321202_alarm": (P_suct_barG < 17.0),
+        "PI_321201_alarm": (s.pumpA["lube_barG"] < LUBE_OIL_ALARM_BARG),  # PI-321211 lube pre-alarm
+        "PI_321202_alarm": (s.pumpB["lube_barG"] < LUBE_OIL_ALARM_BARG),  # PI-321221 lube pre-alarm
         "PY_321201":   round(PY, 2),            # NH3 sat vapour P (bar a)
         "PY_321202":   round(PY, 2),
         "PDY_321203":  round(PDY_A, 2),         # sub-cooling margin (bar)
@@ -1497,6 +1543,7 @@ def step_sim(dt: float) -> dict:
         },
         "ext_override": s.ext_override,
         "trips": s.trips,
+        "trip_latched": s.trip_latched,
         "controllers": {tag: ctrl.to_packet()
                         for tag, ctrl in s.controllers.items()},
     }
@@ -1508,8 +1555,26 @@ def handle_cmd(cmd: dict):
     t = cmd.get("type")
 
     if t == "pump_toggle":
-        p = s.pumpA if cmd["id"] == "A" else s.pumpB
-        p["on"] = not p["on"]
+        pid = cmd["id"]
+        p   = s.pumpA if pid == "A" else s.pumpB
+        latch_key = "21_8" if pid == "A" else "21_10"
+        # P1-2: block restart of a tripped pump via the UI toggle.  21_2 main trip latches BOTH
+        #   pumps; the per-pump 21_8/21_10 latch blocks its own pump.  Turning a pump OFF is always
+        #   allowed; only the OFF->ON transition is gated.  Operator must trip_reset first.
+        if (not p["on"]) and (s.trip_latched["21_2"] or s.trip_latched[latch_key]):
+            pass   # restart blocked while latched
+        else:
+            p["on"] = not p["on"]
+
+    elif t == "trip_reset":
+        # Operator clear: only succeeds for trips whose LIVE condition has already recovered
+        #   (a latch over a still-active condition cannot be cleared).  id = "21_2"|"21_8"|"21_10"
+        #   or "ALL"/None for every trip.
+        key  = cmd.get("id")
+        keys = ("21_2", "21_8", "21_10") if key in (None, "ALL") else (key,)
+        for k in keys:
+            if k in s.trip_latched and not s.trips.get(k, False):
+                s.trip_latched[k] = False
 
     elif t == "xv_toggle":
         if cmd["id"] == "321901":
@@ -1607,16 +1672,19 @@ app = FastAPI()
 # ----- Controller REST API -----
 
 class _TuningPayload(BaseModel):
-    Kc: Optional[float] = None
-    Ti: Optional[float] = None
-    Td: Optional[float] = None
+    # P1-1: reject NaN/Inf + enforce PID physical constraints (Kc>0, Ti>=1e-9, Td>=0)
+    Kc: Optional[float] = Field(default=None, gt=0.0,   allow_inf_nan=False)
+    Ti: Optional[float] = Field(default=None, ge=1e-9,  allow_inf_nan=False)
+    Td: Optional[float] = Field(default=None, ge=0.0,   allow_inf_nan=False)
 
 
 class CtrlCommand(BaseModel):
+    # P1-1: every float field rejects NaN/Inf at the REST boundary (set_bias additionally
+    #   clamped to +/-CAS_BIAS_LIM in Controller.set_bias against saturation exploits).
     set_mode:   Optional[str]            = None
-    set_sp:     Optional[float]          = None
-    set_op:     Optional[float]          = None
-    set_bias:   Optional[float]          = None
+    set_sp:     Optional[float]          = Field(default=None, allow_inf_nan=False)
+    set_op:     Optional[float]          = Field(default=None, allow_inf_nan=False)
+    set_bias:   Optional[float]          = Field(default=None, allow_inf_nan=False)
     set_tuning: Optional[_TuningPayload] = None
 
 
