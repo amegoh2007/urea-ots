@@ -357,7 +357,8 @@ function render322(s){
     if(op) op.readOnly = (v!=='MAN');     // MAN: only valve-opening (OP) editable
     if(sp) sp.readOnly = (v!=='AUTO');    // AUTO: only setpoint (SP) editable
   };
-  mMan.onclick=()=>setMode('MAN'); mAuto.onclick=()=>setMode('AUTO');
+  mMan.onclick=()=>setMode('MAN');
+  mAuto.onclick=()=>{ if(mode!=='AUTO' && pv && pv.value!=='') sp.value = parseFloat(pv.value); setMode('AUTO'); };  // bumpless: SP<-PV on MAN->AUTO (mirrors backend snap)
   const open=()=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{};
     if(pv) pv.value = c.PIC_322203!=null ? c.PIC_322203 : '';
     if(sp) sp.value = c.PIC_sp!=null ? c.PIC_sp : (c.PIC_322203!=null ? c.PIC_322203 : '');
@@ -400,7 +401,7 @@ function render322(s){
   const CK='ots_ctl_v1';                                               // local mode/SP/OP store (unmodelled loops)
   const load=()=>{ try{ return JSON.parse(localStorage.getItem(CK))||{}; }catch(e){ return {}; } };
   const save=st=>{ try{ localStorage.setItem(CK, JSON.stringify(st)); }catch(e){} };
-  let cur=null, mode='AUTO';
+  let cur=null, curPV=null, mode='AUTO';
   const applyMode=v=>{                                                 // MAN=set opening, AUTO=set SP, CAS=linked param
     mode=v;
     bMan.classList.toggle('active', v==='MAN');
@@ -417,15 +418,24 @@ function render322(s){
     cur=o; ttl.textContent=o.tag;
     const v = o.bind ? gp(window.OTS_LAST||{}, o.bind) : null;
     pv.value = (v==null||v==='') ? '—' : (v + (o.u?(' '+o.u):''));
-    const st=load()[o.tag]||{};
-    sp.value = st.sp!=null ? st.sp : '';
-    op.value = st.op!=null ? st.op : '';
-    applyMode(st.mode||'AUTO');
+    curPV = (v==null||v==='') ? null : parseFloat(v);
+    // authoritative telemetry: modelled loops expose a sibling {pv,sp,op,mode} block (bind ends in .pv)
+    const blk = (o.bind && o.bind.endsWith('.pv')) ? gp(window.OTS_LAST||{}, o.bind.slice(0,-3)) : null;
+    if(blk && typeof blk==='object' && blk.mode!=null){     // backend-authoritative loop -> live sp/op/mode
+      sp.value = blk.sp!=null ? blk.sp : '';
+      op.value = blk.op!=null ? blk.op : '';
+      applyMode(blk.mode||'AUTO');
+    } else {                                                // unmodelled loop -> local mode/SP/OP store
+      const st=load()[o.tag]||{};
+      sp.value = st.sp!=null ? st.sp : '';
+      op.value = st.op!=null ? st.op : '';
+      applyMode(st.mode||'AUTO');
+    }
     m.classList.add('show');
   };
   bMan.onclick =()=>applyMode('MAN');
-  bAuto.onclick=()=>applyMode('AUTO');
-  bCas.onclick =()=>applyMode('CAS');
+  bAuto.onclick=()=>{ if(mode!=='AUTO' && curPV!=null) sp.value = curPV; applyMode('AUTO'); };  // bumpless: SP<-PV on MAN->AUTO
+  if(bCas) bCas.style.display='none';   // single non-cascade loops -> no CAS source; hide dead button
   const apply=()=>{
     if(!cur) return;
     const st=load(), o=parseFloat(op.value), p=parseFloat(sp.value);
