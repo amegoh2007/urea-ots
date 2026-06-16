@@ -50,6 +50,9 @@
       // ---- XVs ----
       { k: 'xva', t: 'xv',   x: 629,  y: 230, bind: 'XV_321901', cmd: '321901', tag: 'XV-321901' },
       { k: 'xvb', t: 'xv',   x: 1198, y: 337, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
+      // 21.4 interlock override pushbutton (beside XV-322901): opens the NH3 shut-off XV while the
+      //   loss-of-CO2 21.4 interlock is latched.  Lamp lit = interlock latched (override armed).
+      { k: 'ovrd322901', t: 'ovrd', x: 1198, y: 382, cmd: '322901', latch: '21_4', xv: 'XV_322901', tag: 'XV-322901 INTERLOCK OVERRIDE' },
     ],
     'screen-322-2': [
       // ---- indicators: ALL tags positioned; only 3 bound, rest = white-frame empty slots ----
@@ -180,6 +183,7 @@
   const elMap = {};   // sid|k -> element
   let lastS = {};
   let editing = false;
+  let simBtn = null;   // fixed SLOW/FAST pacing toggle button
 
   const stage = () => document.getElementById('stage');
   const gp = (o, path) => path ? path.split('.').reduce((a, k) => (a == null ? undefined : a[k]), o) : undefined;
@@ -236,6 +240,13 @@
       const open = xvOpen(sid, o);
       el.classList.toggle('closed', !open);
       el.dataset.tip = o.tag + ' — ' + (open ? 'OPEN' : 'CLOSED');
+    } else if (o.t === 'ovrd') {                         // 21.x interlock override pushbutton
+      const armed = !!gp(lastS, 'trip_latched.' + (o.latch || '21_4'));
+      const open = !!gp(lastS, o.xv || 'XV_322901');
+      el.classList.toggle('armed', armed);               // lamp lit while interlock latched
+      el.classList.toggle('on', open);
+      el.dataset.tip = o.tag + ' — interlock ' + (armed ? 'LATCHED (override available)' : 'clear')
+        + '; XV ' + (open ? 'OPEN' : 'CLOSED') + ' (click to toggle)';
     } else { // ind
       const b = el.querySelector('b'), sp = el.querySelector('.ou');   // stable nodes (built once); update text only so a click isn't swallowed by per-tick innerHTML churn
       if (!o.bind) { if (b) b.textContent = o.tag; if (sp) sp.textContent = ''; return; }   // empty slot keeps tag text
@@ -253,6 +264,9 @@
       if (o.bind && o.id) { if (window.otsSend) otsSend({ type: 'pump_toggle', id: o.id }); return; }
     } else if (o.t === 'xv') {
       if (o.cmd) { if (window.otsSend) otsSend({ type: 'xv_toggle', id: o.cmd }); return; }
+    } else if (o.t === 'ovrd') {                  // manual override: toggle the XV (open while interlock latched)
+      if (o.cmd && window.otsSend) otsSend({ type: 'xv_toggle', id: o.cmd });
+      return;
     } else if (o.t === 'nav') {
       if (o.goto && window.otsSwitchScreen) window.otsSwitchScreen(o.goto);
       return;
@@ -313,7 +327,7 @@
     for (const key in elMap) if (key.indexOf(sid + '|') === 0) delete elMap[key];
     cfg(sid).forEach(o => {
       const el = document.createElement('div');
-      el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'nav' ? 'nav' : o.t === 'strm' ? 'strm' : 'ind');
+      el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'nav' ? 'nav' : o.t === 'strm' ? 'strm' : o.t === 'ovrd' ? 'ovrd' : 'ind');
       if (o.t === 'ind') {
         const eo = eff(o);
         if (!eo.bind) el.classList.add('empty');
@@ -331,6 +345,7 @@
       el.title = o.tag;
       if (o.t === 'pump') el.innerHTML = svgPump();
       else if (o.t === 'xv') el.innerHTML = svgXV();
+      else if (o.t === 'ovrd') el.innerHTML = '<span class="ovl"></span><b>OVRD</b>';
       const p = pos[sid + '|' + o.k] || { x: o.x, y: o.y };
       place(el, p.x, p.y);
       attach(el, sid, o);
@@ -358,6 +373,19 @@
       '.ov.strm{background:transparent;border:1px solid transparent;border-radius:3px;}' +
       '.ov.strm:hover{border-color:rgba(127,208,216,.85);background:rgba(80,160,220,.14);}' +
       'body.ov-editing .ov.strm{border-color:rgba(255,160,60,.7);background:rgba(255,160,60,.10);}' +
+      '.ov.ovrd{display:flex;align-items:center;gap:5px;padding:3px 7px;background:#1a1208;border:1px solid #6b5a2f;border-radius:3px;color:#cdbb78;font:bold 10px Consolas,monospace;letter-spacing:.6px;cursor:pointer;white-space:nowrap;user-select:none;}' +
+      '.ov.ovrd .ovl{width:13px;height:9px;border:1px solid #6b5a2f;background:#3a3320;flex:none;}' +
+      '.ov.ovrd:hover{border-color:#ffd000;color:#ffe9a0;}' +
+      '.ov.ovrd:active{background:#3aa56e;color:#04140c;border-color:#3aa56e;}' +
+      '.ov.ovrd.armed{border-color:#ffd000;color:#ffd000;background:#241a06;box-shadow:0 0 7px rgba(255,208,0,.55);}' +
+      '.ov.ovrd.armed .ovl{background:#ffd000;border-color:#ffd000;box-shadow:0 0 5px #ffd000;animation:ovrdblink 1s steps(1) infinite;}' +
+      '.ov.ovrd.on .ovl{background:#22ff22;border-color:#22ff22;}' +
+      '@keyframes ovrdblink{50%{opacity:.35;}}' +
+      '#sim-toggle{position:fixed;left:12px;bottom:12px;z-index:9000;display:flex;align-items:center;gap:8px;font:600 12px "Segoe UI",system-ui;padding:7px 13px;background:#13202c;color:#cfe;border:1px solid #2f4858;border-radius:6px;cursor:pointer;user-select:none;}' +
+      '#sim-toggle:hover{background:#1d3242;border-color:#4aa587;}' +
+      '#sim-toggle .dot{width:9px;height:9px;border-radius:50%;background:#3a6b4e;box-shadow:0 0 5px #3a6b4e;flex:none;}' +
+      '#sim-toggle.fast{background:#3a2a08;border-color:#b3892f;color:#ffd98a;}' +
+      '#sim-toggle.fast .dot{background:#ffb000;box-shadow:0 0 8px #ffb000;}' +
       '.ov-menu{position:fixed;z-index:9100;background:#10202a;border:1px solid #2f4858;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.5);display:flex;flex-direction:column;min-width:128px;overflow:hidden;font:13px "Segoe UI",system-ui;}' +
       '.ov-menu button{text-align:left;padding:8px 12px;background:none;border:none;color:#cfe;cursor:pointer;}' +
       '.ov-menu button:hover{background:#1d3242;}' +
@@ -552,9 +580,28 @@
     });
   }
 
-  window.OV_apply = function (s) { lastS = s; window.OTS_LAST = s; renderAll(); };  // app.js calls each ws packet (OTS_LAST -> faceplate prefill)
+  function simToggle() {                          // global SLOW/FAST simulation-pacing toggle
+    const b = document.createElement('div'); b.id = 'sim-toggle';
+    b.title = 'Simulation pacing — SLOW (real-time) <-> FAST (accelerated). Click to toggle.';
+    b.innerHTML = '<span class="dot"></span><span class="lbl">SLOW</span>';
+    b.onclick = () => {
+      const next = (gp(lastS, 'sim_mode') === 'FAST') ? 'SLOW' : 'FAST';
+      if (window.otsSend) otsSend({ type: 'set_sim_mode', mode: next });
+    };
+    document.body.appendChild(b);
+    simBtn = b;
+  }
+  function simRender(s) {                          // reflect backend sim_mode/sim_speed on the button
+    if (!simBtn) return;
+    const fast = gp(s, 'sim_mode') === 'FAST', sp = gp(s, 'sim_speed');
+    simBtn.classList.toggle('fast', fast);
+    simBtn.querySelector('.lbl').textContent = (fast ? 'FAST' : 'SLOW') + (sp != null ? ' ×' + sp : '');
+  }
+
+  window.OV_apply = function (s) { lastS = s; window.OTS_LAST = s; renderAll(); simRender(s); };  // app.js calls each ws packet (OTS_LAST -> faceplate prefill)
 
   for (const sid in OV) build(sid);
   editButton();
+  simToggle();
   renderAll();
 })();

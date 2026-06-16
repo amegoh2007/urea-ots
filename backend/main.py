@@ -1537,12 +1537,14 @@ def step_sim(dt: float) -> dict:
         s.SIC_321950.set_mode("MAN"); s.SIC_321950.set_op(0.0)
         s.SIC_321951.set_mode("MAN"); s.SIC_321951.set_op(0.0)
     # 21_4 loss-of-CO2 trip -> cut the NH3 feed (mirror the 21_2 NH3 action): STOP both HP-NH3 pumps,
-    #   close NH3 shut-off XV-322901 (=> ejector motive 0 -> HPCC/reactor-feed cascade), force
-    #   SIC-321950/951 to MAN 0 (overrides a hand-held MAN pump).  XV-322901 NOT auto-reopened.
+    #   force SIC-321950/951 to MAN 0 (overrides a hand-held MAN pump).  Ejector motive -> 0 via the
+    #   TRIPPED PUMPS (motive_nh3 prop. pump flow), so the HPCC/reactor-feed cascade still collapses
+    #   without slamming the valve.  XV-322901 is deliberately NOT force-closed here: the operator
+    #   keeps manual control of the NH3 shut-off XV while latched (it opens with NO flow until the
+    #   pumps are restarted).  The more severe 21_2 main trip still closes XV-322901.
     if s.trip_latched["21_4"]:
         s.pumpA["on"] = False
         s.pumpB["on"] = False
-        s.XV_322901   = False
         s.SIC_321950.set_mode("MAN"); s.SIC_321950.set_op(0.0)
         s.SIC_321951.set_mode("MAN"); s.SIC_321951.set_op(0.0)
     if s.trip_latched["21_8"]:
