@@ -41,3 +41,13 @@ desktop.ini
 
 # --- worktrees ---
 .worktrees/
+
+# --- generated reports / doc build output (regenerated from .md sources) ---
+docs/build/
+backend/reports/*.html
+
+# --- claude code tooling (personal, like .vscode/.idea) ---
+.claude/
+
+# --- ai session transcripts ---
+*session_transcript.md
