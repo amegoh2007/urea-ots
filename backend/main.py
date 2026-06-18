@@ -280,8 +280,15 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     capped at min(mu*motive, m_suc_avail) so no phantom carbamate is created.  None
     (unit-test path) leaves the demand uncapped (= legacy behaviour)."""
     if motive_nh3_kgh <= 1e-6:
+        # No-flow (pumps tripped): zero MASS, but the discharge thermowell (TT-322012) is NOT at
+        #   0 C -- it reads the stagnant fluid backed up into the dead jet pump, i.e. the entrained
+        #   322E003 carbamate at EJ_T_SUCTION_C.  Losing the COLD motive NH3 (~29 C) that normally
+        #   pulls the design blend down to ~108 C leaves only the hot suction carbamate, so the tag
+        #   RISES to the suction temp rather than collapsing to 0.  (Reduced model: stateless step,
+        #   no thermal-inertia decay.)  Mass leaves remain 0 -> no effect on the HPCC T_feed_mix
+        #   (m_liq_in = 0), so this does not perturb TT-322010.
         return {"comp": {k: 0.0 for k in MW_COMP}, "total_kgh": 0.0, "suction_kgh": 0.0,
-                "mol_kmolh": 0.0, "MW": 0.0, "T_C": 0.0, "P_bara": 0.0,
+                "mol_kmolh": 0.0, "MW": 0.0, "T_C": EJ_T_SUCTION_C, "P_bara": 0.0,
                 "rho": 0.0, "vol_m3h": 0.0, "mu": 0.0}
     # HV-322602 (HIC-322602) sets entrainment: decreasing opening -> more 322E003 suction.
     open_eff = clamp(hv_open_pct, 10.0, 100.0)
@@ -1863,11 +1870,24 @@ def handle_cmd(cmd: dict):
         pid = cmd["id"]
         p   = s.pumpA if pid == "A" else s.pumpB
         latch_key = "21_8" if pid == "A" else "21_10"
-        # P1-2: block restart of a tripped pump via the UI toggle.  21_2 main trip latches BOTH
-        #   pumps; the per-pump 21_8/21_10 latch blocks its own pump.  Turning a pump OFF is always
-        #   allowed; only the OFF->ON transition is gated.  Operator must trip_reset first.
+        # P1-2: restart of a tripped pump.  Turning a pump OFF is always allowed; only the OFF->ON
+        #   restart is gated by a latched trip (21_2 main latches BOTH pumps; per-pump 21_8/21_10
+        #   latches its own pump).  The UI exposes NO separate trip_reset control, so the OFF->ON
+        #   click itself AUTO-ACKNOWLEDGES any latched trip whose LIVE cause has already recovered
+        #   and clears this pump's mechanical fault -- "restart == reset, mechanical obstacle ignored"
+        #   per spec.  A latch whose cause is STILL live (tank empty, CO2 lost) stays set and keeps
+        #   the restart blocked.  (21_8/21_10 live-cond = pump_on AND fault; the pump is OFF here so
+        #   the live cond is False -> the latch clears and the lube-oil fault is resolved on restart.)
+        if not p["on"]:
+            for k in ("21_2", "21_4", latch_key):
+                if s.trip_latched.get(k) and not s.trips.get(k, False):
+                    s.trip_latched[k] = False
+                    if k == "21_8":
+                        s.pumpA["fault"] = False
+                    elif k == "21_10":
+                        s.pumpB["fault"] = False
         if (not p["on"]) and (s.trip_latched["21_2"] or s.trip_latched["21_4"] or s.trip_latched[latch_key]):
-            pass   # restart blocked while latched
+            pass   # restart still blocked: a blocking interlock cause is unresolved
         else:
             p["on"] = not p["on"]
 
