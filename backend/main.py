@@ -630,6 +630,8 @@ SCRUB_CARB_P_BARA    = 140.7     # bar a, carbamate feed line
 SCRUB_CARB_RHO       = 1226.0    # kg/m³, carbamate density (74 C)
 SCRUB_OFFGAS_T_C     = 114.0     # C, TT-322011 off-gas vent-top temp -> HV-322604 (DESIGN PIN)
 SCRUB_OFFGAS_T_GAIN  = 120.0     # C / (N/C unit), TT-322011 rise w/ excess-NH3 loop slip: k*(AT-322701 - N/C_des)
+SCRUB_OFFGAS_T_VENT_GAIN  = 20.0 # C / (theta/theta_des - 1), TT-322011 rise w/ HV-322604 opening (more uncondensed vent overhead)
+SCRUB_OVERFLOW_T_VENT_GAIN = 12.0 # C / (theta/theta_des - 1), TT-322002 fall w/ HV-322604 opening (vent relief cools bottom overflow)
 SCRUB_OFFGAS_P_BARA  = 140.7     # bar a, off-gas line pressure (synthesis)
 SCRUB_OFFGAS_RHO     = 111.0     # kg/m³, off-gas density (114 C, 140.7 bar a)
 SCRUB_OVERFLOW_T_C   = 178.8     # C, TT-322002 overflow temp -> 322F001 (= EJ_T_SUCTION_C)
@@ -682,7 +684,7 @@ SYN_P_DEFICIT_GAIN  = 0.30       # bar/bar, PT lift per unit condensation defici
 SYN_P_VENT_GAIN     = 0.30       # bar/bar, PT lift per unit HV-322604 vent deficit (1-vent_frac) -- calib
 SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant (vapour inventory)
 SYN_P_MIN_BARA      = 120.0      # bar a, PT clamp floor
-SYN_P_MAX_BARA      = 175.0      # bar a, PT clamp ceiling (relief margin)
+SYN_P_MAX_BARA      = HPCC_P_DES_BARA  # 144.2 bar a, PT ceiling = feed-supply head (CO2/HPCC/ejector all 144.2); loop cannot exceed feed delivery P
 SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) / 3600.0  # ≈5329 kW
 # 322E003 shell-side effective conductance (ε-NTU). Back-calibrated so the design
 # carbamate-condensation duty pins BOTH the design overflow temp and CCW outlet EXACTLY:
@@ -870,7 +872,8 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
 
 
 def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
-                  m_ccw_kgh: float, vent_ratio: float = 1.0, nc_act: float = None) -> dict:
+                  m_ccw_kgh: float, vent_ratio: float = 1.0, nc_act: float = None,
+                  hic604_pct: float = None) -> dict:
     """322E003 HP scrubber — reduced calibrated split-fraction, pinned to the shared design HMB.
     Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
     wash (323P001 A/B design vector × s).  Both discharges PINNED (proven IDENTICAL):
@@ -920,8 +923,15 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     C_ccw_kwk  = max(m_ccw_kgh * SCRUB_CCW_CP / 3600.0, 1e-6)                  # floored heat-capacity rate
     eps_ht     = 1.0 - math.exp(-SCRUB_UA_KWK / C_ccw_kwk)                     # single-stream effectiveness
     ua_eff_kwk = max(eps_ht * C_ccw_kwk, 1e-6)
-    t_overflow = min(t_ccw_in + q_ccw_kw / ua_eff_kwk, SCRUB_T_PROC_C)        # TT-322002 (capped at T_proc)
-    t_ccw_out  = t_ccw_in + (t_overflow - t_ccw_in) * eps_ht                  # TT-329125 (bounded, pinned)
+    # HV-322604 vent-opening deviation theta_dev = θ/θ_des − 1 ∈ [−1,+1] over 0..100 %; ≡ 0 at θ_des (50 %).
+    # Two-sided LIVE coupling, zero at design -> off-gas/overflow HMB + every TT pin stay bit-exact at θ_des.
+    theta_dev  = (hic604_pct if hic604_pct is not None else SCRUB_HIC604_DES_PCT) / SCRUB_HIC604_DES_PCT - 1.0
+    t_overflow_cond = min(t_ccw_in + q_ccw_kw / ua_eff_kwk, SCRUB_T_PROC_C)   # condensation-driven overflow T
+    t_ccw_out  = t_ccw_in + (t_overflow_cond - t_ccw_in) * eps_ht            # TT-329125 (CCW pin anchored to cond. T)
+    # TT-322002: condensation T minus the vent-opening deviation — opening HV-322604 relieves the scrubber and
+    # cools the bottom carbamate overflow; closing pressurises and heats it (toward the T_proc ceiling).
+    t_overflow = min(max(t_overflow_cond - SCRUB_OVERFLOW_T_VENT_GAIN * theta_dev, t_ccw_in),
+                     SCRUB_T_PROC_C)                                          # TT-322002 (vent-coupled, clamped)
     dT_ccw     = t_ccw_out - t_ccw_in                                         # TDY-329125 (cond. quality)
     # TT-322011 off-gas vent-top temp — LIVE off the excess-NH3 loop slip (AT-322701).  At higher feed N/C
     # the synthesis loop runs CO2-limited: excess NH3 cannot form carbamate, slips unabsorbed through the
@@ -929,8 +939,9 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     # at design L_feed=L0 -> nh3_shift=0 -> AT-322701 = N/C_des -> deviation 0 -> 114.0 EXACT (bit-pin).
     # Physically bounded: cannot fall below the CCW inlet, cannot exceed the condensation ceiling T_proc.
     nc = nc_act if nc_act is not None else SCRUB_OFFGAS_NC_DES                # AT-322701 (loop N/C); design fallback
-    t_offgas   = min(max(SCRUB_OFFGAS_T_C + SCRUB_OFFGAS_T_GAIN * (nc - SCRUB_OFFGAS_NC_DES),
-                         t_ccw_in), SCRUB_T_PROC_C)                           # TT-322011 (design-pinned, clamped)
+    t_offgas   = min(max(SCRUB_OFFGAS_T_C + SCRUB_OFFGAS_T_GAIN * (nc - SCRUB_OFFGAS_NC_DES)
+                         + SCRUB_OFFGAS_T_VENT_GAIN * theta_dev,
+                         t_ccw_in), SCRUB_T_PROC_C)                           # TT-322011 (N/C + vent-coupled, clamped)
     return {"feed_kmolh": feed, "carb_kmolh": carb,
             "offgas_kmolh": offgas, "overflow_kmolh": overflow,
             "closure_resid": closure_resid, "co2_abs": co2_abs,
@@ -1443,7 +1454,8 @@ def step_sim(dt: float) -> dict:
     dP_vent   = max(s.p_syn_bara - SCRUB_HV604_P_OUT, 0.0)
     vent_frac = (s.HIC_322604 / SCRUB_HIC604_DES_PCT) * math.sqrt(dP_vent / SCRUB_HV604_DP_DES)
     scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
-                          vent_ratio=nu, nc_act=react_nc_ratio(react["overflow_kmolh"]))
+                          vent_ratio=nu, nc_act=react_nc_ratio(react["overflow_kmolh"]),
+                          hic604_pct=s.HIC_322604)
     # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
     #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
     #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation
@@ -1470,8 +1482,8 @@ def step_sim(dt: float) -> dict:
     # clamped >= 0 (Fix-2), so at/above design Π = 0 -> no spurious depressurisation at high N/C.
     Pi_conv   = REACT_PI_KAPPA * react["delta_X"]
     pt_target = pt_fwd + SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * SYN_P_DES_BARA \
-                       + SYN_P_VENT_GAIN * max(1.0 - vent_frac, 0.0) * SYN_P_DES_BARA \
-                       + Pi_conv * SYN_P_DES_BARA   # HV-322604 vent deficit + Π conversion-deficit forcing
+                       + SYN_P_VENT_GAIN * (1.0 - vent_frac) * SYN_P_DES_BARA \
+                       + Pi_conv * SYN_P_DES_BARA   # HV-322604 vent: TWO-SIDED (open<des -> PT up; open>des -> PT down) + Π forcing
     # L3-2 inventory-aware PT floor: a totally empty loop must be able to bottom out at atmospheric,
     #   not a hard 120 bar.  Loop-mass fraction = mean of the three HP liquid inventories vs their design
     #   NLL (LT-322504 80%, LT-322E002 50%, LT-322501 50%); == 1.0 at design -> P_min == 120 bar (the
@@ -1868,6 +1880,15 @@ def handle_cmd(cmd: dict):
         for k in keys:
             if k in s.trip_latched and not s.trips.get(k, False):
                 s.trip_latched[k] = False
+                # Resolve the mechanical trip cause on reset so the pump is restartable.
+                #   21_8/21_10 are armed by the instructor lube-oil fault (pump["fault"]),
+                #   which persists past the latch clear and would re-trip the pump on the next
+                #   tick after restart.  Clearing it here makes "reset" == cause resolved, so the
+                #   pump can be restarted and stays running (mechanical obstacle ignored).
+                if k == "21_8":
+                    s.pumpA["fault"] = False
+                elif k == "21_10":
+                    s.pumpB["fault"] = False
 
     elif t == "xv_toggle":
         if cmd["id"] == "321901":
