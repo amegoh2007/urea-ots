@@ -36,6 +36,16 @@ K_LETDOWN     = 2.0     # MP->LP let-down valve coeff   [ (kg/s) / sqrt(bar) ]
 C_MP = 25.0       # MP header lumped capacitance (vapour inventory) -> slow accumulation
 C_LP = 25.0       # LP header lumped capacitance
 
+# ---------------------------------------------------------------- LP make-up floor (site LP-main tie-in)
+#   The LP header is backed by the plant LP steam main through a low-pressure make-up PIC: when local
+#   generation (HPCC steam raising) collapses -- e.g. a CO2-feed cut zeroes the carbamate condensation
+#   duty -> m_hpcc_gen=0 -- the make-up station imports steam from the site main and CLAMPS the header
+#   at its setpoint.  Without it the header (with the let-down held at a fixed opening and a fixed
+#   stripper draw on MP) drains to vacuum, dragging the HPCC shell saturation temp -- and hence
+#   TT-322010 -- to ~4 C, which is unphysical.  Set just below design (HPCC_STEAM_P_BARA=4.4) so the
+#   make-up only acts on a genuine deficit and the design steady state is untouched.
+P_LP_MIN_BARA = 3.5     # bar a, minimum LP header pressure held by the make-up PIC (Tsat ~= 138.6 C)
+
 # ---------------------------------------------------------------- fixed LP design consumer
 M_USERS_LP = 7.66       # kg/s, lumped LP-steam users (held constant for now)
 
@@ -86,7 +96,10 @@ def step_steam(state: SteamState, dt: float,
     dP_LP = (m_hpcc_gen + m_ld + m_water - M_USERS_LP) / C_LP
 
     state.P_MP = max(0.0, state.P_MP + dt * dP_MP)
-    state.P_LP = max(0.0, state.P_LP + dt * dP_LP)
+    # LP make-up PIC: header cannot fall below P_LP_MIN_BARA -- the site LP-main tie-in imports
+    #   steam to hold the floor when local HPCC generation collapses (e.g. CO2-feed cut), so the
+    #   HPCC shell saturation temp (-> TT-322010) stays physical instead of crashing toward vacuum.
+    state.P_LP = max(P_LP_MIN_BARA, state.P_LP + dt * dP_LP)
 
     state.m_supply, state.m_ld, state.m_water = m_supply, m_ld, m_water
     return state
