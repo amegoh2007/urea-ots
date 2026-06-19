@@ -152,6 +152,26 @@ document.getElementById('extOverride').onclick = ()=> send({type:'ext_override',
 document.getElementById('ratioSP').addEventListener('change', e=>{
   const v=parseFloat(e.target.value); if(!isNaN(v)) send({type:'ratio_set',sp:v});
 });
+// ENTER confirms the N/C ratio setpoint (ratioSP lives in the always-visible panel, not a .modal).
+// Without it the next ~10Hz telemetry packet overwrites the un-committed field and the entry appears to revert.
+document.getElementById('ratioSP').addEventListener('keydown', e=>{
+  if(e.key==='Enter'){ const v=parseFloat(e.target.value); if(!isNaN(v)) send({type:'ratio_set',sp:v}); }
+});
+
+// ---------- Global: ENTER in any open faceplate input confirms (clicks that faceplate's SET button) ----------
+// Operators expect ENTER to commit the value they typed. On faceplates with no Enter handler the keypress
+// does nothing, so the next telemetry packet overwrites the field and the entry appears to "revert to 0".
+// One handler covers every faceplate modal; the SET button is each modal's single primary button.
+const FACEPLATE_MODALS = '#hicModal,#picModal,#hic2Modal,#ctlModal,#f50,#f51';
+document.addEventListener('keydown', e=>{
+  if(e.key!=='Enter') return;
+  const ae=document.activeElement;
+  if(!ae || ae.tagName!=='INPUT') return;
+  const modal=ae.closest(FACEPLATE_MODALS);
+  if(!modal || !modal.classList.contains('show')) return;
+  const setBtn=modal.querySelector('button.primary');
+  if(setBtn && !setBtn.disabled){ e.preventDefault(); setBtn.click(); }
+});
 
 // ---------- Faceplate routing (SIC controllers -> dedicated REST modals) ----------
 const FP_MAP = {
@@ -621,9 +641,7 @@ connect();
     await post({ [verb]: v });
   };
 
-  // Enter in any editable field triggers SET
-  ['f51-sp','f51-mv','f51-bias'].forEach(id =>
-    f(id).addEventListener('keydown', e => { if(e.key === 'Enter') f('f51-set').click(); }));
+  // Enter-to-SET handled globally for all faceplates (see FACEPLATE_MODALS handler).
 
   f('f51-close').onclick = () => modal.classList.remove('show');
 })();
@@ -744,9 +762,7 @@ connect();
     await post({ [verb]: v });
   };
 
-  // Enter in any editable field triggers SET
-  ['f50-sp','f50-mv','f50-bias'].forEach(id =>
-    f(id).addEventListener('keydown', e => { if(e.key === 'Enter') f('f50-set').click(); }));
+  // Enter-to-SET handled globally for all faceplates (see FACEPLATE_MODALS handler).
 
   f('f50-close').onclick = () => modal.classList.remove('show');
 })();
