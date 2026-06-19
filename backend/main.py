@@ -778,9 +778,17 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSA
                  * math.exp(-HPCC_UA / max(m_dot * HPCC_CP_GAS, 1e-9))
     # bubble-point synthesis pressure of the combined carbamate feed (N/C, H/C molar); replaces the
     # pinned HPCC_P_DES_BARA.  At design this feed's N/C, H/C == reactor.L0_DES/W0_DES -> P=144.2 exact.
+    #   The N/C, H/C ratios are NH3/CO2 and H2O/CO2: as a CO2-feed cut drives CO2 -> 0 they diverge,
+    #   so on the transient (CO2 in the (1e-9, small] band before it crosses the cliff) the bubble
+    #   pressure used to IMPULSE to ~330 bar a for one tick -- an unphysical N/C->inf artifact, not a
+    #   real synthesis pressure.  Clamp both ratios to a physical band about design (0.5x .. 2.0x) so
+    #   the published PI-322E002 moves only within a bounded, physical range.  At design the ratios
+    #   equal L0_DES/W0_DES (inside the band, untouched) -> P = 144.2 bar a bit-exact.
     _co2   = feed.get("CO2", 0.0)
-    L_hpcc = feed.get("NH3", 0.0) / _co2 if _co2 > 1e-9 else reactor.L0_DES
-    W_hpcc = feed.get("H2O", 0.0) / _co2 if _co2 > 1e-9 else reactor.W0_DES
+    L_hpcc = (clamp(feed.get("NH3", 0.0) / _co2, 0.5 * reactor.L0_DES, 2.0 * reactor.L0_DES)
+              if _co2 > 1e-9 else reactor.L0_DES)
+    W_hpcc = (clamp(feed.get("H2O", 0.0) / _co2, 0.5 * reactor.W0_DES, 2.0 * reactor.W0_DES)
+              if _co2 > 1e-9 else reactor.W0_DES)
     p_bub  = bubble_p_322e002(HPCC_T_PROD_DES_C, L_hpcc, W_hpcc)
     return {
         "feed_kmolh": feed,
@@ -991,6 +999,43 @@ def react_nc_ratio(comp_kmolh: dict) -> float:
 SCRUB_OFFGAS_NC_DES = react_nc_ratio(REACT_OVERFLOW_DES)   # ≈ 3.000, computed once at import
 
 
+# ----------------------------------------------------------------------------------------------------
+#  Section-322 downstream (scrubber / ejector / stripper / HPCC-product) display-lag time constants.
+#  That block is an explicit ALGEBRAIC TEAR (no vessel-inventory ODE) -- without a lag its published
+#  temperatures / level / analyzer SNAP to the new pinned value in a single 0.1 s tick when an upstream
+#  stream property or composition steps, which is unphysical (a thermowell, a liquid pool, a seal-leg
+#  level and an on-line analyzer all have real capacitance).  We give each PUBLISHED indicator a
+#  first-order lag  X += (dt/tau)*(X_ss - X)  so its rate of change is governed by a time constant.
+#  Display-only: the tear physics is untouched, and a first-order lag converges to its target, so the
+#  pinned design steady state stays bit-exact.  tau values [s] reflect the dominant capacitance:
+EJ_T_TAU_S      = 20.0    # 322F001 ejector mixing-chamber discharge thermowell (small, fast)
+STRIP_T_TAU_S   = 60.0    # 322E001 stripper liquid holdup (falling-film + bottom sump)
+HPCC_T_TAU_S    = 45.0    # 322E002 carbamate-condenser liquid product temperature
+HPCC_P_TAU_S    = 30.0    # 322E002 bubble-point synthesis P (PI-322E002): carbamate-condenser liquid holdup
+SCRUB_T_TAU_S   = 60.0    # 322E003 scrubber overflow liquid pool temperature
+OFFGAS_T_TAU_S  = 30.0    # off-gas line + HV-322604 vent thermowell (vapour line holdup)
+CCW_T_TAU_S     = 25.0    # tempered-CCW shell return (matches TIC-329005 plant lag)
+AT_322701_TAU_S = 40.0    # 322701 on-line N/C analyzer (sample deadtime + measurement lag)
+SCRUB_LVL_TAU_S = 120.0   # 322E003 overflow seal-leg level inventory (slow integrator)
+
+
+def _lag1(store: dict, key: str, target: float, tau_s: float, dt: float) -> float:
+    """First-order lag of a published display value toward `target` with time constant tau_s [s].
+
+    Discrete implicit-Euler weight  a = dt/(tau+dt)  is unconditionally stable for any dt/tau and
+    converges to `target` at steady state (=> design bit-exact).  Lazy-inits to `target` on first
+    call so there is no boot transient.  State lives in `store` (State.tlag), keyed by `key`.
+    """
+    prev = store.get(key)
+    if prev is None or tau_s <= 0.0:
+        store[key] = target
+        return target
+    a = dt / (tau_s + dt)
+    val = prev + a * (target - prev)
+    store[key] = val
+    return val
+
+
 def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None):
     """Uniform process-stream object. Derives BOTH mol % and mass % from the same
     per-component kmol/h vector, so the two bases can never drift. rho unknown -> None
@@ -1112,6 +1157,9 @@ class State:
         # PT-329201 synthesis-loop top pressure (DYNAMIC state, reverse Q->P accumulation):
         #   CCW condensation deficit lifts it; first-order relax to the forward stripper-set target.
         self.p_syn_bara  = SYN_P_DES_BARA                # init at design PT-329201 = 140.7 bar a
+        # Section-322 tear display-lag store: {key: last published lagged value} for every downstream
+        #   temperature / level / analyzer indicator (see _lag1).  Lazy-inits to design on first tick.
+        self.tlag = {}
         # MP/LP steam headers (DYNAMIC lumped-capacitance states, quarantined steam_system module).
         #   Seeded at the stripper/HPCC design saturation pressures (NOT steam_system's generic 25.0
         #   default) so tsat(P_MP)=211.6 == STRIP_STEAM_T_DES_C and the LP offset is 0 -> design
@@ -1522,6 +1570,26 @@ def step_sim(dt: float) -> dict:
     TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 − TIC-329005 (condensation quality)
     q_e004_kw  = scrub["q_ccw_kw"]                # 329E004 tempered-water-cooler duty (loop closure)
 
+    # ----- Section-322 tear display lags (compute ONCE per tick -> shared by both telemetry views) -----
+    #   Each published downstream temperature / level / analyzer is relaxed toward its algebraic target
+    #   with a real time constant (see _lag1 + the TAU block) so an upstream stream-property or
+    #   composition step RAMPS the indicator instead of snapping in a single 0.1 s tick.  Computed once
+    #   here because several tags appear in two telemetry blocks; calling the relax twice would double-step.
+    d_TT322012  = _lag1(s.tlag, "TT322012", ej["T_C"],                                 EJ_T_TAU_S,      dt)
+    d_TT322013  = _lag1(s.tlag, "TT322013", strip["T_top"],                            STRIP_T_TAU_S,   dt)
+    d_TT322004  = _lag1(s.tlag, "TT322004", strip["T_bot"],                            STRIP_T_TAU_S,   dt)
+    d_TT323001  = _lag1(s.tlag, "TT323001", TT_323001,                                 STRIP_T_TAU_S,   dt)
+    d_TT322010  = _lag1(s.tlag, "TT322010", hpcc["T_prod"],                            HPCC_T_TAU_S,    dt)
+    d_HPCC_P    = _lag1(s.tlag, "HPCCP",    hpcc["P_bub"],                             HPCC_P_TAU_S,    dt)
+    d_TT322002  = _lag1(s.tlag, "TT322002", scrub["T_overflow"],                       SCRUB_T_TAU_S,   dt)
+    d_TT322011  = _lag1(s.tlag, "TT322011", scrub["T_offgas"],                         OFFGAS_T_TAU_S,  dt)
+    d_TT322011l = _lag1(s.tlag, "TT322011l", hv604["T_out"],                           OFFGAS_T_TAU_S,  dt)
+    d_TT329125  = _lag1(s.tlag, "TT329125", scrub["t_ccw_out"],                        CCW_T_TAU_S,     dt)
+    d_AT322701  = _lag1(s.tlag, "AT322701", react_nc_ratio(react["overflow_kmolh"]),  AT_322701_TAU_S, dt)
+    # LT-329501 seal-leg level: integrate toward the algebraic holdup target (was a 1-tick snap).
+    lt329501_ss = clamp(50.0 + 40.0 * (react["co2_scale"] - 1.0) + 25.0 * (nu - 1.0), 0.0, 100.0)
+    d_LT329501  = _lag1(s.tlag, "LT329501", lt329501_ss,                              SCRUB_LVL_TAU_S, dt)
+
     # ----- Trips (P1-2 stateful interlocks) -----
     # Live initiator conditions (instantaneous). 21_2 = Urea-Synthesis main trip; its initiators
     #   per the trip schedule include loss of NH3 supply head (tank empty here) and the
@@ -1605,7 +1673,7 @@ def step_sim(dt: float) -> dict:
             strip["bot_kmolh"], strip["T_bot"], STRIP_P_DES_BARA,
             "Stripper bottom solution", "322E001", "LV-322501", "liquid"),
         "HPCC_PROD": make_stream(
-            hpcc["feed_kmolh"], hpcc["T_prod"], hpcc["P_bara"],
+            hpcc["feed_kmolh"], hpcc["T_prod"], d_HPCC_P,
             "HPCC two-phase product", "322E002", "322R001", "two-phase"),
         "HPCC_STEAM": make_stream(
             {"H2O": hpcc["steam_kgh"] / MW_COMP["H2O"]}, HPCC_STEAM_TSAT_C, HPCC_STEAM_P_BARA,
@@ -1683,9 +1751,9 @@ def step_sim(dt: float) -> dict:
             "suction_kgh": round(ej["suction_kgh"], 1),
             "HIC_322602":  round(s.HIC_322602, 1),   # HV-322602 spindle opening (%)
             "mu":          round(ej["mu"], 4),       # entrainment ratio m_suc/m_motive
-            "TT_322012":   round(ej["T_C"], 1),      # discharge temp (C) -> 322E002 HPCC
+            "TT_322012":   round(d_TT322012, 1),     # discharge temp (C) -> 322E002 HPCC (lagged)
             "PI_disch":    round(ej["P_bara"], 1),   # discharge pressure (bar a)
-            "TI_322002":   round(scrub["T_overflow"], 1), # TT-322002 = 322E003 overflow temp (C, live)
+            "TI_322002":   round(d_TT322002, 1), # TT-322002 = 322E003 overflow temp (C, lagged)
             "PI_329201":   round(scrub["P_overflow"], 1), # PT-329201 = 322E003 overflow line P (bar a, live)
             "total_kgh":   round(ej["total_kgh"], 1),
             "total_th":    round(ej["total_kgh"]/1000.0, 2),
@@ -1713,9 +1781,9 @@ def step_sim(dt: float) -> dict:
         },
         "STRIP_322E001": {                       # HP Stripper 322E001 feeds -> products
             "TT_322014":   round(STRIP_FEED207_T_C, 1),   # 322R001 overflow feed temp (C)
-            "TT_322013":   round(strip["T_top"], 1),      # top gas -> 322E002 (C)
-            "TT_322004":   round(strip["T_bot"], 1),      # bottom soln -> LV-322501, pre-flash (C)
-            "TT_323001":   round(TT_323001, 1),           # post-LV flash -> 323C003 (C)
+            "TT_322013":   round(d_TT322013, 1),      # top gas -> 322E002 (C, lagged)
+            "TT_322004":   round(d_TT322004, 1),      # bottom soln -> LV-322501, pre-flash (C, lagged)
+            "TT_323001":   round(d_TT323001, 1),          # post-LV flash -> 323C003 (C, lagged)
             "top_th":      round(strip["top_th"], 2),     # top gas (t/h)
             "top_MW":      round(strip["top_MW"], 2),
             "top_mol_pct": {k: round(strip["top_comp_pct"][k], 3) for k in MW_COMP},
@@ -1746,9 +1814,9 @@ def step_sim(dt: float) -> dict:
             },
         },
         "HPCC_322E002": {                        # HP Carbamate Condenser 322E002 -> 322R001
-            "TT_322012":   round(ej["T_C"], 1),          # tube feed 1: ejector-disch liquid temp (C)
-            "TT_322013":   round(strip["T_top"], 1),     # tube feed 2: stripper-top gas temp (C)
-            "TT_322010":   round(hpcc["T_prod"], 1),     # liquid product -> 322R001 (C)
+            "TT_322012":   round(d_TT322012, 1),         # tube feed 1: ejector-disch liquid temp (C, lagged)
+            "TT_322013":   round(d_TT322013, 1),         # tube feed 2: stripper-top gas temp (C, lagged)
+            "TT_322010":   round(d_TT322010, 1),         # liquid product -> 322R001 (C, lagged)
             "TT_329001":   round(T_shell_lp, 1),         # F6: shell BFW/condensate feed T de-pinned -> live LP-header sat T (==146.3 at design)
             "gas_th":      round(hpcc["gas_th"], 2),     # gas product (t/h)
             "gas_MW":      round(hpcc["gas_MW"], 2),
@@ -1757,7 +1825,7 @@ def step_sim(dt: float) -> dict:
             "liq_MW":      round(hpcc["liq_MW"], 2),
             "liq_mass_pct":{k: round(hpcc["liq_mass_pct"][k], 3) for k in MW_COMP},  # mass %
             "LT_322E002":  round(s.hpcc_level_pct, 1),   # liquid level (%) — DYNAMIC inventory (swells on stall)
-            "P_bara":      round(hpcc["P_bara"], 1),
+            "P_bara":      round(d_HPCC_P, 1),
             "steam": {                            # shell side: LP steam (live LP header, heat recovery)
                 "TI_shell": round(T_shell_lp, 1),            # live LP-header sat condensing temp (C)
                 "P_bara":   round(s.steam.P_LP, 1),          # live LP header pressure (bar a)
@@ -1787,7 +1855,7 @@ def step_sim(dt: float) -> dict:
             "TT_322008":   round(s.react_T_node[0], 1),  # N6 D bot (EL  +1000) — node-1 DYNAMIC profile
             "TT_322009":   round(react["T_offgas"], 1),      # off-gas line -> 322E003 (C, live profile)
             "LT_322504":   round(s.react_level_pct, 1),      # top liquid level (%) — DYNAMIC
-            "AT_322701":   round(react_nc_ratio(react["overflow_kmolh"]), 3),  # N/C molar ratio ->322E001
+            "AT_322701":   round(d_AT322701, 3),  # N/C molar ratio ->322E001 (lagged analyzer)
             "HIC_322605":  round(s.HIC_322605, 1),           # overflow valve controller (%)
             "HV_322605":   round(s.HIC_322605, 1),           # HV-322605 opening (tracks HIC 1:1)
             "P_bara":      round(react["P_bara"], 1),        # reactor pressure (bar a)
@@ -1800,7 +1868,7 @@ def step_sim(dt: float) -> dict:
         },
         "SCRUB_322E003": {                       # HP Scrubber 322E003 -> 322C001 (off-gas) / 322F001 (overflow)
             "TT_322009":   round(react["T_offgas"], 1),      # reactor off-gas feed in (C)
-            "TT_322011":   round(scrub["T_offgas"], 1),      # off-gas temp -> HV-322604 (C)
+            "TT_322011":   round(d_TT322011, 1),      # off-gas temp -> HV-322604 (C, lagged)
             "off_th":      streams["SCRUB_OFFGAS"]["mass_th"],   # off-gas mass flow (t/h)
             "off_mol":     streams["SCRUB_OFFGAS"]["mol_kmolh"], # off-gas molar flow (kmol/h)
             "off_MW":      streams["SCRUB_OFFGAS"]["MW"],        # off-gas mean MW
@@ -1813,24 +1881,23 @@ def step_sim(dt: float) -> dict:
             "closure_resid": round(scrub["closure_resid"], 2),  # tube-side mole-balance diag (kmol/h, not injected)
             "HV_322604":   round(s.HIC_322604, 1),           # HV-322604 opening (tracks HIC 1:1)
             "HIC_322604":  round(s.HIC_322604, 1),           # off-gas valve controller (%)
-            "TT_322011_lp":round(hv604["T_out"], 1),         # off-gas T after HV-322604 (JT-cooled, C)
+            "TT_322011_lp":round(d_TT322011l, 1),        # off-gas T after HV-322604 (JT-cooled, C, lagged)
             "og_lp_th":    round(hv604["mass_kgh"] / 1000.0, 3),  # HV-322604 vented off-gas mass flow (t/h, live)
             "vent_frac":   round(scrub["vent_frac"], 4),     # HV-322604 vent capacity / required purge (<1 -> PT rises)
             "P_offgas":    round(scrub["P_offgas"], 1),      # off-gas line P (bar a)
             "P_overflow":  round(scrub["P_overflow"], 1),    # PT-329201 overflow line P (bar a)
-            "TT_322002":   round(scrub["T_overflow"], 1),    # overflow temp -> 322F001 (C)
+            "TT_322002":   round(d_TT322002, 1),    # overflow temp -> 322F001 (C, lagged)
             # F6: LT-329501 de-pinned — seal-leg level rises with overflow throughput (co2_scale) and
             #     downstream synthesis backpressure (nu); ==50% design NLL at s=1, nu=1 (bit-exact).
-            "LT_329501":   round(clamp(50.0 + 40.0 * (react["co2_scale"] - 1.0)
-                                       + 25.0 * (nu - 1.0), 0.0, 100.0), 1),  # overflow seal-leg level (%)
+            "LT_329501":   round(d_LT329501, 1),  # overflow seal-leg level (%, integrated, SCRUB_LVL_TAU_S)
             "ccw": {                              # shell-side CCW loop (329P006 A/B pump + 329E004 cooler)
-                "TT_329125":  round(scrub["t_ccw_out"], 2),     # CCW return temp out of shell (C)
+                "TT_329125":  round(d_TT329125, 2),     # CCW return temp out of shell (C, lagged)
                 "TDY_329125": round(TDY_329125, 2),             # TT-329125 − TIC-329005 (cond. quality, C) — live PT-329201 cascade
                 "vent_ratio": round(scrub["vent_ratio"], 4),    # synthesis-vent load PT-329201/PT_des (= nu, prior-step state)
                 "rho_cond":   round(scrub["rho_cond"], 4),      # condensation capacity/demand (CCW flow / vent load); <1 -> PT-329201 rises
                 "co2_free":   round(scrub["co2_free"], 1),      # free acid CO2 overhead (pressure-building, kmol/h)
                 "pb_push":    round(scrub["pb_push"], 5),       # PT forward push = pressure-building overhead deviation (0 at design)
-                "PI_322E002": round(scrub["P_bub_hpcc"], 1),    # 322E002 HPCC bubble-point synthesis P (bar a)
+                "PI_322E002": round(d_HPCC_P, 1),    # 322E002 HPCC bubble-point synthesis P (bar a, lagged)
                 "Q_ccw_kW":   round(scrub["q_ccw_kw"], 0),      # heat removed by CCW (kW)
                 "Q_carb_kW":  round(scrub["q_carb_kw"], 0),     # carbamate exotherm (diag, kW)
                 "co2_abs":    round(scrub["co2_abs"], 2),       # CO2 absorbed gas->carbamate (kmol/h)
