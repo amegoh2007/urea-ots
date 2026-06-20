@@ -122,6 +122,14 @@ EJ_SUCTION_KGH = {k: _EJ_DES_MASS[k] - (EJ_MOTIVE_NH3_DES if k == "NH3" else 0.0
                   for k in MW_COMP}
 EJ_MU          = sum(EJ_SUCTION_KGH.values()) / EJ_MOTIVE_NH3_DES   # entrainment ~1.4125
 EJ_OPEN_DES    = 74.0            # %, HV-322602 design opening (HIC-322602 design SP)
+# HV-322602 spindle characteristic (322F001 DDS, item (d)): the diaphragm-actuated parabolic NH3-nozzle
+# needle is the ejector's motive throttle, so opening it RAISES motive -> RAISES suction capacity at ~const
+# mu (POSITIVE law).  Datasheet (Remarks 3-5): free area variable 40-100 %; cap 1.00 @ 90 % area, cap 0.60
+# @ 50 % area.  Linear instrument map a(theta)=40+0.6*theta -> area 90 % = theta 83.33 %, area 50 % = theta
+# 16.67 %.  Equal-% factor phi_sp(theta)=R^((theta-EJ_OPEN_DES)/100), phi_sp(74)=R^0=1 (design bit-exact).
+# Fit R from the two anchors: R^((83.33-16.67)/100)=1.00/0.60 -> R^0.6667=1.6667 -> R=1.6667^1.5=2.1517.
+# (Replaces the old INVERSE EJ_OPEN_DES/open_eff term, which moved flow the wrong way vs the real spindle.)
+EJ_SPINDLE_R   = 2.1517          # effective equal-% rangeability of ejector suction capacity vs HV-322602
 EJ_STALL_PHI   = 0.20            # phi_m DEEP-stall KNEE: f_stall==0 at/below this motive fraction (jet
                                  #   momentum cannot overcome discharge backpressure -> capacity collapses).
                                  #   Set LOW: this is a genuine motive FAULT, not normal turndown.  Healthy
@@ -284,9 +292,11 @@ LV322501_P_DOWN_BARA = 4.0        # bar a, L3-1 LP-loop downstream ref for live-
 def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float,
                     scrub_level_frac: float = 1.0) -> dict:
     """322F001 HP ejector: mix live motive NH3 with entrained 322E003 carbamate.
-    Entrainment is set by the HV-322602 spindle opening (HIC-322602): decreasing the
-    opening raises mu -> more 322E003 carbamate suction.  At the design opening (74 %)
-    mu = EJ_MU and the discharge reproduces the design 'Carb. Liq.' table.  Energy
+    Entrainment capacity is set by the HV-322602 spindle opening (HIC-322602): the
+    parabolic NH3-nozzle needle is the motive throttle, so INCREASING the opening raises
+    the suction CAPACITY at ~const mu (POSITIVE equal-% law, EJ_SPINDLE_R, from the
+    322F001 datasheet).  At the design opening (74 %) phi_sp = 1, mu = EJ_MU and the
+    discharge reproduces the design 'Carb. Liq.' table.  Energy
     balance sets discharge temp.  Returns the discharge stream (-> 322E002) + props.
 
     Option-3 self-regulation: actual entrainment = CAPACITY * (L_scrub/NLL).  The
@@ -306,7 +316,7 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
         return {"comp": {k: 0.0 for k in MW_COMP}, "total_kgh": 0.0, "suction_kgh": 0.0,
                 "mol_kmolh": 0.0, "MW": 0.0, "T_C": EJ_T_SUCTION_C, "P_bara": 0.0,
                 "rho": 0.0, "vol_m3h": 0.0, "mu": 0.0}
-    # HV-322602 (HIC-322602) sets entrainment: decreasing opening -> more 322E003 suction.
+    # HV-322602 (HIC-322602) sets entrainment: opening the spindle -> more motive -> more 322E003 suction.
     open_eff = clamp(hv_open_pct, 10.0, 100.0)
     # Representative non-linear liquid-liquid jet-ejector entrainment law (322F001, Options 2+3):
     #   The entrainment RATIO mu is ~constant across the healthy band and the suction CAPACITY scales
@@ -315,17 +325,20 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     #   self-regulating attractor at NLL -- it does NOT false-flood on proportional turndown (where
     #   capacity AND overflow drop together) yet floods on a real stall (capacity << overflow):
     #       phi_m    = motive / EJ_MOTIVE_DES_LIVE        (live design motive -> phi_m==1 bit-exact)
+    #       phi_sp   = EJ_SPINDLE_R^((open_eff - EJ_OPEN_DES)/100)   (POSITIVE equal-% spindle char, 322F001
+    #                  DDS; phi_sp(74)=R^0=1 bit-exact; opening MORE -> MORE capacity, the real needle physics)
     #       f_stall  = clamp((phi_m - PHI)/(REC - PHI), 0, 1) ^ EXP      PHI=0.20, REC=0.35, EXP=2
-    #       capacity = EJ_SUC_TOT_DES * phi_m * (EJ_OPEN_DES/open_eff) * f_stall
+    #       capacity = EJ_SUC_TOT_DES * phi_m * phi_sp * f_stall
     #       m_suc    = capacity * scrub_level_frac        (frac = L_scrub/NLL, gravity suction head)
     #   Steady fixed point: m_suc==overflow -> L_eq = NLL*(overflow/capacity).  Proportional turndown:
     #     capacity ~ phi_m ~ overflow -> L_eq=NLL (dead steady).  Motive fault (phi_m<REC, load held):
     #     f_stall->0 -> capacity<<overflow -> L_eq>>NLL -> sump RISES (true stall).  Design (phi_m=1,
-    #     open=EJ_OPEN_DES, L=NLL -> frac=1): m_suc == EJ_SUC_TOT_DES bit-exact.
+    #     open=EJ_OPEN_DES -> phi_sp=1, L=NLL -> frac=1): m_suc == EJ_SUC_TOT_DES bit-exact.
     _ej_mot_des = EJ_MOTIVE_DES_LIVE if EJ_MOTIVE_DES_LIVE is not None else EJ_MOTIVE_NH3_DES
     phi_m    = motive_nh3_kgh / _ej_mot_des
+    phi_sp   = EJ_SPINDLE_R ** ((open_eff - EJ_OPEN_DES) / 100.0)   # equal-% spindle char (POSITIVE law)
     f_stall  = clamp((phi_m - EJ_STALL_PHI) / (EJ_STALL_REC - EJ_STALL_PHI), 0.0, 1.0) ** EJ_STALL_EXP
-    capacity = EJ_SUC_TOT_DES * phi_m * (EJ_OPEN_DES / open_eff) * f_stall   # entrainment CAPACITY (kg/h)
+    capacity = EJ_SUC_TOT_DES * phi_m * phi_sp * f_stall   # entrainment CAPACITY (kg/h)
     m_suc    = capacity * max(scrub_level_frac, 0.0)     # actual entrainment = capacity * suction head
     suction  = {k: m_suc * EJ_CARB_FRAC[k] for k in MW_COMP}
     disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
