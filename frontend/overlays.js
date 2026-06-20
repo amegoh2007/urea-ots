@@ -72,7 +72,7 @@
       { k: 'tdy25', t: 'ind', x: 494, y: 344, tag: 'TDY-329125', bind: 'SCRUB_322E003.ccw.TDY_329125',   u: 'C',   dec: 1 },
       { k: 'i008',  t: 'ind', x: 995, y: 351, tag: 'IT-329008'  },
       { k: 'ti25',  t: 'ind', x: 988, y: 402, tag: 'TI-329125',  bind: 'SCRUB_322E003.ccw.TT_329125',    u: 'C', dec: 1 },
-      { k: 'h602',  t: 'ind', x: 103, y: 531, tag: 'HIC-322602',bind: 'HIC_322602', u: '%',     dec: 1, face: 'hic' },
+      { k: 'h602',  t: 'ind', x: 103, y: 531, tag: 'HIC-322602',bind: 'EJ_322F001.HIC_322602', u: '%',     dec: 1, face: 'hic' },
       { k: 't21',   t: 'ind', x: 148, y: 652, tag: 'TI-321020', bind: 'TI_321020',  u: 'C',     dec: 1 },
       // pumps (state-only: no backend toggle handler yet -> local toggle)
       { k: 'p2a', t: 'pump', x: 558, y: 43,  tag: '329P002A' },
@@ -85,7 +85,7 @@
       { k: 'xv3', t: 'xv',   x: 226, y: 466, tag: 'XV-322903' },
       { k: 'xv1', t: 'xv',   x: 214, y: 593, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
       // HV-322602 opening (driven by HIC-322602) — placed below h602 per updated 322-2 tagged
-      { k: 'hv602', t: 'ind', x: 128, y: 578, tag: 'HV-322602', bind: 'HIC_322602', u: '%', dec: 1 },
+      { k: 'hv602', t: 'ind', x: 128, y: 578, tag: 'HV-322602', bind: 'EJ_322F001.HIC_322602', u: '%', dec: 1 },
       // ---- stream-inspector hotspots (click = composition/properties popup; drag in edit mode to align) ----
       { k: 'strm-soffg', t: 'strm', stream: 'SCRUB_OFFGAS',    tag: 'SCRUBBER OFF-GAS → HV-322604', x: 560,  y: 60,  w: 230, h: 16 },
       { k: 'strm-soglp', t: 'strm', stream: 'SCRUB_OFFGAS_LP', tag: 'OFF-GAS LP → 322C001',         x: 1005, y: 150, w: 150, h: 16 },
