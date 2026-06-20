@@ -693,6 +693,7 @@ SCRUB_HIC604_DES_PCT = 50.0      # %, HIC-322604 design opening (HV-322604, iner
 SCRUB_HV604_P_OUT    = 4.0       # bar a, 322C001 LP-absorber downstream pressure
 SCRUB_HV604_MU_JT    = 0.55      # C/bar, mixture Joule-Thomson coeff (NH3/CO2-rich off-gas)
 SCRUB_HV604_DP_DES   = SCRUB_OFFGAS_P_BARA - SCRUB_HV604_P_OUT   # 136.7 bar, design ΔP across HV-322604 (dP_des)
+SCRUB_HV604_RANGE    = 50.0      # equal-% inherent rangeability R (datasheet char = EQUAL %): K_v(h)=K_vs·R^(h-1)
 # --- Shell-side CCW (Conditioning Cooling Water) closed loop: 329P006 A/B pump + 329E004 cooler ---
 #   322E003 shell -- TT-329125 -- 329P006 A/B -- FV-329409/FIC-329409 -- TIC-329005 -- shell in;
 #   branch after 329P006: TV-329005 -- 329E002 -- main CCW header (heat rejected via 329E004).
@@ -1032,17 +1033,29 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
             "T_overflow": t_overflow, "P_overflow": SCRUB_OVERFLOW_P_BARA}
 
 
+def _eq_pct(theta_pct: float, theta_des_pct: float, R: float = SCRUB_HV604_RANGE) -> float:
+    """Equal-percentage valve characteristic factor, normalised to the design opening.
+
+    IEC 60534 inherent equal-percentage trim  K_v(h) = K_vs · R^(h-1)  (h = fractional travel,
+    R = rangeability).  Normalised to the design travel h_des the K_vs cancels:
+        φ_ep(θ) = K_v(θ)/K_v(θ_des) = R^(h - h_des) = R^((θ - θ_des)/100)
+    so φ_ep(θ_des) = R^0 = 1 exactly (design bit-exact) and each +1 % travel multiplies the
+    installed K_v by R^0.01 (≈ +8 %/1 % at R=50) — the steep top-of-travel gain that distinguishes
+    an equal-% trim from a linear one near the seat-limited / choked operating band."""
+    return R ** ((max(theta_pct, 0.0) - theta_des_pct) / 100.0)
+
+
 def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float) -> dict:
     """HV-322604 HP-scrubber off-gas valve — dynamic isenthalpic letdown 322E003 -> 322C001.
     Inert purge to the LP absorber.  Flow follows the valve hydraulic characteristic, driven by
-    the live controller opening θ (HIC-322604) and √ΔP across the seat:
-        m_og = m_og_des·s · (θ/θ_des) · √(max(P_up−P_down,0)/ΔP_des)   (θ_des = design opening 50%)
+    the live controller opening θ (HIC-322604) and √ΔP across the seat.  Datasheet trim is
+    EQUAL PERCENTAGE (DN-24, Kvs 2.1, carbamate gas), so the opening term is R^((θ−θ_des)/100):
+        m_og = m_og_des·s · R^((θ−θ_des)/100) · √(max(P_up−P_down,0)/ΔP_des)   (θ_des = 50%, R = 50)
     The incoming `offgas` vector is already the design purge × s, so the valve factor scales it
     1:1 (composition held; θ=θ_des & P_up=design -> factor=1 -> bit-exact design HMB).  Dynamic
     Joule-Thomson cooling on the ACTUAL pressure drop:  T_out = T_in − μ_JT·ΔP."""
     dP    = max(p_up - SCRUB_HV604_P_OUT, 0.0)
-    theta = max(hic_pct, 0.0)
-    valve = (theta / SCRUB_HIC604_DES_PCT) * math.sqrt(dP / SCRUB_HV604_DP_DES)   # θ-opening × √ΔP-ratio
+    valve = _eq_pct(hic_pct, SCRUB_HIC604_DES_PCT) * math.sqrt(dP / SCRUB_HV604_DP_DES)   # equal-% trim × √ΔP-ratio
     comp  = {k: offgas.get(k, 0.0) * valve for k in MW_COMP}                      # throttled flow, comp held
     T_out = T_in - SCRUB_HV604_MU_JT * dP                                         # dynamic JT letdown
     m_kgh = sum(comp.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)                   # = m_og_des·s·valve
@@ -1594,11 +1607,12 @@ def step_sim(dt: float) -> dict:
     top_ratio  = (strip["top_mol"] / STRIP_TOP_MOL_DES) if STRIP_TOP_MOL_DES else 1.0  # stripper overhead push
     nu = s.p_syn_bara / SYN_P_DES_BARA            # vent ratio = PT-329201/PT_des (prior-step state; breaks the algebraic loop)
     # HV-322604 back-pressure penalty — valve vent capacity vs the scrubber's required inert purge:
-    #   vent_frac = m_og/(m_og_des·s) = (θ/θ_des)·√(ΔP/ΔP_des);  θ_des = design opening (50%, demand-met).
-    #   Pinch below design (vent_frac<1) starves the inert vent -> uncondensed inerts accumulate and
-    #   integrate PT-329201 up.  Uses prior-step p_syn for ΔP (same loop-break convention as nu).
+    #   vent_frac = m_og/(m_og_des·s) = R^((θ−θ_des)/100)·√(ΔP/ΔP_des);  θ_des = design opening (50%,
+    #   demand-met), equal-% trim per datasheet (must match hv_322604 so the diagnostic vent flow and
+    #   the back-pressure penalty use one characteristic).  Pinch below design (vent_frac<1) starves the
+    #   inert vent -> uncondensed inerts accumulate and integrate PT-329201 up.  Prior-step p_syn for ΔP.
     dP_vent   = max(s.p_syn_bara - SCRUB_HV604_P_OUT, 0.0)
-    vent_frac = (s.HIC_322604 / SCRUB_HIC604_DES_PCT) * math.sqrt(dP_vent / SCRUB_HV604_DP_DES)
+    vent_frac = _eq_pct(s.HIC_322604, SCRUB_HIC604_DES_PCT) * math.sqrt(dP_vent / SCRUB_HV604_DP_DES)
     scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
                           vent_ratio=nu, nc_act=react_nc_ratio(react["overflow_kmolh"]),
                           hic604_pct=s.HIC_322604)
