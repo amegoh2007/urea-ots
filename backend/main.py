@@ -122,9 +122,19 @@ EJ_SUCTION_KGH = {k: _EJ_DES_MASS[k] - (EJ_MOTIVE_NH3_DES if k == "NH3" else 0.0
                   for k in MW_COMP}
 EJ_MU          = sum(EJ_SUCTION_KGH.values()) / EJ_MOTIVE_NH3_DES   # entrainment ~1.4125
 EJ_OPEN_DES    = 74.0            # %, HV-322602 design opening (HIC-322602 design SP)
-EJ_STALL_PHI   = 0.35            # motive-fraction (phi_m) jet-stall knee: below this the ejector
-                                 # can no longer entrain -> mu collapses.  f_stall==1.0 at design
-                                 # motive (phi_m=1) so mu == spindle value (design bit-exact).
+EJ_STALL_PHI   = 0.20            # phi_m DEEP-stall KNEE: f_stall==0 at/below this motive fraction (jet
+                                 #   momentum cannot overcome discharge backpressure -> capacity collapses).
+                                 #   Set LOW: this is a genuine motive FAULT, not normal turndown.  Healthy
+                                 #   proportional turndown does NOT false-stall because capacity AND scrubber
+                                 #   overflow both scale with motive -> sump self-regulates at NLL (see below).
+EJ_STALL_REC   = 0.35            # phi_m RECOVERY fraction: f_stall saturates at 1.0 at/above this.  For any
+                                 #   phi_m >= EJ_STALL_REC the entrainment RATIO mu is ~constant (jet-ejector
+                                 #   physics); below it the capacity collapses sharply (deep motive loss /
+                                 #   N/C-ratio break with load held -> ejector STALLS -> 322E003 sump floods).
+EJ_STALL_EXP   = 2.0             # convexity of the f_stall collapse inside the deep-stall band [PHI, REC]:
+                                 #   f_stall = clamp((phi_m-PHI)/(REC-PHI),0,1)^EXP.  EXP=2 -> sharp
+                                 #   quadratic knee: f(0.25)=0.11, f(0.30)=0.44, f(0.35)=1.  NOT a linear
+                                 #   phi_m cheat and NOT a curve that only reaches 1 at phi_m=1.
 EJ_SUC_TOT_DES = sum(EJ_SUCTION_KGH.values())                      # kg/h, design suction
 EJ_CARB_FRAC   = {k: EJ_SUCTION_KGH[k] / EJ_SUC_TOT_DES for k in MW_COMP}  # 322E003 overflow comp
 EJ_CP_N, EJ_CP_C, EJ_CP_D = 4.74, 3.10, 3.50    # kJ/kg.K  motive / carbamate / discharge
@@ -232,6 +242,10 @@ STRIP_DT_STEAM_DES_C = STRIP_DUTY_DES_KW * 3600.0 / (STRIP_FEED_DES_KGH * STRIP_
 #   heat and pulls the bottom COLDER.  Acts only on EXCESS G/L (feed-lean / CO2-rich); saturates (no pole).
 STRIP_STRIPCOOL_MAX  = 72.0     # °C, max forced-decomposition/evaporation endotherm (G/L -> ∞ asymptote)
 STRIP_STRIPCOOL_KGL  = 1.80     # cooling ramp per unit excess G/L ratio ((G/L)/(G/L)_des − 1)
+STRIP_T_TOP_LOAD_K   = 0.5      # overhead (TT-322013) attenuation of the bottom feed-load thermal swing
+                                #   (dT_bot is a liquid/reboiler effect; the top gas feels it only weakly).
+                                #   The G/L strip-cool endotherm (dT_strip) couples to the OVERHEAD at full
+                                #   weight — the rising vapour is first to carry the CO2-sweep flash latent load.
 STRIP_ETA_KT    = 1.50     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
 STRIP_ETA_KN    = 1.50     # eta_T penalty per unit reactor-feed N/C above design (excess NH3 chokes)
 STRIP_ETA_KW    = 1.50     # eta_T penalty per unit reactor-feed H/C above design (dilution chokes)
@@ -268,17 +282,19 @@ LV322501_P_DOWN_BARA = 4.0        # bar a, L3-1 LP-loop downstream ref for live-
 
 
 def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float,
-                    m_suc_avail: float = None) -> dict:
+                    scrub_level_frac: float = 1.0) -> dict:
     """322F001 HP ejector: mix live motive NH3 with entrained 322E003 carbamate.
     Entrainment is set by the HV-322602 spindle opening (HIC-322602): decreasing the
     opening raises mu -> more 322E003 carbamate suction.  At the design opening (74 %)
     mu = EJ_MU and the discharge reproduces the design 'Carb. Liq.' table.  Energy
     balance sets discharge temp.  Returns the discharge stream (-> 322E002) + props.
 
-    P1-3 mass conservation: a jet pump cannot entrain more than the upstream actually
-    supplies.  m_suc_avail (kg/h) = live 322E003 overflow mass; the entrained suction is
-    capped at min(mu*motive, m_suc_avail) so no phantom carbamate is created.  None
-    (unit-test path) leaves the demand uncapped (= legacy behaviour)."""
+    Option-3 self-regulation: actual entrainment = CAPACITY * (L_scrub/NLL).  The
+    scrub_level_frac (= prior-step 322E003 level / NLL, gravity suction head) makes the
+    sump a STABLE attractor: at design L=NLL -> frac=1 -> entrain=capacity.  If the
+    ejector stalls (capacity << overflow) the sump rises -> frac>1 -> entrain climbs back,
+    settling at L_eq = NLL*(overflow/capacity); a true motive fault floods it.  frac=1.0
+    (unit-test / warm-up path) reproduces design entrainment exactly."""
     if motive_nh3_kgh <= 1e-6:
         # No-flow (pumps tripped): zero MASS, but the discharge thermowell (TT-322012) is NOT at
         #   0 C -- it reads the stagnant fluid backed up into the dead jet pump, i.e. the entrained
@@ -292,15 +308,25 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
                 "rho": 0.0, "vol_m3h": 0.0, "mu": 0.0}
     # HV-322602 (HIC-322602) sets entrainment: decreasing opening -> more 322E003 suction.
     open_eff = clamp(hv_open_pct, 10.0, 100.0)
-    # motive-linked entrainment stall: a jet pump can no longer entrain below a critical motive
-    # momentum -> suction chokes.  Linear ramp on motive fraction phi_m, knee EJ_STALL_PHI.
-    phi_m    = motive_nh3_kgh / EJ_MOTIVE_NH3_DES
-    f_stall  = clamp((phi_m - EJ_STALL_PHI) / (1.0 - EJ_STALL_PHI), 0.0, 1.0)
-    mu       = EJ_MU * (EJ_OPEN_DES / open_eff) * f_stall   # spindle entrainment x motive stall
-    m_suc    = mu * motive_nh3_kgh                          # entrainment DEMAND (kg/h)
-    # P1-3 cap: suction strictly bounded by the live scrubber-overflow availability.
-    if m_suc_avail is not None:
-        m_suc = min(m_suc, max(m_suc_avail, 0.0))
+    # Representative non-linear liquid-liquid jet-ejector entrainment law (322F001, Options 2+3):
+    #   The entrainment RATIO mu is ~constant across the healthy band and the suction CAPACITY scales
+    #   with live motive; a deep-stall factor collapses it only on a genuine motive fault.  ACTUAL
+    #   entrainment is then gated by the gravity suction head (scrub level) so the sump is a STABLE
+    #   self-regulating attractor at NLL -- it does NOT false-flood on proportional turndown (where
+    #   capacity AND overflow drop together) yet floods on a real stall (capacity << overflow):
+    #       phi_m    = motive / EJ_MOTIVE_DES_LIVE        (live design motive -> phi_m==1 bit-exact)
+    #       f_stall  = clamp((phi_m - PHI)/(REC - PHI), 0, 1) ^ EXP      PHI=0.20, REC=0.35, EXP=2
+    #       capacity = EJ_SUC_TOT_DES * phi_m * (EJ_OPEN_DES/open_eff) * f_stall
+    #       m_suc    = capacity * scrub_level_frac        (frac = L_scrub/NLL, gravity suction head)
+    #   Steady fixed point: m_suc==overflow -> L_eq = NLL*(overflow/capacity).  Proportional turndown:
+    #     capacity ~ phi_m ~ overflow -> L_eq=NLL (dead steady).  Motive fault (phi_m<REC, load held):
+    #     f_stall->0 -> capacity<<overflow -> L_eq>>NLL -> sump RISES (true stall).  Design (phi_m=1,
+    #     open=EJ_OPEN_DES, L=NLL -> frac=1): m_suc == EJ_SUC_TOT_DES bit-exact.
+    _ej_mot_des = EJ_MOTIVE_DES_LIVE if EJ_MOTIVE_DES_LIVE is not None else EJ_MOTIVE_NH3_DES
+    phi_m    = motive_nh3_kgh / _ej_mot_des
+    f_stall  = clamp((phi_m - EJ_STALL_PHI) / (EJ_STALL_REC - EJ_STALL_PHI), 0.0, 1.0) ** EJ_STALL_EXP
+    capacity = EJ_SUC_TOT_DES * phi_m * (EJ_OPEN_DES / open_eff) * f_stall   # entrainment CAPACITY (kg/h)
+    m_suc    = capacity * max(scrub_level_frac, 0.0)     # actual entrainment = capacity * suction head
     suction  = {k: m_suc * EJ_CARB_FRAC[k] for k in MW_COMP}
     disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
     m_d   = sum(disch.values())
@@ -470,7 +496,8 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "bot_MW": (bot_m / bot_n if bot_n else 0.0),
         "top_comp_pct": {k: (top[k] / top_n * 100.0 if top_n else 0.0) for k in MW_COMP},   # mol %
         "bot_mass_pct": {k: (bot_kgh[k] / bot_m * 100.0 if bot_m else 0.0) for k in MW_COMP},# mass %
-        "T_top": STRIP_T_TOPGAS_DES_C + 0.6 * dTs,
+        "T_top": min(STRIP_T_TOPGAS_DES_C + 0.6 * dTs
+                     + STRIP_T_TOP_LOAD_K * dT_bot + dT_strip, T_steam_C),  # TT-322013: steam-heat + feed-load (atten.) + G/L strip-cool (full); ≤ steam sat
         "T_bot": T_bot_C,
         "xi_hyd": xi_hyd, "xi_biu": xi_biu, "eta_T": eta_T, "T_steam": T_steam_C,
         "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC, "g_T": g_T,
@@ -523,6 +550,14 @@ REACT_OFFGAS_DES   = {"NH3": 665.73, "CO2": 197.69, "N2": 44.53, "H2O": 42.51,
                       "O2": 7.42, "CH4": 3.86, "H2": 2.02, "Urea": 0.0, "Biuret": 0.0}  # Σ ≈ 963.76
 REACT_XI_UREA_DES  = 1302.27     # urea-formation extent at design (kmol/h)
 REACT_XI_BIU_DES   = 2.414       # biuret-formation extent at design (kmol/h)
+# ISSUE-c incremental mass-conservation references (kg/h), captured on the SETTLED live design loop
+# by _pin_hpcc_ua (mirrors the HPCC_UA pin).  None -> reactor overflow rescale is INACTIVE (warm-up
+# pass + any pre-pin call), so the references themselves are taken from the un-rescaled design point.
+REACT_MASS_DES = None            # (m_feed_des, m_overflow_des, m_offgas_des) kg/h
+EJ_MOTIVE_DES_LIVE = None        # settled live design motive NH3 (kg/h), pinned in _pin_hpcc_ua ->
+                                 #   phi_m = motive/EJ_MOTIVE_DES_LIVE == 1.0 bit-exact at design steady
+                                 #   state (so the 322E003 sump holdup ODE is a STATIONARY fixed point).
+                                 #   None -> fall back to const EJ_MOTIVE_NH3_DES (warm-up/pre-pin calls).
 REACT_HIC605_DES_PCT = 60.0      # φ_des: HV-322605 design opening (Kv_req/Kvs, linear trim)
 REACT_OVERFLOW_T_C = 183.0       # TT-322014 overflow temp -> 322E001
 RATIO_PV_DES       = 2.0231315310702604   # design fresh-feed N/C (live-probed settled ratio.PV)
@@ -632,6 +667,15 @@ SCRUB_OFFGAS_KMOLH_DES = {k: SCRUB_OFFGAS_MOLPCT.get(k, 0.0) / 100.0 * SCRUB_OFF
                           for k in MW_COMP}
 # Overflow design vector IS the 322F001 ejector suction (single source of truth -> DRY, bit-identical):
 SCRUB_OVERFLOW_KMOLH_DES = {k: EJ_SUCTION_KGH[k] / MW_COMP[k] for k in MW_COMP}   # Σ ≈ 2519.4 kmol/h
+# --- 322E003 sump liquid inventory (Option 3: TRUE dynamic state, not a display lag) ---
+#   dM_scrub/dt = ṁ_cond,in − ṁ_entrain ;  ṁ_cond,in = Σ overflow_kmolh·MWᵢ (carbamate make from
+#   condensation/absorption), ṁ_entrain = ej["suction_kgh"] (actual non-linear-curve entrainment).
+#   At design cond == entrain == EJ_SUC_TOT_DES -> dM=0, level == NLL (bit-exact, indep. of τ).
+#   If the ejector STALLS (C(phi_m)->0) entrainment collapses while condensation continues -> M rises.
+SCRUB_LEVEL_NLL_PCT  = 50.0      # %, 322E003 sump design normal liquid level
+SCRUB_TAU_HOLDUP_MIN = 4.0       # min, sump residence time at design throughput (sets holdup scale)
+SCRUB_HOLDUP_NLL_KG  = EJ_SUC_TOT_DES * SCRUB_TAU_HOLDUP_MIN / 60.0   # kg liquid at NLL (≈3837 kg)
+SCRUB_HOLDUP_MAX_KG  = SCRUB_HOLDUP_NLL_KG * 100.0 / SCRUB_LEVEL_NLL_PCT  # kg at 100% (sump full)
 SCRUB_CARB_T_C       = 74.0      # C, weak-carbamate wash inlet (323P001 A/B)
 SCRUB_CARB_P_BARA    = 140.7     # bar a, carbamate feed line
 SCRUB_CARB_RHO       = 1226.0    # kg/m³, carbamate density (74 C)
@@ -820,6 +864,9 @@ _HPCC_DES = hpcc_322e002(
     stripper_322e001(CO2_DES_KGH / 1000.0, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA),
     ejector_322f001(EJ_MOTIVE_NH3_DES, EJ_MOTIVE_T_DES_C, EJ_OPEN_DES))            # design make ref
 HPCC_LIQ_DES_KGH   = _HPCC_DES["liq_kgh"]                                          # design make
+HPCC_LIQ_DES_LIVE  = None        # ISSUE-c/e: SETTLED live design liquid make (pinned in _pin_hpcc_ua);
+#   the synthetic HPCC_LIQ_DES_KGH above understates it ~2 %, so normalising phi_in on it left the
+#   level winding past NLL (drift +0.33 %/2min, never steady).  The live ref makes NLL a true fixed pt.
 # HPCC_UA (shell conductance, kJ/h.K) is design-pinned AFTER step_sim is defined, by a one-shot
 # settle warm-up on the LIVE loop (see _pin_hpcc_ua() near the module tail).  The synthetic single-
 # call construction above understates the tube throughput by ~2 % (its stripper sees CO2_DES_KGH
@@ -874,6 +921,23 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
     og_tot   = sum(offgas.values())
     p_nh3_og = (offgas.get("NH3", 0.0) / og_tot) * REACT_OFFGAS_P_BARA if og_tot > 0.0 else 0.0
     p_co2_og = (offgas.get("CO2", 0.0) / og_tot) * REACT_OFFGAS_P_BARA if og_tot > 0.0 else 0.0
+    # ISSUE-c: incremental mass conservation.  CO2 + 2 NH3 -> urea + H2O is mass-neutral, so reactor
+    # mass-out (overflow + off-gas) must track mass-in (feed) 1:1.  The pinned design vectors do NOT
+    # close off-design (overflow ∝ s·φ vs. feed ∝ ejector φ_m²), inventing ~35 t/h at 70 % turndown.
+    # Rescale the overflow MASS to carry the live feed/off-gas deltas about the settled design refs:
+    #       m_ov_tgt = m_ov_des + (m_feed − m_feed_des) − (m_og − m_og_des)
+    # At design every delta = 0 -> f_cons = 1.0 (bit-exact); the standing design residual (≈ +2.5 %,
+    # baked into the published HMB) is HELD constant, never amplified.  Uniform molar rescale keeps the
+    # overflow composition shape (and the AT-322701 NH3 N/C shift above) intact.  Inactive until pinned.
+    if REACT_MASS_DES is not None:
+        m_feed_des, m_ov_des, m_og_des = REACT_MASS_DES
+        m_feed = sum(feed.get(k, 0.0)     * MW_COMP[k] for k in MW_COMP)
+        m_og   = sum(offgas.get(k, 0.0)   * MW_COMP[k] for k in MW_COMP)
+        m_ov   = sum(overflow.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+        m_ov_tgt = m_ov_des + (m_feed - m_feed_des) - (m_og - m_og_des)
+        if m_ov > 1e-9 and m_ov_tgt > 0.0:
+            f_cons   = m_ov_tgt / m_ov
+            overflow = {k: overflow.get(k, 0.0) * f_cons for k in MW_COMP}
     closure_resid = (sum(feed.values())
                      - (sum(overflow.values()) + sum(offgas.values()))
                      - xi_urea)
@@ -1008,12 +1072,12 @@ SCRUB_OFFGAS_NC_DES = react_nc_ratio(REACT_OVERFLOW_DES)   # ≈ 3.000, computed
 #  first-order lag  X += (dt/tau)*(X_ss - X)  so its rate of change is governed by a time constant.
 #  Display-only: the tear physics is untouched, and a first-order lag converges to its target, so the
 #  pinned design steady state stays bit-exact.  tau values [s] reflect the dominant capacitance:
-EJ_T_TAU_S      = 20.0    # 322F001 ejector mixing-chamber discharge thermowell (small, fast)
-STRIP_T_TAU_S   = 60.0    # 322E001 stripper liquid holdup (falling-film + bottom sump)
-HPCC_T_TAU_S    = 45.0    # 322E002 carbamate-condenser liquid product temperature
+EJ_T_TAU_S      = 120.0   # 322F001 ejector discharge + suction-side carbamate inventory thermal mass
+STRIP_T_TAU_S   = 180.0   # 322E001 stripper liquid holdup (falling-film + bottom sump) + HP shell metal
+HPCC_T_TAU_S    = 240.0   # 322E002 carbamate-condenser liquid product + tube-bundle metal mass (slow)
 HPCC_P_TAU_S    = 30.0    # 322E002 bubble-point synthesis P (PI-322E002): carbamate-condenser liquid holdup
-SCRUB_T_TAU_S   = 60.0    # 322E003 scrubber overflow liquid pool temperature
-OFFGAS_T_TAU_S  = 30.0    # off-gas line + HV-322604 vent thermowell (vapour line holdup)
+SCRUB_T_TAU_S   = 180.0   # 322E003 scrubber overflow liquid pool + HP shell metal thermal mass
+OFFGAS_T_TAU_S  = 120.0   # off-gas line + HV-322604 vent thermowell (vapour line holdup + metal)
 CCW_T_TAU_S     = 25.0    # tempered-CCW shell return (matches TIC-329005 plant lag)
 AT_322701_TAU_S = 40.0    # 322701 on-line N/C analyzer (sample deadtime + measurement lag)
 SCRUB_LVL_TAU_S = 120.0   # 322E003 overflow seal-leg level inventory (slow integrator)
@@ -1106,6 +1170,10 @@ class State:
         #   Seeded at design (L0/W0) -> blend == design feed -> conversion bit-exact on init.
         self.react_L_rec = reactor.L0_DES    # lagged recycle N/C (NH3/CO2) contribution
         self.react_W_rec = reactor.W0_DES    # lagged recycle H/C (H2O/CO2) contribution
+        # Prior-step conversion factor (tear var). Feeds the design-ANCHORED bulk temp into f_T so the
+        #   conversion self-loop (gain ~0.16) flexes with its OWN exotherm but does NOT ride the HPCC
+        #   T_prod cold-cliff (which closed an unstable G~-15 thermal recycle). =1.0 -> design bit-exact.
+        self.react_conv_fac = 1.0
         # LT-322504 reactor liquid level (%) — DYNAMIC inventory state (mass balance, open-loop:
         # HV-322605 is hand/auto and does NOT control level). dV/dt = Q_in - Q_out(φ).
         self.react_level_pct = REACT_LEVEL_NLL_PCT      # init at design NLL = 80 % (derived from react_m_liq)
@@ -1113,6 +1181,10 @@ class State:
         #   so cooling (rho up) drops the level below the weir lip even with the holdup frozen.
         self.react_m_liq     = REACT_M_LIQ_DES          # seeded rho_bulk·A·level_des -> reads 80 % at design
         self.hpcc_level_pct  = HPCC_LEVEL_NLL_PCT       # 322E002 liquid inventory, init design NLL
+        # 322E003 scrubber sump — TRUE dynamic liquid inventory (Option 3). holdup kg integrated
+        #   each tick from (condensation make − actual ejector entrainment); level = holdup/NLL_KG·NLL%.
+        self.scrub_holdup_kg = SCRUB_HOLDUP_NLL_KG      # init at design NLL holdup -> 50 % (bit-exact)
+        self.scrub_level_pct = SCRUB_LEVEL_NLL_PCT      # 322E003 sump level (LT-329501), design NLL
         # pumps: open_act = torque-converter valve opening %
         self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M", "fault": False}
         self.pumpB = {"on": True,  "open_act": 86.2, "speed_act": 131.0, "current": 43.9, "mode": "M", "fault": False}
@@ -1297,12 +1369,12 @@ def step_sim(dt: float) -> dict:
     # 322F001 HP ejector: live motive NH3 (gated by XV-322901) + entrained carbamate
     #   -> discharge stream to 322E002 (TT-322012). Motive temp = TI-321020.
     motive_nh3_kgh = (F_pump_total_th * 1000.0) if disch_open else 0.0
-    # P1-3: live 322E003 overflow mass available to entrain = design suction * co2_scale
-    #   (scrub overflow = SCRUB_OVERFLOW_KMOLH_DES * co2_scale, no phi term).  Computed here
-    #   (ejector precedes the scrubber block this tick) from the live CO2 throughput ratio.
-    ej_co2_scale = s.F_CO2_th / (CO2_DES_KGH / 1000.0)
-    ej_m_avail   = EJ_SUC_TOT_DES * max(ej_co2_scale, 0.0)
-    ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602, m_suc_avail=ej_m_avail)
+    # Option 3 coupling: ACTUAL entrainment = ejector capacity * gravity suction head (scrub level).
+    #   scrub_lvl_frac = prior-step 322E003 level / NLL (loop tear: ejector runs BEFORE the scrubber
+    #   block, so it sees last-tick level).  frac=1 at NLL -> design entrainment; frac self-regulates
+    #   the sump to L_eq=NLL*(overflow/capacity) -> stable at NLL on turndown, floods on a true stall.
+    scrub_lvl_frac = s.scrub_level_pct / SCRUB_LEVEL_NLL_PCT
+    ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602, scrub_level_frac=scrub_lvl_frac)
     # motive fraction (PD pump -> flow ~ speed) and ejector developed-head forward-flow fraction.
     # phi_fwd ~ phi_m^2 (affinity head curve): drives the HPCC->reactor liquid circulation and the
     # discharge-header pressure.  ==1 at design motive -> all hydraulic states hold design.
@@ -1398,8 +1470,13 @@ def step_sim(dt: float) -> dict:
     s.react_W_rec += a_rec * (W_inst  - s.react_W_rec)        # recycle H/C lags the live feed water
     L_blend = REACT_FRESH_FRAC * L_fresh + (1.0 - REACT_FRESH_FRAC) * s.react_L_rec
     W_blend = REACT_FRESH_FRAC * W_inst  + (1.0 - REACT_FRESH_FRAC) * s.react_W_rec
+    # f_T bulk temp = design HPCC base + the reactor's OWN prior-step exotherm (NOT the live cascading
+    #   lip). This keeps the deliberate conversion self-loop (gain ~0.16, stable) while CUTTING the
+    #   conversion->composition->HPCC-N/C cliff return leg that closed an unstable G~-15 thermal recycle
+    #   (the source of the TT-322010 161<->213 oscillation). conv_fac=1 -> 170+13=183=T0_DES (bit-exact).
+    T_conv_c = HPCC_T_PROD_DES_C + REACT_DT_COL_DES * s.react_conv_fac
     react   = react_322r001(hpcc, s.F_CO2_th, s.HIC_322605, L_drive=L_blend, W_drive=W_blend,
-                            T_overflow_c=s.react_T_overflow)   # F5: prior-step lip temp (loop-break)
+                            T_overflow_c=T_conv_c)
     s.react_overflow_kmolh = react["overflow_kmolh"]   # tear -> next step's stripper feed
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
@@ -1411,9 +1488,10 @@ def step_sim(dt: float) -> dict:
     # decoupled within a tick (steady state is identical: T_old[n-1]==T_new[n-1] -> telescopes to
     # T_n = T_feed + ΔT_col·G_raw(ζ_n), the as-built residence-time probe profile when conv_fac->1).
     conv_fac = react["X_conv"] / reactor.X_DES_RAW
+    s.react_conv_fac = conv_fac                              # tear -> next step's design-anchored f_T base
     dT_col   = REACT_DT_COL_DES * conv_fac
     T_old     = list(s.react_T_node)
-    T_up      = HPCC_T_PROD_DES_C                             # node-0 upstream = reactor feed T
+    T_up      = hpcc["T_prod"]                               # node-0 upstream = LIVE HPCC two-phase feed T (cascade)
     flow_frac = clamp(react["co2_scale"], 0.0, 1.0)          # m_dot/m_dot_des proxy: tau-scale + loss gate
     new_T     = []
     for n in range(4):
@@ -1426,7 +1504,7 @@ def step_sim(dt: float) -> dict:
         new_T.append(Tn)
         T_up = T_old[n]                                       # next node's upstream = this node (prev step)
     s.react_T_node     = new_T
-    s.react_T_overflow = HPCC_T_PROD_DES_C + dT_col           # overflow lip (Σ g_n + g_ov = 1 anchor)
+    s.react_T_overflow = new_T[3] + REACT_G_OV * dT_col       # overflow lip off INERTIAL node-3 (Σ g_n + g_ov = 1 anchor)
     s.react_T_offgas   = new_T[3] + REACT_OFFGAS_GAMMA * (s.react_T_overflow - new_T[3])
     react["T_overflow"] = s.react_T_overflow                 # publish live profile to telemetry + scrubber
     react["T_offgas"]   = s.react_T_offgas
@@ -1450,8 +1528,14 @@ def step_sim(dt: float) -> dict:
     m_in_react    = _react_mdot_kgh * react["co2_scale"] * phi_fwd
     T_bulk_react  = sum(new_T) / 4.0                          # live bulk temp (= node mean; design 179.7 C)
     level_m_react = REACT_LIQ_H_M * s.react_level_pct / 100.0  # prev-step head feeding the weir (explicit)
+    # ISSUE-c: HV-322605 throttles the reactor overflow LINE downstream of the weir lip, so its opening
+    #   GATES the discharge capacity:  m_out = rho·(C_w·φ/φ_des)·H^1.5 .  Throttling below φ_des backs the
+    #   liquid up -> head rises until the higher H restores m_out == m_in -> the reactor floods (level^).
+    #   The OUTLET valve thus drives its OWN (U/S) vessel level (linear trim, == HIC-322605 molar scaling).
+    #   At design φ == REACT_HIC605_DES_PCT -> ratio 1.0 -> C_w unchanged -> dm/dt = 0 (bit-exact).
+    cw_valve      = REACT_WEIR_CW * (s.HIC_322605 / REACT_HIC605_DES_PCT)
     s.react_m_liq += reactor.holdup_dmdt_kgph(m_in_react, level_m_react, T_bulk_react,
-                                              crest_m=REACT_WEIR_CREST_M, cw=REACT_WEIR_CW) * (dt / 3600.0)
+                                              crest_m=REACT_WEIR_CREST_M, cw=cw_valve) * (dt / 3600.0)
     s.react_m_liq  = max(s.react_m_liq, reactor.M_HOLDUP_MIN)  # holdup floor -> guards level_from_holdup
     s.react_level_pct = clamp(reactor.level_from_holdup(s.react_m_liq, T_bulk_react,
                                                         area_m2=_react_area_m2) / REACT_LIQ_H_M * 100.0,
@@ -1460,9 +1544,16 @@ def step_sim(dt: float) -> dict:
     # LT-322E002 HPCC liquid inventory (Euler): carbamate condensation make in - ejector fwd out.
     #   phi_in  = live HPCC liquid make / design make  (stripper-gas condensation is motive-indep)
     #   phi_fwd = phi_m^2 forward circulation out (ejector developed head)
-    #   dLevel/dt = (phi_in - phi_fwd)·100/(tau·60)  ->  SWELLS on ejector stall (in > out).
-    phi_in_hpcc = (hpcc["liq_kgh"] / HPCC_LIQ_DES_KGH) if HPCC_LIQ_DES_KGH else phi_fwd
-    dL_hpcc     = (phi_in_hpcc - phi_fwd) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
+    # ISSUE-c/e: the old outflow term was phi_fwd ALONE (level-independent) -> a pure integrator: any
+    # in!=out mismatch wound the level to a rail (floods to 100 % at 70 % load, drifts even at design).
+    # A condenser sump drains by gravity head, so make the outflow rise with level: phi_out =
+    # phi_fwd·(L/NLL).  This closes the loop -> a stable first-order lag that SETTLES at the bounded
+    # equilibrium L_eq = NLL·(phi_in/phi_fwd) instead of railing.  At design phi_in = phi_fwd = 1 and
+    # L = NLL -> phi_out = phi_fwd -> dL = 0 (NLL is now an exact fixed point; bit-exact design).
+    _hpcc_liq_des = HPCC_LIQ_DES_LIVE or HPCC_LIQ_DES_KGH      # live settled ref once pinned
+    phi_in_hpcc  = (hpcc["liq_kgh"] / _hpcc_liq_des) if _hpcc_liq_des else phi_fwd
+    phi_out_hpcc = phi_fwd * (s.hpcc_level_pct / HPCC_LEVEL_NLL_PCT)
+    dL_hpcc      = (phi_in_hpcc - phi_out_hpcc) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
     s.hpcc_level_pct = clamp(s.hpcc_level_pct + dL_hpcc, 0.0, 100.0)
 
     # ----- 322E003 HP Scrubber: reactor off-gas + weak carbamate (323P001 A/B) -> off-gas line
@@ -1563,6 +1654,16 @@ def step_sim(dt: float) -> dict:
     f_ovf = _f_flow(scrub["T_overflow"], 60.0)
     scrub["overflow_kmolh"] = {k: v * f_ovf for k, v in scrub["overflow_kmolh"].items()}
     s.flags["SCRUBBER_SOLIDIFICATION"] = (f_ovf < 1.0)
+    # --- Option 3: 322E003 sump inventory ODE (Euler) ---------------------------------------------
+    #   dM/dt = ṁ_cond,in − ṁ_entrain.  ṁ_cond,in = the condensation/absorption make this tick
+    #   (post-mushy-zone overflow mass); ṁ_entrain = what the ejector actually pulled this tick
+    #   (ej["suction_kgh"], from the non-linear curve, computed earlier this step).  At design
+    #   both == EJ_SUC_TOT_DES -> dM=0, level holds NLL.  Ejector stall -> entrain<<cond -> M rises.
+    m_cond_in = sum(scrub["overflow_kmolh"][k] * MW_COMP[k] for k in scrub["overflow_kmolh"])
+    s.scrub_holdup_kg = clamp(s.scrub_holdup_kg + (m_cond_in - ej["suction_kgh"]) * (dt / 3600.0),
+                              0.0, SCRUB_HOLDUP_MAX_KG)
+    s.scrub_level_pct = clamp(s.scrub_holdup_kg / SCRUB_HOLDUP_NLL_KG * SCRUB_LEVEL_NLL_PCT,
+                              0.0, 100.0)
     hv604 = hv_322604(scrub["offgas_kmolh"], scrub["T_offgas"], s.HIC_322604, scrub["P_offgas"])
     # L3-7 HV-322604 off-gas: external steam-tracing holds the 60 C baseline; flag only when extreme JT
     #   cooling overwhelms the jacket (T_out < 20 C).  Flow NOT restricted (gas line) -> fouling warning.
@@ -1586,9 +1687,6 @@ def step_sim(dt: float) -> dict:
     d_TT322011l = _lag1(s.tlag, "TT322011l", hv604["T_out"],                           OFFGAS_T_TAU_S,  dt)
     d_TT329125  = _lag1(s.tlag, "TT329125", scrub["t_ccw_out"],                        CCW_T_TAU_S,     dt)
     d_AT322701  = _lag1(s.tlag, "AT322701", react_nc_ratio(react["overflow_kmolh"]),  AT_322701_TAU_S, dt)
-    # LT-329501 seal-leg level: integrate toward the algebraic holdup target (was a 1-tick snap).
-    lt329501_ss = clamp(50.0 + 40.0 * (react["co2_scale"] - 1.0) + 25.0 * (nu - 1.0), 0.0, 100.0)
-    d_LT329501  = _lag1(s.tlag, "LT329501", lt329501_ss,                              SCRUB_LVL_TAU_S, dt)
 
     # ----- Trips (P1-2 stateful interlocks) -----
     # Live initiator conditions (instantaneous). 21_2 = Urea-Synthesis main trip; its initiators
@@ -1780,7 +1878,7 @@ def step_sim(dt: float) -> dict:
             "PIC_mode":   pic["mode"],
         },
         "STRIP_322E001": {                       # HP Stripper 322E001 feeds -> products
-            "TT_322014":   round(STRIP_FEED207_T_C, 1),   # 322R001 overflow feed temp (C)
+            "TT_322014":   round(s.react_T_overflow, 1),  # 322R001 overflow feed temp (C, live cascade lip)
             "TT_322013":   round(d_TT322013, 1),      # top gas -> 322E002 (C, lagged)
             "TT_322004":   round(d_TT322004, 1),      # bottom soln -> LV-322501, pre-flash (C, lagged)
             "TT_323001":   round(d_TT323001, 1),          # post-LV flash -> 323C003 (C, lagged)
@@ -1887,9 +1985,9 @@ def step_sim(dt: float) -> dict:
             "P_offgas":    round(scrub["P_offgas"], 1),      # off-gas line P (bar a)
             "P_overflow":  round(scrub["P_overflow"], 1),    # PT-329201 overflow line P (bar a)
             "TT_322002":   round(d_TT322002, 1),    # overflow temp -> 322F001 (C, lagged)
-            # F6: LT-329501 de-pinned — seal-leg level rises with overflow throughput (co2_scale) and
-            #     downstream synthesis backpressure (nu); ==50% design NLL at s=1, nu=1 (bit-exact).
-            "LT_329501":   round(d_LT329501, 1),  # overflow seal-leg level (%, integrated, SCRUB_LVL_TAU_S)
+            # Option 3: LT-329501 now reads the TRUE 322E003 sump inventory state (holdup ODE):
+            #     50% design NLL when cond==entrain; RISES on ejector stall as entrainment collapses.
+            "LT_329501":   round(s.scrub_level_pct, 1),  # 322E003 sump level (%, true dynamic inventory)
             "ccw": {                              # shell-side CCW loop (329P006 A/B pump + 329E004 cooler)
                 "TT_329125":  round(d_TT329125, 2),     # CCW return temp out of shell (C, lagged)
                 "TDY_329125": round(TDY_329125, 2),             # TT-329125 − TIC-329005 (cond. quality, C) — live PT-329201 cascade
@@ -2265,19 +2363,43 @@ def _pin_hpcc_ua():
         UA = -m_dot*cp * ln[(T_prod_des - T_sat) / (T_adb - T_sat)]
 
     This anchors TT-322010 to exactly 170.0 C at 100 % live design steady state."""
-    global HPCC_UA, state, last_packet, hpcc_322e002, _STEAM_READY
+    global HPCC_UA, state, last_packet, hpcc_322e002, react_322r001, ejector_322f001
+    global REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE, _STEAM_READY
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
     _orig = hpcc_322e002
-    _cap = {}
+    _orig_r = react_322r001                          # capture the settled reactor streams for the
+    _orig_ej = ejector_322f001                       #   ISSUE-c mass refs + the settled design motive
+    _cap = {}                                        #   (EJ_MOTIVE_DES_LIVE -> phi_m bit-exact pin)
     def _cap_hpcc(gas_feed, liq_feed, **kw):
         r = _orig(gas_feed, liq_feed, **kw)
         _cap["r"] = r
         return r
+    def _cap_react(*a, **kw):
+        rr = _orig_r(*a, **kw)
+        _cap["react"] = rr
+        return rr
+    def _cap_ej(motive, *a, **kw):
+        rr = _orig_ej(motive, *a, **kw)
+        _cap["ejm"] = motive
+        return rr
     hpcc_322e002 = _cap_hpcc
+    react_322r001 = _cap_react
+    ejector_322f001 = _cap_ej
     for _ in range(18000):                           # 30 sim-min @ dt=0.1 s -> settled design steady state
         step_sim(0.1)
     hpcc_322e002 = _orig
+    react_322r001 = _orig_r
+    ejector_322f001 = _orig_ej
     r = _cap["r"]
+    # ISSUE-c: pin the reactor mass-conservation references on the SETTLED design loop (rescale was
+    # INACTIVE this pass since REACT_MASS_DES is None -> these are the un-rescaled design masses).
+    _rr = _cap["react"]
+    _m_feed_des = sum(_rr["feed_kmolh"].get(k, 0.0)     * MW_COMP[k] for k in MW_COMP)
+    _m_ov_des   = sum(_rr["overflow_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+    _m_og_des   = sum(_rr["offgas_kmolh"].get(k, 0.0)   * MW_COMP[k] for k in MW_COMP)
+    REACT_MASS_DES = (_m_feed_des, _m_ov_des, _m_og_des)
+    HPCC_LIQ_DES_LIVE = r["liq_kgh"]                 # ISSUE-c/e: anchor LT-322E002 NLL fixed point
+    EJ_MOTIVE_DES_LIVE = _cap["ejm"]                 # settled live design motive NH3 -> phi_m == 1 exact
     # L3-4 boot-pin domain assert: the UA back-calc log requires 0 < (T_prod_des - T_sat)/(T_adb - T_sat)
     #   < 1, i.e. T_adb > T_prod_des > T_sat_shell.  A failed warm-up settle (bad steam/feed) would feed
     #   a non-positive or >1 argument -> ValueError/NaN at import.  Fail loud here instead of hiding it.
