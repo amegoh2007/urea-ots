@@ -642,6 +642,13 @@ REACT_WEIR_HEAD_DES = 0.05                                         # design head
 REACT_WEIR_CREST_M  = REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M - REACT_WEIR_HEAD_DES  # 19.95 m lip elev
 REACT_WEIR_CW       = _react_mdot_kgh / (REACT_RHO_BULK_DES * REACT_WEIR_HEAD_DES ** 1.5)  # Francis coeff, m^3/h/m^1.5
 REACT_M_LIQ_DES     = REACT_RHO_BULK_DES * _react_area_m2 * (REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M)  # design holdup, kg
+REACT_LEVEL_DES_M   = REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M  # 20.0 m design liquid level (outlet-line head ref)
+REACT_PHI_FWD_FLOOR = 0.25  # Fix-4: residual letdown floor on φ_fwd in the OUTLET reference (see line ~1619).
+#   Bottom take-off drains by loop-pressure/gravity head even when forward circulation stops, so the outlet
+#   reference is m_dot_des·max(φ_fwd, FLOOR), NOT m_dot_des·φ_fwd.  At runtime design φ_fwd≈1.10 ≫ FLOOR so the
+#   max() picks φ_fwd and it cancels m_in's φ_fwd -> bit-exact L_des pin.  On a CO2-cut pump trip φ_fwd->0 but
+#   the FLOOR keeps m_out>0 -> the vessel drains (φ_fwd-coupled m_out would collapse to 0 and freeze — Bug #4).
+#   FLOOR engages only below motive ≈ sqrt(FLOOR)·EJ_MOTIVE_NH3_DES ≈ 20.4 t/h (~half design = trip/deep turndown).
 # --- Fix-2: synthesis-pressure forcing from the per-pass conversion deficit -------------------
 REACT_OFFGAS_DEFICIT_GAIN = 1.0  # off-gas NH3/CO2 slip amplifier per unit conversion deficit δ_X
 REACT_PI_KAPPA     = 2.0         # κ: dimensionless pressure forcing Π = κ·δ_X (δ_X = 1 - conversion_factor)
@@ -1600,23 +1607,25 @@ def step_sim(dt: float) -> dict:
     if _STEAM_READY:                        # OFF during both boot-pin settles (headers frozen at design)
         step_steam(s.steam, dt, m_strip, m_hpcc)
 
-    # LT-322504 dynamic level — Fix-2b CONSERVED holdup mass + Francis-weir overflow (DECOUPLED):
-    #   m_in   = m_dot_des·s·φ_fwd                         (actual ejector-driven forward feed from HPCC)
-    #   m_out  = rho(T_bulk)·C_w·max(0, L - L_weir)^1.5    (level-driven weir; below the lip -> m_out = 0)
+    # LT-322504 dynamic level — Fix-4 CONSERVED holdup mass + liquid-OUTLET-LINE discharge (DECOUPLED):
+    #   m_in   = m_dot_des·s·φ_fwd                                       (ejector-driven forward feed from HPCC)
+    #   m_out  = m_dot_des·max(φ_fwd,FLOOR)·(θ/θ_des)·(max(L,0)/L_des)   (HV-322605 bottom take-off; linear head law)
     #   d(m_liq)/dt = m_in - m_out ;  L = m_liq/(rho(T_bulk)·A).
-    #   Closed CO2 XV (s -> 0): m_in -> 0, level drains to the lip then m_out -> 0, holdup FREEZES; the
-    #   reactor then cools, rho(T_bulk) rises, and the same mass reads a level BELOW the lip (un-freeze).
+    #   HV-322605 sits on the reactor's BOTTOM take-off, not a top weir; its driving head is the ENTIRE
+    #   liquid column, so holding it open with the CO2 XV shut (m_in -> 0) drains the vessel CONTINUOUSLY
+    #   toward empty (the old weir term could only fall to the 19.95 m lip, then froze — Bug #4).  The φ_fwd
+    #   FLOOR (REACT_PHI_FWD_FLOOR) is what keeps the outlet draining after a CO2-cut pump trip kills φ_fwd.
     m_in_react    = _react_mdot_kgh * react["co2_scale"] * phi_fwd
     T_bulk_react  = sum(new_T) / 4.0                          # live bulk temp (= node mean; design 179.7 C)
-    level_m_react = REACT_LIQ_H_M * s.react_level_pct / 100.0  # prev-step head feeding the weir (explicit)
-    # ISSUE-c: HV-322605 throttles the reactor overflow LINE downstream of the weir lip, so its opening
-    #   GATES the discharge capacity:  m_out = rho·(C_w·φ/φ_des)·H^1.5 .  Throttling below φ_des backs the
-    #   liquid up -> head rises until the higher H restores m_out == m_in -> the reactor floods (level^).
-    #   The OUTLET valve thus drives its OWN (U/S) vessel level (linear trim, == HIC-322605 molar scaling).
-    #   At design φ == REACT_HIC605_DES_PCT -> ratio 1.0 -> C_w unchanged -> dm/dt = 0 (bit-exact).
-    cw_valve      = REACT_WEIR_CW * (s.HIC_322605 / REACT_HIC605_DES_PCT)
-    s.react_m_liq += reactor.holdup_dmdt_kgph(m_in_react, level_m_react, T_bulk_react,
-                                              crest_m=REACT_WEIR_CREST_M, cw=cw_valve) * (dt / 3600.0)
+    level_m_react = REACT_LIQ_H_M * s.react_level_pct / 100.0  # prev-step head feeding the discharge (explicit)
+    # ISSUE-c: HV-322605 throttles the reactor OUTLET line, so its opening GATES discharge capacity linearly
+    #   (θ/θ_des) atop the sqrt-of-head valve law.  Throttling below θ_des backs liquid up -> head rises
+    #   until m_out == m_in -> reactor floods (level^); opening above drains it.  The OUTLET valve drives its
+    #   OWN (U/S) vessel level.  At design θ == REACT_HIC605_DES_PCT and L == L_des -> both ratios 1.0 ->
+    #   m_out == m_in == m_dot_des -> dm/dt = 0 (bit-exact pin).
+    m_fwd_ref     = _react_mdot_kgh * max(phi_fwd, REACT_PHI_FWD_FLOOR)  # outlet ref: φ_fwd above FLOOR (cancels m_in at design), FLOOR below (drains on trip)
+    s.react_m_liq += reactor.outlet_line_dmdt_kgph(m_in_react, level_m_react, m_fwd_ref,
+                                                   REACT_LEVEL_DES_M, s.HIC_322605, REACT_HIC605_DES_PCT) * (dt / 3600.0)
     s.react_m_liq  = max(s.react_m_liq, reactor.M_HOLDUP_MIN)  # holdup floor -> guards level_from_holdup
     s.react_level_pct = clamp(reactor.level_from_holdup(s.react_m_liq, T_bulk_react,
                                                         area_m2=_react_area_m2) / REACT_LIQ_H_M * 100.0,
@@ -1710,8 +1719,11 @@ def step_sim(dt: float) -> dict:
     # clamped >= 0 (Fix-2), so at/above design Π = 0 -> no spurious depressurisation at high N/C.
     Pi_conv   = REACT_PI_KAPPA * react["delta_X"]
     pt_target = pt_fwd + SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * SYN_P_DES_BARA \
-                       + SYN_P_VENT_GAIN * (1.0 - vent_frac) * SYN_P_DES_BARA \
-                       + Pi_conv * SYN_P_DES_BARA   # HV-322604 vent: TWO-SIDED (open<des -> PT up; open>des -> PT down) + Π forcing
+                       + SYN_P_VENT_GAIN * max(1.0 - vent_frac, 0.0) * SYN_P_DES_BARA \
+                       + Pi_conv * SYN_P_DES_BARA   # HV-322604 vent: ONE-SIDED inert-purge deficit only
+                                                    #   (close<des -> inerts accumulate -> PT up; open>=des
+                                                    #   -> purge is supply-limited, no extra venting -> PT
+                                                    #   unchanged).  Tiny purge valve cannot crash HP P.
     # L3-2 inventory-aware PT floor: a totally empty loop must be able to bottom out at atmospheric,
     #   not a hard 120 bar.  Loop-mass fraction = mean of the three HP liquid inventories vs their design
     #   NLL (LT-322504 80%, LT-322E002 50%, LT-322501 50%); == 1.0 at design -> P_min == 120 bar (the

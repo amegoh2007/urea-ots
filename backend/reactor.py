@@ -320,3 +320,42 @@ def holdup_dmdt_kgph(m_in_kgph: float, level_m: float, T_bulk_c: float,
     Reaction mass change is interior to the closed column atom balance and omitted here.
     """
     return m_in_kgph - weir_outflow_kgph(level_m, T_bulk_c, crest_m=crest_m, cw=cw)
+
+
+def outlet_line_outflow_kgph(level_m: float, m_fwd_ref_kgph: float, level_des_m: float,
+                             theta_pct: float, theta_des_pct: float) -> float:
+    """Reactor liquid-OUTLET line flow, kg/h, throttled by HV-322605 on the discharge line.
+
+    HV-322605 sits on the reactor's bottom take-off to the HP stripper, NOT a top overflow weir, so
+    the discharge can DRAIN the vessel BELOW the normal level when the inlet stops (the old weir term
+    could only fall to its lip, then froze -> Bug #4).  Linear level/valve law, mirroring the proven
+    HPCC-level model (main.py phi_out = phi_fwd·(L/NLL)):
+
+        m_out = m_fwd_ref · (θ / θ_des) · ( max(level_m, 0) / level_des_m )
+
+    The caller passes  m_fwd_ref = m_dot_des · φ_fwd  — the SAME forward-circulation push that scales
+    the inlet  m_in = m_dot_des · co2_scale · φ_fwd .  φ_fwd therefore CANCELS at equilibrium:
+
+        L_eq / L_des = co2_scale · (θ_des / θ)
+
+    so at design (co2_scale = 1, θ = θ_des) the level pins at L_des EXACTLY, independent of the loop
+    operating point φ_fwd (bit-exact design pin).  Cutting CO2 (co2_scale -> 0) with HV-322605 held
+    open drains the holdup: m_in -> 0 while m_out = m_dot_des·φ_fwd·(θ/θ_des)·(L/L_des) stays positive
+    (NH3 pumps keep φ_fwd alive), so d(m_liq)/dt < 0 down to L = 0.
+    """
+    if level_m <= 0.0 or level_des_m <= 0.0:
+        return 0.0
+    theta_ratio = max(theta_pct, 0.0) / max(theta_des_pct, 1.0e-6)
+    return m_fwd_ref_kgph * theta_ratio * (level_m / level_des_m)
+
+
+def outlet_line_dmdt_kgph(m_in_kgph: float, level_m: float, m_fwd_ref_kgph: float,
+                          level_des_m: float, theta_pct: float, theta_des_pct: float) -> float:
+    """Liquid-inventory mass-balance RHS, kg/h:  d(m_liq)/dt = m_in - m_outlet_line(level, θ).
+
+    OUTLET is the HV-322605 discharge LINE (drainable below the normal level), NOT a top weir, so a
+    sustained inlet cut with the valve held open empties the reactor (fixes the frozen-level bug).
+    Euler in step_sim:  m_liq += dmdt * dt_h ;  level = level_from_holdup(m_liq, T_bulk).
+    """
+    return m_in_kgph - outlet_line_outflow_kgph(level_m, m_fwd_ref_kgph, level_des_m,
+                                                theta_pct, theta_des_pct)
