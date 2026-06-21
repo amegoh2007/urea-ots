@@ -23,6 +23,7 @@ Physics:
 
 import asyncio
 import json
+import hashlib
 import math
 import os
 import time
@@ -2521,8 +2522,76 @@ def _pin_hpcc_ua():
     last_packet = {}
 
 
+# ---- boot-pin result cache -----------------------------------------------------------------------
+#   _pin_hpcc_ua() settles two design fixed points over 21,000 step_sim() ticks (~20 s) to compute a
+#   handful of DETERMINISTIC calibration constants.  The result depends only on the simulation source,
+#   so it is cached to disk keyed by a SHA-256 of the backend model files: an unchanged tree restores
+#   the pinned constants in milliseconds; ANY model edit busts the key and forces a fresh settle.  The
+#   exact computed constants are stored and restored -- the settle math is untouched -- so design
+#   bit-exactness is preserved while the ~20 s import stall behind the desktop launch is removed.
+_HERE           = os.path.dirname(os.path.abspath(__file__))
+_PIN_CACHE_PATH = os.path.join(_HERE, ".boot_pin_cache.json")
+_PIN_SRC_FILES  = ("main.py", "steam_system.py", "reactor.py", "controllers.py")
+
+
+def _pin_cache_key() -> str:
+    h = hashlib.sha256()
+    for _fn in _PIN_SRC_FILES:
+        try:
+            with open(os.path.join(_HERE, _fn), "rb") as _f:
+                h.update(_f.read())
+        except OSError:
+            h.update(b"\x00")            # missing source -> stable sentinel (busts again on reappear)
+    return h.hexdigest()
+
+
+def _apply_pin(d: dict) -> None:
+    """Restore the pinned design constants from a cache dict (== state after a fresh _pin_hpcc_ua())."""
+    global HPCC_UA, REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE
+    global _STEAM_READY, state, last_packet
+    import steam_system as _ss
+    HPCC_UA            = d["HPCC_UA"]
+    REACT_MASS_DES     = tuple(d["REACT_MASS_DES"])
+    HPCC_LIQ_DES_LIVE  = d["HPCC_LIQ_DES_LIVE"]
+    EJ_MOTIVE_DES_LIVE = d["EJ_MOTIVE_DES_LIVE"]
+    _ss.K_SUPPLY       = d["K_SUPPLY"]
+    _ss.M_USERS_LP     = d["M_USERS_LP"]
+    _STEAM_READY       = True
+    state              = State()         # fresh design seed (the settle transient is never persisted)
+    last_packet        = {}
+
+
+def _collect_pin() -> dict:
+    import steam_system as _ss
+    return {
+        "HPCC_UA":            HPCC_UA,
+        "REACT_MASS_DES":     list(REACT_MASS_DES),
+        "HPCC_LIQ_DES_LIVE":  HPCC_LIQ_DES_LIVE,
+        "EJ_MOTIVE_DES_LIVE": EJ_MOTIVE_DES_LIVE,
+        "K_SUPPLY":           _ss.K_SUPPLY,
+        "M_USERS_LP":         _ss.M_USERS_LP,
+    }
+
+
 if HPCC_UA is None:
-    _pin_hpcc_ua()
+    _key = _pin_cache_key()
+    _cached = None
+    try:
+        with open(_PIN_CACHE_PATH, "r", encoding="utf-8") as _f:
+            _doc = json.load(_f)
+        if _doc.get("key") == _key:
+            _cached = _doc.get("pin")
+    except (OSError, ValueError):
+        _cached = None
+    if _cached is not None:
+        _apply_pin(_cached)              # cache hit: skip the 21k-tick settle
+    else:
+        _pin_hpcc_ua()                   # cache miss/stale: full settle, then persist for next launch
+        try:
+            with open(_PIN_CACHE_PATH, "w", encoding="utf-8") as _f:
+                json.dump({"key": _key, "pin": _collect_pin()}, _f, indent=2)
+        except OSError:
+            pass                          # cache is an optimization; never fail import on a write error
 
 
 if __name__ == "__main__":

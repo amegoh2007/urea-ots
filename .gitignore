@@ -21,6 +21,7 @@ New folder/
 
 # --- python ---
 __pycache__/
+.boot_pin_cache.json
 *.pyc
 *.pyo
 *.pyd
