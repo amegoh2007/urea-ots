@@ -993,6 +993,13 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
     # At design every delta = 0 -> f_cons = 1.0 (bit-exact); the standing design residual (≈ +2.5 %,
     # baked into the published HMB) is HELD constant, never amplified.  Uniform molar rescale keeps the
     # overflow composition shape (and the AT-322701 NH3 N/C shift above) intact.  Inactive until pinned.
+    # closure_resid: intrinsic molar imbalance of the PINNED design split-fraction vectors (overflow +
+    # off-gas vs. feed + urea), reported as a diagnostic ONLY -- never injected into any stream.  It is
+    # computed BEFORE the ISSUE-c mass rescale so it measures the pin residual itself, not the mass
+    # correction applied to the emitted overflow (a degenerate/probe feed must not corrupt it).
+    closure_resid = (sum(feed.values())
+                     - (sum(overflow.values()) + sum(offgas.values()))
+                     - xi_urea)
     if REACT_MASS_DES is not None:
         m_feed_des, m_ov_des, m_og_des = REACT_MASS_DES
         m_feed = sum(feed.get(k, 0.0)     * MW_COMP[k] for k in MW_COMP)
@@ -1002,9 +1009,6 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
         if m_ov > 1e-9 and m_ov_tgt > 0.0:
             f_cons   = m_ov_tgt / m_ov
             overflow = {k: overflow.get(k, 0.0) * f_cons for k in MW_COMP}
-    closure_resid = (sum(feed.values())
-                     - (sum(overflow.values()) + sum(offgas.values()))
-                     - xi_urea)
     return {"overflow_kmolh": overflow, "offgas_kmolh": offgas, "feed_kmolh": feed,
             "xi_urea": xi_urea, "xi_biu": xi_biu, "closure_resid": closure_resid,
             "T_overflow": REACT_OVERFLOW_T_C, "T_offgas": REACT_OFFGAS_T_C,
@@ -2460,38 +2464,28 @@ def _pin_hpcc_ua():
     global HPCC_UA, state, last_packet, hpcc_322e002, react_322r001, ejector_322f001
     global REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE, _STEAM_READY
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
-    _orig = hpcc_322e002
-    _orig_r = react_322r001                          # capture the settled reactor streams for the
-    _orig_ej = ejector_322f001                       #   ISSUE-c mass refs + the settled design motive
-    _cap = {}                                        #   (EJ_MOTIVE_DES_LIVE -> phi_m bit-exact pin)
+    _orig = hpcc_322e002                             # capture the settled HPCC product (HPCC_UA back-calc)
+    _orig_ej = ejector_322f001                       #   and the settled design motive NH3 for the
+    _cap = {}                                        #   EJ_MOTIVE_DES_LIVE -> phi_m bit-exact pin
     def _cap_hpcc(gas_feed, liq_feed, **kw):
         r = _orig(gas_feed, liq_feed, **kw)
         _cap["r"] = r
         return r
-    def _cap_react(*a, **kw):
-        rr = _orig_r(*a, **kw)
-        _cap["react"] = rr
-        return rr
     def _cap_ej(motive, *a, **kw):
         rr = _orig_ej(motive, *a, **kw)
         _cap["ejm"] = motive
         return rr
     hpcc_322e002 = _cap_hpcc
-    react_322r001 = _cap_react
     ejector_322f001 = _cap_ej
     for _ in range(18000):                           # 30 sim-min @ dt=0.1 s -> settled design steady state
         step_sim(0.1)
     hpcc_322e002 = _orig
-    react_322r001 = _orig_r
     ejector_322f001 = _orig_ej
     r = _cap["r"]
-    # ISSUE-c: pin the reactor mass-conservation references on the SETTLED design loop (rescale was
-    # INACTIVE this pass since REACT_MASS_DES is None -> these are the un-rescaled design masses).
-    _rr = _cap["react"]
-    _m_feed_des = sum(_rr["feed_kmolh"].get(k, 0.0)     * MW_COMP[k] for k in MW_COMP)
-    _m_ov_des   = sum(_rr["overflow_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
-    _m_og_des   = sum(_rr["offgas_kmolh"].get(k, 0.0)   * MW_COMP[k] for k in MW_COMP)
-    REACT_MASS_DES = (_m_feed_des, _m_ov_des, _m_og_des)
+    # ISSUE-c reactor mass-conservation refs are NOT pinned here on the CAS warm-up settle (wrong
+    # operating point: the off-gas carries the conversion-deficit amplification and the feed differs
+    # from the MAN seed).  They are pinned below at the MAN runtime design seed -- see REACT_MASS_DES
+    # following `state = State()`.
     HPCC_LIQ_DES_LIVE = r["liq_kgh"]                 # ISSUE-c/e: anchor LT-322E002 NLL fixed point
     EJ_MOTIVE_DES_LIVE = _cap["ejm"]                 # settled live design motive NH3 -> phi_m == 1 exact
     # L3-4 boot-pin domain assert: the UA back-calc log requires 0 < (T_prod_des - T_sat)/(T_adb - T_sat)
@@ -2501,6 +2495,26 @@ def _pin_hpcc_ua():
     HPCC_UA = -r["m_dot"] * HPCC_CP_GAS * math.log(
         (HPCC_T_PROD_DES_C - HPCC_STEAM_TSAT_C) / (r["T_adb"] - HPCC_STEAM_TSAT_C))
     state = State()                                  # discard the warm-up transient (fresh design seed)
+
+    # ---- ISSUE-c: pin the reactor mass-conservation refs at the MAN RUNTIME design seed (where the
+    #   live loop AND the unit tests actually operate: `State(); step_sim()`), NOT the CAS warm-up
+    #   settle above.  The overflow/off-gas refs are the DETERMINISTIC pinned design-vector masses
+    #   (at design s=1, phi=phi_des, delta_X=0 -> amp=1 and nh3_shift~=0, so the emitted vectors equal
+    #   REACT_OVERFLOW_DES / REACT_OFFGAS_DES exactly); only the feed mass is genuinely upstream-coupled
+    #   (ejector phi_m^2 / HPCC), so capture it from the first MAN-seed reactor step.  Then every delta
+    #   is identically 0 at the seed -> f_cons == 1.0 bit-exact (restores the design pin).
+    _orig_r2 = react_322r001
+    _capf = {}
+    def _cap_react2(*a, **kw):
+        rr = _orig_r2(*a, **kw); _capf["feed"] = rr["feed_kmolh"]; return rr
+    react_322r001 = _cap_react2
+    step_sim(0.1)                                    # one MAN-seed step (REACT_MASS_DES still None ->
+    react_322r001 = _orig_r2                          #   rescale inactive -> overflow is the pinned vec)
+    REACT_MASS_DES = (
+        sum(_capf["feed"].get(k, 0.0)        * MW_COMP[k] for k in MW_COMP),
+        sum(REACT_OVERFLOW_DES.get(k, 0.0)   * MW_COMP[k] for k in MW_COMP),
+        sum(REACT_OFFGAS_DES.get(k, 0.0)     * MW_COMP[k] for k in MW_COMP))
+    state = State()                                  # discard the capture step (fresh design seed)
 
     # ---- pin the steam-header valve coeffs so the runtime design seed is a STATIONARY fixed point.
     #   The steam shell T feeds BACK into the process (stripper eta_T_steam = f(tsat(P_MP))), so the
