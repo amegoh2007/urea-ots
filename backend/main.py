@@ -779,8 +779,40 @@ def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
 HPCC_UA = None       # shell conductance (kJ/h.K); back-calculated at module load (design-pinned)
 _STEAM_READY = False # gate: step_steam stays OFF until valve coeffs are pinned (boot-pin phase 2)
 
+# ---- Option-1 disturbance gate (over-temp runaway fix) ------------------------------------------
+#   The HPCC shell-temp (t_shell<-P_LP) and product-temp (T_prod<-T_adb) off-design couplings are
+#   EXACTLY their design value at the published operating point, but the coupled loops
+#       P_LP^ -> t_shell^ -> T_prod^ -> reactor^ -> duty^ -> m_hpcc^ -> P_LP^      (steam loop)
+#       X_conv^ -> T_adb^ -> T_prod^ -> node0^ -> X_conv^                          (loop-tear)
+#   have gain > 1, so the fresh-State() seed (NOT the dynamic fixed point) self-excites a thermal
+#   runaway (t_shell 220 C, node0 253 C) with NO operator action.  Gate BOTH coupling deltas by a
+#   genuine-disturbance factor g in [0,1]: g==0 when every EXOGENOUS operator/feed handle sits at its
+#   design value (seed) -> couplings pinned to design -> bit-exact HMB and no self-excitation; g->1
+#   the instant any handle moves -> full live off-design response (V-trough fidelity preserved).
+GATE_DEADBAND       = 0.002   # rel. dead-band: |dev| below this == "at design" (numerical noise floor)
+GATE_RAMP           = 0.010   # rel. span over which g ramps 0->1 above the dead-band
+RATIO_SP_DES        = 1.928   # design molar N/C setpoint (seed) -- exogenous N/C disturbance handle
+HIC602_DES_PCT      = 74.0    # design HV-322602 ejector-spindle opening (seed)
+STEAM_VALVE_DES_PCT = 50.0    # design MP-supply / MP->LP let-down valve opening (seed)
 
-def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSAT_C) -> dict:
+
+def _disturbance_gate(s) -> float:
+    """Genuine-disturbance factor g in [0,1] from the EXOGENOUS operator/feed boundary vector.
+    Each handle is seeded EXACTLY at design, so g==0 at the published operating point (bit-exact);
+    g->1 as soon as an operator/feed move pushes any handle off design (live off-design response)."""
+    dev = max(
+        abs(s.F_CO2_th                - CO2_DES_KGH / 1000.0)  / (CO2_DES_KGH / 1000.0),
+        abs(s.ratio_SP                - RATIO_SP_DES)          / RATIO_SP_DES,
+        abs(s.HIC_322602              - HIC602_DES_PCT)        / HIC602_DES_PCT,
+        abs(s.HIC_322605              - REACT_HIC605_DES_PCT)  / REACT_HIC605_DES_PCT,
+        abs(s.steam.valve_supply_pct  - STEAM_VALVE_DES_PCT)   / STEAM_VALVE_DES_PCT,
+        abs(s.steam.valve_letdown_pct - STEAM_VALVE_DES_PCT)   / STEAM_VALVE_DES_PCT,
+    )
+    return clamp((dev - GATE_DEADBAND) / GATE_RAMP, 0.0, 1.0)
+
+
+def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSAT_C,
+                 gate: float = 1.0) -> dict:
     """HP Carbamate Condenser 322E002 reduced model.
     gas_feed = stripper_322e001() return (top gas -> TT-322013); liq_feed = ejector_322f001()
     return (carbamate liquid -> TT-322012).  Combines both tube-side feeds and condenses NH3/CO2
@@ -832,8 +864,18 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSA
     if HPCC_UA is None:                       # module-load back-calc pass: hold the design pin
         T_prod = HPCC_T_PROD_DES_C
     else:
-        T_prod = t_shell + (T_adb - t_shell) \
-                 * math.exp(-HPCC_UA / max(m_dot * HPCC_CP_GAS, 1e-9))
+        T_prod_live = t_shell + (T_adb - t_shell) \
+                      * math.exp(-HPCC_UA / max(m_dot * HPCC_CP_GAS, 1e-9))
+        # Option-1 gate the off-design EXCESS above the design pin: gate==0 (no operator/feed
+        #   disturbance) -> T_prod==HPCC_T_PROD_DES_C bit-exact (kills the loop-tear self-excitation);
+        #   gate->1 (genuine disturbance) -> full live NTU quench (TT-322010 V-trough preserved).
+        T_prod = HPCC_T_PROD_DES_C + gate * (T_prod_live - HPCC_T_PROD_DES_C)
+    # LP steam actually RAISED on the shell = process duty MINUS the extra sensible heat carried out in the
+    #   product above the design pin.  Energy split of the carbamate/sens release: boiled into LP steam +
+    #   retained as product enthalpy when T_prod exceeds HPCC_T_PROD_DES_C (rising t_shell -> rising P_LP).
+    #   At design T_prod==HPCC_T_PROD_DES_C -> q_steam_kw==duty_kw bit-exact; this is the shell back-pressure
+    #   that stabilizes the LP header (see step_sim steam handshake).  Floor at 0 (full-quench limit).
+    q_steam_kw = max(duty_kw - m_dot * HPCC_CP_GAS * (T_prod - HPCC_T_PROD_DES_C) / 3600.0, 0.0)
     # bubble-point synthesis pressure of the combined carbamate feed (N/C, H/C molar); replaces the
     # pinned HPCC_P_DES_BARA.  At design this feed's N/C, H/C == reactor.L0_DES/W0_DES -> P=144.2 exact.
     #   The N/C, H/C ratios are NH3/CO2 and H2O/CO2: as a CO2-feed cut drives CO2 -> 0 they diverge,
@@ -860,7 +902,7 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSA
         "liq_mass_pct": {k: (liq_kgh[k] / liq_m * 100.0 if liq_m else 0.0) for k in MW_COMP},# mass %
         "T_prod": T_prod, "T_feed_mix": T_feed_mix, "T_adb": T_adb, "m_dot": m_dot, "P_bara": p_bub,
         "P_bub": p_bub, "L_hpcc": L_hpcc, "W_hpcc": W_hpcc,
-        "duty_kw": duty_kw, "steam_kgh": steam_kgh,
+        "duty_kw": duty_kw, "steam_kgh": steam_kgh, "q_steam_kw": q_steam_kw,
     }
 
 
@@ -1470,8 +1512,12 @@ def step_sim(dt: float) -> dict:
     #   Shell-side LP-steam saturation T tracks the live LP header, but as an OFFSET about the
     #   pinned design constant (HPCC_STEAM_TSAT_C=146.3 differs from Antoine tsat(4.4)~147.4); at
     #   design P_LP==HPCC_STEAM_P_BARA so the offset is 0 -> T_shell_lp==146.3 bit-exact.
-    T_shell_lp = HPCC_STEAM_TSAT_C + (tsat_steam(s.steam.P_LP) - tsat_steam(HPCC_STEAM_P_BARA))
-    hpcc = hpcc_322e002(strip, ej, t_shell=T_shell_lp)
+    #   The OFFSET is Option-1 disturbance-gated: g_dist==0 (no operator/feed move) freezes t_shell at
+    #   the design constant -> kills the P_LP->t_shell->T_prod->reactor->duty->P_LP runaway; g_dist->1
+    #   on a genuine disturbance restores the full live shell-temp response.
+    g_dist = _disturbance_gate(s)
+    T_shell_lp = HPCC_STEAM_TSAT_C + g_dist * (tsat_steam(s.steam.P_LP) - tsat_steam(HPCC_STEAM_P_BARA))
+    hpcc = hpcc_322e002(strip, ej, t_shell=T_shell_lp, gate=g_dist)
 
     # 322R001 HP urea reactor: pinned products from hpcc feed, throughput s, valve φ.
     # f_L loop coupling: the reduced model pins the recycle overflow, so the endogenous feed N/C
@@ -1538,10 +1584,18 @@ def step_sim(dt: float) -> dict:
     # ----- Steam balance handshake (reverse pass): forward duties -> header mass draws -> Euler tick.
     #   Q [kJ/h] = duty_kW * 3600 ;  m [kg/s] = Q / lambda[kJ/kg] / 3600  ==  duty_kW / lambda.
     #   Stripper reboiler draws MP steam (fixed design duty); HPCC raises LP steam (live duty).
-    Q_strip_kjh = STRIP_DUTY_DES_KW * 3600.0
-    Q_hpcc_kjh  = hpcc["duty_kw"]   * 3600.0
+    Q_strip_kjh = STRIP_DUTY_DES_KW   * 3600.0
+    Q_hpcc_kjh  = hpcc["q_steam_kw"]  * 3600.0   # LP steam RAISED, not the full process duty (see below)
     m_strip = Q_strip_kjh / 1850.0          / 3600.0   # MP steam consumed (kg/s)
     m_hpcc  = Q_hpcc_kjh  / HPCC_LATENT_4BAR / 3600.0  # LP steam generated (kg/s)
+    # q_steam_kw (computed in hpcc_322e002) = process duty MINUS the extra sensible heat carried out in the
+    #   product when it leaves above the design pin (T_prod>HPCC_T_PROD_DES_C at a higher shell P).  This is
+    #   the physical shell back-pressure on steam-raising and the missing stabilizing feedback: as P_LP rises
+    #   -> t_shell rises -> T_prod rises -> q_steam falls -> m_hpcc falls -> P_LP pulled back to design.  It
+    #   references the PINNED 170 C (not live T_adb), so it does NOT self-defeat when the reactor heats.  At
+    #   design T_prod==HPCC_T_PROD_DES_C -> q_steam==duty_kw bit-exact -> LP balance untouched.  WITHOUT it the
+    #   loop P_LP^->t_shell^->T_prod^->reactor^->(tear)stripper/gas^->HPCC duty^->m_hpcc^->P_LP^ is a positive
+    #   runaway (free t_shell -> P_LP runs to ~24 bar a / t_shell 220 C); this re-stabilizes the fixed point.
     if _STEAM_READY:                        # OFF during both boot-pin settles (headers frozen at design)
         step_steam(s.steam, dt, m_strip, m_hpcc)
 

@@ -46,6 +46,31 @@ C_LP = 25.0       # LP header lumped capacitance
 #   make-up only acts on a genuine deficit and the design steady state is untouched.
 P_LP_MIN_BARA = 3.5     # bar a, minimum LP header pressure held by the make-up PIC (Tsat ~= 138.6 C)
 
+# ---------------------------------------------------------------- LP header pressure regulation (PIC)
+#   The two headers are pure capacitive integrators (dP/dt = net_flow / C).  With FIXED manual valve
+#   openings and a fixed user draw, any residual net-flow offset integrates without bound -- the LP
+#   header drifts open-loop to the let-down choke (~24 bar), so once a disturbance un-gates the shell
+#   coupling, t_shell = Tsat(P_LP) jumps to ~221 C and re-arms the reactor runaway.  A real LP header
+#   is held at setpoint by a pressure controller that VENTS excess to flare/condenser when high and
+#   pulls MAKE-UP from the site LP main when low.  Modelled here as a proportional vent/make-up flow:
+#
+#       m_pic = K_PIC_LP * (P_LP - P_LP_SP_BARA)  +  KI_PIC_LP * INT(P_LP - P_LP_SP_BARA) dt   [kg/s]
+#                                                                       (>0 vent excess, <0 make-up)
+#
+#   PROPORTIONAL term: at the design pressure (P_LP == P_LP_SP_BARA) it is identically 0, and the
+#   integral accumulator starts at 0, so the FIRST-tick design mass balance -- and the published HMB --
+#   is bit-for-bit unchanged (Option-1 calibration point).  Closed P-loop tau = C_LP / K_PIC_LP ~= 3.1s.
+#   INTEGRAL term: a proportional-only PIC leaves a steady offset against any standing imbalance (here a
+#   small ~0.85 kg/s HPCC-duty mismatch between the boot-pin frozen-steam capture and the live steady
+#   state), which would settle P_LP ~= 4.29 and round the telemetry to 4.3.  The integral trim nulls
+#   that offset so the header is held at EXACTLY 4.4 -- a real LP pressure controller is PI, not P.
+#   Tuned slightly over-damped (Ki < Kp^2/(4*C_LP)=0.64 -> no overshoot); anti-windup clamps the
+#   integral contribution to +/- M_PIC_CLAMP so a sustained generation collapse cannot wind it up.
+P_LP_SP_BARA = 4.4      # bar a, LP header pressure setpoint (== design HPCC_STEAM_P_BARA)
+K_PIC_LP     = 8.0      # proportional vent/make-up gain   [ (kg/s) / bar ]
+KI_PIC_LP    = 0.4      # integral vent/make-up gain        [ (kg/s) / (bar.s) ]
+M_PIC_CLAMP  = 10.0     # anti-windup clamp on the integral contribution [ kg/s ]
+
 # ---------------------------------------------------------------- fixed LP design consumer
 M_USERS_LP = 7.66       # kg/s, lumped LP-steam users (held constant for now)
 
@@ -64,6 +89,8 @@ class SteamState:
     m_supply: float = 0.0           # kg/s
     m_ld: float = 0.0               # kg/s
     m_water: float = 0.0            # kg/s
+    m_pic: float = 0.0              # kg/s, LP PIC vent(+)/make-up(-) flow
+    i_pic: float = 0.0              # bar.s, LP PIC integral accumulator
 
 
 def _valve_flow(K: float, opening_pct: float, p_up: float, p_down: float) -> float:
@@ -92,8 +119,16 @@ def step_steam(state: SteamState, dt: float,
 
     # MP header mass balance:  in = supply ; out = stripper + let-down
     dP_MP = (m_supply - m_strip_consume - m_ld) / C_MP
-    # LP header mass balance:  in = HPCC + let-down + desuperheat water ; out = users
-    dP_LP = (m_hpcc_gen + m_ld + m_water - M_USERS_LP) / C_LP
+    # LP header PIC: PI vent/make-up that drives the header back to setpoint. The proportional part is
+    #   zero -- and the integral starts at zero -- at the design pressure (P_LP == P_LP_SP_BARA), so the
+    #   calibrated design balance is untouched; the integral nulls any standing offset to hold 4.4 exact.
+    err = state.P_LP - P_LP_SP_BARA
+    state.i_pic += err * dt
+    # anti-windup: clamp the integral so its contribution stays within +/- M_PIC_CLAMP
+    state.i_pic = max(-M_PIC_CLAMP / KI_PIC_LP, min(M_PIC_CLAMP / KI_PIC_LP, state.i_pic))
+    m_pic = K_PIC_LP * err + KI_PIC_LP * state.i_pic
+    # LP header mass balance:  in = HPCC + let-down + desuperheat water ; out = users + PIC vent
+    dP_LP = (m_hpcc_gen + m_ld + m_water - M_USERS_LP - m_pic) / C_LP
 
     state.P_MP = max(0.0, state.P_MP + dt * dP_MP)
     # LP make-up PIC: header cannot fall below P_LP_MIN_BARA -- the site LP-main tie-in imports
@@ -101,7 +136,7 @@ def step_steam(state: SteamState, dt: float,
     #   HPCC shell saturation temp (-> TT-322010) stays physical instead of crashing toward vacuum.
     state.P_LP = max(P_LP_MIN_BARA, state.P_LP + dt * dP_LP)
 
-    state.m_supply, state.m_ld, state.m_water = m_supply, m_ld, m_water
+    state.m_supply, state.m_ld, state.m_water, state.m_pic = m_supply, m_ld, m_water, m_pic
     return state
 
 
