@@ -29,6 +29,9 @@ def grab(tel):
         "TT_322011":   tel["SCRUB_322E003"]["TT_322011"],
         "TDY_329125":  tel["SCRUB_322E003"]["ccw"]["TDY_329125"],
         "LT_322504":   tel["REACT_322R001"]["LT_322504"],
+        "LT_329501":   tel["SCRUB_322E003"]["LT_329501"],
+        "ov_th":       tel["SCRUB_322E003"]["ov_th"],
+        "ej_suc_kgh":  tel["EJ_322F001"]["suction_kgh"],
         "HIC_322605":  tel["REACT_322R001"]["HIC_322605"],
     }
 
@@ -80,6 +83,9 @@ def main_run():
         ("TT-322011",  "C",      "TT_322011"),
         ("TDY-329125", "C",      "TDY_329125"),
         ("LT-322504",  "%",      "LT_322504"),
+        ("LT-329501",  "%",      "LT_329501"),
+        ("ov_th",      "t/h",    "ov_th"),
+        ("ej_suction", "kg/h",   "ej_suc_kgh"),
         ("HIC-322605", "%",      "HIC_322605"),
     ]
     for tag, unit, key in rows:

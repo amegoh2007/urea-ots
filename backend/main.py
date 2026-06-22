@@ -770,6 +770,13 @@ SCRUB_UA_KWK         = -_SCRUB_C_CCW_DES_KWK * math.log(1.0 - _SCRUB_UAEFF_DES_K
 SCRUB_T_PROC_C       = 185.0     # C, process-gas (carbamate) condensation ceiling — the absolute max T
 #   the shell side can reach.  GAP #2 ε-NTU anchor: as ṁ_ccw -> 0 (FIC-329409 shut) both TT-329125 and
 #   TT-322002 asymptote here instead of +inf.  > SCRUB_OVERFLOW_T_C design 178.8 (synthesis-P headroom).
+SCRUB_COND_CHOKE_MIN = 0.30      # —, residual condensation-duty fraction at a FULLY choked (L-329501=100%)
+#   sump.  Phase-B-coupled CHOKE derate: a flooding 322E003 sump (LT-329501 above NLL) progressively floods
+#   the shell-side condensation surface, constricting the carbamate-condensation duty Q_scrubber.  The
+#   condensation-availability factor χ_choke ramps LINEARLY from 1.0 at NLL (50 %) down to this floor at
+#   100 %: χ_choke = 1 − (1−SCRUB_COND_CHOKE_MIN)·max(L−L_NLL,0)/(100−L_NLL).  At/below NLL χ_choke ≡ 1 ->
+#   q_ccw unchanged -> TDY-329125 + every TT pin stay bit-exact at design.  Above NLL it cuts q_ccw, so the
+#   CCW-rise indicator TDY-329125 FALLS (condensation constricted) — the physically-correct choke signature.
 
 
 def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
@@ -1020,7 +1027,9 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
 
 def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
                   m_ccw_kgh: float, vent_ratio: float = 1.0, nc_act: float = None,
-                  hic604_pct: float = None) -> dict:
+                  hic604_pct: float = None,
+                  liq_carry_kmolh: dict = None, t_carry_c: float = None,
+                  choke_level_pct: float = None) -> dict:
     """322E003 HP scrubber — reduced calibrated split-fraction, pinned to the shared design HMB.
     Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
     wash (323P001 A/B design vector × s).  Both discharges PINNED (proven IDENTICAL):
@@ -1053,10 +1062,33 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     d_nh3 = max(min(2.0 * d_co2, 0.5 * offgas.get("NH3", 0.0)), -0.5 * offgas.get("NH3", 0.0))  # 2 NH3:1 CO2
     offgas["CO2"] -= d_co2;  overflow["CO2"] += d_co2                          # mass-conserving gas->liquid
     offgas["NH3"] -= d_nh3;  overflow["NH3"] += d_nh3
+    # --- Phase A: reactor OFF-GAS-LINE LIQUID CARRYOVER (flood entrainment) -------------------------
+    # On reactor flood (LT-322504 == 100%) the un-passable melt spills the off-gas line into 322E003 as
+    # entrained liquid of reactor-OVERFLOW composition.  It joins the tube feed AND leaves with the bottom
+    # overflow (-> 322F001 ejector suction -> 322E003 sump inventory ODE), so closure stays balanced
+    # (feed += c, overflow += c -> net 0).  Below the flood lip liq_carry_kmolh is None -> every term is
+    # identically unchanged -> pinned off-gas/overflow HMB + all TT pins remain bit-exact at design.
+    carry_mass_kgh = 0.0
+    if liq_carry_kmolh:
+        for k in MW_COMP:
+            c = liq_carry_kmolh.get(k, 0.0)
+            feed[k]        += c                                               # enters the combined tube feed
+            overflow[k]    += c                                               # leaves with the bottom liquid
+            carry_mass_kgh += c * MW_COMP[k]
     closure_resid = sum(feed.values()) - sum(offgas.values()) - sum(overflow.values())
     co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)          # kmol/h gas->carbamate (now wash-live)
     q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0                # full exotherm (diag)
     q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s × synthesis-vent load PT-329201)
+    # --- Phase-B-coupled CONDENSATION CHOKE derate (TDY-329125 / TT-322002 response to sump flood) -----
+    # A flooding sump (LT-329501 above NLL, prior-step tear) floods the shell-side condensation surface,
+    # so the carbamate-condensation duty Q_scrubber is constricted by χ_choke ∈ [SCRUB_COND_CHOKE_MIN, 1]:
+    #   χ_choke = 1 − (1−SCRUB_COND_CHOKE_MIN)·max(L_329501 − L_NLL, 0)/(100 − L_NLL)   (L_NLL = NLL %)
+    # At/below NLL χ_choke ≡ 1 -> q_ccw unchanged -> design bit-exact (TDY-329125 holds 15.0).  Above NLL
+    # q_ccw is cut, so TDY-329125 = χ_choke·q_ccw/UA_eff·ε FALLS — condensation constricted by the choke.
+    if choke_level_pct is not None:
+        chi_choke = 1.0 - (1.0 - SCRUB_COND_CHOKE_MIN) * max(choke_level_pct - SCRUB_LEVEL_NLL_PCT, 0.0) \
+                          / max(100.0 - SCRUB_LEVEL_NLL_PCT, 1e-6)
+        q_ccw_kw *= clamp(chi_choke, SCRUB_COND_CHOKE_MIN, 1.0)
     # GAP #2 — ε-NTU condenser bridge bounds BOTH the CCW outlet and the process overflow against the
     # condensation ceiling T_proc, killing the ṁ_ccw -> 0 (FIC-329409 shut) divide-by-zero pole.  Old
     # code blew up two ways: the raw sensible rise q_ccw/(ṁ_ccw·cp) AND q_ccw/UA_eff both -> ~1e9 C.
@@ -1079,6 +1111,14 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     # cools the bottom carbamate overflow; closing pressurises and heats it (toward the T_proc ceiling).
     t_overflow = min(max(t_overflow_cond - SCRUB_OVERFLOW_T_VENT_GAIN * theta_dev, t_ccw_in),
                      SCRUB_T_PROC_C)                                          # TT-322002 (vent-coupled, clamped)
+    # Phase A: entrained hot reactor melt (t_carry_c ~ react_T_overflow) lifts the bottom-overflow
+    # temperature by an enthalpy mass-blend over the post-carryover overflow mass.  w_carry == 0 below
+    # the flood lip (carry_mass_kgh == 0) -> t_overflow unchanged -> TT-322002 design pin bit-exact.
+    if carry_mass_kgh > 0.0 and t_carry_c is not None:
+        m_ov_tot = sum(overflow[k] * MW_COMP[k] for k in MW_COMP)             # incl. entrained carryover
+        if m_ov_tot > 0.0:
+            w_carry    = carry_mass_kgh / m_ov_tot
+            t_overflow = min(t_overflow + w_carry * (t_carry_c - t_overflow), SCRUB_T_PROC_C)
     dT_ccw     = t_ccw_out - t_ccw_in                                         # TDY-329125 (cond. quality)
     # TT-322011 off-gas vent-top temp — LIVE off the excess-NH3 loop slip (AT-322701).  At higher feed N/C
     # the synthesis loop runs CO2-limited: excess NH3 cannot form carbamate, slips unabsorbed through the
@@ -1631,9 +1671,27 @@ def step_sim(dt: float) -> dict:
     s.react_m_liq += reactor.outlet_line_dmdt_kgph(m_in_react, level_m_react, m_fwd_ref,
                                                    REACT_LEVEL_DES_M, s.HIC_322605, REACT_HIC605_DES_PCT) * (dt / 3600.0)
     s.react_m_liq  = max(s.react_m_liq, reactor.M_HOLDUP_MIN)  # holdup floor -> guards level_from_holdup
+    # ISSUE (Phase A): OFF-GAS-LINE LIQUID CARRYOVER on flood.  Throttling the bottom take-off (HV-322605)
+    #   cannot pass m_in, so holdup rises to the vessel-full mass M_full = rho(T_bulk)·A·H_liq (== the
+    #   LT-322504 100% lip).  Liquid above M_full CANNOT accumulate in the reactor — it physically spills
+    #   over the off-gas line (TT-322009) into the HP scrubber (322E003) as ENTRAINED MELT.  Capping m_liq
+    #   at M_full simultaneously (a) closes a latent conservation leak (m_liq integrated unbounded above
+    #   full while only the level DISPLAY was clamped, so m_out saturated < m_in forever) and (b) yields
+    #   the carryover rate = the un-passable excess (m_in − m_out)|_full.  Carryover carries reactor-
+    #   OVERFLOW composition + enthalpy (react_T_overflow).  Identically ZERO below the flood lip
+    #   (m_liq < M_full at design 80% NLL) -> react_carry_kmolh is None -> scrubber HMB/TT pins bit-exact.
+    M_full_react      = reactor.liquid_density(T_bulk_react) * _react_area_m2 * REACT_LIQ_H_M
+    react_carry_kgh   = max(s.react_m_liq - M_full_react, 0.0) * (3600.0 / dt)   # spilled melt rate (kg/h)
+    s.react_m_liq     = min(s.react_m_liq, M_full_react)                         # vessel cannot exceed full
     s.react_level_pct = clamp(reactor.level_from_holdup(s.react_m_liq, T_bulk_react,
                                                         area_m2=_react_area_m2) / REACT_LIQ_H_M * 100.0,
                               0.0, 100.0)
+    # carryover molar vector = reactor-overflow composition scaled by (entrained mass / overflow mass):
+    #   ν_carry,k = ṁ_carry · ν_ov,k / Σ_j ν_ov,j·MW_j  -> preserves overflow mole fractions exactly.
+    _ov_mass_kgh      = sum(react["overflow_kmolh"][k] * MW_COMP[k] for k in react["overflow_kmolh"])
+    react_carry_kmolh = ({k: react["overflow_kmolh"][k] * (react_carry_kgh / _ov_mass_kgh)
+                          for k in react["overflow_kmolh"]}
+                         if (react_carry_kgh > 0.0 and _ov_mass_kgh > 0.0) else None)
 
     # LT-322E002 HPCC liquid inventory (Euler): carbamate condensation make in - ejector fwd out.
     #   phi_in  = live HPCC liquid make / design make  (stripper-gas condensation is motive-indep)
@@ -1696,7 +1754,9 @@ def step_sim(dt: float) -> dict:
     vent_frac = _eq_pct(s.HIC_322604, SCRUB_HIC604_DES_PCT) * math.sqrt(dP_vent / SCRUB_HV604_DP_DES)
     scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
                           vent_ratio=nu, nc_act=react_nc_ratio(react["overflow_kmolh"]),
-                          hic604_pct=s.HIC_322604)
+                          hic604_pct=s.HIC_322604,
+                          liq_carry_kmolh=react_carry_kmolh, t_carry_c=s.react_T_overflow,
+                          choke_level_pct=s.scrub_level_pct)
     # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
     #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
     #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation
