@@ -144,6 +144,14 @@ EJ_STALL_EXP   = 2.0             # convexity of the f_stall collapse inside the 
                                  #   f_stall = clamp((phi_m-PHI)/(REC-PHI),0,1)^EXP.  EXP=2 -> sharp
                                  #   quadratic knee: f(0.25)=0.11, f(0.30)=0.44, f(0.35)=1.  NOT a linear
                                  #   phi_m cheat and NOT a curve that only reaches 1 at phi_m=1.
+EJ_HYD_FRAC_MAX = 1.25           # —, HYDRAULIC-CAPACITY (throat-choke) ceiling on the suction-head
+#   multiplier frac = L_329501/NLL.  A real jet ejector chokes: above a finite suction head the throat
+#   reaches max mass capacity and entrainment STOPS rising with head.  m_suc = capacity·min(frac, this).
+#   >1 -> design (frac=1 at NLL) is below the ceiling -> NEVER engages at design -> every pin bit-exact.
+#   25 % head-overcapacity above NLL = typical HP jet-ejector hydraulic margin.  On a 322E003 flood the
+#   raw frac wants 2.0 (L=100%/NLL=50%); the ceiling caps entrainment at 1.25·capacity, so the un-pumpable
+#   overflow excess backs up the sump (already at SCRUB_HOLDUP_MAX clamp) INSTEAD of recirculating the
+#   flood into the discharge -> 322E002 -> reactor loop -> the reactor conversion self-loop re-bounds.
 EJ_SUC_TOT_DES = sum(EJ_SUCTION_KGH.values())                      # kg/h, design suction
 EJ_CARB_FRAC   = {k: EJ_SUCTION_KGH[k] / EJ_SUC_TOT_DES for k in MW_COMP}  # 322E003 overflow comp
 EJ_CP_N, EJ_CP_C, EJ_CP_D = 4.74, 3.10, 3.50    # kJ/kg.K  motive / carbamate / discharge
@@ -340,7 +348,12 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     phi_sp   = EJ_SPINDLE_R ** ((open_eff - EJ_OPEN_DES) / 100.0)   # equal-% spindle char (POSITIVE law)
     f_stall  = clamp((phi_m - EJ_STALL_PHI) / (EJ_STALL_REC - EJ_STALL_PHI), 0.0, 1.0) ** EJ_STALL_EXP
     capacity = EJ_SUC_TOT_DES * phi_m * phi_sp * f_stall   # entrainment CAPACITY (kg/h)
-    m_suc    = capacity * max(scrub_level_frac, 0.0)     # actual entrainment = capacity * suction head
+    # Phase B: HYDRAULIC-CAPACITY (throat-choke) ceiling on the gravity-head multiplier.  The suction throat
+    # chokes -> entrainment cannot rise with head past EJ_HYD_FRAC_MAX·capacity.  At design (L=NLL -> frac=1
+    # < EJ_HYD_FRAC_MAX) the cap is inactive -> bit-exact.  On flood (frac->2.0) it caps the recirculation,
+    # so the un-pumpable overflow backs up the 322E003 sump instead of self-amplifying the synthesis loop.
+    frac_eff = min(max(scrub_level_frac, 0.0), EJ_HYD_FRAC_MAX)  # head multiplier, choke-limited
+    m_suc    = capacity * frac_eff                        # actual entrainment = capacity * (capped head)
     suction  = {k: m_suc * EJ_CARB_FRAC[k] for k in MW_COMP}
     disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
     m_d   = sum(disch.values())
