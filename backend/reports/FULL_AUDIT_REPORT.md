@@ -505,3 +505,96 @@ PASS: entrainment mu falls as spindle opens (EJ_OPEN_DES/open, 1.3462->1.1003); 
 ## PART E — CONCLUSION
 
 All equipment audited; correct equation confirmed in correct place. Indicators (TT/PT/LT/AT/FY/PDY) verified live and wired to the right equations. One genuine gap (carbamate-recycle dead input) found and fixed with a mass-conserving, design-bit-exact deviation-injection model. 16/16 deep-test physics verdicts PASS across all 5 mandated categories. Design point reproduces the shared HMB bit-exact for every unit.
+
+---
+
+## PART F — FULL-LOOP TURNDOWN MULTI-SETTLE AUDIT (100% -> 70%)
+
+**Date:** 2026-06-22  **Harness:** `tests/run_turndown_envelope.py`  **Scope:** integrated synthesis loop 322R001 + 322E001 + 322E002 + 322E003 + 322F001 settled at 7 load setpoints. Settle = 60 sim-min/point (SETTLE_TICK = 36000, dt = 0.1 s); convergence sampled over final CONV_WIN = 1000 ticks.
+
+### F1. Actuation — proportional turndown (design-anchored)
+
+Both feeds scaled by the same fraction `frac in {1.00, 0.95, 0.90, 0.85, 0.80, 0.75, 0.70}` each tick:
+
+```
+F_CO2_raw_th         = frac * 54.618            (raw CO2 t/h; CO2_DES_KGH/1000 = 54.618)
+SIC_321951.set_op( 86.2 * frac )                (NH3 pump-B opening %, held MAN; design seed 86.2)
+s.tank_level_frac    = tank_pin                 (continuous-makeup pin -> trip 21_2 dormant)
+```
+
+MAN opening-scaling was chosen over CAS ratio control because CAS settles pump-B to open_act = 82.147 (not the design 86.2), breaking the design anchor (CAS @100%: f_cons = 0.96226, closure = -142.733 vs MAN baseline f_cons = 0.97571, closure = +6.986). MAN @frac=1.0 reproduces the verified design baseline f_cons = 0.97571 bit-identical. Reactor N/C `AT_322701` holds 3.0000 at every load -> true proportional turndown (constant recycle-inclusive N/C, NOT the fresh-feed ratio_SP = 1.928).
+
+### F2. Global mass conservation — the decisive metric
+
+`f_cons` is the reactor overflow mass-rescale factor inside `react_322r001`:
+
+```
+f_cons = m_ov_tgt / m_ov_pre
+m_ov_tgt = m_ov_des + (m_feed - m_feed_des) - (m_og - m_og_des)
+m_ov_pre = m_ov_des * co2_scale * (phi/phi_des)
+```
+
+It is LOCAL (never telemetered). It was reconstructed in the harness spy bit-identically to the in-function value. Design pins (live at module import):
+
+```
+REACT_MASS_DES = (m_feed_des, m_ov_des, m_og_des)
+             = (253486.24766399845, 226177.627954, 22354.6374)   [kg/h]
+```
+
+With phi/phi_des = 1 and co2_scale = frac = s, the numerator collapses to a standing absolute residual baked into the design pins:
+
+```
+m_ov_tgt = m_feed - m_og + (m_ov_des - m_feed_des + m_og_des)
+         = m_feed - m_og + (226177.627954 - 253486.24766399845 + 22354.6374)
+         = m_feed - m_og - 4953.98231       [kg/h]
+
+f_cons   = (m_feed - m_og - 4954) / (s * m_ov_des)
+```
+
+The fixed -4954 kg/h offset is the pre-existing design-pin mass-closure residual. As `s` shrinks it becomes a larger fraction of a shrinking overflow, and `m_ov_pre` is forced linear in `s` while the actual pumped feed scales sub-linearly (pump opening 0.70 -> flow ~0.62). Hence `f_cons` sags from 0.9757 to 0.8426 across the envelope WITHOUT any mass loss.
+
+**Proof mass is conserved — clos_abs (post-rescale absolute non-closure):**
+
+```
+clos_abs = ( m_ov_post - (m_feed - m_og) ) / 1000     [t/h]
+         = -4.9540 t/h  at 100, 95, 90, 85, 80, 75, 70 %   (span = 0.0000)
+```
+
+The post-rescale overflow closes against (feed - off-gas) to a CONSTANT offset equal to the standing pin residual at every load. Invariant across the whole envelope => no new mass created or destroyed during turndown. The `f_cons` sag is pure arithmetic of a fixed offset over a shrinking overflow, not a leak. **No model fix applied (Iron Law: root-caused, behaves as designed.)**
+
+### F3. Envelope closure table
+
+| Load % | frac | AT_322701 (N/C) | f_cons | clos_abs t/h | TT_322014 C | dTT014/100s |
+|-----:|----:|------:|--------:|------:|------:|------:|
+| 100 | 1.00 | 3.0000 | 0.97569 | -4.9540 | 183.1 | <0.05 (OK) |
+| 95 | 0.95 | 3.0000 | 0.95022 | -4.9540 | 177.8 | <0.05 (OK) |
+| 90 | 0.90 | 3.0000 | 0.92467 | -4.9540 | 173.8 | 0.2 (tail) |
+| 85 | 0.85 | 3.0000 | 0.90197 | -4.9540 | 170.7 | 0.2 (tail) |
+| 80 | 0.80 | 3.0000 | 0.88141 | -4.9540 | 168.3 | 0.3 (tail) |
+| 75 | 0.75 | 3.0000 | 0.86175 | -4.9540 | 166.5 | 0.4 (tail) |
+| 70 | 0.70 | 3.0000 | 0.84264 | -4.9540 | 164.5 | 0.4 (tail) |
+
+f_cons span [0.842642, 0.975692]; clos_abs span [-4.9540, -4.9540] (span = 0.0000); reactor T span [164.50, 183.10] C (runaway guard 230 C never approached); N/C span [3.0000, 3.0000].
+
+### F4. Per-unit steady response (100% -> 70%)
+
+| Unit | Indicator | 100% | 70% | Behaviour |
+|------|-----------|-----:|-----:|-----------|
+| 322R001 | X_conv % / TT_322014 | 54.6 / 183.1 | 53.9 / 164.5 | conversion ~flat; reactor cools (lower exotherm density) |
+| 322E001 | TT_322004 / eta_T | 172.8 / ~1.04 | 192.5 / ~1.04 | bottom T rises toward steam sat (B4 low-feed flood branch) |
+| 322E002 | LT_322E002 % | 45.2 | 57.3 | level swells as vapour load drops (B5 phi_m^2 forward flow) |
+| 322E003 | LT_329501 / TDY_329125 | 47.6 / 15.08 | 47.6 / 10.74 | level held by controller; condensation duty scales down |
+| 322F001 | mu / total_th | 1.346 / 100.33 | 1.346 / 70.23 | entrainment ratio invariant; throughput scales with motive |
+
+P_syn (PT-329201) 141.5 bar @100% -> mild rise at turndown (less CO2 consumption). All responses monotone, physical, design-consistent.
+
+### F5. Guards & one open item
+
+- **Thermal runaway:** none. Reactor T monotone-decreasing 183.1 -> 164.5 C, bounded well below the 230 C gate.
+- **Vanishing mass:** none. f_cons in (0.5, 1.5) throughout; overflow stays positive (220.7 -> 133.4 t/h); clos_abs flat.
+- **Trip 21_2:** dormant (continuous-makeup pin).
+- **OPEN — low-load thermal tail:** loads <=90% retain a residual dTT_322014 = 0.2-0.4 C over the final 100 s (was 0.7 at 30-min settle; halved at 60-min). Decelerating, monotone, non-oscillatory — the ~1/throughput residence-time stretch at reduced load. Mass/level/pressure states are dead-flat alongside it (dfcons = 0.000000, clos_abs constant). Converged for engineering purposes; clearing the last 0.4 C would need ~150 min/point for no physical gain.
+
+### F6. Verdict
+
+**ENVELOPE CLOSED.** Loop converges smoothly 100% -> 70%; global mass conserved (clos_abs flat at the standing design-pin residual, zero new loss); no un-gated thermal runaway; no vanishing mass; reactor N/C locked at design 3.0000 (true proportional turndown). No new model defect surfaced. Per the Bounded Foreground Audit mandate, the previously verified Phase A (off-gas liquid carryover) and Phase B (ejector hydraulic-capacity ceiling) couplings were exercised in the full loop without regression.
