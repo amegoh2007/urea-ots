@@ -58,8 +58,8 @@
       // ---- indicators: ALL tags positioned; only 3 bound, rest = white-frame empty slots ----
       { k: 'ti09',  t: 'ind', x: 225, y: 68,  tag: 'TI-322009',  bind: 'SCRUB_322E003.TT_322009',  u: 'C', dec: 1 },
       { k: 'tt11',  t: 'ind', x: 390, y: 65,  tag: 'TT-322011',  bind: 'SCRUB_322E003.TT_322011',  u: 'C', dec: 1 },
-      { k: 'h604',  t: 'ind', x: 929, y: 63,  tag: 'HIC-322604', bind: 'SCRUB_322E003.HIC_322604', u: '%', dec: 1 },
-      { k: 'hv604', t: 'ind', x: 928, y: 137, tag: 'HV-322604',  bind: 'SCRUB_322E003.HV_322604',  u: '%', dec: 1 },
+      { k: 'h604',  t: 'ind', x: 929, y: 63,  tag: 'HIC-322604', bind: 'SCRUB_322E003.HIC_322604', u: '%', dec: 1, face: 'hic' },
+      { k: 'hv604', t: 'ind', x: 928, y: 137, tag: 'HV-322604',  bind: 'SCRUB_322E003.HV_322604',  u: '%', dec: 1, face: 'hic' },
       { k: 'ti12',  t: 'ind', x: 143, y: 152, tag: 'TT-322012', bind: 'EJ_322F001.TT_322012', u: 'C',     dec: 1 },
       { k: 'pi2',   t: 'ind', x: 239, y: 151, tag: 'PI-329201', bind: 'EJ_322F001.PI_329201', u: 'BAR A', dec: 1 },
       { k: 'i007',  t: 'ind', x: 995, y: 227, tag: 'IT-329007'  },
@@ -85,7 +85,7 @@
       { k: 'xv3', t: 'xv',   x: 226, y: 466, tag: 'XV-322903' },
       { k: 'xv1', t: 'xv',   x: 214, y: 593, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
       // HV-322602 opening (driven by HIC-322602) — placed below h602 per updated 322-2 tagged
-      { k: 'hv602', t: 'ind', x: 128, y: 578, tag: 'HV-322602', bind: 'EJ_322F001.HIC_322602', u: '%', dec: 1 },
+      { k: 'hv602', t: 'ind', x: 128, y: 578, tag: 'HV-322602', bind: 'EJ_322F001.HIC_322602', u: '%', dec: 1, face: 'hic' },
       // ---- stream-inspector hotspots (click = composition/properties popup; drag in edit mode to align) ----
       { k: 'strm-soffg', t: 'strm', stream: 'SCRUB_OFFGAS',    tag: 'SCRUBBER OFF-GAS → HV-322604', x: 560,  y: 60,  w: 230, h: 16 },
       { k: 'strm-soglp', t: 'strm', stream: 'SCRUB_OFFGAS_LP', tag: 'OFF-GAS LP → 322C001',         x: 1005, y: 150, w: 150, h: 16 },
@@ -146,12 +146,12 @@
       { k: 'tt007',  t: 'ind', x: 543,  y: 247, tag: 'TT-322007', bind: 'REACT_322R001.TT_322007', u: 'C', dec: 1 },
       { k: 'tt008',  t: 'ind', x: 543,  y: 297, tag: 'TT-322008', bind: 'REACT_322R001.TT_322008', u: 'C', dec: 1 },
       { k: 'tt010',  t: 'ind', x: 597,  y: 335, tag: 'TT-322010', bind: 'HPCC_322E002.TT_322010', u: 'C', dec: 1 },   // 322E002 liquid product temp -> 322R001
-      { k: 'h605',   t: 'ind', x: 830,  y: 325, tag: 'HIC-322605', bind: 'REACT_322R001.HIC_322605', u: '%', dec: 1 },
+      { k: 'h605',   t: 'ind', x: 830,  y: 325, tag: 'HIC-322605', bind: 'REACT_322R001.HIC_322605', u: '%', dec: 1, face: 'hic' },
       { k: 'pt9206', t: 'ind', x: 1242, y: 145, tag: 'PT-329206' },
       { k: 'tt9001', t: 'ind', x: 1048, y: 259, tag: 'TT-329001', bind: 'HPCC_322E002.TT_329001', u: 'C', dec: 1 },   // 322D001 A/B condensate -> 322E002 shell (BFW feed)
       { k: 'py9207', t: 'ind', x: 1094, y: 208, tag: 'PY-329207B' },
       { k: 'tt014',  t: 'ind', x: 638,  y: 398, tag: 'TT-322014', bind: 'STRIP_322E001.TT_322014', u: 'C', dec: 1 },
-      { k: 'hv605',  t: 'ind', x: 823,  y: 392, tag: 'HV-322605', bind: 'REACT_322R001.HV_322605', u: '%', dec: 1 },
+      { k: 'hv605',  t: 'ind', x: 823,  y: 392, tag: 'HV-322605', bind: 'REACT_322R001.HV_322605', u: '%', dec: 1, face: 'hic' },
       { k: 'lic501', t: 'ind', x: 861,  y: 471, tag: 'LIC-322501', bind: 'STRIP_322E001.LIC_322501.pv', u: '%', dec: 1 },
       { k: 'pic9204',t: 'ind', x: 1113, y: 380, tag: 'PIC-329204' },
       { k: 'hic9601',t: 'ind', x: 1127, y: 489, tag: 'HIC-329601' },

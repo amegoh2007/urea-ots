@@ -293,6 +293,9 @@ LIC_322501_TI       = 90.0        # s, integral time
 #   LIC-322501 DIRECT-acting on the FC valve = correct negative feedback (level^ -> drain^).
 LV322501_KVS        = 36.0        # m3/h flow coefficient (full open) [reference]
 LV322501_OPEN_DES   = 82.0        # %, opening at the design bottom-solution flow
+STRIP_SUMP_DT_LOSS_DES_C = 4.0    # C, design-throughput sump heat-loss ΔT (falling-film tube exit -> LV-322501 drain)
+STRIP_BOT_T_CRYST_C      = 132.7  # C, urea-melt crystallization floor = sump heat-loss sink T (low-throughput asymptote)
+STRIP_SUMP_NTU_DES       = STRIP_SUMP_DT_LOSS_DES_C / (STRIP_T_BOTTOM_DES_C - STRIP_BOT_T_CRYST_C)  # τ_des = UA/(ṁ_des·cp), design sump heat-loss NTU ≈ 0.1018
 LV322501_DP_DES_BAR = 139.8       # bar, design pressure drop (144.0 - 4.2)
 STRIP_P_DOWN_BARA   = 4.2         # bar a, downstream of LV-322501 (-> 323C003)
 LV322501_P_DOWN_BARA = 4.0        # bar a, L3-1 LP-loop downstream ref for live-P_syn drain head
@@ -1571,7 +1574,31 @@ def step_sim(dt: float) -> dict:
                           + (strip["bot_kgh"] - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
                           0.0, 100.0)
     lic["pv"] = s.strip_level
-    TT_323001 = STRIP_T_DOWN_DES_C + 0.7 * (strip["T_bot"] - STRIP_T_BOTTOM_DES_C)
+    # L3-7 bottoms-sump ENERGY BALANCE -> TT-322004 (stream 322E001 falling-film exit -> LV-322501):
+    #   The bottom sump is a stirred buffer below the steam-heated falling-film tubes.  Steady-state sump
+    #   energy balance (film enthalpy in = drain enthalpy out + heat loss to surroundings):
+    #       ṁ·cp·T_film = ṁ·cp·T_out + UA·(T_out − T_amb)
+    #   The rigorous stripper model's strip["T_bot"] already equals the DESIGN-drain sump outlet (design HMB
+    #   anchor), so the film feeding the sump is  T_film = T_bot·(1+τ) − τ·T_amb  with the design sump-loss
+    #   NTU  τ = UA/(ṁ_des·cp) = STRIP_SUMP_NTU_DES.  Eliminating T_film and writing r = ṁ_drain/ṁ_des
+    #   (live drain / design drain) gives the closed-form sump outlet temperature:
+    #       T_out = [ r·(1+τ)·T_bot + τ·(1−r)·T_amb ] / (r + τ)
+    #   r=1 -> T_out = T_bot  (bit-exact design HMB);  r↑ (LV-322501 opened -> more bottoms flow, less sump
+    #   residence) -> T_out -> (1+τ)·T_bot = T_film  (hotter, ≤ steam sat);  r↓ (throttled, long residence)
+    #   -> T_out -> T_amb  (crystallization-pinned floor).  dT_out/dr = τ(1+τ)(T_bot−T_amb)/(r+τ)² > 0 since
+    #   T_bot > T_amb, so opening LV-322501 raises the bottoms flow which raises TT-322004 (item 3) — now
+    #   driven by the ACTUAL drain mass flow through the sump heat balance, not an empirical opening curve.
+    #   drain_kgh keys off strip["T_bot"] (f_drain) only, never T_out -> no algebraic loop.
+    T_amb_sump = STRIP_BOT_T_CRYST_C
+    if strip["T_bot"] > T_amb_sump:
+        r_drain    = drain_kgh / STRIP_BOT_DES_KGH
+        tau_sump   = STRIP_SUMP_NTU_DES
+        T_bot_disp = (r_drain * (1.0 + tau_sump) * strip["T_bot"] + tau_sump * (1.0 - r_drain) * T_amb_sump) \
+                     / (r_drain + tau_sump)
+        T_bot_disp = min(T_bot_disp, strip["T_steam"])   # bottoms can never out-heat the condensing shell
+    else:
+        T_bot_disp = strip["T_bot"]                      # cold start / solidified: no hot-film sump residence effect
+    TT_323001 = STRIP_T_DOWN_DES_C + 0.7 * (T_bot_disp - STRIP_T_BOTTOM_DES_C)   # post-flash ripples the same bottoms T
 
     # HP carbamate condenser 322E002: strip gas + ejector liquid -> two-phase product to 322R001.
     #   Shell-side LP-steam saturation T tracks the live LP header, but as an OFFSET about the
@@ -1849,7 +1876,7 @@ def step_sim(dt: float) -> dict:
     #   here because several tags appear in two telemetry blocks; calling the relax twice would double-step.
     d_TT322012  = _lag1(s.tlag, "TT322012", ej["T_C"],                                 EJ_T_TAU_S,      dt)
     d_TT322013  = _lag1(s.tlag, "TT322013", strip["T_top"],                            STRIP_T_TAU_S,   dt)
-    d_TT322004  = _lag1(s.tlag, "TT322004", strip["T_bot"],                            STRIP_T_TAU_S,   dt)
+    d_TT322004  = _lag1(s.tlag, "TT322004", T_bot_disp,                                STRIP_T_TAU_S,   dt)
     d_TT323001  = _lag1(s.tlag, "TT323001", TT_323001,                                 STRIP_T_TAU_S,   dt)
     d_TT322010  = _lag1(s.tlag, "TT322010", hpcc["T_prod"],                            HPCC_T_TAU_S,    dt)
     d_HPCC_P    = _lag1(s.tlag, "HPCCP",    hpcc["P_bub"],                             HPCC_P_TAU_S,    dt)

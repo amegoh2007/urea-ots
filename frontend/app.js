@@ -170,7 +170,8 @@ document.addEventListener('keydown', e=>{
   const modal=ae.closest(FACEPLATE_MODALS);
   if(!modal || !modal.classList.contains('show')) return;
   const setBtn=modal.querySelector('button.primary');
-  if(setBtn && !setBtn.disabled){ e.preventDefault(); setBtn.click(); }
+  // ENTER records the change (clicks SET) AND closes the faceplate — applies to every controller faceplate.
+  if(setBtn && !setBtn.disabled){ e.preventDefault(); setBtn.click(); modal.classList.remove('show'); }
 });
 
 // ---------- Faceplate routing (SIC controllers -> dedicated REST modals) ----------
@@ -339,26 +340,45 @@ function render322(s){
   setPI('PI_329201',  e.PI_disch,   'BAR A', false);   // HP loop pressure
   setPI('HIC_322602', e.HIC_322602, '%',     false);
   const hv=document.getElementById('hv-op'); if(hv) hv.textContent = fmt(e.HIC_322602)+' %';
-  const inp=document.getElementById('hic-inp');
-  if(inp && document.activeElement!==inp) inp.value = fmt(e.HIC_322602);
+  if(window.OTS_FACE && window.OTS_FACE.hicSync) window.OTS_FACE.hicSync();   // keep the open HV faceplate's field live (any hand valve)
   const xb=document.getElementById('xv-322901b');
   if(xb) xb.classList.toggle('closed', !s.XV_322901);   // bowtie: green=open, red=closed (CSS)
 }
 
-// ---------- HIC-322602 hand controller -> HV-322602 opening (faceplate popup) ----------
+// ---------- Hand-valve faceplate (opening-only) — HV-322602 reference; SHARED by every hand valve ----------
+// Every HV (HIC/HV-322602, -322605, -322604, and any future hand valve) opens THIS one opening-only faceplate:
+// a single "Opening %" field, no MAN/AUTO/CAS (a hand valve has no controller mode). Overlays route here via
+// face:'hic'. To add a future HV: one CMD row below + face:'hic' on its overlay record — nothing else.
 (function(){
   const inp=document.getElementById('hic-inp'), btn=document.getElementById('hic-set-btn'),
         box=document.getElementById('hic-box'), m=document.getElementById('hicModal'),
-        cl=document.getElementById('hic-close');
+        cl=document.getElementById('hic-close'), ttl=document.getElementById('hic-title'),
+        note=document.getElementById('hic-note');
   if(!inp||!btn) return;
-  const apply=()=>{ const v=parseFloat(inp.value); if(!isNaN(v)) send({type:'hic_set',value:v}); };
+  const gp=(o,p)=> p.split('.').reduce((a,k)=> (a==null?a:a[k]), o);   // dotted live-packet path
+  // tag (HIC or HV form) -> backend command + payload field. Hand-valve setpoint = opening only.
+  const CMD={ 'HIC-322602':{t:'hic_set',   f:'value'}, 'HV-322602':{t:'hic_set',   f:'value'},
+              'HIC-322605':{t:'hic605_set',f:'op'},    'HV-322605':{t:'hic605_set',f:'op'},
+              'HIC-322604':{t:'hic604_set',f:'op'},    'HV-322604':{t:'hic604_set',f:'op'} };
+  const NOTE={ '322602':'↓ opening ⇒ ↑ 322E003 suction (↑ μ)' };
+  let cur=null;   // overlay currently shown -> drives the SET command + live prefill
+  const apply=()=>{ const v=parseFloat(inp.value); if(isNaN(v)) return;
+    const c=(cur&&CMD[cur.tag])||CMD['HV-322602'];          // default = HV-322602 (panel %-box / direct open)
+    send({type:c.t, [c.f]:v}); };
   btn.onclick=apply;
   inp.addEventListener('change',apply);
-  // open faceplate from HIC-322602 tag or its % box (rule 6 controller)
-  const open=()=>{ if(m) m.classList.add('show'); };
-  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { hic: open });   // overlay h602 left-click -> faceplate
-  if(box) box.addEventListener('click',open);
-  const pibox=document.querySelector('.pi[data-tag="HIC_322602"]'); if(pibox) pibox.addEventListener('click',open);
+  const open=(o)=>{ cur=o||null;
+    const num=((cur&&cur.tag.match(/\d+/))||[''])[0];
+    if(ttl)  ttl.textContent  = num ? ('HIC-'+num+' → HV-'+num+' (MANUAL)') : 'HV (MANUAL)';
+    if(note) note.textContent = NOTE[num] || 'Hand valve — operator sets opening directly (no controller mode).';
+    const v=(cur&&cur.bind)? gp(window.OTS_LAST||{}, cur.bind) : null;   // prefill from THIS valve's live opening
+    if(v!=null && document.activeElement!==inp) inp.value=fmt(v);
+    if(m) m.classList.add('show'); };
+  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { hic: open,
+    hicSync: ()=>{ if(!m||!m.classList.contains('show')||!cur||!cur.bind||document.activeElement===inp) return;
+                   const v=gp(window.OTS_LAST||{}, cur.bind); if(v!=null) inp.value=fmt(v); } });   // per-tick live field
+  if(box) box.addEventListener('click', ()=>open(null));
+  const pibox=document.querySelector('.pi[data-tag="HIC_322602"]'); if(pibox) pibox.addEventListener('click', ()=>open(null));
   if(cl&&m) cl.onclick=()=> m.classList.remove('show');
   if(m) m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
