@@ -659,6 +659,20 @@ REACT_WEIR_CREST_M  = REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M - REACT_WEIR_H
 REACT_WEIR_CW       = _react_mdot_kgh / (REACT_RHO_BULK_DES * REACT_WEIR_HEAD_DES ** 1.5)  # Francis coeff, m^3/h/m^1.5
 REACT_M_LIQ_DES     = REACT_RHO_BULK_DES * _react_area_m2 * (REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M)  # design holdup, kg
 REACT_LEVEL_DES_M   = REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M  # 20.0 m design liquid level (outlet-line head ref)
+# --- LT-322504 NARROW-BAND transmitter geometry (datasheet UD-AU-322-EC-0006, nozzle N7 = "LT 322504")
+# N7 is a stilling-well / protection-pipe level transmitter at the reactor TOP, NOT a full-height gauge:
+#   * datasheet p14 "1000 TO OVERFLOW PIPE" -> protection-pipe bottom (= measuring-range TOP tap / URV)
+#     sits 1.0 m above the overflow weir;  p6 "1500" -> measuring SPAN = 1.5 m.
+# So the 0->100 % indication maps a 1.5 m band whose TOP tap (URV, 100 %) is 1.0 m above the overflow line.
+# The liquid HOLDUP + hydraulics stay on the full physical head (react_level_pct, the 25 m column) — ONLY the
+# DISPLAYED transmitter reading is re-scoped to this real narrow band, which SATURATES (0 %/100 %) once the
+# surface leaves its range (real instrument behavior).  The reading is referenced to the design-valve SHADOW
+# holdup (see step loop) and anchored at NLL, so the slow off-seed loop relaxation cancels and design pins
+# bit-exact 80 %; see the LT-322504 DISPLAY block for the full rationale.
+REACT_LT_SPAN_M       = 1.5      # N7 measuring span, m (datasheet p6 "1500")
+REACT_LT_ABOVE_OVF_M  = 1.0      # URV (100 %) elevation above the overflow line, m (datasheet p14 "1000")
+#   URV = LRV + span = 20.3 m;  overflow line = URV - 1.0 = 19.3 m -> design level sits 0.7 m above the weir.
+#   Span 1.5 m vs the old 25 m full-height map -> ~16.7x more sensitive: HV-322605 head moves now read PROMPT.
 REACT_PHI_FWD_FLOOR = 0.25  # Fix-4: residual letdown floor on φ_fwd in the OUTLET reference (see line ~1619).
 #   Bottom take-off drains by loop-pressure/gravity head even when forward circulation stops, so the outlet
 #   reference is m_dot_des·max(φ_fwd, FLOOR), NOT m_dot_des·φ_fwd.  At runtime design φ_fwd≈1.10 ≫ FLOOR so the
@@ -1079,7 +1093,8 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     offgas["CO2"] -= d_co2;  overflow["CO2"] += d_co2                          # mass-conserving gas->liquid
     offgas["NH3"] -= d_nh3;  overflow["NH3"] += d_nh3
     # --- Phase A: reactor OFF-GAS-LINE LIQUID CARRYOVER (flood entrainment) -------------------------
-    # On reactor flood (LT-322504 == 100%) the un-passable melt spills the off-gas line into 322E003 as
+    # On reactor flood (holdup at PHYSICAL vessel-full; LT-322504 narrow-band already pegged 100%) the
+    # un-passable melt spills the off-gas line into 322E003 as
     # entrained liquid of reactor-OVERFLOW composition.  It joins the tube feed AND leaves with the bottom
     # overflow (-> 322F001 ejector suction -> 322E003 sump inventory ODE), so closure stays balanced
     # (feed += c, overflow += c -> net 0).  Below the flood lip liq_carry_kmolh is None -> every term is
@@ -1310,12 +1325,26 @@ class State:
         #   conversion self-loop (gain ~0.16) flexes with its OWN exotherm but does NOT ride the HPCC
         #   T_prod cold-cliff (which closed an unstable G~-15 thermal recycle). =1.0 -> design bit-exact.
         self.react_conv_fac = 1.0
-        # LT-322504 reactor liquid level (%) — DYNAMIC inventory state (mass balance, open-loop:
-        # HV-322605 is hand/auto and does NOT control level). dV/dt = Q_in - Q_out(φ).
+        # PHYSICAL liquid-head fraction (% of the 25 m column) — DYNAMIC inventory state (mass balance,
+        # open-loop: HV-322605 is hand/auto and does NOT control level). dV/dt = Q_in - Q_out(φ).  Drives
+        # the bottom-take-off hydraulics, the flood/carryover guard and the loop-mass P_min (full-column).
         self.react_level_pct = REACT_LEVEL_NLL_PCT      # init at design NLL = 80 % (derived from react_m_liq)
+        # LT-322504 transmitter reading (%) — the DISPLAYED narrow-band indication (N7, 1.5 m span, top tap
+        #   1 m above overflow): a re-scope of react_level_pct, NOT a separate inventory.  Init 80 % (design).
+        self.react_lt322504_pct = REACT_LEVEL_NLL_PCT
         # Fix-2b: CONSERVED liquid holdup mass (kg) — the true level state.  level = m_liq/(rho(T)·A),
         #   so cooling (rho up) drops the level below the weir lip even with the holdup frozen.
         self.react_m_liq     = REACT_M_LIQ_DES          # seeded rho_bulk·A·level_des -> reads 80 % at design
+        # LT-322504 reference: a SHADOW holdup integrated with HV-322605 PINNED at its design position and the
+        #   same production inflow.  At the design valve it tracks react_m_liq bit-identically, so the slow
+        #   off-seed loop relaxation cancels and the narrow band pins NLL 80 %; when the operator moves
+        #   HV-322605 the real holdup departs from this shadow by exactly the take-off term -> that departure
+        #   IS what LT-322504 reads.  Seeded == design holdup (deviation 0 on init -> bit-exact 80 %).
+        self.react_m_liq_shadow = REACT_M_LIQ_DES
+        # Recycle-mass transport lag (τ_rec): the (1-φ_f) recycle leg of the production-mass surge buffers
+        #   through the loop inventory before reaching the holdup In term, so HV-322605 keeps PROMPT drain
+        #   authority over LT-322504.  Seeded 0 (no surge at design) -> m_in==ṁ_des on init (bit-exact).
+        self.react_m_in_lag  = 0.0
         self.hpcc_level_pct  = HPCC_LEVEL_NLL_PCT       # 322E002 liquid inventory, init design NLL
         # 322E003 scrubber sump — TRUE dynamic liquid inventory (Option 3). holdup kg integrated
         #   each tick from (condensation make − actual ejector entrainment); level = holdup/NLL_KG·NLL%.
@@ -1707,19 +1736,39 @@ def step_sim(dt: float) -> dict:
     #   vessel CONTINUOUSLY toward empty — no φ_fwd FLOOR hack needed (Bug #4 safe by construction).
     T_bulk_react   = sum(new_T) / 4.0                          # live bulk temp (= node mean; design 179.7 C)
     level_m_react  = REACT_LIQ_H_M * s.react_level_pct / 100.0  # prev-step head feeding the discharge (explicit)
-    m_ov_split_kgh = sum(react["overflow_kmolh"][k] * MW_COMP[k] for k in react["overflow_kmolh"])  # production In
+    m_ov_split_kgh = sum(react["overflow_kmolh"][k] * MW_COMP[k] for k in react["overflow_kmolh"])  # instantaneous production
+    # HV-322605 ⟶ mass-balance timing fix.  The production surge above design (m_ov_split − ṁ_des) is the
+    #   synthesis-loop recycle returning as urea solution; the reduced model returns it with ZERO transport
+    #   delay (1-step tears), so production refilled the holdup as fast as HV-322605 drained it and LT-322504
+    #   barely moved.  Split the surge exactly like the L/W composition lag above: the fresh fraction φ_f
+    #   arrives PROMPT, the (1−φ_f) recycle leg buffers through the loop inventory τ_rec (same a_rec, φ_f).
+    #   Result: m_out responds to HV-322605 at once while m_in refills over τ_rec -> HV-322605 has prompt,
+    #   visible hydraulic authority over the level, re-settling at L_eq=L_des·(θ_des/θ).  At design the surge
+    #   is 0 -> lag stays 0 -> m_in==ṁ_des==m_out -> dm/dt=0 (bit-exact pin preserved).
+    m_surge_kgh       = m_ov_split_kgh - _react_mdot_kgh                    # production above design (0 at design)
+    s.react_m_in_lag += a_rec * (m_surge_kgh - s.react_m_in_lag)           # recycle leg lags through τ_rec
+    m_in_kgh          = (_react_mdot_kgh + REACT_FRESH_FRAC * m_surge_kgh
+                         + (1.0 - REACT_FRESH_FRAC) * s.react_m_in_lag)    # prompt fresh + lagged recycle
     m_out_kgh      = reactor.outlet_line_outflow_kgph(level_m_react, _react_mdot_kgh, REACT_LEVEL_DES_M,
                                                       s.HIC_322605, REACT_HIC605_DES_PCT)  # HV-322605 take-off
-    s.react_m_liq += (m_ov_split_kgh - m_out_kgh) * (dt / 3600.0)
+    s.react_m_liq += (m_in_kgh - m_out_kgh) * (dt / 3600.0)
     s.react_m_liq  = max(s.react_m_liq, reactor.M_HOLDUP_MIN)  # holdup floor -> guards level_from_holdup
+    # SHADOW holdup for LT-322504: identical In term, but HV-322605 PINNED at design -> isolates the take-off
+    #   deviation from the slow loop relaxation.  Uses prev-step shadow head (explicit Euler, like the actual).
+    _level_m_shadow       = reactor.level_from_holdup(s.react_m_liq_shadow, T_bulk_react, area_m2=_react_area_m2)
+    _m_out_shadow         = reactor.outlet_line_outflow_kgph(_level_m_shadow, _react_mdot_kgh, REACT_LEVEL_DES_M,
+                                                             REACT_HIC605_DES_PCT, REACT_HIC605_DES_PCT)  # valve@design
+    s.react_m_liq_shadow += (m_in_kgh - _m_out_shadow) * (dt / 3600.0)
+    s.react_m_liq_shadow  = max(s.react_m_liq_shadow, reactor.M_HOLDUP_MIN)
     # DOMINO: the hydraulic take-off m_out IS this step's stripper liquid feed — scale the split-fraction
     #   overflow composition to the live outlet mass (f_strip=1 at design -> bit-exact).  The 322E001 native
     #   heat/CO2-strip equations then drive this liquid surge into the overhead gas at its own equilibrium.
     f_strip = (m_out_kgh / m_ov_split_kgh) if m_ov_split_kgh > 1.0e-9 else 1.0
     s.react_overflow_kmolh = {k: react["overflow_kmolh"][k] * f_strip for k in react["overflow_kmolh"]}
     # ISSUE (Phase A): OFF-GAS-LINE LIQUID CARRYOVER on flood.  Throttling the bottom take-off (HV-322605)
-    #   cannot pass m_in, so holdup rises to the vessel-full mass M_full = rho(T_bulk)·A·H_liq (== the
-    #   LT-322504 100% lip).  Liquid above M_full CANNOT accumulate in the reactor — it physically spills
+    #   cannot pass m_in, so holdup rises to the vessel-full mass M_full = rho(T_bulk)·A·H_liq (PHYSICAL
+    #   vessel-full lip; the LT-322504 narrow band saturates 100% earlier, at overflow+1 m).  Liquid above
+    #   M_full CANNOT accumulate in the reactor — it physically spills
     #   over the off-gas line (TT-322009) into the HP scrubber (322E003) as ENTRAINED MELT.  Capping m_liq
     #   at M_full simultaneously (a) closes a latent conservation leak (m_liq integrated unbounded above
     #   full while only the level DISPLAY was clamped, so m_out saturated < m_in forever) and (b) yields
@@ -1732,6 +1781,28 @@ def step_sim(dt: float) -> dict:
     s.react_level_pct = clamp(reactor.level_from_holdup(s.react_m_liq, T_bulk_react,
                                                         area_m2=_react_area_m2) / REACT_LIQ_H_M * 100.0,
                               0.0, 100.0)
+    # LT-322504 DISPLAY: shadow-referenced N7 narrow band (datasheet 1.5 m span; top tap 1 m above overflow).
+    #   The transmitter reads the actual liquid head RELATIVE to the design-valve SHADOW head (above), anchored
+    #   at NLL.  Because the shadow integrates the SAME production inflow with HV-322605 pinned at design, the
+    #   two holdups share every production-driven term and differ ONLY by the live take-off (θ_des/θ): the slow
+    #   off-seed loop relaxation moves shadow AND actual together (rejected), while an HV-322605 move opens a
+    #   SUSTAINED, properly-damped gap -> the valve has prompt, visible authority over LT-322504.
+    #   ROOT-CAUSE NOTE: the static design seed is not the coupled-loop fixed point — over ~5 h the loop relaxes
+    #   (HPCC −4.8 %, reactor head −0.49 m / −1.9 %; stripper ~0) as production sags ~2.4 %.  The old full-25 m
+    #   map hid that 0.49 m sag as a cosmetic 80->78 %; the datasheet 1.5 m band amplifies the SAME sag 16.7x
+    #   (80->48 %) and would break the Design-Anchor.  A production-only datum over-rejected on STARTUP (level
+    #   lags the fast HPCC sag -> LT humped to 96 %); the shadow holdup shares the level's OWN dynamics, so it
+    #   tracks bit-identically at the design valve -> LT pins NLL 80.0000 % through the whole relaxation.
+    #   Saturates 0/100 % off the 1.5 m band like the real transmitter.  HOLDUP, discharge hydraulics, flood
+    #   guard and loop P_min all stay on the PHYSICAL head s.react_level_pct (shadow drives the DISPLAY only).
+    _H_liq_react          = REACT_LIQ_H_M * s.react_level_pct / 100.0                              # physical head, m
+    _H_ref_shadow_pct     = clamp(reactor.level_from_holdup(s.react_m_liq_shadow, T_bulk_react,
+                                                            area_m2=_react_area_m2) / REACT_LIQ_H_M * 100.0,
+                                  0.0, 100.0)
+    _H_ref_react          = REACT_LIQ_H_M * _H_ref_shadow_pct / 100.0                              # design-valve datum, m
+    s.react_lt322504_pct  = clamp(REACT_LEVEL_NLL_PCT
+                                  + (_H_liq_react - _H_ref_react) / REACT_LT_SPAN_M * 100.0,
+                                  0.0, 100.0)
     # carryover molar vector = reactor-overflow composition scaled by (entrained mass / overflow mass):
     #   ν_carry,k = ṁ_carry · ν_ov,k / Σ_j ν_ov,j·MW_j  -> preserves overflow mole fractions exactly.
     _ov_mass_kgh      = sum(react["overflow_kmolh"][k] * MW_COMP[k] for k in react["overflow_kmolh"])
@@ -2156,7 +2227,7 @@ def step_sim(dt: float) -> dict:
             "TT_322007":   round(s.react_T_node[1], 1),  # N6 C     (EL  +7900) — node-2 DYNAMIC profile
             "TT_322008":   round(s.react_T_node[0], 1),  # N6 D bot (EL  +1000) — node-1 DYNAMIC profile
             "TT_322009":   round(react["T_offgas"], 1),      # off-gas line -> 322E003 (C, live profile)
-            "LT_322504":   round(s.react_level_pct, 1),      # top liquid level (%) — DYNAMIC
+            "LT_322504":   round(s.react_lt322504_pct, 1),   # N7 narrow-band reading (1.5 m span, top tap 1 m above overflow) — DYNAMIC
             "AT_322701":   round(d_AT322701, 3),  # N/C molar ratio ->322E001 (lagged analyzer)
             "HIC_322605":  round(s.HIC_322605, 1),           # overflow valve controller (%)
             "HV_322605":   round(s.HIC_322605, 1),           # HV-322605 opening (tracks HIC 1:1)
