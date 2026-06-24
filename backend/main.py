@@ -1641,9 +1641,10 @@ def step_sim(dt: float) -> dict:
     T_conv_c = HPCC_T_PROD_DES_C + REACT_DT_COL_DES * s.react_conv_fac
     react   = react_322r001(hpcc, s.F_CO2_th, s.HIC_322605, L_drive=L_blend, W_drive=W_blend,
                             T_overflow_c=T_conv_c)
-    s.react_overflow_kmolh = react["overflow_kmolh"]   # tear -> next step's stripper feed
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
+    # NB: s.react_overflow_kmolh (the stripper-feed tear) is set BELOW in the reactor-inventory block —
+    #     it is the HYDRAULIC bottom take-off m_out (HV-322605 × column head), NOT the raw split production.
 
     # Fix-1: integrate the distributed 4-node axial thermal profile (Damköhler-shaped exotherm).
     #   dT_n/dt = [ (T_{n-1} - T_n) + g_n·ΔT_col ] / τ_n ,  T_0 = T_feed (HPCC two-phase product),
@@ -1691,26 +1692,31 @@ def step_sim(dt: float) -> dict:
     if _STEAM_READY:                        # OFF during both boot-pin settles (headers frozen at design)
         step_steam(s.steam, dt, m_strip, m_hpcc)
 
-    # LT-322504 dynamic level — Fix-4 CONSERVED holdup mass + liquid-OUTLET-LINE discharge (DECOUPLED):
-    #   m_in   = m_dot_des·s·φ_fwd                                       (ejector-driven forward feed from HPCC)
-    #   m_out  = m_dot_des·max(φ_fwd,FLOOR)·(θ/θ_des)·(max(L,0)/L_des)   (HV-322605 bottom take-off; linear head law)
-    #   d(m_liq)/dt = m_in - m_out ;  L = m_liq/(rho(T_bulk)·A).
-    #   HV-322605 sits on the reactor's BOTTOM take-off, not a top weir; its driving head is the ENTIRE
-    #   liquid column, so holding it open with the CO2 XV shut (m_in -> 0) drains the vessel CONTINUOUSLY
-    #   toward empty (the old weir term could only fall to the 19.95 m lip, then froze — Bug #4).  The φ_fwd
-    #   FLOOR (REACT_PHI_FWD_FLOOR) is what keeps the outlet draining after a CO2-cut pump trip kills φ_fwd.
-    m_in_react    = _react_mdot_kgh * react["co2_scale"] * phi_fwd
-    T_bulk_react  = sum(new_T) / 4.0                          # live bulk temp (= node mean; design 179.7 C)
-    level_m_react = REACT_LIQ_H_M * s.react_level_pct / 100.0  # prev-step head feeding the discharge (explicit)
-    # ISSUE-c: HV-322605 throttles the reactor OUTLET line, so its opening GATES discharge capacity linearly
-    #   (θ/θ_des) atop the sqrt-of-head valve law.  Throttling below θ_des backs liquid up -> head rises
-    #   until m_out == m_in -> reactor floods (level^); opening above drains it.  The OUTLET valve drives its
-    #   OWN (U/S) vessel level.  At design θ == REACT_HIC605_DES_PCT and L == L_des -> both ratios 1.0 ->
-    #   m_out == m_in == m_dot_des -> dm/dt = 0 (bit-exact pin).
-    m_fwd_ref     = _react_mdot_kgh * max(phi_fwd, REACT_PHI_FWD_FLOOR)  # outlet ref: φ_fwd above FLOOR (cancels m_in at design), FLOOR below (drains on trip)
-    s.react_m_liq += reactor.outlet_line_dmdt_kgph(m_in_react, level_m_react, m_fwd_ref,
-                                                   REACT_LEVEL_DES_M, s.HIC_322605, REACT_HIC605_DES_PCT) * (dt / 3600.0)
+    # LT-322504 dynamic level — DOMINO inventory (Option 2, Lead-Ops mandate): the reactor 322R001 is a
+    #   true liquid HOLDUP and HV/HIC-322605 has STRICT HYDRAULIC authority over the BOTTOM take-off to the
+    #   stripper (NOT over the molar off-gas split — vaporization happens DOWNSTREAM in the 322E001 tubes):
+    #       m_in  = ṁ_ov,split                              (live urea-solution PRODUCTION; φ-independent)
+    #       m_out = ṁ_des·(θ/θ_des)·(max(L,0)/L_des)        (HV-322605 gate × column head; capacity = ṁ_des)
+    #       d(m_liq)/dt = m_in − m_out ;  L = m_liq/(rho(T_bulk)·A).
+    #   m_out IS the liquid fed to the stripper (conservation through the holdup) — see f_strip below.  At
+    #   design θ==θ_des, L==L_des and ṁ_ov,split==ṁ_des -> m_out==m_in==ṁ_des -> dm/dt=0, f_strip=1.0
+    #   (bit-exact pin).  OPEN HV-322605: m_out>m_in -> reactor DRAINS (L↓) AND surges the stripper feed
+    #   (transient); level re-settles at L_eq=L_des·(θ_des/θ) while steady feed returns to production.
+    #   THROTTLE: m_out<m_in -> reactor FLOODS (L↑, see carryover below) and starves the stripper.  The
+    #   take-off capacity is ṁ_des (production-independent), so a CO2-cut feed trip (m_in -> 0) drains the
+    #   vessel CONTINUOUSLY toward empty — no φ_fwd FLOOR hack needed (Bug #4 safe by construction).
+    T_bulk_react   = sum(new_T) / 4.0                          # live bulk temp (= node mean; design 179.7 C)
+    level_m_react  = REACT_LIQ_H_M * s.react_level_pct / 100.0  # prev-step head feeding the discharge (explicit)
+    m_ov_split_kgh = sum(react["overflow_kmolh"][k] * MW_COMP[k] for k in react["overflow_kmolh"])  # production In
+    m_out_kgh      = reactor.outlet_line_outflow_kgph(level_m_react, _react_mdot_kgh, REACT_LEVEL_DES_M,
+                                                      s.HIC_322605, REACT_HIC605_DES_PCT)  # HV-322605 take-off
+    s.react_m_liq += (m_ov_split_kgh - m_out_kgh) * (dt / 3600.0)
     s.react_m_liq  = max(s.react_m_liq, reactor.M_HOLDUP_MIN)  # holdup floor -> guards level_from_holdup
+    # DOMINO: the hydraulic take-off m_out IS this step's stripper liquid feed — scale the split-fraction
+    #   overflow composition to the live outlet mass (f_strip=1 at design -> bit-exact).  The 322E001 native
+    #   heat/CO2-strip equations then drive this liquid surge into the overhead gas at its own equilibrium.
+    f_strip = (m_out_kgh / m_ov_split_kgh) if m_ov_split_kgh > 1.0e-9 else 1.0
+    s.react_overflow_kmolh = {k: react["overflow_kmolh"][k] * f_strip for k in react["overflow_kmolh"]}
     # ISSUE (Phase A): OFF-GAS-LINE LIQUID CARRYOVER on flood.  Throttling the bottom take-off (HV-322605)
     #   cannot pass m_in, so holdup rises to the vessel-full mass M_full = rho(T_bulk)·A·H_liq (== the
     #   LT-322504 100% lip).  Liquid above M_full CANNOT accumulate in the reactor — it physically spills

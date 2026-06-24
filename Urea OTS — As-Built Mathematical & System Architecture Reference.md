@@ -13,6 +13,7 @@
 |-----|------|----------|-------|
 | 1 | 2026-06-05 | Gemini HTML export | Original as-built (Sections 1–6 below). |
 | 2 | 2026-06-22 | commit `a0a9180` (branch `fix/reactor-level-drain-and-vent-coupling`) | Add Revision Delta + PART F (full-loop turndown multi-settle audit). Sections 1–6 transcribed faithfully from Rev 1; see Revision Delta for post-snapshot model changes. |
+| 3 | 2026-06-24 | branch `fix/reactor-level-drain-and-vent-coupling` | Reactor 322R001 dynamic liquid-inventory (Domino) coupling: HV/HIC-322605 given strict hydraulic authority over the bottom take-off, which IS the 322E001 stripper feed. Fixes stale HP-stripper level (excess reactor flow / valve had zero authority over 322E001 mass balance). See Revision Delta #7. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -24,6 +25,9 @@ The Rev-1 equation set below reflects the engine at the 2026-06-05 commit. The f
 4. **Phase B — HP ejector hydraulic-capacity (throat-choke) ceiling** added (suction capped at throat-choke limit). See FULL_AUDIT_REPORT §B3 note.
 5. **TDY-329125 choke-condensation coupling** between scrubber carryover and CCW condensation quality.
 6. **`f_cons` reactor overflow mass-rescale** (global mass-closure enforcement) characterised across the turndown envelope — see PART F.
+7. **Reactor 322R001 dynamic liquid-inventory (Domino coupling) — HP-stripper feed FIXED** (stale 322E001 level). Root cause: line-975 φ-scaling of the reactor overflow was annihilated by the §B `f_cons` mass-rescale, so the stripper feed tear `react_overflow_kmolh` was pinned to `m_ov_tgt` independent of HV/HIC-322605 ⇒ `∂\dot m_{bot}/∂\theta = 0` ⇒ frozen 322E001 level. Fix: the reactor is now a true liquid holdup whose **hydraulic bottom take-off IS the stripper feed**. Standard accumulation ODE with HV-322605 (θ) authority over the outlet:
+$$\frac{dM_{liq}}{dt} = \dot m_{in} - \dot m_{out},\qquad \dot m_{in} = \dot m_{ov,split},\qquad \dot m_{out} = \dot m_{des}\cdot\frac{\theta}{\theta_{des}}\cdot\frac{\max(L,0)}{L_{des}}$$
+   The split-overflow tear is scaled to the live outlet, $f_{strip} = \dot m_{out}/\dot m_{ov,split}$ (guarded; $=1$ at design ⇒ bit-exact pin, $\dot m_{out}=\dot m_{in}=\dot m_{des}$, $dM/dt=0$). Stripper `322e001` is **untouched** — its native heat/CO₂ equations strip the introduced liquid surge to overhead at its own thermal/chemical equilibrium. Capacity anchor $\dot m_{des}$ is production-independent ⇒ a CO₂-cut feed trip ($\dot m_{in}\to0$) drains the vessel continuously toward empty (no φ_fwd FLOOR hack). Verified (matched-baseline probe): HV-322605 +20 pts → 322E001 feed `d_bot_kgh = +17315.7` (was `−0.0`, dead) + reactor LT-322504 drains 79.98→79.37 % (m_liq −1632 kg); steady feed returns to production at $L_{eq}=L_{des}\cdot(\theta_{des}/\theta)$; design baseline flat (bit-exact). Replaces the decoupled cosmetic-level path of Delta #3. `main.py` reactor level/holdup block.
 
 ---
 
