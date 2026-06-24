@@ -18,6 +18,8 @@
     --signal:#9bbabb;
     --ratio:#2e8a8f;
     --line-carb:#ff9a3c;
+    /* proper readout style for live indicator + valve-opening values */
+    --val-font:"Cascadia Mono","Consolas",ui-monospace,"Segoe UI Mono",monospace;
   }
   *{box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;}
   html,body{margin:0;padding:0;background:#0a1416;color:#fff;overflow:auto;}
@@ -31,9 +33,9 @@
   .ov{position:absolute;transform:translate(-50%,-50%);z-index:5;cursor:pointer;}
   .ov.pump{width:54px;height:54px;}
   .ov.avalve{width:34px;height:34px;}
-  .ov.ind{min-width:30px;height:18px;padding:0 4px;background:#04110d;border:1px solid #e8f4f0;color:#d6f3e4;font:bold 11px Consolas,monospace;display:flex;align-items:center;justify-content:center;white-space:nowrap;border-radius:2px;}
-  .ov.ind .ou{color:#82b3a3;font-weight:normal;margin-left:3px;font-size:9px;}
-  .ov.ind.empty{min-width:34px;height:16px;background:rgba(8,16,14,.45);border:1px solid #ffffff;color:#eef;font:normal 8px Consolas,monospace;letter-spacing:-.3px;}
+  .ov.ind{min-width:30px;height:18px;padding:0 4px;background:#04110d;border:1px solid #e8f4f0;color:#d6f3e4;font:bold 12px var(--val-font);font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;white-space:nowrap;border-radius:2px;}
+  .ov.ind .ou{color:#82b3a3;font-weight:normal;margin-left:3px;font-size:10px;}
+  .ov.ind.empty{min-width:34px;height:16px;background:rgba(8,16,14,.45);border:1px solid #ffffff;color:#eef;font:normal 9px var(--val-font);font-variant-numeric:tabular-nums;letter-spacing:-.3px;}
   .ov.ind.fp{border-color:#7fd0d8;box-shadow:0 0 0 1px rgba(127,208,216,.25);}
   .ov.strm{background:rgba(64,224,255,.06);border:1px dashed rgba(64,224,255,.45);border-radius:2px;}
   .ov.strm:hover{background:rgba(64,224,255,.22);border-color:#41e0ff;box-shadow:0 0 0 1px rgba(64,224,255,.4);}
@@ -65,11 +67,11 @@
   .lbl-s{position:absolute;font-size:11px;color:#fff;}
   .pi{
     position:absolute;background:var(--pi-bg);color:var(--pi-text);
-    border:1px solid var(--pi-border);font-size:12px;padding:2px 6px;
+    border:1px solid var(--pi-border);font-size:13px;padding:2px 6px;
     min-width:46px;text-align:right;cursor:pointer;white-space:nowrap;
-    font-family:Consolas,monospace;
+    font-family:var(--val-font);font-variant-numeric:tabular-nums;
   }
-  .pi .u{color:#bbb;margin-left:4px;font-size:10px;}
+  .pi .u{color:#bbb;margin-left:4px;font-size:11px;}
   .pi.alarm{color:var(--pi-alarm);}
   .badge-l{
     position:absolute;background:#22ff22;color:#000;font-weight:bold;
@@ -142,7 +144,7 @@
   /* HV-322602 adjustable ejector valve + HIC panel + ejector */
   .avalve{position:absolute;color:#fff;font-size:11px;text-align:center;cursor:pointer;width:44px;}
   .avalve .sym{display:block;width:34px;height:24px;margin:0 auto;}
-  .avalve .op{display:block;background:#000;border:1px solid #fff;font-family:Consolas,monospace;margin-top:2px;font-size:11px;}
+  .avalve .op{display:block;background:#000;border:1px solid #fff;font-family:var(--val-font);font-variant-numeric:tabular-nums;margin-top:2px;font-size:12px;}
   .hic-panel{
     position:absolute;background:var(--ratio);color:#fff;border:1px solid #99dadd;padding:6px;font-size:12px;width:160px;
   }
