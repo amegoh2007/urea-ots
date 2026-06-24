@@ -11,6 +11,7 @@
 * **The Design Anchor:** All off-design dynamic equations must resolve to be bit-exact with the provided 100% steady-state Heat and Material Balance (HMB).
 
 ## 2. Development Workflow & Active Skill Utilization
+* **The Baseline Regression Test (STRICT MANDATE):** Before confirming any code change (adding, editing, or deleting logic), you MUST mathematically and programmatically test the output against the 100% steady-state design values. If a change breaks the design anchor or introduces mass/energy drift at steady state, you must discard the approach and recalculate.
 * **Tool & Skill Mandate:** You MUST actively use your available skills (Bash execution, file reading, `grep`, and MCP tools) to perform tasks. Never guess file paths, function names, or existing state variables. Prove your assumptions by searching the codebase before writing new logic.
 * **Scope Lock:** Build strictly ONE unit at a time. Do not anticipate or stub downstream units.
 * **UI Enforcement:** Upon receiving a DCS screenshot, you MUST automatically apply the rules defined in `ui_guidelines.md`.
