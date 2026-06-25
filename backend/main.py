@@ -820,6 +820,15 @@ SCRUB_COND_CHOKE_MIN = 0.30      # —, residual condensation-duty fraction at a
 #   100 %: χ_choke = 1 − (1−SCRUB_COND_CHOKE_MIN)·max(L−L_NLL,0)/(100−L_NLL).  At/below NLL χ_choke ≡ 1 ->
 #   q_ccw unchanged -> TDY-329125 + every TT pin stay bit-exact at design.  Above NLL it cuts q_ccw, so the
 #   CCW-rise indicator TDY-329125 FALLS (condensation constricted) — the physically-correct choke signature.
+SCRUB_COND_SPINDLE_GAIN = 0.25   # —, carbamate-condensation duty sensitivity to the 322F001 ejector-spindle
+#   intensity (HV-322602).  The motive jet sets how vigorously the off-gas is drawn through the bottom
+#   condensation zone: CLOSING HV-322602 raises phi_sp>1 (stronger jet, deeper suction) -> more off-gas is
+#   condensed into carbamate per unit time -> Q_scrubber RISES; opening (phi_sp<1) lowers it.  Spindle-duty
+#   factor χ_sp = 1 + SCRUB_COND_SPINDLE_GAIN·(1 − 1/phi_sp), the SAME (1−1/phi_sp) spindle driver as the
+#   322R001 forward-carbamate domino (Rev Δ#11).  At θ_des phi_sp≡1 -> χ_sp≡1 -> q_ccw unscaled -> TT-322002
+#   (178.8) + TDY-329125 (15.0) hold bit-exact; off-design it couples HV-322602 into the FULL 322E003 thermo
+#   (t_overflow_cond -> TT-322002, t_ccw_out/dT_ccw -> TT/TDY-329125).  Two-sided, persistent, phi_sp-keyed
+#   so it is independent of the steady sump level (which sits below NLL at θ_des) — pin holds by construction.
 
 
 def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
@@ -1072,7 +1081,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
                   m_ccw_kgh: float, vent_ratio: float = 1.0, nc_act: float = None,
                   hic604_pct: float = None,
                   liq_carry_kmolh: dict = None, t_carry_c: float = None,
-                  choke_level_pct: float = None) -> dict:
+                  choke_level_pct: float = None, spindle_phi: float = 1.0) -> dict:
     """322E003 HP scrubber — reduced calibrated split-fraction, pinned to the shared design HMB.
     Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
     wash (323P001 A/B design vector × s).  Both discharges PINNED (proven IDENTICAL):
@@ -1123,6 +1132,14 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)          # kmol/h gas->carbamate (now wash-live)
     q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0                # full exotherm (diag)
     q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s × synthesis-vent load PT-329201)
+    # --- HV-322602 ejector-spindle CONDENSATION-INTENSITY coupling (TT-322002 / TDY-329125 / 322E003 thermo) ---
+    # The 322F001 motive jet sets how vigorously the off-gas is drawn through the bottom condensation zone.
+    # CLOSING HV-322602 raises phi_sp>1 (stronger jet, deeper suction) -> more off-gas condensed into carbamate
+    # per unit time -> Q_scrubber RISES; opening (phi_sp<1) lowers it.  Same (1−1/phi_sp) spindle driver as the
+    # 322R001 forward-carbamate domino.  At θ_des phi_sp≡1 -> chi_sp≡1 -> q_ccw unscaled -> TT-322002 (178.8)
+    # + TDY-329125 (15.0) bit-exact; phi_sp-keyed so it is independent of the steady sump level (below NLL @θ_des).
+    chi_sp    = 1.0 + SCRUB_COND_SPINDLE_GAIN * (1.0 - 1.0 / max(spindle_phi, 1e-6))
+    q_ccw_kw *= max(chi_sp, SCRUB_COND_CHOKE_MIN)
     # --- Phase-B-coupled CONDENSATION CHOKE derate (TDY-329125 / TT-322002 response to sump flood) -----
     # A flooding sump (LT-329501 above NLL, prior-step tear) floods the shell-side condensation surface,
     # so the carbamate-condensation duty Q_scrubber is constricted by χ_choke ∈ [SCRUB_COND_CHOKE_MIN, 1]:
@@ -1914,7 +1931,7 @@ def step_sim(dt: float) -> dict:
                           vent_ratio=nu, nc_act=react_nc_ratio(react["overflow_kmolh"]),
                           hic604_pct=s.HIC_322604,
                           liq_carry_kmolh=react_carry_kmolh, t_carry_c=s.react_T_overflow,
-                          choke_level_pct=s.scrub_level_pct)
+                          choke_level_pct=s.scrub_level_pct, spindle_phi=_phi_sp_theta)
     # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
     #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
     #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation

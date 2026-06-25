@@ -97,6 +97,38 @@ def test_lt322504_design_holds():
     assert abs(lt - base) < 0.1, (base, lt)
 
 
+def _run_tt002(open_val, warm=800, hold=2500):
+    """322E003 bottom carbamate-overflow temp TT-322002 before/after an HV-322602 move (steady)."""
+    main.state = main.State()
+    base = _settle(warm)["SCRUB_322E003"]["TT_322002"]
+    main.handle_cmd({"type": "hic_set", "value": open_val})
+    tt = _settle(hold)["SCRUB_322E003"]["TT_322002"]
+    return base, tt
+
+
+def test_tt322002_rises_on_close():
+    """THERMO COUPLING: CLOSING HV-322602 -> stronger motive jet (phi_sp>1) -> deeper suction ->
+    more off-gas condensed into carbamate per unit time -> carbamate-condensation duty q_ccw RISES
+    -> bottom overflow TT-322002 RISES.  The sump drains below NLL so the flood-choke is inactive;
+    the spindle-duty term is the live HV-322602 <-> TT-322002 <-> 322E003-thermo coupling."""
+    base, tt = _run_tt002(50.0)
+    assert tt > base + 1.0, (base, tt)
+
+
+def test_tt322002_falls_on_open():
+    """THERMO COUPLING: OPENING HV-322602 -> weaker jet (phi_sp<1) -> less condensation duty AND the
+    sump floods (flood-choke) -> bottom overflow TT-322002 FALLS."""
+    base, tt = _run_tt002(95.0)
+    assert tt < base - 1.0, (base, tt)
+
+
+def test_tt322002_design_holds():
+    """Design anchor: at the 74 % design opening phi_sp=1 -> chi_sp=1 -> q_ccw unscaled -> TT-322002
+    holds its 178.8 design pin (no spindle-driven drift)."""
+    base, tt = _run_tt002(74.0)
+    assert abs(tt - base) < 0.5, (base, tt)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
