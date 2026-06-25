@@ -695,6 +695,14 @@ REACT_NC_OVERFLOW_GAIN = 0.5     # AT-322701 excess-NH3 partition gain: fraction
 # --- Fix-3: first-order recycle lag + genuine blended reactor feed ----------------------------
 REACT_TAU_REC_MIN  = 5.0         # τ_rec: HP synthesis-loop recycle inventory lag time constant (min)
 REACT_FRESH_FRAC   = 0.30        # φ_f: fresh make-up fraction of the reactor feed (1-φ_f = lagged recycle)
+# --- Fix-4: ejector forward-carbamate coupling 322E003 -> 322F001 -> 322E002 -> 322R001 ---------
+REACT_FWD_GAIN     = 1.0         # G_fwd: fraction of the TRANSIENT (washed-out) spindle-attributable draw
+                                 # pumped forward through the HPCC into the reactor holdup as extra carbamate
+                                 # make.  Driver = ṁ_suc·(1 − 1/φ_sp(θ)) (≡0 at the design valve θ=74, φ_sp=1);
+                                 # the high-pass of it isolates the valve-move PULSE and dies to 0 at any steady
+                                 # θ -> mass-conservative (no sustained source).  >0 closing, <0 opening.
+REACT_FWD_TAU_MIN  = 8.0         # τ_fwd: washout time constant (min) ≈ 322E003 sump-drain redistribution time;
+                                 # sets how long the LT-322504 forward-carbamate swell persists before relaxing.
 # AT-322701 analyzer: atom-count N/C molar ratio of 322R001 overflow (Σnᵢ·#Nᵢ)/(Σnᵢ·#Cᵢ)
 REACT_N_ATOMS = {"NH3": 1, "Urea": 2, "Biuret": 3, "N2": 2}
 REACT_C_ATOMS = {"CO2": 1, "Urea": 1, "Biuret": 2, "CH4": 1}
@@ -1350,6 +1358,11 @@ class State:
         #   through the loop inventory before reaching the holdup In term, so HV-322605 keeps PROMPT drain
         #   authority over LT-322504.  Seeded 0 (no surge at design) -> m_in==ṁ_des on init (bit-exact).
         self.react_m_in_lag  = 0.0
+        # Fix-4 ejector forward-carbamate washout: low-pass of the spindle-attributable draw
+        #   ṁ_suc·(1−1/φ_sp(θ)).  The high-pass (driver − this state) is the TRANSIENT forward-carbamate
+        #   pulse on an HV-322602 move, decaying to 0 at any steady θ (so no sustained fictitious source).
+        #   Seeded 0; driver ≡ 0 at the design valve θ=74 -> state stays 0 -> LT-322504 pin bit-exact.
+        self.react_fwd_wash  = 0.0
         self.hpcc_level_pct  = HPCC_LEVEL_NLL_PCT       # 322E002 liquid inventory, init design NLL
         # 322E003 scrubber sump — TRUE dynamic liquid inventory (Option 3). holdup kg integrated
         #   each tick from (condensation make − actual ejector entrainment); level = holdup/NLL_KG·NLL%.
@@ -1756,7 +1769,30 @@ def step_sim(dt: float) -> dict:
                          + (1.0 - REACT_FRESH_FRAC) * s.react_m_in_lag)    # prompt fresh + lagged recycle
     m_out_kgh      = reactor.outlet_line_outflow_kgph(level_m_react, _react_mdot_kgh, REACT_LEVEL_DES_M,
                                                       s.HIC_322605, REACT_HIC605_DES_PCT)  # HV-322605 take-off
-    s.react_m_liq += (m_in_kgh - m_out_kgh) * (dt / 3600.0)
+    # DOMINO (Fix-4): ejector forward-carbamate coupling 322E003 -> 322F001 -> 322E002 -> 322R001.
+    #   Closing HV-322602 raises the spindle momentum flux ṁ²/(ρA) -> the 322F001 ejector entrains MORE
+    #   carbamate from the 322E003 sump (ej["suction_kgh"] climbs above its design draw EJ_SUC_TOT_DES); that
+    #   surge is pumped forward through the HPCC (322E002) into the reactor as extra liquid make.  The reduced
+    #   loop previously dead-ended this wave at the HPCC — reactor m_in carried no forward-flow term — so
+    #   LT-322504 was stone-dead to HV-322602.  Inject the surge (kg/h above design) into the ACTUAL holdup
+    #   ONLY: NOT m_in_kgh (the shadow shares it -> would cancel in the display) and NOT the shadow.  The
+    #   actual head then climbs above the design-valve datum -> LT-322504 RISES on closing / FALLS on opening.
+    #   Driver = the SPINDLE-attributable part of the draw, ṁ_suc·(1 − 1/φ_sp(θ)) -> identically 0 at the design
+    #   valve θ=74 (φ_sp=1) at ANY sump state, so the LT-322504 startup/relaxation NLL pin stays bit-exact (it is
+    #   NOT keyed on raw suction, which is nonzero off-NLL during the sump fill).  The driver's SUSTAINED part is
+    #   a counterfactual (at steady state the sump can only supply its inflow -> a constant forward term would
+    #   INVENT mass), so wash it out: low-pass the driver (react_fwd_wash, τ_fwd ≈ sump-drain time) and inject
+    #   only the HIGH-PASS residue (driver − wash) — the TRANSIENT pulse on an HV-322602 move that decays to 0
+    #   at any steady θ.  Mass-conservative inventory REDISTRIBUTION sump->reactor->stripper; injected into the
+    #   ACTUAL holdup ONLY (not m_in_kgh, which the shadow shares -> would cancel; not the shadow) so the actual
+    #   head climbs above the design-valve datum and LT-322504 RISES on closing / FALLS on opening; the higher
+    #   head then raises the level-servoed take-off m_out and the swell relaxes back.
+    _phi_sp_theta    = EJ_SPINDLE_R ** ((EJ_OPEN_DES - s.HIC_322602) / 100.0)   # >1 closing, =1 @74, <1 opening
+    _fwd_drive_kgh   = ej["suction_kgh"] * (1.0 - 1.0 / _phi_sp_theta)          # spindle-attributable draw (0 @74)
+    _a_fwd           = dt / (REACT_FWD_TAU_MIN * 60.0)
+    s.react_fwd_wash += _a_fwd * (_fwd_drive_kgh - s.react_fwd_wash)            # low-pass (sustained part)
+    m_fwd_carb_kgh   = REACT_FWD_GAIN * (_fwd_drive_kgh - s.react_fwd_wash)     # high-pass: transient pulse, ->0 steady
+    s.react_m_liq += (m_in_kgh - m_out_kgh + m_fwd_carb_kgh) * (dt / 3600.0)
     s.react_m_liq  = max(s.react_m_liq, reactor.M_HOLDUP_MIN)  # holdup floor -> guards level_from_holdup
     # SHADOW holdup for LT-322504: identical In term, but HV-322605 PINNED at design -> isolates the take-off
     #   deviation from the slow loop relaxation.  Uses prev-step shadow head (explicit Euler, like the actual).

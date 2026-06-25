@@ -69,6 +69,34 @@ def test_lt329501_design_holds():
     assert abs(lt - base) < 0.5, (base, lt)
 
 
+def _run_lt504(open_val, warm=800, hold=600):
+    """Reactor 322R001 narrow-band LT-322504 before/after an HV-322602 move (transient-swell window)."""
+    main.state = main.State()
+    base = _settle(warm)["REACT_322R001"]["LT_322504"]
+    main.handle_cmd({"type": "hic_set", "value": open_val})
+    lt = _settle(hold)["REACT_322R001"]["LT_322504"]
+    return base, lt
+
+
+def test_lt322504_rises_on_close():
+    """DOMINO: CLOSING HV-322602 -> more entrainment -> more carbamate fwd 322E003->322E002->322R001
+    -> the reactor holdup swells -> LT-322504 RISES (the chain the user reported as broken)."""
+    base, lt = _run_lt504(50.0)
+    assert lt > base + 0.3, (base, lt)
+
+
+def test_lt322504_falls_on_open():
+    """DOMINO: OPENING HV-322602 -> less entrainment -> less carbamate fwd -> LT-322504 FALLS."""
+    base, lt = _run_lt504(95.0)
+    assert lt < base - 0.3, (base, lt)
+
+
+def test_lt322504_design_holds():
+    """Design anchor: at the 74 % design opening the fwd-flow deviation is 0 -> LT-322504 holds NLL."""
+    base, lt = _run_lt504(74.0)
+    assert abs(lt - base) < 0.1, (base, lt)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]
