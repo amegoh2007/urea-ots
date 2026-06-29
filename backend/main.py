@@ -112,16 +112,30 @@ T_BL_FEED_C     = 25.0           # C, BL NH3 supply temp to 321D003 (design feed
 # discharge composition stays pinned to the design 'Carb. Liq.' table while total flow
 # tracks the live motive.  Verified IDENTICAL to design (verify_322f001.py: PASS).
 MW_COMP = {"CO2":44.0098,"CH4":16.043,"H2":2.0158,"H2O":18.0152,
-           "N2":28.0134,"NH3":17.0304,"O2":31.9988,"Urea":60.056,"Biuret":103.081}
-EJ_MOTIVE_NH3_DES = 40756.0      # kg/h, design motive NH3 (pure, 321P002 A/B BL feed)
-EJ_DES_TOTAL      = 98320.0      # kg/h, design discharge total (Carb. Liq.)
+           "N2":28.0134,"NH3":17.0304,"O2":31.9988,"Urea":60.0554,"Biuret":103.0804}
+# Urea   MW = C+2N+4H+O   -> urea-couple   (CO2+2NH3->Urea+H2O) Sum(nu*MW) = 0 exactly
+# Biuret MW = 2*Urea-NH3  -> biuret-couple (2Urea->Biuret+NH3)  Sum(nu*MW) = 0 exactly
+# both atom-consistent w.r.t. the listed CO2/NH3/H2O MW -> reactor mass closes to machine zero.
+EJ_MOTIVE_NH3_DES = 42762.05427809782   # kg/h, design motive NH3 (pure, 321P002 A/B BL feed)
+#   RE-PINNED to physical Cluster-2023 design point: motive = RATIO_PV_DES*NC_TO_MASS*CO2_DES_KGH.
+#   Prior 40756.0 implied fresh N/C = 1.928 < 2.0 (sub-stoichiometric -> proven non-steady free-run);
+#   re-pin restores ejector phi_m == 1 at the published operating point (W_inst == W0, L_feed == L0).
+# -- SUPERSEDED datasheet provenance (Carb.Liq. HMB table; FALSIFIED by Path-B tear-closure audit) --
+#   The 98320 kg/h nameplate + mass-pct table do NOT atom-close against the reconciled stripper-top /
+#   reactor-offgas vectors (rank-1 free DOF ov_CO2 forced the discharge off the datasheet).  Retained
+#   ONLY as provenance (Sourcing Law) + to keep the audit imports resolvable; NOT fed to live streams.
+EJ_DES_TOTAL_NAMEPLATE = 98320.0   # kg/h, OLD datasheet discharge total (Carb. Liq.) -- superseded
 EJ_DES_MASSPCT    = {"CO2":23.24,"CH4":0.06,"H2":4.17e-3,"H2O":12.39,
-                     "N2":0.02,"NH3":64.27,"O2":0.0,"Urea":0.02,"Biuret":0.0}
-# 322E003 overflow suction spec (kg/h) = design discharge - pure motive NH3:
-_EJ_DES_MASS   = {k: EJ_DES_MASSPCT[k]/100.0*EJ_DES_TOTAL for k in MW_COMP}
-EJ_SUCTION_KGH = {k: _EJ_DES_MASS[k] - (EJ_MOTIVE_NH3_DES if k == "NH3" else 0.0)
-                  for k in MW_COMP}
-EJ_MU          = sum(EJ_SUCTION_KGH.values()) / EJ_MOTIVE_NH3_DES   # entrainment ~1.4125
+                     "N2":0.02,"NH3":64.27,"O2":0.0,"Urea":0.02,"Biuret":0.0}   # superseded datasheet mass%
+_EJ_DES_MASS   = {k: EJ_DES_MASSPCT[k]/100.0*EJ_DES_TOTAL_NAMEPLATE for k in MW_COMP}  # superseded reconstruction
+# -- RECONCILED design suction (Path B, Option 1: free DOF ov_CO2 = 458.358305 kmol/h, the feasible-band MAX
+#   -> vent_H2O=0, max heavy recovery).  Overflow (kmol/h) is the source of truth; EJ_SUCTION = overflow*MW.
+#   Verified atom-/mass-closing: scrubber GAP=0, W_inst=W0_DES, L_inst=L0_DES, reactor-node dM/dt sump=0. --
+_EJ_OVERFLOW_KMOLH = {"CO2": 458.35830512, "CH4": 0.0, "H2": 0.0, "H2O": 674.24844864,
+                      "N2": 0.0, "NH3": 1234.46697667, "O2": 0.0, "Urea": 0.43027771, "Biuret": 0.0}
+EJ_SUCTION_KGH = {k: _EJ_OVERFLOW_KMOLH[k] * MW_COMP[k] for k in MW_COMP}   # kg/h reconciled design suction
+EJ_DES_TOTAL   = EJ_MOTIVE_NH3_DES + sum(EJ_SUCTION_KGH.values())           # kg/h reconciled discharge (~94124)
+EJ_MU          = sum(EJ_SUCTION_KGH.values()) / EJ_MOTIVE_NH3_DES   # entrainment ~1.3095 (reconciled)
 EJ_OPEN_DES    = 74.0            # %, HV-322602 design opening (HIC-322602 design SP)
 # HV-322602 spindle characteristic (322F001 DDS, item (d)): the diaphragm-actuated parabolic NH3-nozzle
 # needle is a CONVERGING motive throat.  Motive NH3 comes from the 321P002 A/B POSITIVE-DISPLACEMENT
@@ -585,10 +599,25 @@ REACT_OFFGAS_DES   = {"NH3": 665.73, "CO2": 197.69, "N2": 44.53, "H2O": 42.51,
                       "O2": 7.42, "CH4": 3.86, "H2": 2.02, "Urea": 0.0, "Biuret": 0.0}  # Σ ≈ 963.76
 REACT_XI_UREA_DES  = 1302.27     # urea-formation extent at design (kmol/h)
 REACT_XI_BIU_DES   = 2.414       # biuret-formation extent at design (kmol/h)
+# Calibrated vapour/liquid split fraction theta_i = OGd_i/(OVd_i+OGd_i): partitions reactor product
+# molar flow to liquid overflow (->322E001) vs off-gas (->322E003).  Derived from the published design
+# vectors so the design point is bit-exact; guarded for pure-overflow / pure-off-gas species.
+REACT_THETA_OG = {
+    k: (REACT_OFFGAS_DES.get(k, 0.0)
+        / (REACT_OVERFLOW_DES.get(k, 0.0) + REACT_OFFGAS_DES.get(k, 0.0))
+        if (REACT_OVERFLOW_DES.get(k, 0.0) + REACT_OFFGAS_DES.get(k, 0.0)) > 1e-12
+        else (1.0 if REACT_OFFGAS_DES.get(k, 0.0) > 0.0 else 0.0))
+    for k in MW_COMP}
 # ISSUE-c incremental mass-conservation references (kg/h), captured on the SETTLED live design loop
 # by _pin_hpcc_ua (mirrors the HPCC_UA pin).  None -> reactor overflow rescale is INACTIVE (warm-up
 # pass + any pre-pin call), so the references themselves are taken from the un-rescaled design point.
 REACT_MASS_DES = None            # (m_feed_des, m_overflow_des, m_offgas_des) kg/h
+# Option-A conserving-rebuild pins (captured by _pin_hpcc_ua at the MAN design seed; None -> rebuild
+# falls back to zero tear / kinetics-module anchors on warm-up + pre-pin calls).
+REACT_TEAR_DES   = None   # explicit pinned recycle-tear vector (kmol/h): feed_des - implied_feed
+REACT_L_FEED_DES = None   # boot-pinned design liquid-NH3 driver L_feed (AT-322701 shift anchor)
+REACT_W_FEED_DES = None   # boot-pinned design water driver W_feed
+REACT_X_DES      = None   # boot-pinned design per-pass conversion X_conv (deficit-slip anchor)
 EJ_MOTIVE_DES_LIVE = None        # settled live design motive NH3 (kg/h), pinned in _pin_hpcc_ua ->
                                  #   phi_m = motive/EJ_MOTIVE_DES_LIVE == 1.0 bit-exact at design steady
                                  #   state (so the 322E003 sump holdup ODE is a STATIONARY fixed point).
@@ -724,11 +753,17 @@ SCRUB_CARB_KMOLH_DES = {k: SCRUB_CARB_MASSPCT.get(k, 0.0) / 100.0 * SCRUB_CARB_K
                         for k in MW_COMP}                            # Σ ≈ 1618.5 kmol/h
 SCRUB_CARB_KMOLH_DES_REF = dict(SCRUB_CARB_KMOLH_DES)    # FROZEN design wash (deviation datum; never mutate)
 SCRUB_CARB_ABS_GAIN  = 0.15      # kmol extra CO2 scrubbed per kmol surplus carbamate-wash flow (323P001)
-SCRUB_OFFGAS_MOLPCT  = {"N2": 68.81, "O2": 11.39, "NH3": 8.26, "CH4": 5.93,       # img1 MOL%
+# -- SUPERSEDED off-gas datasheet (img1 MOL%, 64.78 kmol/h): does NOT route 100% of inerts -> vent and
+#   leaves the scrubber node open.  Retained as provenance + to keep audit imports resolvable; NOT live. --
+SCRUB_OFFGAS_MOLPCT  = {"N2": 68.81, "O2": 11.39, "NH3": 8.26, "CH4": 5.93,       # superseded img1 MOL%
                         "H2": 3.14, "CO2": 2.22, "H2O": 0.26}
-SCRUB_OFFGAS_MOL_DES = 64.78     # kmol/h design off-gas total (322E003 -> 322C001)
-SCRUB_OFFGAS_KMOLH_DES = {k: SCRUB_OFFGAS_MOLPCT.get(k, 0.0) / 100.0 * SCRUB_OFFGAS_MOL_DES
-                          for k in MW_COMP}
+SCRUB_OFFGAS_MOL_DES = 64.78     # kmol/h OLD design off-gas total (322E003 -> 322C001) -- superseded
+# -- RECONCILED off-gas (Path B, Option 1): 100% of inerts (N2,O2,CH4,H2) routed to vent; NH3/CO2 vent =
+#   reactor-offgas IN minus heavy-overflow recovery (forced reactant slip 156.95 kmol/h); H2O vent = 0
+#   (ov_CO2 at feasible max).  Closes the 322E003 component balance to machine zero (GAP=0). --
+_SCRUB_OFFGAS_RECON = {"CO2": 62.18213955, "CH4": 3.86000000, "H2": 2.02000000, "N2": 44.53000000,
+                       "NH3": 94.76367511, "O2": 7.42000000, "H2O": 0.0}
+SCRUB_OFFGAS_KMOLH_DES = {k: _SCRUB_OFFGAS_RECON.get(k, 0.0) for k in MW_COMP}   # span all 9 comps (Urea/Biuret=0)
 # Overflow design vector IS the 322F001 ejector suction (single source of truth -> DRY, bit-identical):
 SCRUB_OVERFLOW_KMOLH_DES = {k: EJ_SUCTION_KGH[k] / MW_COMP[k] for k in MW_COMP}   # Σ ≈ 2519.4 kmol/h
 # --- 322E003 sump liquid inventory (Option 3: TRUE dynamic state, not a display lag) ---
@@ -791,6 +826,15 @@ HPCC_BUB_DHVAP_JMOL = 23000.0    # J/mol, effective NH3-dominated vaporisation e
 HPCC_BUB_KN         = 0.18       # 1/(N/C), bubble-P sensitivity to feed N/C (free NH3)   -- calib
 HPCC_BUB_KW         = -0.25      # 1/(H/C), bubble-P sensitivity to feed H/C (dilution)    -- calib
 _HPCC_BUB_T0_K      = HPCC_T_PROD_DES_C + 273.15
+HPCC_NC_DES_LIVE    = None       # design HPCC carbamate-MELT N/C (NH3/CO2) -- AUTO-CAPTURED at boot from
+#   the MAN runtime design seed (the stable Cluster-2023 fixed point, ~3.12324).  This is the actual
+#   combined-melt N/C the synthesis loop settles at -- DISTINCT from the controlled reactor-FEED N/C
+#   reactor.L0_DES (3.07296): the HPCC melt is NH3-richer than the reactor feed it produces because ALL
+#   fresh NH3 enters as ejector motive (loads the melt NH3 numerator) while the melt water is entrainment-
+#   pinned to W0 (phi_m==1).  bubble_p_322e002 anchors fN HERE so P_bub == HPCC_P_DES_BARA (144.2 bar a,
+#   datasheet) BIT-EXACT at the live design operating point (residual -> 0).  Falls back to reactor.L0_DES
+#   when unset (pre-boot).  [Was anchored to L0_DES -> read +1.3 bar HIGH (145.5, above the 144.2 PT
+#   ceiling) at the live melt N/C of 3.12324; the L0 anchor wrongly assumed melt N/C == reactor-feed N/C.]
 # (2) PT-329201 reverse heat->pressure: the synthesis-loop top pressure is a DYNAMIC state.  CCW
 #     flow sets the off-gas condensation capacity; when capacity < vent demand the uncondensed
 #     vapour accumulates and lifts PT-329201.  rho_cond = (m_ccw/m_ccw_des)/(s*nu), nu = PT/PT_des.
@@ -834,11 +878,16 @@ SCRUB_COND_SPINDLE_GAIN = 0.25   # —, carbamate-condensation duty sensitivity 
 def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
     """322E002 HPCC carbamate-melt bubble-point synthesis pressure (bar a) = f(T, N/C=L, H/C=W).
     Reduced Clausius-Clapeyron T-slope x separable N/C, H/C modifiers, anchored bit-exact at the
-    design combined feed:  bubble_p_322e002(HPCC_T_PROD_DES_C, reactor.L0_DES, reactor.W0_DES)
-    == HPCC_P_DES_BARA.  Monotone: dP/dT>0, dP/dL>0 (free NH3 volatility), dP/dW<0 (water dilution)."""
+    DESIGN MELT composition:  bubble_p_322e002(HPCC_T_PROD_DES_C, HPCC_NC_DES_LIVE, reactor.W0_DES)
+    == HPCC_P_DES_BARA.  The fN anchor is the design HPCC-MELT N/C (HPCC_NC_DES_LIVE ~= 3.12324, auto-
+    captured at boot), NOT the controlled reactor-FEED N/C reactor.L0_DES (3.07296): the live combined
+    melt is NH3-richer than the reactor feed (all fresh NH3 enters as ejector motive).  fW keeps the
+    reactor.W0_DES anchor because the melt H/C settles at W0 exactly (entrainment phi_m==1).
+    Monotone: dP/dT>0, dP/dL>0 (free NH3 volatility), dP/dW<0 (water dilution)."""
+    _nc0 = HPCC_NC_DES_LIVE if HPCC_NC_DES_LIVE is not None else reactor.L0_DES   # design melt N/C anchor
     cc = math.exp((HPCC_BUB_DHVAP_JMOL / reactor.R_GAS)
                   * (1.0 / _HPCC_BUB_T0_K - 1.0 / (T_c + 273.15)))
-    fN = 1.0 + HPCC_BUB_KN * (L - reactor.L0_DES)      # free-NH3 (N/C) volatility lift
+    fN = 1.0 + HPCC_BUB_KN * (L - _nc0)               # free-NH3 (N/C) volatility lift (anchor = design melt N/C)
     fW = 1.0 + HPCC_BUB_KW * (W - reactor.W0_DES)      # water (H/C) dilution
     return HPCC_P_DES_BARA * cc * max(fN, 0.0) * max(fW, 0.0)
 
@@ -858,7 +907,7 @@ _STEAM_READY = False # gate: step_steam stays OFF until valve coeffs are pinned 
 #   the instant any handle moves -> full live off-design response (V-trough fidelity preserved).
 GATE_DEADBAND       = 0.002   # rel. dead-band: |dev| below this == "at design" (numerical noise floor)
 GATE_RAMP           = 0.010   # rel. span over which g ramps 0->1 above the dead-band
-RATIO_SP_DES        = 1.928   # design molar N/C setpoint (seed) -- exogenous N/C disturbance handle
+RATIO_SP_DES        = 2.0231315310702604   # design molar N/C setpoint (seed) == RATIO_PV_DES -- exogenous N/C disturbance handle
 HIC602_DES_PCT      = 74.0    # design HV-322602 ejector-spindle opening (seed)
 STEAM_VALVE_DES_PCT = 50.0    # design MP-supply / MP->LP let-down valve opening (seed)
 
@@ -943,14 +992,15 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSA
     #   At design T_prod==HPCC_T_PROD_DES_C -> q_steam_kw==duty_kw bit-exact; this is the shell back-pressure
     #   that stabilizes the LP header (see step_sim steam handshake).  Floor at 0 (full-quench limit).
     q_steam_kw = max(duty_kw - m_dot * HPCC_CP_GAS * (T_prod - HPCC_T_PROD_DES_C) / 3600.0, 0.0)
-    # bubble-point synthesis pressure of the combined carbamate feed (N/C, H/C molar); replaces the
-    # pinned HPCC_P_DES_BARA.  At design this feed's N/C, H/C == reactor.L0_DES/W0_DES -> P=144.2 exact.
-    #   The N/C, H/C ratios are NH3/CO2 and H2O/CO2: as a CO2-feed cut drives CO2 -> 0 they diverge,
-    #   so on the transient (CO2 in the (1e-9, small] band before it crosses the cliff) the bubble
-    #   pressure used to IMPULSE to ~330 bar a for one tick -- an unphysical N/C->inf artifact, not a
-    #   real synthesis pressure.  Clamp both ratios to a physical band about design (0.5x .. 2.0x) so
-    #   the published PI-322E002 moves only within a bounded, physical range.  At design the ratios
-    #   equal L0_DES/W0_DES (inside the band, untouched) -> P = 144.2 bar a bit-exact.
+    # bubble-point synthesis pressure of the combined carbamate MELT (N/C, H/C molar); replaces the
+    # pinned HPCC_P_DES_BARA.  At design this melt's N/C == HPCC_NC_DES_LIVE (~3.12324, the bubble_p fN
+    #   anchor -- NH3-richer than reactor-feed L0_DES) and H/C == reactor.W0_DES (entrainment phi_m==1)
+    #   -> P=144.2 exact.  The N/C, H/C ratios are NH3/CO2 and H2O/CO2: as a CO2-feed cut drives CO2 -> 0
+    #   they diverge, so on the transient (CO2 in the (1e-9, small] band before it crosses the cliff) the
+    #   bubble pressure used to IMPULSE to ~330 bar a for one tick -- an unphysical N/C->inf artifact, not
+    #   a real synthesis pressure.  Clamp both ratios to a physical band about design (0.5x .. 2.0x of the
+    #   reactor-feed refs) so the published PI-322E002 moves only within a bounded, physical range; the
+    #   design melt N/C (3.12324) and H/C (W0) both sit inside the band (untouched) -> P = 144.2 bit-exact.
     _co2   = feed.get("CO2", 0.0)
     L_hpcc = (clamp(feed.get("NH3", 0.0) / _co2, 0.5 * reactor.L0_DES, 2.0 * reactor.L0_DES)
               if _co2 > 1e-9 else reactor.L0_DES)
@@ -999,76 +1049,86 @@ HPCC_LIQ_DES_LIVE  = None        # ISSUE-c/e: SETTLED live design liquid make (p
 # until that pass runs (None => hpcc_322e002 holds the 170.0 C design pin every tick).
 
 
+def _react_delta(fc: dict, xi_urea: float, xi_biu: float) -> dict:
+    """out_total_i = feed_corrected_i + sum_r nu_{i,r}*xi_r for the urea couple + biuret reactions.
+      Urea couple  CO2 + 2 NH3 -> Urea + H2O   (xi_urea): dN=dC=0, dn_tot=-1.
+      Biuret       2 Urea -> Biuret + NH3       (xi_biu) : dn_tot= 0.   Atoms exactly conserved."""
+    out = {k: fc.get(k, 0.0) for k in MW_COMP}
+    out["CO2"]    -= xi_urea
+    out["NH3"]    -= 2.0 * xi_urea
+    out["Urea"]   += xi_urea
+    out["H2O"]    += xi_urea
+    out["Urea"]   -= 2.0 * xi_biu
+    out["Biuret"] += xi_biu
+    out["NH3"]    += xi_biu
+    return out
+
+
 def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
                   L_drive: float = None, W_drive: float = None,
                   T_overflow_c: float = REACT_OVERFLOW_T_C) -> dict:
-    """322R001 HP urea reactor — reduced calibrated split-fraction, pinned to design HMB.
-    overflow_i = nu_overflow_i,des * co2_scale * (phi/phi_des);  offgas_i = nu_offgas_i,des * co2_scale.
-    closure_resid is reported as a diagnostic only (NOT injected back into any stream)."""
+    """322R001 HP urea reactor -- rigorous component mole balance with exact atom conservation.
+      feed_corrected_i = feed_i - TEAR_DES_i * s          (explicit pinned recycle tear)
+      out_total_i      = feed_corrected_i + sum_r nu_{i,r} * xi_r   (urea couple + biuret)
+      overflow_i = out_total_i * (1 - theta_i);  offgas_i = out_total_i * theta_i
+    Conservative composition shifts (AT-322701 NH3 partition; conversion-deficit slip) move species
+    BETWEEN overflow and off-gas only -> per-species totals (hence atoms + mass) invariant.  Bit-exact
+    at design: xi_live == xi_pin and feed == feed_des -> out_total == OVd + OGd exactly.  closure_resid
+    is a true conservation diagnostic (~0), reported only -- never injected into any stream.
+    NOTE: the phi (HIC-322605) -> overflow split coupling of the prior pinned model is intentionally
+    NOT reintroduced here (it was part of the mass-creating split-fraction defect); a conservative
+    theta(phi) modulation is DEFERRED to Phase 3."""
     s   = co2_feed_th / (CO2_DES_KGH / 1000.0)
     phi = hic_322605_pct / 100.0
     phi_des = REACT_HIC605_DES_PCT / 100.0
-    overflow = {k: REACT_OVERFLOW_DES.get(k, 0.0) * s * (phi / phi_des) for k in MW_COMP}
-    offgas   = {k: REACT_OFFGAS_DES.get(k, 0.0) * s for k in MW_COMP}
-    xi_biu   = REACT_XI_BIU_DES * s
-    feed     = hpcc["feed_kmolh"]
-    # Modified Inoue-Kanai conversion coupling: shifts xi_urea + overflow by f(N/C, H/C, T),
-    # atom-conserving, == design when feed is at (L0,W0,T0). closure_resid stays invariant.
-    # F5: T_overflow_c is the PRIOR-step live reactor lip temp (loop-break) so the f_T(T,L) optimum
-    # parabola now flexes the conversion with bulk temperature; == REACT_OVERFLOW_T_C at design (s=1)
-    # -> conversion_factor==1.0 bit-exact.  Loop gain dT_lip/dT_in = ΔT_col·df_T/dT ≈ 0.16 < 1 (stable).
-    xi_urea, overflow, X_conv, L_feed, W_feed = reactor.react_couple(
-        feed, overflow, REACT_XI_UREA_DES * s, T_overflow_c,
+    feed = hpcc["feed_kmolh"]
+    # kinetics module supplies ONLY the scalar extent + conversion/holdup state; its internal overflow
+    # mutation is discarded (throwaway design vector passed in).
+    xi_urea, _ov_discard, X_conv, L_feed, W_feed = reactor.react_couple(
+        feed, dict(REACT_OVERFLOW_DES), REACT_XI_UREA_DES * s, T_overflow_c,
         L_override=L_drive, W_override=W_drive)
-    # AT-322701 response (excess-NH3 partition).  The urea couple (CO2 + 2 NH3 -> Urea + H2O) has
-    # ΔN = ΔC = 0, so it leaves the overflow N/C atom-pinned regardless of feed N/C -> AT-322701 was
-    # invariant.  Physically an NH3-rich feed (L_feed > L0) carries proportionally more FREE NH3 in
-    # the liquid overflow to the stripper, while an NH3-starved feed sheds NH3 to the off-gas.  Move
-    # NH3 ONLY between overflow and off-gas (CO2 untouched) so total N & C are conserved (global
-    # closure_resid invariant) but the reactor->stripper stream N/C now tracks the feed N/C.
-    # Bit-exact at design: L_feed = L0 -> nh3_shift = 0 -> overflow/off-gas == pinned design HMB.
-    nh3_shift = REACT_NC_OVERFLOW_GAIN * (L_feed / reactor.L0_DES - 1.0) * REACT_OVERFLOW_DES["NH3"] * s
+    xi_biu = REACT_XI_BIU_DES * s
+    # feed corrected for the pinned recycle tear (documented torn quantity, main.py:995):
+    s_tear = s if REACT_TEAR_DES is not None else 0.0
+    fc = {k: feed.get(k, 0.0) - (REACT_TEAR_DES.get(k, 0.0) if REACT_TEAR_DES else 0.0) * s_tear
+          for k in MW_COMP}
+    # extent feasibility clamps (non-binding at/near design -> bit-exact; bind under reagent starvation)
+    xi_urea = max(min(xi_urea, fc.get("CO2", 0.0), 0.5 * fc.get("NH3", 0.0)), 0.0)
+    xi_biu  = max(min(xi_biu, 0.5 * (fc.get("Urea", 0.0) + xi_urea)), 0.0)
+    out_total = _react_delta(fc, xi_urea, xi_biu)
+    overflow = {k: out_total[k] * (1.0 - REACT_THETA_OG[k]) for k in MW_COMP}
+    offgas   = {k: out_total[k] * REACT_THETA_OG[k]         for k in MW_COMP}
+    # AT-322701 excess-NH3 partition (CONSERVATIVE: NH3 overflow<->off-gas only; total N & C held).
+    # Anchored to boot-pinned design L_feed (NOT reactor.L0_DES) so H-1 seed creep cannot unpin it.
+    L_ref = REACT_L_FEED_DES if REACT_L_FEED_DES is not None else reactor.L0_DES
+    nh3_shift = REACT_NC_OVERFLOW_GAIN * (L_feed / L_ref - 1.0) * REACT_OVERFLOW_DES["NH3"] * s
     nh3_shift = max(min(nh3_shift, 0.9 * offgas.get("NH3", 0.0)), -0.5 * overflow.get("NH3", 0.0))
     overflow["NH3"] = overflow.get("NH3", 0.0) + nh3_shift   # NH3-rich liquid effluent at high N/C
     offgas["NH3"]   = offgas.get("NH3", 0.0)   - nh3_shift   # conserved: total NH3 unchanged
-    # Fix-2: de-pin the off-gas off the conversion deficit.  δ_X is the fractional shortfall of the
-    # live per-pass conversion below design (clamped >= 0): the un-converted NH3 + CO2 that DON'T
-    # make carbamate/urea flash off the reactor top, so the off-gas NH3 and CO2 are amplified by
-    # (1 + gain·δ_X).  At/above design δ_X = 0 -> off-gas == pinned design (bit-exact, no spurious
-    # shrink at high N/C).  Dalton partial pressures p_i = y_i · P_offgas are then tracked off the
-    # AMPLIFIED off-gas composition; the dimensionless loop forcing Π = κ·δ_X (built in step_sim).
-    delta_X = max(1.0 - X_conv / reactor.X_DES_RAW, 0.0)
-    amp = 1.0 + REACT_OFFGAS_DEFICIT_GAIN * delta_X
-    offgas["NH3"] = offgas.get("NH3", 0.0) * amp
-    offgas["CO2"] = offgas.get("CO2", 0.0) * amp
+    # conversion-deficit slip (CONSERVATIVE re-partition overflow->off-gas; total per-species held).
+    # delta_X is the fractional per-pass conversion shortfall below design (clamped >= 0): un-converted
+    # NH3 + CO2 slip to the off-gas instead of the liquid overflow.  Replaces the prior mass-CREATING
+    # amplifier (offgas *= 1+g).  Anchored to boot-pinned design X so H-1 creep cannot unpin it.  At/
+    # above design delta_X = 0 -> no shift (bit-exact).  Dalton partials p_i = y_i*P_offgas tracked off
+    # the re-partitioned off-gas; dimensionless loop forcing Pi = kappa*delta_X (built in step_sim).
+    X_ref = REACT_X_DES if REACT_X_DES is not None else reactor.X_DES_RAW
+    delta_X = max(1.0 - X_conv / X_ref, 0.0)
+    g = REACT_OFFGAS_DEFICIT_GAIN * delta_X
+    for k in ("NH3", "CO2"):
+        sh = min(g * offgas.get(k, 0.0), overflow.get(k, 0.0))
+        offgas[k]   = offgas.get(k, 0.0)   + sh
+        overflow[k] = overflow.get(k, 0.0) - sh
     og_tot   = sum(offgas.values())
     p_nh3_og = (offgas.get("NH3", 0.0) / og_tot) * REACT_OFFGAS_P_BARA if og_tot > 0.0 else 0.0
     p_co2_og = (offgas.get("CO2", 0.0) / og_tot) * REACT_OFFGAS_P_BARA if og_tot > 0.0 else 0.0
-    # ISSUE-c: incremental mass conservation.  CO2 + 2 NH3 -> urea + H2O is mass-neutral, so reactor
-    # mass-out (overflow + off-gas) must track mass-in (feed) 1:1.  The pinned design vectors do NOT
-    # close off-design (overflow ∝ s·φ vs. feed ∝ ejector φ_m²), inventing ~35 t/h at 70 % turndown.
-    # Rescale the overflow MASS to carry the live feed/off-gas deltas about the settled design refs:
-    #       m_ov_tgt = m_ov_des + (m_feed − m_feed_des) − (m_og − m_og_des)
-    # At design every delta = 0 -> f_cons = 1.0 (bit-exact); the standing design residual (≈ +2.5 %,
-    # baked into the published HMB) is HELD constant, never amplified.  Uniform molar rescale keeps the
-    # overflow composition shape (and the AT-322701 NH3 N/C shift above) intact.  Inactive until pinned.
-    # closure_resid: intrinsic molar imbalance of the PINNED design split-fraction vectors (overflow +
-    # off-gas vs. feed + urea), reported as a diagnostic ONLY -- never injected into any stream.  It is
-    # computed BEFORE the ISSUE-c mass rescale so it measures the pin residual itself, not the mass
-    # correction applied to the emitted overflow (a degenerate/probe feed must not corrupt it).
-    closure_resid = (sum(feed.values())
-                     - (sum(overflow.values()) + sum(offgas.values()))
-                     - xi_urea)
-    if REACT_MASS_DES is not None:
-        m_feed_des, m_ov_des, m_og_des = REACT_MASS_DES
-        m_feed = sum(feed.get(k, 0.0)     * MW_COMP[k] for k in MW_COMP)
-        m_og   = sum(offgas.get(k, 0.0)   * MW_COMP[k] for k in MW_COMP)
-        m_ov   = sum(overflow.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
-        m_ov_tgt = m_ov_des + (m_feed - m_feed_des) - (m_og - m_og_des)
-        if m_ov > 1e-9 and m_ov_tgt > 0.0:
-            f_cons   = m_ov_tgt / m_ov
-            overflow = {k: overflow.get(k, 0.0) * f_cons for k in MW_COMP}
+    # true conservation diagnostic: feed_corrected - urea-couple dn - products ~= 0 (machine zero).
+    # reported ONLY -- never injected into any stream.
+    closure_resid = (sum(fc.values()) - xi_urea
+                     - (sum(overflow.values()) + sum(offgas.values())))
+    tear_mass = sum((REACT_TEAR_DES.get(k, 0.0) if REACT_TEAR_DES else 0.0) * MW_COMP[k]
+                    for k in MW_COMP) * s_tear
     return {"overflow_kmolh": overflow, "offgas_kmolh": offgas, "feed_kmolh": feed,
+            "feed_corrected_kmolh": fc, "tear_mass_kgh": tear_mass,
             "xi_urea": xi_urea, "xi_biu": xi_biu, "closure_resid": closure_resid,
             "T_overflow": REACT_OVERFLOW_T_C, "T_offgas": REACT_OFFGAS_T_C,
             "P_bara": REACT_P_BARA, "P_offgas": REACT_OFFGAS_P_BARA,
@@ -1387,21 +1447,32 @@ class State:
         self.scrub_level_pct = SCRUB_LEVEL_NLL_PCT      # 322E003 sump level (LT-329501), design NLL
         # pumps: open_act = torque-converter valve opening %
         self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M", "fault": False}
-        self.pumpB = {"on": True,  "open_act": 86.2, "speed_act": 131.0, "current": 43.9, "mode": "M", "fault": False}
+        # pumpB MANUAL seed pinned at the ratio-cascade DESIGN opening (step_sim ~L1539-1544:
+        #   open_cas = clamp(rpm_req/PUMP_RATED_RPM*100), rpm_req from ratio_SP*NC_TO_MASS*F_CO2_th).
+        #   Cluster-2023 design point (fresh N/C = RATIO_PV_DES >= 2.0): open_for(RATIO_PV_DES) == 86.2 %
+        #   (exact inverse of the cascade flow law, NC_FACTOR*NC_TO_MASS == 1). The pump delivers motive
+        #   == EJ_MOTIVE_NH3_DES == 42762.05 kg/h -> ejector phi_m == 1 -> W_feed == W0, L_feed == L0 at
+        #   the design seed (stationary). [Was 82.147 % under the SUPERSEDED N/C=1.928 Cluster-1928 point,
+        #   which forced ratio_PV=1.928 != RATIO_PV_DES -> L_fresh normalization off -> L_feed != L0.]
+        _OPEN_DES_B = 86.2   # ratio block @ design (pumpA off, pumpB on); == open_for(RATIO_PV_DES)
+        self.pumpB = {"on": True, "open_act": _OPEN_DES_B,
+                      "speed_act": _OPEN_DES_B / 100.0 * PUMP_RATED_RPM,
+                      "current": pump_current_A(_OPEN_DES_B / 100.0 * PUMP_RATED_RPM, True),
+                      "mode": "M", "fault": False}
         # controllers (percent)
         self.SIC_321950 = Controller("SIC_321950", Kc=2.0, Ti=8.0,
                                      sp=80.0, mv=0.0)
         self.SIC_321951 = Controller("SIC_321951", Kc=2.0, Ti=8.0,
-                                     sp=86.2, mv=86.2)   # MAN holds B at 86 %
+                                     sp=_OPEN_DES_B, mv=_OPEN_DES_B)  # MAN holds B at cascade design opening
         self.controllers: dict = {
             "SIC_321950": self.SIC_321950,
             "SIC_321951": self.SIC_321951,
         }
         # ratio
         self.ratio_mode = "MAN"
-        self.ratio_SP   = 1.928    # design molar N/C = (40.756/54.618)*2.584 (attached eq)
-        self.ratio_PV   = 1.928    # molar N/C PV
-        self.ratio_bal  = 1.928
+        self.ratio_SP   = 2.0231315310702604    # design molar N/C == RATIO_PV_DES (fresh N/C>=2.0, Cluster-2023)
+        self.ratio_PV   = 2.0231315310702604    # molar N/C PV
+        self.ratio_bal  = 2.0231315310702604
         self.F_CO2_th   = 54.618   # t/h, actual CO2 feed to 322E001 (derived: raw - vent)
         # CO2 feed line (320K002 BL -> XV-322902 -> 322E001), vent via PV-322203
         self.F_CO2_raw_th = 54.618 # t/h, raw CO2 from 320K002 compressor (BL boundary)
@@ -2686,18 +2757,27 @@ app.mount("/", _NoCacheStatic(directory=_FRONTEND, html=True), name="static")
 
 
 def _pin_hpcc_ua():
-    """Design-pin HPCC_UA on the SETTLED live design steady state (not the synthetic single-call
-    _HPCC_DES, which understates tube throughput ~2 %).  With HPCC_UA is None, hpcc_322e002 holds
-    T_prod == 170.0 C every tick, so the mass loop settles to the SAME m_dot/T_adb the NTU run would
-    converge to (T_prod does NOT feed back into any mass: reactor uses fixed REACT_OVERFLOW_T_C, and
-    the ejector/stripper masses are T_prod-independent).  We capture that settled (m_dot, T_adb),
-    back-calc UA from the design NTU pin, then discard the warm-up transient by re-seeding state.
+    """Design-pin HPCC_UA at the RECONCILED design point (synthetic single-call feed at W0/L0 -- the
+    same basis tests/audit_e002_hpcc.py checks the gate=1 quench against).  The scrubber-tear
+    reconciliation moved the design anchor onto W0/L0; post-recon the SETTLED-live loop attractor
+    drifts off W0/L0 (W_feed~=0.410, L~=3.128), so pinning UA on the settled state lands the gate=1
+    design quench HIGH (T_prod~=170.41 > 170 -> q_steam < duty).  We therefore back-calc UA on the
+    synthetic design feed evaluated exactly at the reconciled W0/L0 (m_dot/T_adb are UA- and
+    gate-independent pure feed properties):
 
-        UA = -m_dot*cp * ln[(T_prod_des - T_sat) / (T_adb - T_sat)]
+        g_syn = stripper_322e001(CO2_DES, ..., L_feed=L0_DES, W_feed=W0_DES)
+        l_syn = ejector_322f001(EJ_MOTIVE_NH3_DES, ...)        # nameplate motive
+        d_syn = hpcc_322e002(g_syn, l_syn, gate=1.0)           # read m_dot/T_adb only
+        UA    = -m_dot*cp * ln[(T_prod_des - T_sat) / (T_adb - T_sat)]
 
-    This anchors TT-322010 to exactly 170.0 C at 100 % live design steady state."""
+    LIVE loop is unaffected: at design steady state it runs gate~=0, where hpcc_322e002 holds
+    T_prod == 170.0 C for ANY UA (gate masks the NTU term), so this re-pin only sets the gate=1
+    design-audit quench and the off-design (disturbed) NTU response.  Anchors TT-322010 to exactly
+    170.0 C at the reconciled design point."""
     global HPCC_UA, state, last_packet, hpcc_322e002, react_322r001, ejector_322f001
     global REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE, _STEAM_READY
+    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES
+    global HPCC_NC_DES_LIVE
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
     _orig = hpcc_322e002                             # capture the settled HPCC product (HPCC_UA back-calc)
     _orig_ej = ejector_322f001                       #   and the settled design motive NH3 for the
@@ -2726,9 +2806,16 @@ def _pin_hpcc_ua():
     # L3-4 boot-pin domain assert: the UA back-calc log requires 0 < (T_prod_des - T_sat)/(T_adb - T_sat)
     #   < 1, i.e. T_adb > T_prod_des > T_sat_shell.  A failed warm-up settle (bad steam/feed) would feed
     #   a non-positive or >1 argument -> ValueError/NaN at import.  Fail loud here instead of hiding it.
-    assert r["T_adb"] > HPCC_T_PROD_DES_C > HPCC_STEAM_TSAT_C, "HPCC UA back-calc domain error"
-    HPCC_UA = -r["m_dot"] * HPCC_CP_GAS * math.log(
-        (HPCC_T_PROD_DES_C - HPCC_STEAM_TSAT_C) / (r["T_adb"] - HPCC_STEAM_TSAT_C))
+    # back-calc UA on the RECONCILED synthetic design feed at W0/L0 (audit gate=1 basis), NOT the
+    #   settled-live `r` (drifts off W0/L0 post-recon).  m_dot/T_adb are UA/gate-independent.
+    _g_syn = stripper_322e001(CO2_DES_KGH / 1000.0, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA,
+                              overflow_kmolh=STRIP_FEED207_KMOLH,
+                              L_feed=reactor.L0_DES, W_feed=reactor.W0_DES)
+    _l_syn = ejector_322f001(EJ_MOTIVE_NH3_DES, EJ_MOTIVE_T_DES_C, EJ_OPEN_DES)
+    _d_syn = hpcc_322e002(_g_syn, _l_syn, t_shell=HPCC_STEAM_TSAT_C, gate=1.0)
+    assert _d_syn["T_adb"] > HPCC_T_PROD_DES_C > HPCC_STEAM_TSAT_C, "HPCC UA back-calc domain error"
+    HPCC_UA = -_d_syn["m_dot"] * HPCC_CP_GAS * math.log(
+        (HPCC_T_PROD_DES_C - HPCC_STEAM_TSAT_C) / (_d_syn["T_adb"] - HPCC_STEAM_TSAT_C))
     state = State()                                  # discard the warm-up transient (fresh design seed)
 
     # ---- ISSUE-c: pin the reactor mass-conservation refs at the MAN RUNTIME design seed (where the
@@ -2741,14 +2828,44 @@ def _pin_hpcc_ua():
     _orig_r2 = react_322r001
     _capf = {}
     def _cap_react2(*a, **kw):
-        rr = _orig_r2(*a, **kw); _capf["feed"] = rr["feed_kmolh"]; return rr
+        rr = _orig_r2(*a, **kw)
+        _capf["feed"]    = rr["feed_kmolh"]
+        _capf["xi_urea"] = rr["xi_urea"]; _capf["xi_biu"] = rr["xi_biu"]
+        _capf["L"]       = rr["L_feed"];  _capf["W"]      = rr["W_feed"]
+        _capf["X"]       = rr["X_conv"]
+        # design HPCC carbamate-MELT N/C (NH3/CO2) for the bubble_p_322e002 fN anchor.  a[0] is the
+        #   hpcc dict (positional); hpcc_322e002 runs BEFORE react_322r001 this step so its raw combined
+        #   melt feed is populated.  This is the NH3-richer melt N/C (~3.12324), DISTINCT from the
+        #   reactor-feed N/C L (3.07296) captured above.  Guard a zero/absent CO2 (pre-warm pathological).
+        _hf  = a[0].get("feed_kmolh", {}) if a else {}
+        _co2 = _hf.get("CO2", 0.0)
+        if _co2 > 1e-9:
+            _capf["hpcc_L"] = _hf.get("NH3", 0.0) / _co2
+        return rr
     react_322r001 = _cap_react2
-    step_sim(0.1)                                    # one MAN-seed step (REACT_MASS_DES still None ->
-    react_322r001 = _orig_r2                          #   rescale inactive -> overflow is the pinned vec)
+    step_sim(0.1)                                    # one MAN-seed step (REACT_TEAR_DES still None ->
+    react_322r001 = _orig_r2                          #   tear inactive -> feed_corrected == raw feed)
     REACT_MASS_DES = (
         sum(_capf["feed"].get(k, 0.0)        * MW_COMP[k] for k in MW_COMP),
         sum(REACT_OVERFLOW_DES.get(k, 0.0)   * MW_COMP[k] for k in MW_COMP),
         sum(REACT_OFFGAS_DES.get(k, 0.0)     * MW_COMP[k] for k in MW_COMP))
+    # ---- C-1 ISSUE-c: pin the explicit recycle-tear vector + conservative-shift anchors (Basis A).
+    #   implied_feed_i = (OVd_i + OGd_i) - sum_r nu_{i,r} * xi_pin_r  is the CLOSED feed that makes
+    #   out_total == published design exactly; TEAR_DES_i = feed_des_i - implied_feed_i is the torn
+    #   recycle (the undocumented ~2 % the published HMB drops).  Subtracting TEAR_DES*s from the raw
+    #   feed gives feed_corrected, and out_total = feed_corrected + nu*xi closes atoms AND mass to
+    #   machine zero.  At the seed xi_live == xi_pin and feed == feed_des -> feed_corrected restores
+    #   the closed design feed -> overflow/off-gas partition == published vectors bit-exact.
+    _xu, _xb = _capf["xi_urea"], _capf["xi_biu"]
+    _impl = {k: REACT_OVERFLOW_DES.get(k, 0.0) + REACT_OFFGAS_DES.get(k, 0.0) for k in MW_COMP}
+    _impl["CO2"]    += _xu
+    _impl["NH3"]    += 2.0 * _xu - _xb
+    _impl["Urea"]   += -_xu + 2.0 * _xb
+    _impl["H2O"]    += -_xu
+    _impl["Biuret"] += -_xb
+    REACT_TEAR_DES   = {k: _capf["feed"].get(k, 0.0) - _impl[k] for k in MW_COMP}
+    REACT_L_FEED_DES = _capf["L"]; REACT_W_FEED_DES = _capf["W"]; REACT_X_DES = _capf["X"]
+    HPCC_NC_DES_LIVE = _capf.get("hpcc_L", REACT_L_FEED_DES)   # design melt N/C -> bubble_p fN anchor (P_bub==144.2)
     state = State()                                  # discard the capture step (fresh design seed)
 
     # ---- pin the steam-header valve coeffs so the runtime design seed is a STATIONARY fixed point.
@@ -2810,11 +2927,18 @@ def _apply_pin(d: dict) -> None:
     """Restore the pinned design constants from a cache dict (== state after a fresh _pin_hpcc_ua())."""
     global HPCC_UA, REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE
     global _STEAM_READY, state, last_packet
+    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES
+    global HPCC_NC_DES_LIVE
     import steam_system as _ss
     HPCC_UA            = d["HPCC_UA"]
     REACT_MASS_DES     = tuple(d["REACT_MASS_DES"])
     HPCC_LIQ_DES_LIVE  = d["HPCC_LIQ_DES_LIVE"]
     EJ_MOTIVE_DES_LIVE = d["EJ_MOTIVE_DES_LIVE"]
+    REACT_TEAR_DES     = {k: d["REACT_TEAR_DES"].get(k, 0.0) for k in MW_COMP}
+    REACT_L_FEED_DES   = d["REACT_L_FEED_DES"]
+    REACT_W_FEED_DES   = d["REACT_W_FEED_DES"]
+    REACT_X_DES        = d["REACT_X_DES"]
+    HPCC_NC_DES_LIVE   = d.get("HPCC_NC_DES_LIVE", REACT_L_FEED_DES)   # bubble_p fN anchor (design melt N/C)
     _ss.K_SUPPLY       = d["K_SUPPLY"]
     _ss.M_USERS_LP     = d["M_USERS_LP"]
     _STEAM_READY       = True
@@ -2829,6 +2953,11 @@ def _collect_pin() -> dict:
         "REACT_MASS_DES":     list(REACT_MASS_DES),
         "HPCC_LIQ_DES_LIVE":  HPCC_LIQ_DES_LIVE,
         "EJ_MOTIVE_DES_LIVE": EJ_MOTIVE_DES_LIVE,
+        "REACT_TEAR_DES":     dict(REACT_TEAR_DES),
+        "REACT_L_FEED_DES":   REACT_L_FEED_DES,
+        "REACT_W_FEED_DES":   REACT_W_FEED_DES,
+        "REACT_X_DES":        REACT_X_DES,
+        "HPCC_NC_DES_LIVE":   HPCC_NC_DES_LIVE,
         "K_SUPPLY":           _ss.K_SUPPLY,
         "M_USERS_LP":         _ss.M_USERS_LP,
     }

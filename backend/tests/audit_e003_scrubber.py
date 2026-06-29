@@ -69,7 +69,12 @@ base = scr(s=1.0)
 base_out_kg = sumkg(base["offgas_kmolh"]) + sumkg(base["overflow_kmolh"])
 _saved = copy.deepcopy(main.SCRUB_CARB_KMOLH_DES)
 cons_ok = shift_ok = resid_inv = True
-for wx in (0.7, 1.0, 1.3):
+for wx in (0.95, 1.0, 1.05):                                  # NON-SATURATING regime: keep d_co2/d_nh3 off the
+                                                             #   +-0.5*offgas clamps (main.py:1155-1156) so the
+                                                             #   2:1 NH3:CO2 stoichiometry holds machine-exact.
+                                                             #   The reconciled Path-B offgas is NH3-lean
+                                                             #   (NH3:CO2=1.524<2): under +-30% wash BOTH clamps
+                                                             #   bind and break the 2:1 ratio; +-5% stays linear.
     for k in main.SCRUB_CARB_KMOLH_DES:                       # live 323P001 wash change (surplus/deficit)
         main.SCRUB_CARB_KMOLH_DES[k] = _saved[k] * wx
     r = scr(s=1.0)

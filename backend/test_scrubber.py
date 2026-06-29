@@ -53,26 +53,29 @@ def test_offgas_hmb():
     sc = _design()
     og = sc["offgas_kmolh"]
     n_tot = sum(og.values())
-    assert abs(n_tot - 64.786) < 0.05, n_tot                      # Σ kmol/h (img1 64.78)
+    # Path-B (Option 1, ov_CO2=458.358305) RECONCILED off-gas: 100% inerts + forced reactant slip
+    # (NH3 94.7637 + CO2 62.1821), H2O=0 -> NH3/CO2-dominated vent (supersedes img1 64.78 datasheet).
+    assert abs(n_tot - 214.776) < 0.05, n_tot                     # Σ kmol/h (reconciled 214.78)
     mass = sum(og[k] * MW_COMP[k] for k in MW_COMP)
-    assert abs(mass - 1708.0) < 5.0, mass                         # kg/h
-    assert abs(mass / n_tot - 26.36) < 0.1, mass / n_tot          # mean MW
-    assert abs(og["N2"] / n_tot * 100.0 - 68.81) < 0.1            # mol % N2
-    assert abs(og["O2"] / n_tot * 100.0 - 11.39) < 0.1            # mol % O2
-    assert abs(og["CO2"] / n_tot * 100.0 - 2.22) < 0.1           # mol % CO2 slip
+    assert abs(mass - 5901.35) < 5.0, mass                        # kg/h
+    assert abs(mass / n_tot - 27.4768) < 0.1, mass / n_tot        # mean MW
+    assert abs(og["N2"]  / n_tot * 100.0 - 20.7332) < 0.1         # mol % N2
+    assert abs(og["O2"]  / n_tot * 100.0 -  3.4548) < 0.1         # mol % O2
+    assert abs(og["CO2"] / n_tot * 100.0 - 28.9521) < 0.1         # mol % CO2 slip
+    assert abs(og["NH3"] / n_tot * 100.0 - 44.1221) < 0.1         # mol % NH3 slip
 
 
 def test_overflow_equals_ej_suction():
     sc = _design()
     mass = sum(sc["overflow_kmolh"][k] * MW_COMP[k] for k in MW_COMP)
-    assert abs(mass - sum(main.EJ_SUCTION_KGH.values())) < 1.0, mass   # 57568 kg/h
-    assert abs(sum(sc["overflow_kmolh"].values()) - 2519.44) < 0.2     # kmol/h
+    assert abs(mass - sum(main.EJ_SUCTION_KGH.values())) < 1.0, mass   # reconciled 53368.28 kg/h
+    assert abs(sum(sc["overflow_kmolh"].values()) - 2367.504) < 0.2    # kmol/h (Path-B reconciled)
 
 
 def test_closure_resid():
     sc = _design()
     cr = sc["closure_resid"]                                      # feed − off-gas − overflow
-    assert -2.5 < cr < -1.0, cr                                   # ≈ −1.945 kmol/h
+    assert abs(cr) < 1e-6, cr                                     # ≈ 0 (Path-B reconciled: node closes machine-exact)
     feed_tot = sum(sc["feed_kmolh"].values())
     assert abs(cr) / feed_tot < 0.002                             # bounded < 0.2 %
 
@@ -135,7 +138,7 @@ def test_packet_tags_and_streams():
         assert tag in blk["ccw"], tag
     # off-gas composition closes; design point pins MW / mol% / temps
     assert abs(sum(blk["off_mol_pct"].values()) - 100.0) < 0.2
-    assert abs(blk["off_MW"] - 26.36) < 0.2
+    assert abs(blk["off_MW"] - 27.4768) < 0.2                     # Path-B reconciled off-gas mean MW
     assert abs(blk["TT_322011"] - 114.0) < 0.1
     assert abs(blk["TT_322011_lp"] - 38.8) < 0.1                  # JT-cooled off-gas to 322C001
     assert abs(blk["TT_322002"] - 178.8) < 0.1
@@ -159,7 +162,7 @@ def test_packet_tags_and_streams():
     assert st["CCW_RETURN"]["src"] == "322E003" and st["CCW_RETURN"]["dst"] == "329P006 A/B"
     # CARB_RECYCLE re-pointed to live scrubber overflow (322E003 -> 322F001)
     assert st["CARB_RECYCLE"]["src"] == "322E003" and st["CARB_RECYCLE"]["dst"] == "322F001"
-    assert abs(st["CARB_RECYCLE"]["mol_kmolh"] - 2519.44) < 0.5
+    assert abs(st["CARB_RECYCLE"]["mol_kmolh"] - 2367.504) < 0.5   # Path-B reconciled overflow Σ
 
 
 def test_hic604_command():

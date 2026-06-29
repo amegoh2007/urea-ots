@@ -23,6 +23,10 @@ from main import (MW_COMP, stripper_322e001, ejector_322f001, hpcc_322e002, bubb
 
 CO2_DES_TH = CO2_DES_KGH / 1000.0
 L0, W0 = reactor.L0_DES, reactor.W0_DES
+# design HPCC carbamate-MELT N/C -- the bubble_p_322e002 fN anchor (NH3-richer than the reactor FEED N/C
+# L0, since all fresh NH3 enters as ejector motive).  Auto-captured at boot (main.HPCC_NC_DES_LIVE ~3.12324);
+# fall back to L0 only if the pin failed to populate (matches bubble_p_322e002's own _nc0 fallback).
+NC_MELT = main.HPCC_NC_DES_LIVE if main.HPCC_NC_DES_LIVE is not None else L0
 fails = []
 def chk(cond, msg):
     print("   [%s] %s" % ("PASS" if cond else "FAIL", msg))
@@ -57,9 +61,11 @@ print("    gas=%.3f t/h  liq=%.3f t/h  m_dot=%.1f  | synth/live liq ratio=%.5f"
 # (1) gate=0 design pin is BIT-EXACT regardless of feed
 chk(abs(dp["T_prod"] - HPCC_T_PROD_DES_C) < 1e-9, "gate=0 design-pin T_prod == 170.0 C bit-exact (got %.10f)" % dp["T_prod"])
 chk(abs(dp["duty_kw"] - dp["q_steam_kw"]) < 1e-6, "gate=0 q_steam == duty bit-exact (T_prod at pin, no shell backfill)")
-# (2) bubble-P pin anchor is exact at the reactor design L0/W0 (the surface HPCC_P_DES_BARA was fit to)
-chk(abs(bubble_p_322e002(HPCC_T_PROD_DES_C, L0, W0) - HPCC_P_DES_BARA) < 1e-6,
-    "bubble_p(170, L0_DES, W0_DES) == 144.2 bar bit-exact (P_bub pin anchor)")
+# (2) bubble-P pin anchor is exact at the DESIGN MELT composition (N/C = HPCC_NC_DES_LIVE ~3.12324, the
+#     NH3-richer combined HPCC melt -- all fresh NH3 enters as ejector motive -- NOT the reactor-FEED N/C
+#     L0_DES=3.07296; H/C settles at W0).  This live melt composition is what the 144.2-bar surface anchors to.
+chk(abs(bubble_p_322e002(HPCC_T_PROD_DES_C, NC_MELT, W0) - HPCC_P_DES_BARA) < 1e-6,
+    "bubble_p(170, NC_melt=HPCC_NC_DES_LIVE, W0_DES) == 144.2 bar bit-exact (P_bub pin anchor)")
 # (3) gate=1 on the synthetic feed lands within 0.5 C of pin, LOW side (correct direction for ~0.17% low m_dot)
 chk(0.0 <= (HPCC_T_PROD_DES_C - d["T_prod"]) < 0.5,
     "gate=1 synthetic-feed T_prod within [169.5, 170.0] (got %.4f): ~0.17%% throughput understatement, correct sign" % d["T_prod"])
@@ -106,9 +112,9 @@ chk(ok_qsteam,  "q_steam_kw >= 0 across sweep (no negative shell duty / energy c
 
 # ============================================================================================== C
 print("\n" + bar); print("  C. BUBBLE-POINT SYNTHESIS P + V-TROUGH CONTINUITY"); print(bar)
-# C1 bubble_p monotonicity (design anchored)
-chk(abs(bubble_p_322e002(HPCC_T_PROD_DES_C, L0, W0) - HPCC_P_DES_BARA) < 1e-6,
-    "bubble_p(170, L0, W0) == 144.2 bar (design anchor)")
+# C1 bubble_p monotonicity (design anchored at the MELT N/C = HPCC_NC_DES_LIVE, see header note (2))
+chk(abs(bubble_p_322e002(HPCC_T_PROD_DES_C, NC_MELT, W0) - HPCC_P_DES_BARA) < 1e-6,
+    "bubble_p(170, NC_melt, W0) == 144.2 bar (design melt anchor)")
 chk(bubble_p_322e002(HPCC_T_PROD_DES_C, L0*1.1, W0) > bubble_p_322e002(HPCC_T_PROD_DES_C, L0, W0),
     "dP/d(N/C) > 0 (free-NH3 volatility lifts bubble P)")
 chk(bubble_p_322e002(HPCC_T_PROD_DES_C, L0, W0*1.1) < bubble_p_322e002(HPCC_T_PROD_DES_C, L0, W0),

@@ -118,18 +118,17 @@ chk(abs(reactor.X_DES_RAW - reactor.X_INF * (reactor.ALPHA_NC*1.072961/(1+reacto
     "X_DES_RAW == X_inf*fL(L0)*fW(W0) (calibration closes: 0.9196*0.795165*0.742582 = X_des 0.543)")
 
 # ============================================================================================== B
-print("\n" + bar); print("  B. react_322r001 DESIGN PIN  (captured feed for mass-pin basis + NOMINAL kinetic anchor)"); print(bar)
-# SETTLED-LIVE vs NOMINAL (Phase-2/4 pin trap): the captured MAN-seed args are the FIRST tick, where
-# the recycle-W tear is UNSETTLED -> W_blend=%.6f != W0_DES=%.6f (Delta=%+.1e), so conv_fac sits
-# ppm below 1 (delta_X~4e-6, amp~1+4e-6).  The reactor's DESIGN KINETIC anchor is the NOMINAL point
-# (L0,W0,T0) -- Section A proved conversion_factor(L0,W0,T0)==1.0 bit-exact -- which the loop reaches
-# only after the W tear converges (W_inst->W0).  Drive the design pin at the nominal anchor while
-# keeping the captured FEED/co2/HIC (which is what pinned REACT_MASS_DES) for the f_cons mass basis.
-print(("   note: captured first-tick W_drive=%.6f vs nominal W0=%.6f (Delta=%+.2e) -> drive pin at nominal anchor"
-       % (KW_DES.get("W_drive"), reactor.W0_DES, KW_DES.get("W_drive") - reactor.W0_DES)))
-NOM = {"L_drive": reactor.L0_DES, "W_drive": reactor.W0_DES, "T_overflow_c": reactor.T0_DES_C}
-R = react_322r001(HPCC_DES, CO2_DES, HIC_DES, **NOM)
-chk(abs(R["X_conv"] / reactor.X_DES_RAW - 1.0) < 1e-12, "conversion_factor == 1.000000 BIT-EXACT at nominal anchor (L0,W0,T0)")
+print("\n" + bar); print("  B. react_322r001 DESIGN PIN  (driven at the CAPTURED design anchor -> bit-exact partition)"); print(bar)
+# C-1 REBUILD pin basis: TEAR_DES / xi_pin / L_FEED_DES / W_FEED_DES / X_DES were all captured by the
+# boot-pin at the MAN-seed design tick (KW_DES below).  To reproduce the published overflow/off-gas
+# BIT-EXACT we drive react_322r001 at that SAME captured anchor, so xi_live == xi_pin and the conserving
+# theta partition returns OVERFLOW_DES / OFFGAS_DES exactly.  The first-tick recycle-W tear leaves
+# W_FEED_DES marginally above the fully-settled W0_DES (Delta below) -> conv_fac reproduces the PINNED
+# X_DES (not nominal 1.0) at this anchor; Phase-2 (H-1 seed re-pin) drives that first-tick creep to zero.
+print(("   note: captured design anchor  L_drive=%.6f  W_drive=%.6f (W0_DES=%.6f, first-tick Delta=%+.2e)"
+       % (KW_DES.get("L_drive"), KW_DES.get("W_drive"), reactor.W0_DES, KW_DES.get("W_drive") - reactor.W0_DES)))
+R = react_322r001(HPCC_DES, CO2_DES, HIC_DES, **KW_DES)
+chk(abs(R["X_conv"] - main.REACT_X_DES) < 1e-9, "X_conv reproduces pinned REACT_X_DES at captured anchor (xi_live == xi_pin -> bit-exact partition)")
 ov_ok = True
 for k in MW_COMP:
     d = REACT_OVERFLOW_DES.get(k, 0.0)
@@ -140,18 +139,24 @@ og_ok = all(abs(R["offgas_kmolh"][k] - REACT_OFFGAS_DES.get(k, 0.0) * S_DES) < 1
 chk(og_ok, "off-gas_i == REACT_OFFGAS_DES_i * s bit-exact (delta_X==0 -> amp==1, no deficit slip at design)")
 chk(abs(R["delta_X"]) < 1e-9, "delta_X == 0 at design (X_conv == X_DES_RAW, no conversion deficit)")
 chk(abs(R["xi_biu"] - REACT_XI_BIU_DES * S_DES) < 1e-9, "xi_biu == REACT_XI_BIU_DES * s (biuret extent pinned)")
-m_in = mass_of(FEED_DES); m_out = mass_of(R["overflow_kmolh"]) + mass_of(R["offgas_kmolh"])
-print("      design: s=%.6f  conv_fac=%.9f  overflow=%.1f  offgas=%.1f kg/h  feed=%.1f  AT-322701 N/C=%.5f"
-      % (S_DES, R["X_conv"]/reactor.X_DES_RAW, mass_of(R["overflow_kmolh"]), mass_of(R["offgas_kmolh"]), m_in, atom_ratio(R["overflow_kmolh"])))
-chk(abs(m_out - m_in) < 0.05 * m_in, "ISSUE-c: reactor mass-out (overflow+offgas) tracks feed mass-in (urea rxn mass-neutral)")
+m_fc = mass_of(R["feed_corrected_kmolh"]); m_out = mass_of(R["overflow_kmolh"]) + mass_of(R["offgas_kmolh"])
+print("      design: s=%.6f  conv_fac=%.9f  overflow=%.1f  offgas=%.1f kg/h  feed_corr=%.1f  tear=%.4f kg/h  AT-322701 N/C=%.5f"
+      % (S_DES, R["X_conv"]/reactor.X_DES_RAW, mass_of(R["overflow_kmolh"]), mass_of(R["offgas_kmolh"]), m_fc, R["tear_mass_kgh"], atom_ratio(R["overflow_kmolh"])))
+chk(abs(m_out - m_fc) < 1e-6, "C-1 REBUILD: mass_out(overflow+offgas) == mass_in(feed_corrected) to MACHINE ZERO (atom-consistent MW)")
+_aN_fc = sum(R["feed_corrected_kmolh"].get(k,0.0)*REACT_N_ATOMS.get(k,0) for k in MW_COMP)
+_aN_o  = sum((R["overflow_kmolh"].get(k,0.0)+R["offgas_kmolh"].get(k,0.0))*REACT_N_ATOMS.get(k,0) for k in MW_COMP)
+_aC_fc = sum(R["feed_corrected_kmolh"].get(k,0.0)*REACT_C_ATOMS.get(k,0) for k in MW_COMP)
+_aC_o  = sum((R["overflow_kmolh"].get(k,0.0)+R["offgas_kmolh"].get(k,0.0))*REACT_C_ATOMS.get(k,0) for k in MW_COMP)
+chk(abs(_aN_fc-_aN_o) < 1e-6 and abs(_aC_fc-_aC_o) < 1e-6, "C-1 REBUILD: N & C atoms close feed_corrected->out to machine zero (urea+biuret couples atom-exact)")
+chk(abs(R["closure_resid"]) < 1e-6, "closure_resid == 0 (true conservation diagnostic; the OLD pin reported ~+250 kmol/h defect)")
 NC_DES = atom_ratio(R["overflow_kmolh"])
 chk(2.5 < NC_DES < 3.5, "AT-322701 design overflow atom N/C ~= 3.0 (excess-NH3 urea melt) -- baseline for C-sweep")
 
 # ============================================================================================== C
 print("\n" + bar); print("  C. DIRECTIVE-#2 COMPOSITION COUPLING  (feed shift -> stream comp, not just flow)"); print(bar)
 print("\n   AT-322701 excess-NH3 partition: feed N/C^ moves NH3 overflow<->off-gas (N & C conserved):")
-KW_hi = dict(NOM); KW_hi["L_drive"] = reactor.L0_DES * 1.10   # both at delta_X==0 (conv_fac>=1)
-KW_lo = dict(NOM); KW_lo["L_drive"] = reactor.L0_DES * 0.90   # ... isolate nh3_shift + d-couple only
+KW_hi = dict(KW_DES); KW_hi["L_drive"] = KW_DES["L_drive"] * 1.10   # perturb ONLY L (feed N/C lever)
+KW_lo = dict(KW_DES); KW_lo["L_drive"] = KW_DES["L_drive"] * 0.90   # about the captured anchor -> isolate nh3_shift
 R_hi = react_322r001(HPCC_DES, CO2_DES, HIC_DES, **KW_hi)
 R_lo = react_322r001(HPCC_DES, CO2_DES, HIC_DES, **KW_lo)
 N_tot = lambda r: sum((r["overflow_kmolh"].get(k,0.0)+r["offgas_kmolh"].get(k,0.0))*REACT_N_ATOMS.get(k,0) for k in MW_COMP)
@@ -160,24 +165,25 @@ chk(R_hi["overflow_kmolh"]["NH3"] > R["overflow_kmolh"]["NH3"] > R_lo["overflow_
     "feed N/C^ -> overflow NH3^ (NH3-rich liquid effluent carries more free NH3 to stripper)")
 chk(R_hi["offgas_kmolh"]["NH3"] < R["offgas_kmolh"]["NH3"] or R_lo["offgas_kmolh"]["NH3"] > R["offgas_kmolh"]["NH3"],
     "feed N/C^ -> off-gas NH3v (conserved partition: NH3 moved overflow<-off-gas, CO2 untouched)")
-# nh3_shift (overflow<->offgas) and the CO2+2NH3->Urea+H2O d-couple are each atom-neutral (dN=dC=0).
-# But ISSUE-c f_cons (L1003-1011) then rescales overflow UNIFORMLY to pin out-mass, and a uniform mass
-# rescale perturbs N/C.  So the conserved invariant under a feed-preserving perturbation is total
-# OUT-MASS (f_cons targets m_ov_des+m_og_des with feed fixed), NOT total atoms.  Assert the MASS
-# invariant; characterize the (bounded) f_cons-induced atom drift -- the declared MASS-closure contract.
+# C-1 REBUILD: nh3_shift (overflow<->offgas) and the CO2+2NH3->Urea+H2O / 2Urea->Biuret+NH3 couples are
+# ALL atom- AND mass-neutral.  There is NO f_cons rescale any more.  So under a feed-preserving L_drive
+# perturbation BOTH total out-mass AND total out-atoms are conserved bit-exact; nh3_shift only re-
+# partitions NH3 between the liquid overflow and the off-gas (AT-322701 still tracks feed N/C).
 mout = lambda r: mass_of(r["overflow_kmolh"]) + mass_of(r["offgas_kmolh"])
 chk(abs(mout(R_hi)-mout(R)) < 1e-6*mout(R) and abs(mout(R_lo)-mout(R)) < 1e-6*mout(R),
-    "total OUT-MASS invariant under feed-preserving L_drive (f_cons pins overflow+offgas to m_ov_des+m_og_des)")
-print("      f_cons atom drift R_hi vs R:  dN=%+.3f%%  dC=%+.3f%% (uniform mass rescale, not atom-exact -- declared contract)"
-      % (100.0*(N_tot(R_hi)-N_tot(R))/N_tot(R), 100.0*(C_tot(R_hi)-C_tot(R))/C_tot(R)))
+    "total OUT-MASS invariant under feed-preserving L_drive (urea/biuret couples mass-neutral, shift is a transfer)")
+chk(abs(N_tot(R_hi)-N_tot(R)) < 1e-6 and abs(C_tot(R_hi)-C_tot(R)) < 1e-6,
+    "total OUT-ATOMS (N,C) ALSO invariant bit-exact (no f_cons rescale; conserving rebuild eliminates atom drift)")
+print("      atom drift R_hi vs R:  dN=%+.3e  dC=%+.3e kmol-atom/h (atom-exact -- conserving contract)"
+      % (N_tot(R_hi)-N_tot(R), C_tot(R_hi)-C_tot(R)))
 chk(atom_ratio(R_hi["overflow_kmolh"]) > NC_DES > atom_ratio(R_lo["overflow_kmolh"]),
-    "AT-322701 overflow N/C TRACKS feed N/C (de-pinned from atom-invariant; high-N/C feed -> high-N/C effluent)")
+    "AT-322701 overflow N/C tracks feed N/C via conserved nh3_shift transfer (high-L feed -> NH3-rich effluent)")
 print("      L_drive 0.90/1.00/1.10*L0 -> overflow NH3 %.1f / %.1f / %.1f kmol/h ; AT-322701 N/C %.4f / %.4f / %.4f"
       % (R_lo["overflow_kmolh"]["NH3"], R["overflow_kmolh"]["NH3"], R_hi["overflow_kmolh"]["NH3"],
          atom_ratio(R_lo["overflow_kmolh"]), NC_DES, atom_ratio(R_hi["overflow_kmolh"])))
 print("\n   conversion shift d (CO2+2NH3->Urea+H2O) flexes overflow composition per stoichiometry:")
 # Lower conversion (cold + watery feed) -> d<0 vs design -> less urea, more CO2/NH3 in overflow + off-gas slip
-KW_cold = dict(NOM); KW_cold["T_overflow_c"] = 165.0; KW_cold["W_drive"] = reactor.W0_DES * 1.5
+KW_cold = dict(KW_DES); KW_cold["T_overflow_c"] = 165.0; KW_cold["W_drive"] = KW_DES["W_drive"] * 1.5
 R_cold = react_322r001(HPCC_DES, CO2_DES, HIC_DES, **KW_cold)
 chk(R_cold["delta_X"] > 0.0, "cold + watery feed -> delta_X > 0 (per-pass conversion deficit below design)")
 chk(R_cold["overflow_kmolh"]["Urea"] < R["overflow_kmolh"]["Urea"], "deficit -> LESS urea in overflow (dehydration back-off, directive #2 comp change)")
@@ -188,27 +194,30 @@ print("      cold/watery: delta_X=%.4f  amp NH3 %.1f->%.1f  CO2 %.1f->%.1f  Urea
       % (R_cold["delta_X"], R["offgas_kmolh"]["NH3"], R_cold["offgas_kmolh"]["NH3"],
          R["offgas_kmolh"]["CO2"], R_cold["offgas_kmolh"]["CO2"],
          R["overflow_kmolh"]["Urea"], R_cold["overflow_kmolh"]["Urea"]))
-# The design point inherits the as-built HMB STANDING atom residual: HPCC feed_kmolh vs the pinned
-# overflow/offgas split fractions do NOT atom-close (same ~2% gap as the standing MASS residual; the
-# Design-Anchor law pins the OTS to this reduced HMB bit-exact, so the reactor reproduces the gap).
-# react_322r001 holds it CONSTANT off-design via f_cons -- THAT is the conservation contract (no DYNAMIC
-# invent/destroy of mass), NOT bit-exact atom closure.  Off-design the amp slip source (un-converted
-# NH3+CO2 flash off the top, L981-984) re-injects N+C that partly offsets the standing deficit; f_cons
-# (L1003-1011) re-closes MASS only.  Characterize the standing residual; assert it is held bounded.
-dN = (N_tot(R_cold) - sum(FEED_DES.get(k,0.0)*REACT_N_ATOMS.get(k,0) for k in MW_COMP))
-dC = (C_tot(R_cold) - sum(FEED_DES.get(k,0.0)*REACT_C_ATOMS.get(k,0) for k in MW_COMP))
-Nf = sum(FEED_DES.get(k,0.0)*REACT_N_ATOMS.get(k,0) for k in MW_COMP)
-Cf = sum(FEED_DES.get(k,0.0)*REACT_C_ATOMS.get(k,0) for k in MW_COMP)
-mN = abs(N_tot(R) - Nf) / Nf; mC = abs(C_tot(R) - Cf) / Cf
-print("      atom closure feed->(overflow+offgas):  design |dN|/N=%.2e |dC|/C=%.2e ;  cold-slip |dN|/N=%.3f |dC|/C=%.3f (amp source, mass-closed only)"
-      % (mN, mC, abs(dN)/Nf, abs(dC)/Cf))
-chk(0.0 < mN < 0.03 and 0.0 < mC < 0.03,
-    "design carries the standing HMB atom residual (|dN|/N=%.2f%%, |dC|/C=%.2f%%) -- pinned reduced-HMB calibration, not atom-exact" % (100*mN, 100*mC))
-chk(abs(dN)/Nf < 0.05 and abs(dC)/Cf < 0.05,
-    "off-design atom residual HELD BOUNDED < 5%% (amp slip + f_cons do NOT grow the gap: dynamic conservation, no invent/destroy)")
-# ISSUE-c mass conservation off-design
-m_in_c = mass_of(FEED_DES); m_out_c = mass_of(R_cold["overflow_kmolh"]) + mass_of(R_cold["offgas_kmolh"])
-chk(abs(m_out_c - m_in_c) < 0.06 * m_in_c, "ISSUE-c f_cons holds mass 1:1 off-design (no invented ~35 t/h at turndown)")
+# C-1 REBUILD conservation contract: out = feed_corrected + reaction_delta EXACTLY.  feed_corrected =
+# raw_feed - TEAR_DES*s, where TEAR_DES is the explicit pinned recycle-tear (Basis A) accounting for the
+# previously-undocumented ~2% HMB gap.  Closure is bit-exact against feed_corrected; the raw-feed gap
+# equals the tear EXACTLY -- now a NAMED physical recycle stream, not invented/destroyed mass.
+fc_cold = R_cold["feed_corrected_kmolh"]
+Nfc = sum(fc_cold.get(k,0.0)*REACT_N_ATOMS.get(k,0) for k in MW_COMP)
+Cfc = sum(fc_cold.get(k,0.0)*REACT_C_ATOMS.get(k,0) for k in MW_COMP)
+mN = abs(N_tot(R) - sum(R["feed_corrected_kmolh"].get(k,0.0)*REACT_N_ATOMS.get(k,0) for k in MW_COMP))
+mC = abs(C_tot(R) - sum(R["feed_corrected_kmolh"].get(k,0.0)*REACT_C_ATOMS.get(k,0) for k in MW_COMP))
+dN = abs(N_tot(R_cold) - Nfc); dC = abs(C_tot(R_cold) - Cfc)
+print("      atom closure feed_corrected->(overflow+offgas):  design |dN|=%.2e |dC|=%.2e ;  cold |dN|=%.2e |dC|=%.2e kmol-atom/h"
+      % (mN, mC, dN, dC))
+chk(mN < 1e-6 and mC < 1e-6,
+    "design feed_corrected->out atoms close to MACHINE ZERO (urea+biuret atom-exact; standing ~2% residual ERADICATED)")
+chk(dN < 1e-6 and dC < 1e-6,
+    "off-design feed_corrected->out atoms close to machine zero (conservation is structural, holds at any operating point)")
+# the raw-feed gap is now the explicit pinned recycle-tear, accounted bit-exact (no invent/destroy)
+gapN  = abs(N_tot(R) - sum(FEED_DES.get(k,0.0)*REACT_N_ATOMS.get(k,0) for k in MW_COMP))
+tearN = abs(sum(main.REACT_TEAR_DES.get(k,0.0)*REACT_N_ATOMS.get(k,0) for k in MW_COMP))
+print("      raw-feed N gap=%.4f kmol-atom/h  ==  pinned recycle-tear N=%.4f  (explicit, Basis A)" % (gapN, tearN))
+chk(abs(gapN - tearN) < 1e-6, "raw-feed atom gap == TEAR_DES exactly (the ~2% leak is now a NAMED recycle-tear, not a fudge)")
+# mass conservation off-design (exact, against feed_corrected)
+m_in_c = mass_of(fc_cold); m_out_c = mass_of(R_cold["overflow_kmolh"]) + mass_of(R_cold["offgas_kmolh"])
+chk(abs(m_out_c - m_in_c) < 1e-6, "C-1 REBUILD holds mass to MACHINE ZERO off-design (no invented mass at turndown/perturbation)")
 
 # ============================================================================================== D
 print("\n" + bar); print("  D. NODE-ODE + HOLDUP HYDRAULICS  (bounded single-state, no full settle)"); print(bar)

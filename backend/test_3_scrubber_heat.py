@@ -63,10 +63,12 @@ t += 1; n += H.check("CCW cut raises TT-329125 (less coolant)", d_tc > H.FLAT,  
 t += 1; n += H.check("rho_cond falls below 1 under throttle",   rc1 < 0.999,             f"rho_cond={rc1}")
 t += 1; n += H.check("PT-329201 relaxes after CCW restored",    pt2 < pt1 - 0.5,         "PT did not relax")
 t += 1; n += H.check("fresh design state holds PT = 140.7",     abs(pti - DES_PT) < 0.2, f"PT={pti}")
-# PI_322E002 is the bubble-P of the LIVE loop-coupled HPCC feed, not the frozen design vector: at design
-# feed N/C,H/C == reactor.L0_DES/W0_DES -> 144.2 exact, but the live combined feed carries the same closure
-# residual as the rest of the loop (here N/C +0.22 %, H/C -2.19 %), and the bubble-P is monotone (dP/dL>0
-# free-NH3 volatility, dP/dW<0 water dilution) so it sits +0.50 bar at 144.70 -- well inside engineering tol.
+# PI_322E002 is the bubble-P of the LIVE loop-coupled HPCC MELT, evaluated by bubble_p_322e002 whose fN
+# anchor is the design MELT N/C (main.HPCC_NC_DES_LIVE ~= 3.12324, auto-captured at boot), NOT the reactor-
+# feed N/C reactor.L0_DES (3.07296): the combined melt is NH3-richer than the reactor feed it produces (all
+# fresh NH3 enters as ejector motive).  At the live design point the melt settles at N/C == HPCC_NC_DES_LIVE
+# and H/C == W0 exactly (entrainment phi_m==1), so P_bub == 144.2 bar a (datasheet) to ~1e-11 -- the 0.6 band
+# is the off-design live-coupled residual envelope, not slack for a design-point offset.
 t += 1; n += H.check("322E002 bubble-P holds 144.2 anchor",     abs(pbi - DES_BUB) < 0.6, f"P_bub={pbi}")
 H.verdict(n, t)
 
