@@ -196,9 +196,30 @@ EJ_P_SUCTION_BARA = 140.0        # bar a, 322E003 overflow -> 322F001 suction-B 
 #         HIC-322203 = PV-322203 minimum opening.  Opening PV-322203 vents CO2 so the
 #         feed to 322E001 and the plant Load both decrease.
 #   Load% = CO2 feed mass / CO2 design feed mass * 100  (54.618 t/h = 100 % Load).
-#   Dynamic: F_feed = F_raw*(1 - f_vent); f_vent = (PV_open/100)*CO2_VENT_MAX_FRAC;
-#            PV_open = max(HIC-322203 min, PIC-322203 op); s.F_CO2_th = F_feed drives
-#            the N/C ratio block + every downstream CO2 stream.
+#   Dynamic (pressure-gated split of the raw BL CO2 at the feed tee; bugs 1+4 are ONE
+#   defect -- the feed never respected the CO2-line vs synthesis dP):
+#     320K002 is flow(load)-controlled, so its discharge FLOATS to hold the design feed dP
+#     against synthesis backpressure -- there is ALWAYS a dP between the line and the loop --
+#     up to a deliverable ceiling:
+#       P_line = min(P_syn + DP_HP_DES, P_line_ceil) - CO2_PV_DP_GAIN*PV_open
+#       DP_HP_DES = CO2_P_DES - SYN_P_DES = 3.5 bar ;  P_line_ceil = SYN_P_MAX + DP_HP_DES
+#       (ceiling derived from existing constants: the compressor must still feed at the max
+#        synthesis pressure + the feed dP -- NO fabricated head).
+#     The CO2 then splits between two parallel downstream paths by a conductance*sqrt(dP):
+#       (HP)   into 322E001/synthesis loop, dP_HP = max(P_line - P_syn, 0)  -- check valve;
+#       (vent) out PV-322203 to the LP safe header, dP_vent = max(P_line - P_vent, 0),
+#              gated by PV_open = max(HIC-322203 min, PIC-322203 op).
+#     phi_HP = min(1, sqrt(dP_HP/DP_HP_DES))   -- compressor/check-valve DELIVERY (bug 1)
+#     g_HP = sqrt(dP_HP);  g_vent = (PV_open/100)*CO2_VENT_COND*sqrt(dP_vent)
+#     f_toHP = g_HP/(g_HP+g_vent)               -- vent-diversion SPLIT (bug 4)
+#     F_feed = F_raw*feed_factor*phi_HP*f_toHP;  F_vent = F_raw*feed_factor*(1-phi_HP*f_toHP).
+#     Across the normal band (P_syn 140.7..144.2, PV shut) the float holds dP_HP~3.5 ->
+#     phi_HP=1 -> feed stays at load (small synthesis excursions do NOT throttle the feed;
+#     correct plant behaviour).  Opening PV-322203 >= ~14 % sags the line below P_syn ->
+#     dP_HP=0 -> ALL CO2 vents (bug 4).  P_syn at/above the ceiling shrinks dP_HP -> phi_HP
+#     falls -> check valve shuts (bug 1 extreme).
+#     At design (PV_open=0, P_syn=140.7): P_line=144.2, phi_HP=1, g_vent=0 -> F_feed=F_raw (bit-exact).
+#     s.F_CO2_th = F_feed drives the N/C ratio block + every downstream CO2 stream.
 CO2_FEED_MOLFRAC  = {"CO2": 0.9524, "H2O": 0.0061, "N2": 0.0355, "O2": 0.0060}
 CO2_FEED_MW       = sum(CO2_FEED_MOLFRAC[k] * MW_COMP[k] for k in CO2_FEED_MOLFRAC)  # = 43.21
 CO2_DES_KGH       = 54618.0      # kg/h design total CO2-feed mass (54.618 t/h = 100 % Load)
@@ -207,7 +228,8 @@ CO2_T_FEED_C      = 120.0        # C, TI-322017 feed temperature (design)
 CO2_P_DES_BARA    = 144.2        # bar a, design CO2 feed-line pressure (PIC-322203 PV)
 CO2_RHO           = 242.70       # kg/m3, eff. density @ 120 C, 144.2 bar a
 NM3_PER_KMOL      = 22.414       # Nm3/kmol at 0 C, 1 atm (FT-322403 normal-volume basis)
-CO2_VENT_MAX_FRAC = 0.15         # PV-322203 fully open vents up to 15 % of raw CO2 feed
+CO2_VENT_COND     = 0.50         # PV-322203 vent conductance (sqrt-dP orifice coeff, rel. HP path)
+CO2_VENT_P_BARA   = 5.0          # bar a, PV-322203 discharge backpressure (LP safe header)
 CO2_PV_DP_GAIN    = 0.25         # bar a line-pressure drop per % PV-322203 opening
 PIC_322203_KC     = 1.0          # %OP per bar (velocity I-PD proportional gain, DIRECT-acting)
 PIC_322203_TI     = 2.0          # s, integral time (Kc/Ti = 0.5 preserves prior integral-only gain)
@@ -434,6 +456,100 @@ def _f_flow(T: float, T_cryst: float, dT_mush: float = 5.0) -> float:
     """L3 generic mushy-zone flow factor (Batch 2): 1.0 fully molten, ramps linearly to 0.0 at the
     crystallization solidus.  f = clamp((T - T_cryst)/dT_mush, 0, 1) -> liquidus at T_cryst+dT_mush."""
     return clamp((T - T_cryst) / dT_mush, 0.0, 1.0)
+
+
+# ----- Bug 2: predictive carbamate-crystallization monitor (Batch 3) -----
+#   Ammonium-carbamate liquor freezes to a solid crust before it reaches its solidus.  The model
+#   already carries two REACTIVE cut-off anchors (STRIP_BOT_T_CRYST_C urea-melt floor 132.7 C via
+#   _f_flow at the stripper drain, and the 60.0 C carbamate anchor at the scrubber overflow) that
+#   only bite once flow is ALREADY choking.  This block adds a PREDICTIVE freezing-margin monitor
+#   across every carbamate/urea liquid so an alarm is raised BEFORE the crystallization point is
+#   reached, per the operability requirement ("alarms should be given if crystallization point is
+#   about to occur"), and -- critically -- is emitted to telemetry so it reaches the operator UI.
+#   Sourcing Law: only two VERIFIED anchors place the composition-dependent freezing line -- pure
+#   ammonium carbamate m.p. 152 C (NIST) at zero free water, and the plant's own validated 60 C
+#   carbamate cut-off at the upper recycle water envelope (~40 wt% H2O).  The line between them is
+#   the minimum-assumption monotone interpolation (freezing T falls as free water rises, matching
+#   the verified CO2/H2O-ratio crystallization direction); no fabricated polynomial or constant.
+CARB_MP_PURE_C  = 152.0    # NIST pure ammonium-carbamate melting point (0 wt% free-water anchor)
+CARB_W_HI       = 0.40     # upper reliable recycle-liquor free-water mass fraction (60 C anchor)
+CARB_T_CRYST_LO = 60.0     # model-validated carbamate freezing anchor at CARB_W_HI
+CARB_WARN_DT_C  = 15.0     # freezing margin below which a predictive WARN is raised (approaching)
+CARB_MUSH_DT_C  = 5.0      # freezing margin below which a crystallization ALARM is raised (onset)
+#   Applicability of the composition freezing line is gated by molar N/C: the two anchors both sit
+#   inside the verified reliable envelope (N/C 1.8-2.6).  Outside it the water-only line no longer
+#   describes the mixture -- excess ammonia (high N/C) acts as a solvent that DISSOLVES carbamate
+#   and depresses freezing (e.g. the NH3-flooded 322F001 ejector discharge, N/C ~ 8), while the
+#   CO2-rich side (low N/C) RAISES it.  Gate rather than fabricate a wider correlation (Sourcing Law).
+CARB_NC_LO      = 1.8      # verified lower N/C bound of the reliable carbamate freezing envelope
+CARB_NC_HI      = 4.0      # applicability cap: above this the liquor is ammonia-solvent-dominated
+#                            (well beyond the 2.6 upper envelope) -> no freezing point is asserted
+
+
+def _carb_t_cryst_water(w_h2o: float) -> float:
+    r"""Composition-dependent carbamate freezing temperature (deg C) vs free-water mass fraction.
+    Minimum-assumption monotone interpolation between two VERIFIED anchors:
+        w = 0          -> 152.0 C  (pure ammonium carbamate m.p., NIST)
+        w = CARB_W_HI  ->  60.0 C  (plant-validated carbamate cut-off, upper recycle envelope)
+    Linear in w, clamped to [CARB_T_CRYST_LO, CARB_MP_PURE_C]:
+        $T_{cryst}(w) = 152.0 + (60.0 - 152.0)\,\dfrac{\mathrm{clamp}(w,\,0,\,0.40)}{0.40}$
+    Monotonically decreasing in free water, consistent with the verified CO2/H2O crystallization
+    direction (freezing point rises with CO2/H2O mass ratio, i.e. falls with free-water fraction)."""
+    w = clamp(w_h2o, 0.0, CARB_W_HI)
+    return CARB_MP_PURE_C + (CARB_T_CRYST_LO - CARB_MP_PURE_C) * (w / CARB_W_HI)
+
+
+def _stream_nc(mol_pct: dict) -> float:
+    """Molar N/C atom ratio from a stream's mol %:  N = NH3 + 2*Urea + 3*Biuret,
+    C = CO2 + Urea + 2*Biuret.  Returns None if the stream carries no carbon (no carbamate
+    phase to freeze).  mol %/mole counts differ only by a common factor, so the ratio is exact."""
+    nN = mol_pct.get("NH3", 0.0) + 2.0 * mol_pct.get("Urea", 0.0) + 3.0 * mol_pct.get("Biuret", 0.0)
+    nC = mol_pct.get("CO2", 0.0) + mol_pct.get("Urea", 0.0) + 2.0 * mol_pct.get("Biuret", 0.0)
+    return (nN / nC) if nC > 1e-9 else None
+
+
+def _cryst_assess(stream: dict, T_cryst: float = None) -> dict:
+    """Predictive crystallization assessment for ONE carbamate/urea liquid stream (as built by
+    make_stream).  Reads the stream's own derived mass %, computes the freezing margin and a
+    three-tier state.  T_cryst None -> derive the freezing line from the stream's free-water
+    content via _carb_t_cryst_water; else use the caller's equipment anchor (e.g. the 132.7 C
+    urea-melt floor at the stripper bottom).
+        margin = T - T_cryst ;  ALARM if margin < CARB_MUSH_DT_C, WARN if < CARB_WARN_DT_C, else OK.
+
+    The composition line (T_cryst None) is only physically valid inside the verified carbamate
+    envelope, so its applicability is gated by molar N/C:
+      * N/C > CARB_NC_HI  -> liquor is ammonia-solvent-dominated (e.g. the NH3-flooded 322F001
+        ejector discharge, N/C ~ 8); carbamate stays dissolved, no freezing point is asserted ->
+        state 'OOR' (out of range), EXCLUDED from the WARN/ALARM aggregation.
+      * N/C < CARB_NC_LO  -> CO2-rich side, where the water-only line UNDER-predicts freezing
+        (non-conservative); the state is floored at WARN so a possibly-freezing stream is never
+        reported a false OK.
+    An explicit T_cryst (a distinct solid phase, e.g. the urea-melt floor) is always assessed and
+    is NOT N/C-gated.  Any non-finite core input -> 'BAD' (a bad measurement never reads OK)."""
+    T   = stream.get("T_C")
+    mp  = stream.get("mass_pct", {})
+    co2 = mp.get("CO2", 0.0)
+    h2o = mp.get("H2O", 0.0)
+    w   = h2o / 100.0
+    nc  = _stream_nc(stream.get("mol_pct", {}))
+    nc_r = (round(nc, 2) if (nc is not None and math.isfinite(nc)) else None)
+    explicit = T_cryst is not None
+    if not _pv_ok(T, w) or (explicit and not _pv_ok(T_cryst)):
+        return {"T_cryst": None, "margin": None, "co2_h2o": None, "h2o_wt": None,
+                "nc": nc_r, "state": "BAD"}
+    if not explicit:
+        if nc is None or not math.isfinite(nc) or nc > CARB_NC_HI:
+            return {"T_cryst": None, "margin": None, "co2_h2o": None,
+                    "h2o_wt": round(h2o, 2), "nc": nc_r, "state": "OOR"}
+        T_cryst = _carb_t_cryst_water(w)
+    margin  = T - T_cryst
+    co2_h2o = (co2 / h2o) if h2o > 1e-9 else None
+    state   = "ALARM" if margin < CARB_MUSH_DT_C else ("WARN" if margin < CARB_WARN_DT_C else "OK")
+    if (not explicit) and (nc is not None) and nc < CARB_NC_LO and state == "OK":
+        state = "WARN"    # CO2-rich: water-only line under-predicts -> never a false OK
+    return {"T_cryst": round(T_cryst, 1), "margin": round(margin, 1),
+            "co2_h2o": (round(co2_h2o, 3) if co2_h2o is not None else None),
+            "h2o_wt": round(h2o, 2), "nc": nc_r, "state": state}
 
 
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
@@ -927,6 +1043,21 @@ def _disturbance_gate(s) -> float:
     return clamp((dev - GATE_DEADBAND) / GATE_RAMP, 0.0, 1.0)
 
 
+def _load_gate(s) -> float:
+    """PLANT-LOAD disturbance factor g in [0,1] — the production-forcing subset of _disturbance_gate,
+    keyed ONLY on the two exogenous LOAD handles the domino rule references: CO2 throughput (FY-322403 /
+    the PV-322203 vent split -> s.F_CO2_th) and the reactor-feed N/C ratio setpoint (s.ratio_SP).
+    Deliberately EXCLUDES the HV-322605 bottom take-off, the HV-322602 ejector spindle, and the auto-
+    modulating steam valves, so gating the LT-322504 shadow In term (Bug #7) can neither perturb those
+    tuned outflow / actual-only authorities nor be spuriously tripped by a utility valve during an
+    unrelated transient.  ==0 at design (both handles seeded on design) -> bit-exact NLL pin preserved."""
+    dev = max(
+        abs(s.F_CO2_th - CO2_DES_KGH / 1000.0) / (CO2_DES_KGH / 1000.0),
+        abs(s.ratio_SP - RATIO_SP_DES)         / RATIO_SP_DES,
+    )
+    return clamp((dev - GATE_DEADBAND) / GATE_RAMP, 0.0, 1.0)
+
+
 def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSAT_C,
                  gate: float = 1.0) -> dict:
     """HP Carbamate Condenser 322E002 reduced model.
@@ -1378,7 +1509,7 @@ def pump_current_A(N_rpm: float, on: bool) -> float:
 
 
 def mode_tag(c: "Controller") -> str:
-    return {"MAN": "M", "AUTO": "A", "CAS": "C", "OOS": "O"}.get(c.mode, "M")
+    return {"MAN": "M", "AUTO": "A", "CAS": "E", "OOS": "O"}.get(c.mode, "M")
 
 
 # ----- Plant state -----
@@ -1463,23 +1594,46 @@ class State:
         self.SIC_321950 = Controller("SIC_321950", Kc=2.0, Ti=8.0,
                                      sp=80.0, mv=0.0)
         self.SIC_321951 = Controller("SIC_321951", Kc=2.0, Ti=8.0,
-                                     sp=_OPEN_DES_B, mv=_OPEN_DES_B)  # MAN holds B at cascade design opening
+                                     sp=_OPEN_DES_B, mv=_OPEN_DES_B)
         self.controllers: dict = {
             "SIC_321950": self.SIC_321950,
             "SIC_321951": self.SIC_321951,
         }
-        # ratio
-        self.ratio_mode = "MAN"
+        # Bug-6 boot mode: running pump-B speed controller starts on CASCADE (slave to the N/C ratio
+        #   master) -- "all automatic valves on Cascade if applicable, else Auto".  CAS entry is
+        #   bumpless (bias=0, PID reset) and cas_sp == open_cas == _OPEN_DES_B at the design seed
+        #   (verified bit-exact), so the design fixed point is preserved.  SIC_321950 stays MAN: pump A
+        #   is an OFF standby (pv=open_act=0); CAS on a stopped pump would wind mv up toward cas_sp.
+        self.SIC_321951.set_mode("CAS")
+        # ratio: AUTO at boot (master of the SIC-951 cascade).  ratio_mode is the operator-station
+        #   display mode; open_cas is always derived from ratio_SP, so AUTO is math-identical here.
+        self.ratio_mode = "AUTO"
         self.ratio_SP   = 2.0231315310702604    # design molar N/C == RATIO_PV_DES (fresh N/C>=2.0, Cluster-2023)
         self.ratio_PV   = 2.0231315310702604    # molar N/C PV
         self.ratio_bal  = 2.0231315310702604
         self.F_CO2_th   = 54.618   # t/h, actual CO2 feed to 322E001 (derived: raw - vent)
         # CO2 feed line (320K002 BL -> XV-322902 -> 322E001), vent via PV-322203
         self.F_CO2_raw_th = 54.618 # t/h, raw CO2 from 320K002 compressor (BL boundary)
+        self.F_CO2_vent_th = 0.0   # t/h, CO2 vented via PV-322203 (design: vent shut -> 0)
         self.XV_322902    = True   # CO2 feed isolation to HP Stripper 322E001 (True=OPEN)
         self.HIC_322203   = 0.0    # %, HIC-322203 = PV-322203 minimum opening (operator)
-        # PIC-322203 CO2 line-pressure controller -> PV-322203 opening (reverse-acting)
-        self.PIC_322203   = {"mode": "MAN", "op": 0.0, "sp": CO2_P_DES_BARA,
+        # PIC-322203 CO2 line-pressure controller -> PV-322203 opening (direct-acting velocity I-PD).
+        #   Bug-6 boot mode: AUTO (it is an automatic valve, not a hand valve), set as a DORMANT
+        #   over-pressure relief.  The 320K002-float model (bugs 1/4) caps the CO2 line at the
+        #   deliverable ceiling P_line_ceil = SYN_P_MAX_BARA + DP_HP_DES (147.7 bar a); the line can
+        #   never exceed it.  SP is set one design feed-dP ABOVE that ceiling --
+        #     sp = SYN_P_MAX_BARA + 2*(CO2_P_DES_BARA - SYN_P_DES_BARA) = 151.2 bar a --
+        #   so the relief opens only on genuine line over-pressure (line > floating ceiling + one
+        #   feed-dP), NOT on the normal floating band (P_line 144.2..147.7).  SP strictly above the
+        #   ceiling keeps op clamped at 0 across the whole band (the velocity term's pv-sp stays
+        #   negative): at sp == ceiling exactly, the ramp-up velocity transient cracked a hair of
+        #   vent which the SIC-951 CASCADE then amplified into a synthesis-pressure lock (test_3
+        #   relax regression) -- the +1 feed-dP margin removes that marginal coupling.  All from
+        #   existing constants (no fabricated relief head).  op=0 at the design seed -> design-
+        #   preserving.  Operator still forces a minimum opening for carbamate-activation via the
+        #   HIC-322203 hand station (max(HIC, PIC.op)).
+        self.PIC_322203   = {"mode": "AUTO", "op": 0.0,
+                             "sp": SYN_P_MAX_BARA + 2.0 * (CO2_P_DES_BARA - SYN_P_DES_BARA),
                              "pv": CO2_P_DES_BARA, "pv_prev": CO2_P_DES_BARA}
         # HP Stripper 322E001 bottom-sump level (LT-322501) + LIC-322501 -> LV-322501.
         #   AUTO holds the design level (50 %) at the design opening (82 %); direct-acting.
@@ -1521,7 +1675,9 @@ class State:
         self.flags = {"SCRUBBER_SOLIDIFICATION": False,
                       "STRIPPER_SOLIDIFICATION": False,
                       "CARBAMATE_DEPOSITION":    False,
-                      "RATIO_PV_BAD":            False}   # L3-3 N/C measurement-validity (Batch 3)
+                      "RATIO_PV_BAD":            False,   # L3-3 N/C measurement-validity (Batch 3)
+                      "CARBAMATE_CRYST_WARN":    False,   # Bug 2 predictive: approaching freezing
+                      "CARBAMATE_CRYST_ALARM":   False}   # Bug 2 predictive: crystallization onset
 
 
 state = State()
@@ -1553,14 +1709,39 @@ def step_sim(dt: float) -> dict:
     pic["pv_prev"] = pic["pv"]                              # PV_{k-1} for next-tick velocity term
     pv_open = clamp(max(s.HIC_322203, pic["op"]), 0.0, 100.0)
     feed_factor = 1.0 if s.XV_322902 else 0.0          # isolation shut -> no feed
-    f_vent = (pv_open / 100.0) * CO2_VENT_MAX_FRAC
-    F_CO2_feed_kgh = s.F_CO2_raw_th * 1000.0 * (1.0 - f_vent) * feed_factor
+    # Pressure-driven delivery + split of the raw CO2 (bugs 1 & 4 are ONE defect: the feed
+    # never respected the CO2-line vs synthesis dP).  s.p_syn_bara is the prev-tick synthesis
+    # pressure (tear lag).  The CO2 line pressure (PIC-322203 PV) is modelled physically:
+    #   * 320K002 is flow(load)-controlled, so it FLOATS its discharge to hold the design feed
+    #     dP against synthesis backpressure -- there is ALWAYS a dP between the line and the
+    #     loop (bug 1) -- up to the compressor's deliverable ceiling P_line_ceil (= the max
+    #     synthesis pressure SYN_P_MAX it must still feed, plus the design feed dP; derived
+    #     from existing constants, no fabricated head).  Within the normal band dP_HP holds at
+    #     ~design so phi_HP=1 and feed stays at load (correct: feed is NOT pressure-throttled
+    #     by small excursions).  Only when P_syn nears/exceeds the ceiling does dP_HP shrink ->
+    #     phi_HP tapers -> check valve shuts (feed 0).
+    #   * Opening PV-322203 sags the line by CO2_PV_DP_GAIN per % -- toward/below P_syn -- and
+    #     raises g_vent, so f_to_HP -> 0: almost all CO2 leaves via the vent, not the HP loop
+    #     even though it kept flowing before (bug 4).
+    DP_HP_DES   = CO2_P_DES_BARA - SYN_P_DES_BARA            # 3.5 bar design feed dP
+    P_line_ceil = SYN_P_MAX_BARA + DP_HP_DES                 # compressor deliverable ceiling (feed dP held at max-P synthesis)
+    P_line_float = min(s.p_syn_bara + DP_HP_DES, P_line_ceil)  # discharge floats to hold the feed dP, capped at shutoff
+    P_line_bara = P_line_float - CO2_PV_DP_GAIN * pv_open    # PV-322203 venting pulls the line down -> PIC-322203 PV (bar a)
+    dP_HP   = max(P_line_bara - s.p_syn_bara, 0.0)           # drives CO2 INTO HP loop (>=0: check valve)
+    dP_vent = max(P_line_bara - CO2_VENT_P_BARA, 0.0)        # drives CO2 OUT the vent
+    phi_HP  = min(1.0, (dP_HP / DP_HP_DES) ** 0.5)          # bug 1: delivery taper (1.0 across band, shuts near ceiling)
+    g_HP    = dP_HP ** 0.5
+    g_vent  = (pv_open / 100.0) * CO2_VENT_COND * dP_vent ** 0.5
+    f_to_HP = g_HP / (g_HP + g_vent) if (g_HP + g_vent) > 1e-12 else 0.0   # bug 4: vent-diversion split
+    frac_HP = phi_HP * f_to_HP                               # net fraction of raw reaching the HP loop
+    F_CO2_feed_kgh = s.F_CO2_raw_th * 1000.0 * feed_factor * frac_HP
+    F_CO2_vent_kgh = s.F_CO2_raw_th * 1000.0 * feed_factor * (1.0 - frac_HP)  # all CO2 not delivered to HP -> vent/relief
     s.F_CO2_th = F_CO2_feed_kgh / 1000.0               # t/h actual feed -> drives ratio block
+    s.F_CO2_vent_th = F_CO2_vent_kgh / 1000.0          # t/h vented via PV-322203
     CO2_feed_kmolh = F_CO2_feed_kgh / CO2_FEED_MW      # kmol/h
     FT_322403 = CO2_feed_kmolh * NM3_PER_KMOL          # Nm3/h  (FT-322403)
     FY_322403 = s.F_CO2_th                             # t/h    (FY-322403)
     Load_pct  = s.F_CO2_th / (CO2_DES_KGH / 1000.0) * 100.0   # % of design CO2 flow
-    P_line_bara = CO2_P_DES_BARA - CO2_PV_DP_GAIN * pv_open   # PIC-322203 PV (bar a)
     pic["pv"] = P_line_bara
 
     # Cascade opening setpoint (%) from ratio flow demand.
@@ -1887,7 +2068,19 @@ def step_sim(dt: float) -> dict:
     _level_m_shadow       = reactor.level_from_holdup(s.react_m_liq_shadow, T_bulk_react, area_m2=_react_area_m2)
     _m_out_shadow         = reactor.outlet_line_outflow_kgph(_level_m_shadow, _react_mdot_kgh, REACT_LEVEL_DES_M,
                                                              REACT_HIC605_DES_PCT, REACT_HIC605_DES_PCT)  # valve@design
-    s.react_m_liq_shadow += (m_in_kgh - _m_out_shadow) * (dt / 3600.0)
+    # BUG #7 FIX — the shadow datum must reject the SLOW UNFORCED loop-relaxation (so the startup NLL pin
+    #   stays clean) but NOT a GENUINE exogenous LOAD move.  The plain m_in_kgh shadow shared EVERY inflow
+    #   term with the actual, so an operator feed cut (HIC-322203 vent open / F_CO2_th↓ / ratio_SP move)
+    #   dropped BOTH holdups equally and cancelled in the (actual−shadow) display: LT-322504 was dead to
+    #   load.  Gate the shadow In on _load_gate (keyed ONLY on the two exogenous load handles): g==0 while
+    #   on design -> _m_in_shadow == m_in_kgh (byte-identical to the old term; slow relaxation still shared
+    #   and rejected; NLL 80.0000 % pin bit-exact) -> g->1 as load leaves design -> shadow holds the DESIGN
+    #   production datum ṁ_des while the actual head follows the real (load-changed) inflow -> a gap opens
+    #   and LT-322504 falls on a feed cut / rises on a feed boost.  DISPLAY reference only (s.react_m_liq_
+    #   shadow never feeds holdup/hydraulics/flood) -> no real-mass conservation impact.
+    _g_load               = _load_gate(s)
+    _m_in_shadow          = _react_mdot_kgh + (1.0 - _g_load) * (m_in_kgh - _react_mdot_kgh)
+    s.react_m_liq_shadow += (_m_in_shadow - _m_out_shadow) * (dt / 3600.0)
     s.react_m_liq_shadow  = max(s.react_m_liq_shadow, reactor.M_HOLDUP_MIN)
     # DOMINO: the hydraulic take-off m_out IS this step's stripper liquid feed — scale the split-fraction
     #   overflow composition to the live outlet mass (f_strip=1 at design -> bit-exact).  The 322E001 native
@@ -2208,6 +2401,22 @@ def step_sim(dt: float) -> dict:
             rho=SCRUB_CCW_RHO_OUT),
     }
 
+    # ---- Bug 2: predictive carbamate-crystallization monitor across every carbamate/urea liquid ----
+    #   STRIP_BOT keeps its urea-melt-floor anchor (132.7 C, same value the reactive drain factor
+    #   uses); the carbamate/urea liquors derive their freezing line from their own live free-water
+    #   content.  WARN raised while still molten but within CARB_WARN_DT_C of freezing; ALARM at the
+    #   CARB_MUSH_DT_C onset margin -- both BEFORE the reactive _f_flow cut-off starts choking flow.
+    cryst = {
+        "STRIP_BOT":      _cryst_assess(streams["STRIP_BOT"], T_cryst=STRIP_BOT_T_CRYST_C),
+        "CARB_RECYCLE":   _cryst_assess(streams["CARB_RECYCLE"]),
+        "EJ_DISCH":       _cryst_assess(streams["EJ_DISCH"]),
+        "HPCC_PROD":      _cryst_assess(streams["HPCC_PROD"]),
+        "REACT_OVERFLOW": _cryst_assess(streams["REACT_OVERFLOW"]),
+    }
+    _cryst_states = [v["state"] for v in cryst.values()]
+    s.flags["CARBAMATE_CRYST_WARN"]  = any(st in ("WARN", "ALARM") for st in _cryst_states)
+    s.flags["CARBAMATE_CRYST_ALARM"] = any(st == "ALARM" for st in _cryst_states)
+
     return {
         "t":           time.time(),
         "FI_321401":   round(F_pump_total_th, 2),   # FT-321401 live discharge flow
@@ -2272,6 +2481,7 @@ def step_sim(dt: float) -> dict:
             "TI_322017":  round(CO2_T_FEED_C, 1),    # CO2 feed temperature (C)
             "pure_th":    round(s.F_CO2_th * CO2_MASSFRAC_CO2, 2),  # t/h pure CO2 component
             "raw_th":     round(s.F_CO2_raw_th, 2),  # t/h raw from 320K002 (pre-vent)
+            "vent_th":    round(s.F_CO2_vent_th, 2), # t/h CO2 diverted out PV-322203
             "Load":       round(Load_pct, 1),        # plant Load (% of design CO2 flow)
             "XV_322902":  bool(s.XV_322902),         # CO2 isolation to 322E001 (True=OPEN)
             "PV_322203":  round(pv_open, 1),         # vent valve opening (%)
@@ -2413,6 +2623,8 @@ def step_sim(dt: float) -> dict:
             },
         },
         "STREAMS": streams,
+        "CRYST":   cryst,                              # Bug 2 per-equipment predictive freezing margins
+        "flags":   {k: v for k, v in s.flags.items()}, # Bug 2 crystallization + existing phase-boundary flags
         "ratio": {
             "SP":  round(s.ratio_SP, 3),
             "PV":  round(s.ratio_PV, 3),

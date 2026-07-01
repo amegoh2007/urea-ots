@@ -1,29 +1,29 @@
 # Urea Plant OTS - Master Architecture & Directives
 
-**Project:** High-fidelity Stamicarbon CO2-stripping Urea Operator Training Simulator (OTS).
+**Project:** High-fidelity Stamicarbon CO2-stripping Urea OTS.
 **Stack:** Python (FastAPI/WebSockets) backend, HTML/CSS/JS frontend.
 
-## 1. Core Physics & Dynamic Modeling Laws (STRICT)
-* **The Domino Effect (Transient Propagation):** The simulation MUST run as a fully dynamic, coupled state-space system. Any local process perturbation (valve movement, pump trip, composition shift) must recursively calculate and propagate downstream (D/S) in real time, cascading updates to physical properties and multi-component compositions.
-* **100% Conservation Accuracy:** Every module must strictly resolve simultaneous differential equations for mass, component, and energy balances. Mass or energy must NEVER be created, destroyed, or decoupled to bypass mathematical stiffness.
-* **Rigorous Reaction Kinetics:** Forward and reverse reaction rates for carbamate synthesis and urea conversion must be derived using native temperature, pressure, and exact local activities/compositions. No linear or static shortcuts.
-* **The Sourcing Law:** Base all thermodynamic equations, kinetic models, and fluid dynamics on verified sources (UreaKnowHow, Stamicarbon/Uhde patents, peer-reviewed literature). Do not fabricate physical constants.
-* **The Design Anchor:** All off-design dynamic equations must resolve to be bit-exact with the provided 100% steady-state Heat and Material Balance (HMB).
+## 1. Core Physics & Dynamic Modeling Laws
+* **The Domino Effect:** Fully dynamic, coupled state-space system. Perturbations must cascade downstream recursively in real time.
+* **100% Conservation:** Strictly resolve simultaneous differential equations for mass/energy balances. Never decouple to bypass stiffness.
+* **Rigorous Kinetics:** Forward/reverse rates derived from local T, P, and exact activities. No static shortcuts.
+* **Sourcing Law:** Base all equations on verified sources (Stamicarbon/Uhde/literature).
+* **Design Anchor:** Off-design dynamic equations must resolve bit-exact with the 100% HMB.
 
-## 2. Development Workflow & Active Skill Utilization
-* **The Baseline Regression Test (STRICT MANDATE):** Before confirming any code change (adding, editing, or deleting logic), you MUST mathematically and programmatically test the output against the 100% steady-state design values. If a change breaks the design anchor or introduces mass/energy drift at steady state, you must discard the approach and recalculate.
-* **Tool & Skill Mandate:** You MUST actively use your available skills (Bash execution, file reading, `grep`, and MCP tools) to perform tasks. Never guess file paths, function names, or existing state variables. Prove your assumptions by searching the codebase before writing new logic.
-* **Scope Lock:** Build strictly ONE unit at a time. Do not anticipate or stub downstream units.
-* **UI Enforcement:** Upon receiving a DCS screenshot, you MUST automatically apply the rules defined in `ui_guidelines.md`.
+## 2. Autonomous Execution Workflow (STRICT MANDATE)
+* **No Halting:** Do NOT halt for approval. Deep research, plan, execute, and write the correct code continuously.
+* **Skill Mandate:** Mandatory to use the most appropriate skills in all phases (Bash, `grep`, plan-and-execute). Never guess paths or state variables; prove assumptions via search.
+* **Baseline Regression:** Mathematically/programmatically test against the 100% design anchor before confirming code. Discard and recalculate if mass/energy drifts at steady state.
+* **Scope Lock:** Build strictly ONE unit at a time.
+* **UI Enforcement:** Automatically apply `ui_guidelines.md` upon receiving a DCS screenshot.
 
-## 3. Documentation & Version Control (STRICT)
-* **Continuous Documentation:** You MUST always check and update the master architecture reference document in the root directory (`Urea OTS — As-Built Mathematical & System Architecture Reference`) to perfectly reflect any changes you make to modeling equations, instrument tags, or system architecture.
-* **Remote Backup:** After achieving a stable milestone or verified fix, you MUST backup the software by pushing the commits to the remote repository: `https://github.com/amegoh2007/urea-ots.git`.
+## 3. Documentation & Version Control
+* **Continuous Docs:** Autonomously update `Urea OTS — As-Built Mathematical Reference` to reflect model changes.
+* **Remote Backup:** Autonomously commit and push to `https://github.com/amegoh2007/urea-ots.git` after verified fixes.
 
-## 4. The "Checkout" Protocol (Upstream Integrity)
-`plant_state.md` is the absolute source of truth for upstream variables. If you require an upstream output/property NOT listed in `plant_state.md`:
-1. **HALT:** Do not hallucinate variables or create dummy inputs.
-2. **REQUEST:** State: *"To proceed, I need to modify the upstream model. Please upload [Filename.py]."*
-3. **DIFF-ONLY:** Once provided, output ONLY the specific class methods or code lines to replace/add. Do not rewrite the entire script.
-4. **UPDATE:** Output the exact line the user must add to `plant_state.md`.
-5. **RESUME:** Await user confirmation of the state update before proceeding with the current unit.
+## 4. Autonomous "Checkout" Protocol (Upstream Integrity)
+`plant_state.md` is the absolute source of truth. If missing an upstream variable:
+1. **Research & Plan:** Autonomously locate and read the required upstream `[Filename.py]`.
+2. **Execute Update:** Autonomously write the required physical calculation into the upstream model.
+3. **Update State:** Autonomously rewrite `plant_state.md` with the new variable.
+4. **Resume:** Immediately proceed with the current unit construction. Do not await user confirmation.

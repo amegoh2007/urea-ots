@@ -38,8 +38,8 @@
       { k: 'pt2',  t: 'ind', x: 949,  y: 317, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
       { k: 'i61',  t: 'ind', x: 894,  y: 469, tag: 'IT-321961', bind: 'pumpA.current',u: 'A',    dec: 1 },
       { k: 'i62',  t: 'ind', x: 1119, y: 469, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
-      { k: 's50',  t: 'ind', x: 862,  y: 528, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950' },
-      { k: 's51',  t: 'ind', x: 1104, y: 528, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951' },
+      { k: 's50',  t: 'ind', x: 862,  y: 528, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
+      { k: 's51',  t: 'ind', x: 1104, y: 528, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
       { k: 'nca',  t: 'ind', x: 296,  y: 522, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
       { k: 'ncb',  t: 'ind', x: 300,  y: 587, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
       { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LI_321501',  u: '%',     dec: 1 },
@@ -65,9 +65,9 @@
       { k: 'i007',  t: 'ind', x: 995, y: 227, tag: 'IT-329007'  },
       { k: 'ti02',  t: 'ind', x: 255, y: 243, tag: 'TI-322002', bind: 'EJ_322F001.TI_322002', u: 'C',     dec: 1 },
       { k: 'tv05',  t: 'ind', x: 714, y: 253, tag: 'TV-329005',  bind: 'SCRUB_322E003.ccw.TIC_329005.op', u: '%',   dec: 1 },
-      { k: 'tic05', t: 'ind', x: 497, y: 277, tag: 'TIC-329005', bind: 'SCRUB_322E003.ccw.TIC_329005.pv', u: 'C',   dec: 1 },
+      { k: 'tic05', t: 'ind', x: 497, y: 277, tag: 'TIC-329005', bind: 'SCRUB_322E003.ccw.TIC_329005.pv', u: 'C',   dec: 1, mode: 'SCRUB_322E003.ccw.TIC_329005.mode' },
       { k: 'lt01',  t: 'ind', x: 142, y: 306, tag: 'LT-329501',  bind: 'SCRUB_322E003.LT_329501',        u: '%',   dec: 1 },
-      { k: 'fic09', t: 'ind', x: 590, y: 334, tag: 'FIC-329409', bind: 'SCRUB_322E003.ccw.FIC_329409.pv', u: 'T/H', dec: 1 },
+      { k: 'fic09', t: 'ind', x: 590, y: 334, tag: 'FIC-329409', bind: 'SCRUB_322E003.ccw.FIC_329409.pv', u: 'T/H', dec: 1, mode: 'SCRUB_322E003.ccw.FIC_329409.mode' },
       { k: 'fv09',  t: 'ind', x: 714, y: 327, tag: 'FV-329409',  bind: 'SCRUB_322E003.ccw.FIC_329409.op', u: '%',   dec: 1 },
       { k: 'tdy25', t: 'ind', x: 494, y: 344, tag: 'TDY-329125', bind: 'SCRUB_322E003.ccw.TDY_329125',   u: 'C',   dec: 1 },
       { k: 'i008',  t: 'ind', x: 995, y: 351, tag: 'IT-329008'  },
@@ -113,7 +113,7 @@
       // ===== CO2 FEED LINE (Item 5) — bound to backend CO2_FEED packet =====
       { k: 'hic203', t: 'ind',    x: 100,  y: 472, tag: 'HIC-322203', bind: 'CO2_FEED.HIC_322203', u: '%',     dec: 1, face: 'hic2' },
       { k: 'pv203',  t: 'avalve', x: 197,  y: 486, tag: 'PV-322203',  bind: 'CO2_FEED.PV_322203',  u: '%',     dec: 1 },
-      { k: 'pic203', t: 'ind',    x: 128,  y: 525, tag: 'PIC-322203', bind: 'CO2_FEED.PIC_322203', u: 'BAR A', dec: 1, face: 'pic' },
+      { k: 'pic203', t: 'ind',    x: 128,  y: 525, tag: 'PIC-322203', bind: 'CO2_FEED.PIC_322203', u: 'BAR A', dec: 1, face: 'pic', mode: 'CO2_FEED.PIC_mode' },
       { k: 'fy403',  t: 'ind',    x: 289,  y: 520, tag: 'FY-322403',  bind: 'CO2_FEED.FY_322403',  u: 'T/H',   dec: 2 },
       { k: 'ft403',  t: 'ind',    x: 289,  y: 561, tag: 'FT-322403',  bind: 'CO2_FEED.FT_322403',  u: 'NM3/H', dec: 0 },
       { k: 'ti017',  t: 'ind',    x: 308,  y: 628, tag: 'TI-322017',  bind: 'CO2_FEED.TI_322017',  u: 'C',     dec: 1 },
@@ -125,8 +125,8 @@
       { k: 'pa', t: 'pump', x: 58, y: 57,  bind: 'pumpA', id: 'A', tag: '321P002A' },
       { k: 'pb', t: 'pump', x: 58, y: 121, bind: 'pumpB', id: 'B', tag: '321P002B' },
       // ---- pump speed / ratio controllers (modelled in 321) ----
-      { k: 's950b', t: 'ind', x: 491, y: 443, tag: 'SIC-321950',    bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950' },
-      { k: 's951b', t: 'ind', x: 497, y: 492, tag: 'SIC-321951',    bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951' },
+      { k: 's950b', t: 'ind', x: 491, y: 443, tag: 'SIC-321950',    bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
+      { k: 's951b', t: 'ind', x: 497, y: 492, tag: 'SIC-321951',    bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
       { k: 'nca2',  t: 'ind', x: 419, y: 448, tag: 'N/C 321P002A',  bind: 'ratio.NC_A', u: '', dec: 3 },
       { k: 'ncb2',  t: 'ind', x: 414, y: 497, tag: 'N/C 321P002B',  bind: 'ratio.NC_B', u: '', dec: 3 },
       // ---- screen-nav hotspots (Item 3) ----
@@ -152,7 +152,7 @@
       { k: 'py9207', t: 'ind', x: 1094, y: 208, tag: 'PY-329207B' },
       { k: 'tt014',  t: 'ind', x: 638,  y: 398, tag: 'TT-322014', bind: 'STRIP_322E001.TT_322014', u: 'C', dec: 1 },
       { k: 'hv605',  t: 'ind', x: 823,  y: 392, tag: 'HV-322605', bind: 'REACT_322R001.HV_322605', u: '%', dec: 1, face: 'hic' },
-      { k: 'lic501', t: 'ind', x: 861,  y: 471, tag: 'LIC-322501', bind: 'STRIP_322E001.LIC_322501.pv', u: '%', dec: 1 },
+      { k: 'lic501', t: 'ind', x: 861,  y: 471, tag: 'LIC-322501', bind: 'STRIP_322E001.LIC_322501.pv', u: '%', dec: 1, mode: 'STRIP_322E001.LIC_322501.mode' },
       { k: 'pic9204',t: 'ind', x: 1113, y: 380, tag: 'PIC-329204' },
       { k: 'hic9601',t: 'ind', x: 1127, y: 489, tag: 'HIC-329601' },
       { k: 'ft9403', t: 'ind', x: 1127, y: 520, tag: 'FT-329403' },
@@ -184,10 +184,18 @@
   let lastS = {};
   let editing = false;
   let simBtn = null;   // fixed SLOW/FAST pacing toggle button
+  let crystEl = null;  // fixed carbamate-crystallization alarm banner (Bug 2)
 
   const stage = () => document.getElementById('stage');
   const gp = (o, path) => path ? path.split('.').reduce((a, k) => (a == null ? undefined : a[k]), o) : undefined;
   const fmt = (v, d) => (v == null || isNaN(v)) ? '--' : Number(v).toFixed(d == null ? 1 : d);
+  // controller mode badge (Item: show mode beside value -> A=Auto, M=Man, E=CAS, O=OOS).
+  // Backend controller dicts emit FULL words (MAN/AUTO/CAS/OOS); pump dicts already emit letters.
+  const MODE_LETTER = { MAN: 'M', AUTO: 'A', CAS: 'E', OOS: 'O', M: 'M', A: 'A', E: 'E', O: 'O' };
+  function modeLetter(o) {                       // o.mode = dot-path to mode field; HIC* = operator hand station (always M)
+    if (o.mode) { const m = gp(lastS, o.mode); return m ? (MODE_LETTER[m] || '') : ''; }
+    return /^HIC-/.test(o.tag || '') ? 'M' : '';
+  }
 
   function svgPump() {
     return '<svg viewBox="0 0 56 56" style="width:100%;height:100%;display:block;">' +
@@ -223,7 +231,7 @@
   function buildBindMap() {            // shared tags read the SAME value on every screen they appear
     const m = {};
     for (const sid in OV) cfg(sid).forEach(o => {
-      if (o.t === 'ind' && o.bind && !m[o.tag]) m[o.tag] = { bind: o.bind, u: o.u, dec: o.dec, face: o.face, fp: o.fp };
+      if (o.t === 'ind' && o.bind && !m[o.tag]) m[o.tag] = { bind: o.bind, u: o.u, dec: o.dec, face: o.face, fp: o.fp, mode: o.mode };
     });
     BIND_MAP = m;
   }
@@ -248,12 +256,13 @@
       el.dataset.tip = o.tag + ' — interlock ' + (armed ? 'LATCHED (override available)' : 'clear')
         + '; XV ' + (open ? 'OPEN' : 'CLOSED') + ' (click to toggle)';
     } else { // ind
-      const b = el.querySelector('b'), sp = el.querySelector('.ou');   // stable nodes (built once); update text only so a click isn't swallowed by per-tick innerHTML churn
-      if (!o.bind) { if (b) b.textContent = o.tag; if (sp) sp.textContent = ''; return; }   // empty slot keeps tag text
+      const b = el.querySelector('b'), sp = el.querySelector('.ou'), mt = el.querySelector('.mt');   // stable nodes (built once); update text only so a click isn't swallowed by per-tick innerHTML churn
+      if (!o.bind) { if (b) b.textContent = o.tag; if (sp) sp.textContent = ''; if (mt) { mt.textContent = ''; mt.className = 'mt'; } return; }   // empty slot keeps tag text
       const v = gp(lastS, o.bind);
       if (b) b.textContent = fmt(v, o.dec);
       if (sp) sp.textContent = o.u || '';
-      el.dataset.tip = o.tag + (o.u ? ' [' + o.u + ']' : '');
+      if (mt) { const ml = modeLetter(o); mt.textContent = ml; mt.className = 'mt' + (ml ? ' m-' + ml : ''); }   // controller mode badge (A/M/E/O); '' for non-controllers
+      el.dataset.tip = o.tag + (o.u ? ' [' + o.u + ']' : '') + (modeLetter(o) ? ' — ' + { A: 'AUTO', M: 'MAN', E: 'CAS', O: 'OOS' }[modeLetter(o)] : '');
     }
   }
   function renderAll() { buildBindMap(); for (const sid in OV) cfg(sid).forEach(o => renderOne(sid, o)); }
@@ -328,11 +337,11 @@
     cfg(sid).forEach(o => {
       const el = document.createElement('div');
       el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'nav' ? 'nav' : o.t === 'strm' ? 'strm' : o.t === 'ovrd' ? 'ovrd' : 'ind');
-      if (o.t === 'ind') {
+      if (o.t === 'ind' || o.t === 'avalve') {                                 // avalve = modulating PV opening %, rendered as a numeric indicator (bug 3: opening was never shown)
         const eo = eff(o);
         if (!eo.bind) el.classList.add('empty');
         if (eo.fp || eo.face || CTRL_RE.test(o.tag)) el.classList.add('fp');
-        el.innerHTML = '<b></b> <span class="ou"></span>';   // stable value/unit nodes; renderOne sets textContent only (no innerHTML churn that swallows clicks)
+        el.innerHTML = '<b></b> <span class="ou"></span><i class="mt"></i>';   // stable value/unit/mode nodes; renderOne sets textContent only (no innerHTML churn that swallows clicks)
       } else if (o.t === 'nav') {
         el.style.width = (o.w || 60) + 'px';
         el.style.height = (o.h || 24) + 'px';
@@ -400,7 +409,16 @@
       '.ov-act button{padding:7px 14px;border-radius:6px;border:1px solid #2f4858;background:#13202c;color:#cfe;cursor:pointer;font:600 12px "Segoe UI";}' +
       '.ov-act .prim{background:#2f8f5f;border-color:#3a6b4e;color:#04140c;}' +
       '.ov-act .danger{background:#3a1717;border-color:#88322f;color:#fbb;}' +
-      '.ov-act button:hover{filter:brightness(1.18);}';
+      '.ov-act button:hover{filter:brightness(1.18);}' +
+      '#ov-cryst{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:9500;display:none;flex-direction:column;gap:3px;min-width:352px;max-width:62vw;padding:9px 15px;border-radius:7px;box-shadow:0 6px 22px rgba(0,0,0,.55);}' +
+      '#ov-cryst.warn{display:flex;background:#3a2a08;border:1px solid #b3892f;color:#ffdf9a;}' +
+      '#ov-cryst.alarm{display:flex;background:#3a0d0d;border:1px solid #ff3030;color:#ffc2c2;animation:crystblink 1s steps(1) infinite;}' +
+      '#ov-cryst .ttl{font:800 12px "Segoe UI",system-ui;letter-spacing:.7px;display:flex;align-items:center;gap:7px;margin-bottom:1px;}' +
+      '#ov-cryst .ttl .ic{font-size:15px;line-height:1;}' +
+      '#ov-cryst .row{font:600 11px Consolas,monospace;opacity:.96;white-space:nowrap;}' +
+      '#ov-cryst .row .eq{display:inline-block;min-width:126px;}' +
+      '#ov-cryst .row .st{display:inline-block;min-width:52px;font-weight:800;}' +
+      '@keyframes crystblink{50%{opacity:.42;}}';
     document.head.appendChild(s);
   }
 
@@ -598,10 +616,49 @@
     simBtn.querySelector('.lbl').textContent = (fast ? 'FAST' : 'SLOW') + (sp != null ? ' ×' + sp : '');
   }
 
-  window.OV_apply = function (s) { lastS = s; window.OTS_LAST = s; renderAll(); simRender(s); };  // app.js calls each ws packet (OTS_LAST -> faceplate prefill)
+  function crystBanner() {                         // Bug 2: plant-wide carbamate-crystallization banner
+    if (document.getElementById('ov-cryst')) return;
+    const d = document.createElement('div'); d.id = 'ov-cryst';
+    document.body.appendChild(d); crystEl = d;
+  }
+  function crystRender(s) {                         // read CRYST + flags each packet; amber WARN / red-blink ALARM
+    if (!crystEl) return;
+    const C = s && s.CRYST, F = (s && s.flags) || {};
+    crystEl.classList.remove('warn', 'alarm');
+    if (!C) { crystEl.style.display = 'none'; return; }
+    const alarms = [], warns = [], bad = [];
+    for (const eq in C) {
+      const r = C[eq]; if (!r) continue;
+      if (r.state === 'ALARM')      alarms.push([eq, r]);
+      else if (r.state === 'WARN')  warns.push([eq, r]);
+      else if (r.state === 'BAD')   bad.push([eq, r]);   // bad PV surfaces too (never silently OK)
+    }
+    const alarm = !!F.CARBAMATE_CRYST_ALARM || alarms.length > 0;
+    const warn  = !!F.CARBAMATE_CRYST_WARN  || warns.length > 0;
+    if (!alarm && !warn && bad.length === 0) { crystEl.style.display = 'none'; crystEl.innerHTML = ''; return; }
+    const rows = (alarm ? alarms.concat(warns) : warns).concat(bad);
+    const cls  = alarm ? 'alarm' : 'warn';
+    const ttl  = alarm ? 'CARBAMATE CRYSTALLIZATION — ONSET'
+                       : 'CARBAMATE CRYSTALLIZATION — APPROACHING';
+    let html = '<div class="ttl"><span class="ic">⚠</span>' + ttl + '</div>';
+    rows.forEach(function (p) {
+      const eq = p[0], r = p[1];
+      let det = '';
+      if (r.state === 'BAD') det = 'bad PV — unverifiable';
+      else det = 'margin ' + r.margin + '°C'
+               + (r.T_cryst != null ? '  (Tcryst ' + r.T_cryst + '°C, T ' + (r.T_cryst + r.margin).toFixed(1) + '°C)' : '');
+      html += '<div class="row"><span class="eq">' + eq + '</span><span class="st">' + r.state + '</span>' + det + '</div>';
+    });
+    crystEl.innerHTML = html;
+    crystEl.classList.add(cls);
+    crystEl.style.display = 'flex';
+  }
+
+  window.OV_apply = function (s) { lastS = s; window.OTS_LAST = s; renderAll(); simRender(s); crystRender(s); };  // app.js calls each ws packet (OTS_LAST -> faceplate prefill)
 
   for (const sid in OV) build(sid);
   editButton();
   simToggle();
+  crystBanner();
   renderAll();
 })();
