@@ -58,7 +58,7 @@ G               = 9.81
 PUMP_D          = 0.140          # m
 PUMP_L          = 0.205          # m
 PUMP_N_PLGR     = 3
-PUMP_ETA_V      = 0.95
+PUMP_ETA_V      = 0.980         # field-calibrated: DCS 3.6.2025 startup, T-separated fit 0.980+/-0.001 (n=5, flat across 100-142 bar g -> design value, not low-slip artifact). Was 0.95 (assumed, +3.2% under). Conservation-neutral: eta_v cancels in the closed-loop ratio reconstruction (rpm back-computed then mass rebuilt), only SIC-321950 rpm display shifts.
 PUMP_ETA_M      = 0.915
 PUMP_V_PER_REV  = (math.pi/4.0) * PUMP_D**2 * PUMP_L * PUMP_N_PLGR   # m^3/rev
 PUMP_RATED_RPM  = 152.0
@@ -1580,12 +1580,14 @@ class State:
         self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M", "fault": False}
         # pumpB MANUAL seed pinned at the ratio-cascade DESIGN opening (step_sim ~L1539-1544:
         #   open_cas = clamp(rpm_req/PUMP_RATED_RPM*100), rpm_req from ratio_SP*NC_TO_MASS*F_CO2_th).
-        #   Cluster-2023 design point (fresh N/C = RATIO_PV_DES >= 2.0): open_for(RATIO_PV_DES) == 86.2 %
-        #   (exact inverse of the cascade flow law, NC_FACTOR*NC_TO_MASS == 1). The pump delivers motive
+        #   Cluster-2023 design point (fresh N/C = RATIO_PV_DES >= 2.0): the seed is the exact inverse of
+        #   the cascade flow law (NC_FACTOR*NC_TO_MASS == 1) so the pump delivers motive
         #   == EJ_MOTIVE_NH3_DES == 42762.05 kg/h -> ejector phi_m == 1 -> W_feed == W0, L_feed == L0 at
-        #   the design seed (stationary). [Was 82.147 % under the SUPERSEDED N/C=1.928 Cluster-1928 point,
-        #   which forced ratio_PV=1.928 != RATIO_PV_DES -> L_fresh normalization off -> L_feed != L0.]
-        _OPEN_DES_B = 86.2   # ratio block @ design (pumpA off, pumpB on); == open_for(RATIO_PV_DES)
+        #   the design seed (stationary). DERIVED from the module constants (not a hardcoded literal) so it
+        #   stays bumpless-consistent with PUMP_ETA_V by construction: eta_v=0.95 -> 86.200 %, eta_v=0.980
+        #   -> 83.561 %.  [Was 82.147 % under the SUPERSEDED N/C=1.928 Cluster-1928 point, which forced
+        #   ratio_PV=1.928 != RATIO_PV_DES -> L_fresh normalization off -> L_feed != L0.]
+        _OPEN_DES_B = (EJ_MOTIVE_NH3_DES / NH3_RHO) / (PUMP_V_PER_REV * PUMP_ETA_V * 60.0) / PUMP_RATED_RPM * 100.0
         self.pumpB = {"on": True, "open_act": _OPEN_DES_B,
                       "speed_act": _OPEN_DES_B / 100.0 * PUMP_RATED_RPM,
                       "current": pump_current_A(_OPEN_DES_B / 100.0 * PUMP_RATED_RPM, True),
