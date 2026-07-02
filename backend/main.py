@@ -28,6 +28,7 @@ import math
 import os
 import time
 import threading
+from collections import deque
 from typing import Optional, Set
 
 import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
@@ -1472,6 +1473,48 @@ def _lag1(store: dict, key: str, target: float, tau_s: float, dt: float) -> floa
     return val
 
 
+# --- Empirical transport dead time (DCS 03-06-2025 anchor analysis) -------------------
+#  Feed-introduction propagation: dead time bracketed to <=572 s, best estimate 345 s
+#  (PT-329201 FOPTD fit, R2=0.9888; see reports/dcs_anchor_dynamics_2025-06-03.md §1.2).
+#  Applied ONLY to the feed tear streams (NH3 motive, CO2 feed) — the loop's 3470 s
+#  pressurization time constant is an EMERGENT property of the inventory ODEs and is a
+#  validation target, NOT a hard-coded lag (hard-coding it would double-count dynamics).
+FEED_TD_S = 345.0          # s, NH3/CO2 feed -> synthesis-loop response dead time
+
+
+def _delay(store: dict, key: str, target: float, td_s: float, dt: float) -> float:
+    """Pure transport delay y(t) = u(t - td) via ring buffer (deque, O(1)/tick).
+
+    Lazy-inits the buffer filled with `target` so the first call (and any constant
+    input) passes through unchanged -> pinned design steady state stays bit-exact.
+    Mass/energy conservative: values are only re-timed, never scaled or created —
+    material "missing" downstream during a transient is exactly the line pack
+    sum(buf)*dt held in transit.  State lives in `store` (State.tlag), keyed by `key`.
+    """
+    if td_s <= 0.0 or dt <= 0.0:
+        return target
+    n = max(1, int(round(td_s / dt)))
+    buf = store.get(key)
+    if buf is None or len(buf) != n:
+        buf = deque([target] * n, maxlen=n)
+        store[key] = buf
+    out = buf[0]
+    buf.append(target)      # maxlen=n -> appending evicts buf[0] automatically
+    return out
+
+
+def _foptd(store: dict, key: str, target: float, tau_s: float, td_s: float,
+           dt: float) -> float:
+    """First-order-plus-dead-time: dy/dt = (u(t-td) - y)/tau.
+
+    Composition of _delay and _lag1 (implicit Euler, unconditionally stable).
+    Realizes G(s) = e^(-td*s) / (tau*s + 1) on a published signal without
+    touching the underlying physics states.
+    """
+    u_delayed = _delay(store, key + ":dl", target, td_s, dt)
+    return _lag1(store, key + ":lag", u_delayed, tau_s, dt)
+
+
 def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None):
     """Uniform process-stream object. Derives BOTH mol % and mass % from the same
     per-component kmol/h vector, so the two bases can never drift. rho unknown -> None
@@ -1743,6 +1786,10 @@ def step_sim(dt: float) -> dict:
     CO2_feed_kmolh = F_CO2_feed_kgh / CO2_FEED_MW      # kmol/h
     FT_322403 = CO2_feed_kmolh * NM3_PER_KMOL          # Nm3/h  (FT-322403)
     FY_322403 = s.F_CO2_th                             # t/h    (FY-322403)
+    # Empirical BL->loop transport dead time (FEED_TD_S): the CO2 the synthesis loop
+    # (stripper strip-gas + reactor) receives NOW left the battery-limit meter 345 s ago.
+    # FY/FT-322403, load % and the DCS ratio cascade/PV all read the LIVE BL meter above.
+    F_CO2_syn_th = _delay(s.tlag, "FEED_CO2", s.F_CO2_th, FEED_TD_S, dt)
     Load_pct  = s.F_CO2_th / (CO2_DES_KGH / 1000.0) * 100.0   # % of design CO2 flow
     pic["pv"] = P_line_bara
 
@@ -1823,6 +1870,11 @@ def step_sim(dt: float) -> dict:
     # 322F001 HP ejector: live motive NH3 (gated by XV-322901) + entrained carbamate
     #   -> discharge stream to 322E002 (TT-322012). Motive temp = TI-321020.
     motive_nh3_kgh = (F_pump_total_th * 1000.0) if disch_open else 0.0
+    # Empirical BL->loop transport dead time (FEED_TD_S): NH3 leaving the pump discharge
+    # header transits the BL->ejector line before the loop sees it.  Pure re-timing (ring
+    # buffer) — the tank/pump balance above debits the LIVE flow; the difference is line
+    # pack in transit.  FY-321401 / ratio-PV read the live pump-discharge transmitters.
+    motive_nh3_kgh = _delay(s.tlag, "FEED_NH3", motive_nh3_kgh, FEED_TD_S, dt)
     # Option 3 coupling: ACTUAL entrainment = ejector capacity * gravity suction head (scrub level).
     #   scrub_lvl_frac = prior-step 322E003 level / NLL (loop tear: ejector runs BEFORE the scrubber
     #   block, so it sees last-tick level).  frac=1 at NLL -> design entrainment; frac self-regulates
@@ -1855,7 +1907,7 @@ def step_sim(dt: float) -> dict:
     # Stripper consumes the previous step's reactor overflow (tear stream of the synthesis
     # recycle); at design this equals the frozen STRIP_FEED207_KMOLH -> output unchanged.
     T_steam_live = tsat_steam(s.steam.P_MP)           # live sat-steam shell T from MP header pressure
-    strip = stripper_322e001(s.F_CO2_th, T_steam_live, STRIP_P_DES_BARA,
+    strip = stripper_322e001(F_CO2_syn_th, T_steam_live, STRIP_P_DES_BARA,
                              overflow_kmolh=s.react_overflow_kmolh,
                              L_feed=s.react_L_feed, W_feed=s.react_W_feed)
 
@@ -1957,7 +2009,7 @@ def step_sim(dt: float) -> dict:
     #   conversion->composition->HPCC-N/C cliff return leg that closed an unstable G~-15 thermal recycle
     #   (the source of the TT-322010 161<->213 oscillation). conv_fac=1 -> 170+13=183=T0_DES (bit-exact).
     T_conv_c = HPCC_T_PROD_DES_C + REACT_DT_COL_DES * s.react_conv_fac
-    react   = react_322r001(hpcc, s.F_CO2_th, s.HIC_322605, L_drive=L_blend, W_drive=W_blend,
+    react   = react_322r001(hpcc, F_CO2_syn_th, s.HIC_322605, L_drive=L_blend, W_drive=W_blend,
                             T_overflow_c=T_conv_c)
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
