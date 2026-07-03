@@ -356,6 +356,14 @@ The datasheet pin (80 %) outranks a synthetic startup anchor under the sourcing 
 **no pin change**. Discriminator if plant data becomes available: a steady 100 %-load
 trend of LT-322504 (design NLL should read ≈ 80 % if hypothesis 2, ≈ 100 % if 1).
 
+**Update 2026-07-03 (session 3):** user supplied `Urea_NormalOp_29-06-2025_Trends.xlsx`
+(29-06 normal op, 08:59 → 00:59 30-06, 1921 rows @30 s, sheet self-labelled SYNTHETIC)
+as the discriminator — **the export contains no LT-322504 / LIC-322501 / level tag**, so
+C2 remains open. Re-export of the same window including LT-322504-3 (and LIC-322501)
+requested. 29-06 steady anchors logged in §9. Note also that the LT-322504 display law
+changed in session 3 (§9): it now tracks the physical 322R001 head, no load pin — the
+discriminator question (transmitter span/zero vs liquid-full) is unchanged.
+
 ### C3 — Hand-valve / SP lineup deltas — CLOSED (not a model contradiction)
 
 HV-322602 74→60 %, HIC-322604 50→80 %, HIC-322605 60→49 %, TIC-329005 SP 88.1 vs design
@@ -396,3 +404,54 @@ No numeric constant met the sourcing bar for change: every candidate was either
 validated (NH3_RHO), degenerate (η_v·ρ_cfg), design-doc-sourced (NLL 80 %), or an
 operator input (C3/C4). Design steady state untouched → bit-exactness preserved by
 construction; verified by Gate-A probe post-edit.
+
+## 9. Task-5 addendum (2026-07-03, session 3) — LT-322504 display law + 29-06 dataset
+
+### 9.1 Display law change (user order)
+
+Order: "reactor level LT-322504 should not be coupled and pinned to plant load, change in
+LT-322504 should be according to mass balance on 332R001" (typo for 322R001). The shadow-holdup
+/ `_load_gate` display machinery was deleted; LT-322504 now reads the physical 322R001 head
+through the fixed N7 transmitter geometry (datasheet UD-AU-322-EC-0006):
+
+$$LT = \mathrm{clamp}\!\left(80 + \frac{H_{liq} - 20.0}{1.5}\times 100,\; 0,\; 100\right),
+\qquad H_{liq} = 25\,\frac{\text{react\_level\_pct}}{100}\ \text{m}$$
+
+driven by the physical inventory ODE
+$\frac{dm_{liq}}{dt} = \dot m_{in} - \dot m_{out} + \dot m_{fwd}$,
+$\dot m_{out} = \dot m_{des}\cdot\frac{\theta}{\theta_{des}}\cdot\frac{\max(L,0)}{L_{des}}$,
+$L = m_{liq}/(\rho(T_{bulk})\,A)$, equilibrium $L_{eq} = L_{des}\,\theta_{des}/\theta$.
+
+### 9.2 Stripper slip-direction fix (S2 root cause)
+
+Pre-fix, opening HV-322605 60→75 % RAISED the level: `stripper_322e001`'s feed-load choke
+g_T fed the overhead `slip` term, routing unstripped volatiles back around the loop instead
+of out through the bottoms (LV-322501) — wrong physics sign for a flooded steam-limited
+stripper. Fix: `mod = clamp(eta_T_steam·eta_co2·eta_P, 0, 1.12) × min(g_T, 1)`;
+`slip = max(1−g_NC,0) + max(1−g_HC,0)` (composition terms only). Design (g_T=1) and
+turndown (g_T>1) byte-identical; per-component mass closure exact (worst 0.00 ppm / 60
+audit cases). Verified: S2 settles at 16.008 m ≡ L_eq = 20·(60/75) = 16.0 m; 5-gate probe,
+valve-indicator matrix (HV-322605→LT d=−100), flood, pillar4, reactor 14/14, ejector,
+full audit, turndown A/B (70–95 % byte-identical vs HEAD, 100 % row improved CHECK→OK),
+and the 4-gate 28-06 harness all PASS. Gate-A pins bit-exact, LT-322504 = 80.0 at design.
+
+### 9.3 29-06-2025 normal-op steady anchors (C2 discriminator attempt)
+
+`Urea_NormalOp_29-06-2025_Trends.xlsx`, sheet "30s Interpolated (SYNTHETIC)", 1921 rows
+@30 s, 08:59 29-06 → 00:59 30-06, load 99.1–101.3 %. **No LT-322504 / LIC-322501 / level
+tag → C2 discriminator absent; re-export requested.** Steady means (hourly anchors):
+
+| Tag | Steady value | Design / reference |
+|---|---|---|
+| UREA-LOAD | 99.1–101.3 % | 100 % |
+| LV-322501 | ≈ 44.6 % (43.6–45.5) | `LV322501_OPEN_DES` 46.1 % — within 3 % |
+| HIC-322605 | ≈ 55.2 % | 49 % at 16:01 startup (still ramping then) |
+| PT-329201 | ≈ 130.5 bar g steady | 139.6 bar g startup peak (C4: bar g convention) |
+| PIC-322203 | 144.4–145.7 bar g | SP eased post-startup |
+| AY-322701 | 3.19–3.34 | design N/C 3.0; meter span 2.6–3.4 (C5) |
+| FY-322403 | ≈ 28.4 t/h | 27.4 t/h at 97 % startup anchor |
+| HV-322602 | 65–66 % | design 74 % (C3: operator lineup) |
+| TT-322013 | 187.1–187.6 °C | 186.9 °C at 97 % startup anchor |
+
+LV-322501 steady 44.6 % at ~100 % load independently corroborates the X2 calibration
+(46.1 % design pin; sim settles 44.85 % at 97 % load, field band 44.2–46.4).

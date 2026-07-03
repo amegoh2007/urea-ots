@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-03 (session 2) · branch `fix/reactor-level-drain-and-vent-coupling` · NOT pushed_
+_Last updated: 2026-07-03 (session 3) · branch `fix/reactor-level-drain-and-vent-coupling` · NOT pushed_
 
 ## Goal
 
@@ -80,7 +80,9 @@ Headlines:
   `NH3_RHO` / `PUMP_ETA_V` in main.py (comment-only; Gate-A probe re-run post-edit: bit-exact).
 - **C2 reactor level RESIDUAL**: 99.94 % plateau = liquid-full-to-top-tap OR radiometric density
   cross-sensitivity (Beer–Lambert, Berthold) — not separable from synthetic anchors; datasheet
-  NLL 80 % pin stands. Discriminator: steady 100 %-load LT-322504 trend.
+  NLL 80 % pin stands. Discriminator: steady 100 %-load LT-322504 trend. **Update session 3:**
+  29-06 normal-op export received — NO LT-322504 column → still open, re-export requested
+  (same window + LT-322504-3 + LIC-322501). See Task-5 section §C2 below.
 - **C3 lineup deltas CLOSED**: operator inputs, not equations.
 - **C4 P_syn CLOSED**: PT-329201 in bar g ⇒ 14:01 peak 139.6 barg = 140.6 bara ≈ design 140.7;
   16:01 easing follows PIC SP (operator causality), sim floats on vent capacity. No edit.
@@ -149,10 +151,80 @@ target τ_sim ∈ [2884, 4055] s), never hard-coded.
   bumpless CAS |Δ|=0.0000%.
 - `backend/tests/run_full_audit.py` — **exit 0, 0 FAIL** (5-campaign suite ran to END OF CAMPAIGN).
 
+## 2026-07-03 (session 3): Task 5 — LT-322504 decoupled from load + stripper slip-direction fix
+
+**User order:** "reactor level LT-322504 should not be coupled and pinned to plant load, change in
+LT-322504 should be according to mass balance on 332R001" (typo for 322R001). **Overrides** the
+earlier Lead-Ops Option-2 shadow-display mandate.
+
+### main.py edits (uncommitted at time of writing → this session's commit)
+
+**Display decoupling (6 edits):** deleted `self.react_m_liq_shadow`, `_load_gate()`, and the
+SHADOW holdup block. LT-322504 now reads the PHYSICAL head through fixed N7 transmitter
+geometry (~L2140):
+
+```python
+_H_liq_react         = REACT_LIQ_H_M * s.react_level_pct / 100.0          # physical head, m
+s.react_lt322504_pct = clamp(REACT_LEVEL_NLL_PCT
+                             + (_H_liq_react - REACT_LEVEL_DES_M) / REACT_LT_SPAN_M * 100.0,
+                             0.0, 100.0)                                  # span 1.5 m, 20.0 m = 80 %
+```
+
+`react_level_pct` is the DOMINO physical inventory: dm/dt = ṁ_in − ṁ_out + ṁ_fwd with
+ṁ_out = ṁ_des·(θ/θ_des)·(max(L,0)/L_des), L = m/(ρ(T_bulk)·A) → L_eq = L_des·(θ_des/θ).
+
+**S2 stripper slip-direction fix (root cause of level-rise-on-vent-open):** in
+`stripper_322e001` the feed-load choke `g_T` fed the `slip` term, routing unstripped volatiles
+OVERHEAD (loop return) instead of BOTTOMS (loop exit via LV-322501) — wrong physics sign for a
+flooded steam-limited stripper (classic NH₃ slip goes to the LP section). Combined with the
+g_HC 1.05 clamp it made the dynamic return gain ≥ 1, so opening HV-322605 60→75 % RAISED the
+physical level. Fix (one functional line + comments, ~L640):
+
+```python
+mod  = clamp(eta_T_steam * eta_co2 * eta_P, 0.0, 1.12) * min(g_T, 1.0)
+slip = max(1.0 - g_NC, 0.0) + max(1.0 - g_HC, 0.0)   # composition (N/C, H/C) breakthrough only
+```
+
+Design g_T = 1 and feed-lean g_T > 1 ⇒ min(g_T, 1) = 1 ⇒ design point AND turndown
+byte-identical; only the flood branch (g_T < 1) changes, cutting the split so volatiles leave
+with the bottoms. Per-component conservation exact (split loop untouched).
+
+### Verification (all green, this session)
+
+- 5-gate probe `scratchpad/verify_task5_lt322504.py` **OVERALL PASS**:
+  Gate A design hold — all pins bit-exact, LT = 80.0;
+  S1 feed cut to 90 % — LT 31.198, level 77.072 (d_vs_ctrl −48.80);
+  S2 HV-322605 +15 % — LT 0.0, level 69.647 falling (d −80.0; pre-fix FAIL at +17.48);
+  S3 HV-322602 close 74→60 — LT peak 87.884 (d_peak +7.884).
+- S2 settle trace (`scratchpad/s2_settle_trace.py`): level → **16.008 m at t = 10800 s**,
+  exactly L_eq = 20·(60/75) = 16.0 m; LV op returns 46.14 %, P_syn 140.692 — loop inventory
+  shed via bottoms/letdown, conservation intact.
+- `tests/audit_e001_stripper.py` ALL PASS: mass closure worst 0.00 ppm across 60 cases;
+  B2 slip monotone 0→0.4609→0.5; B3 extremes finite; LIC sump returns to SP 50.000 %.
+- Regression: valve-indicator matrix `HV-322605 → LT_322504 d=−100 [OK]` (open→fall restored);
+  flood scenario close→LT 100.000; pillar4 flood LT pegged 100, closure resid ~3e-9;
+  test_reactor 14/14; ejector stall + spindle suites PASS; `run_full_audit.py` exit 0;
+  28-06 4-gate probe (`verify_sim_vs_2806.py`) OVERALL PASS.
+- Turndown A/B vs HEAD (git stash): rows 70–95 % byte-identical to HEAD; 100 % row IMPROVED
+  (f_cons 1.10602→1.03705, dPsyn 0.0110→0.0, CHECK→OK) — old g_T slip term was an asymmetric
+  ripple amplifier at design.
+
+### §C2 status (Task 6, still open)
+
+User attached `Urea_NormalOp_29-06-2025_Trends.xlsx` (29-06 normal op, 08:59→00:59 30-06,
+1921 rows @30 s, sheet self-labelled SYNTHETIC) as the C2 discriminator — **the export has no
+LT-322504 / LIC-322501 / level tag** → C2 stays open. Re-export of the same window including
+LT-322504-3 (and LIC-322501) requested from user. 29-06 steady anchors logged in the 28-06
+report (§9): LV-322501 ≈ 44.6 %, HIC-322605 ≈ 55.2, PT-329201 ≈ 130.5 barg, AY-322701
+3.19–3.34, FY-322403 ≈ 28.4 t/h, PIC-322203 144.4–145.7 barg, HV-322602 65–66,
+TT-322013 187.1–187.6.
+
 ## Files
 
 **Committed / active source:**
-- `backend/main.py` — the engine. `LV322501_OPEN_DES` 82.0→46.1 this session (~L335).
+- `backend/main.py` — the engine. `LV322501_OPEN_DES` 82.0→46.1 (session 2, ~L335); session 3:
+  LT-322504 display decoupling (shadow machinery deleted, ~L2140) + stripper slip-direction fix
+  (`mod × min(g_T,1)`, ~L640).
 - `backend/handoff.md` — this file.
 - `backend/reports/dcs_anchor_dynamics_2025-06-03.md` — 03-06 anchor report (+LIC closure note).
 - `backend/reports/dcs_anchor_dynamics_2025-06-28.md` — **28-06 anchor report (this session)**.
@@ -162,6 +234,8 @@ target τ_sim ∈ [2884, 4055] s), never hard-coded.
 - `probe_pins_2806.py` — boot-pin + 600 s hold A/B probe (pre/post edit bit-exactness).
 - `explore_2806.py`, `knots_2806.py`, `anchors_2806.py`, `analysis_2806.py`,
   `anchors_2806.json`, `analysis_2806_results.json` — 28-06 anchor extraction + 10-target analysis.
+- `verify_sim_vs_2806.py` — 4-gate sim-vs-28-06 harness (session 3 re-run: OVERALL PASS).
+- `verify_task5_lt322504.py`, `s2_settle_trace.py` — Task-5 5-gate probe + S2 long settle.
 
 **Untracked in repo root/backend (NOT mine, left alone — do not commit blindly):**
 `Gemini/`, `Urea Simulation/`, `TECH_DEBT.md`, `fundamentals.md`, several `Combined_*_PFD*.md`,
@@ -177,6 +251,12 @@ target τ_sim ∈ [2884, 4055] s), never hard-coded.
 - `LV322501_OPEN_DES` = 46.1 % (field, 28-06 anchors; was datasheet 82.0).
 - Pinned state: LT-322504=80.0000%, strip_level=50.0000%, F_CO2_th=54.618 t/h, F_in_BL_th=42.762 t/h,
   pumpB speed_act=127.0131 rpm, open_act=83.5612 %. Sim tick DT=0.1 s, STEP_CAP=0.5 s, FAST=×60.
+- Gate-A 600 s hold pins (re-verified post Task-5, bit-exact): LV_op 46.099420016307754,
+  strip_level 49.99999990296993, p_syn 140.7, F_CO2_th 54.618, pumpB_rpm 127.01306122448977,
+  react_level_pct 80.0, react_lt322504_pct 80.0.
+- LT-322504 display law (session 3): LT = clamp(80 + (H_liq − 20.0)/1.5 × 100, 0, 100),
+  H_liq = 25·react_level_pct/100. Equilibrium head L_eq = 20·(60/HIC605) m — verified 16.008 m
+  at HIC605 = 75.
 
 ## Failed / rejected approaches (don't repeat)
 
@@ -194,6 +274,11 @@ target τ_sim ∈ [2884, 4055] s), never hard-coded.
   REJECTED.** Operator practice ≠ design basis; would fabricate constants.
 - **Adopting 28-06 τ=2246 s or T3/T5/T9/T10 secants as model gains — REJECTED.** Under-resolved
   / confounded / sign-unstable (report §3–4).
+- **Shadow-holdup / `_load_gate` LT-322504 display (Option-2 mandate) — DELETED (session 3, user
+  order).** Display pinned to plant load hid real inventory motion; LT must track physical head.
+- **g_T (feed-load) term inside stripper `slip` — REJECTED (session 3, the S2 bug).** Routes
+  unstripped volatiles overhead → positive loop-return gain → level RISES on vent open. Feed-load
+  choke must CUT the split (`mod × min(g_T,1)`) so volatiles exit with bottoms via LV-322501.
 
 ## Next steps (if work resumes)
 
