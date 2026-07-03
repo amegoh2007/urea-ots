@@ -332,7 +332,14 @@ LIC_322501_TI       = 90.0        # s, integral time
 #   (effective dP folded into the constant), with mild sqrt(dP) synthesis-pressure coupling.
 #   LIC-322501 DIRECT-acting on the FC valve = correct negative feedback (level^ -> drain^).
 LV322501_KVS        = 36.0        # m3/h flow coefficient (full open) [reference]
-LV322501_OPEN_DES   = 82.0        # %, opening at the design bottom-solution flow
+#   FIELD CALIBRATION (DCS 28-06-2025 startup anchors, reports/dcs_anchor_dynamics_2025-06-28.md):
+#   at 97 % urea load LV-322501 held 45.4 % (stable 42-45.4 % over final 3 h); dP-corrected to
+#   design (sqrt((P_syn-4)/(140.7-4)) = 0.9853) and load-corrected (/0.97) -> 46.1 % opening at
+#   design flow (cross-checks 46.4 / 44.2 % at 14:01/15:01).  Datasheet-predicted 82 % stroke
+#   over-states required travel ~1.8x for the installed flashing service; DCS reality governs.
+#   Pin-safe: constant enters only as boot seed (op = OPEN_DES) and ratio normalizer
+#   (op/OPEN_DES), so the design steady state is bit-identical.
+LV322501_OPEN_DES   = 46.1        # %, opening at the design bottom-solution flow (field-calibrated)
 STRIP_SUMP_DT_LOSS_DES_C = 4.0    # C, design-throughput sump heat-loss ΔT (falling-film tube exit -> LV-322501 drain)
 STRIP_BOT_T_CRYST_C      = 132.7  # C, urea-melt crystallization floor = sump heat-loss sink T (low-throughput asymptote)
 STRIP_SUMP_NTU_DES       = STRIP_SUMP_DT_LOSS_DES_C / (STRIP_T_BOTTOM_DES_C - STRIP_BOT_T_CRYST_C)  # τ_des = UA/(ṁ_des·cp), design sump heat-loss NTU ≈ 0.1018
