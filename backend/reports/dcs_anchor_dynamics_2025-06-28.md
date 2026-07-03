@@ -337,7 +337,7 @@ whitepaper, UreaKnowHow 2024 Gholipour radiometric paper. Verdict per item: **cl
    design suction density (fixed-k ignores feed-T density change). The engine computes
    true mass — the residual +1.4 % display offset is a DCS artifact, not a model error.
 
-### C2 — LT-322504 plateau 99.94 % vs model NLL pin 80 % — RESIDUAL
+### C2 — LT-322504 plateau 99.94 % vs model NLL pin 80 % — CLOSED (2026-07-03 session 3, see below)
 
 Field level saturates at 99.94 % from 92 % load onward; model pins NLL at 80 % of the
 1.5 m span (datasheet UD-AU-322-EC-0006, nozzle N7, top tap 1 m above overflow).
@@ -356,13 +356,41 @@ The datasheet pin (80 %) outranks a synthetic startup anchor under the sourcing 
 **no pin change**. Discriminator if plant data becomes available: a steady 100 %-load
 trend of LT-322504 (design NLL should read ≈ 80 % if hypothesis 2, ≈ 100 % if 1).
 
-**Update 2026-07-03 (session 3):** user supplied `Urea_NormalOp_29-06-2025_Trends.xlsx`
-(29-06 normal op, 08:59 → 00:59 30-06, 1921 rows @30 s, sheet self-labelled SYNTHETIC)
-as the discriminator — **the export contains no LT-322504 / LIC-322501 / level tag**, so
-C2 remains open. Re-export of the same window including LT-322504-3 (and LIC-322501)
-requested. 29-06 steady anchors logged in §9. Note also that the LT-322504 display law
-changed in session 3 (§9): it now tracks the physical 322R001 head, no load pin — the
-discriminator question (transmitter span/zero vs liquid-full) is unchanged.
+**CLOSED 2026-07-03 (session 3), user directive:** the 28-06 window
+**15:23:00 – 16:01:00** is declared the steady-state discriminator (the 29-06 normal-op
+export lacked the LT tag; that re-export request is moot). Window stats (77 rows @30 s,
+interpolated between true 15:01/16:01 anchors):
+
+| Tag | mean | min | max | range |
+|---|---|---|---|---|
+| UREA-LOAD | 96.02 | 95.04 | 97.00 | 1.96 |
+| **LT-322504-3** | **99.94** | 99.94 | 99.94 | **0.00 (dead flat)** |
+| HIC-322605 | 48.05 | 47.10 | 49.00 | 1.90 |
+| LIC-322501 | 69.37 | 65.54 | 73.20 | 7.66 |
+| LV-322501 | 44.32 | 43.25 | 45.40 | 2.15 |
+| PT-329201 | 135.92 bar g | 135.70 | 136.14 | 0.44 |
+
+**Verdict: hypothesis 1 — the reactor is genuinely liquid-full above the top tap under the
+field lineup.** The post-Task-5 engine (LT-322504 = physical head through N7 geometry, §9.1)
+reproduces the reading **emergently, with no constant changed**: the drain law gives
+
+$$L_{eq} = L_{des}\cdot\frac{\dot m_{in}}{\dot m_{des}}\cdot\frac{\theta_{des}}{\theta}
+        = 20.0 \times 0.96 \times \frac{60}{48.05} = 23.98\ \text{m}
+        \;>\; 20.3\ \text{m (top tap, URV)}$$
+
+so the transmitter saturates. Sim probe (`scratchpad/probe_c2_close.py`): design hold
+600 s (LT = 80.0000 bit-exact), then field lineup applied (load 96 %, HIC-322605 = 48.05);
+LT reaches **100.000 by t = 1800 s and stays clamped**; head 23.359 m at t = 15000 s,
+asymptoting to the predicted 23.98 m; **LV op settles 43.87 % vs field window 44.32 %
+(43.25–45.40)** — independent corroboration of the X2 calibration inside the window.
+Plant 99.94 vs sim clamp 100.0: 0.06 % ≈ transmitter near-saturation readout, immaterial.
+
+Hypothesis 2 (radiometric density cross-sensitivity) is rejected as the primary cause: a
+density bias cannot produce a dead-flat 99.94 across a 2 % load swing, whereas a clamped
+transmitter above URV does exactly that. **No model edit** — the datasheet NLL 80 % pin
+remains the DESIGN point (design lineup θ = 60 % ⇒ 20.0 m = 80 %); the plant plateau is an
+operating-lineup consequence (θ ≈ 48 % ⇒ inventory above the top tap), which the mass
+balance now reproduces.
 
 ### C3 — Hand-valve / SP lineup deltas — CLOSED (not a model contradiction)
 
@@ -395,7 +423,7 @@ degrading the field secants. No edit.
 | ID | Contradiction | Verdict | Model change |
 |---|---|---|---|
 | C1 | pump map −1.4 % | closed (fixed-k DCS compute tag; NH3_RHO NIST-validated) | comments only |
-| C2 | reactor level 99.94 vs 80 % | residual (2 hypotheses; datasheet outranks anchor) | none |
+| C2 | reactor level 99.94 vs 80 % | **closed session 3** (liquid-full above top tap; sim reproduces emergently under field lineup) | none |
 | C3 | lineup deltas | closed (operator practice ≠ design) | none |
 | C4 | P_syn deviation direction | closed (bar g convention + SP causality) | none |
 | C5 | N/C→T direction | closed (sim reproduces negative gain in field window) | none |
@@ -438,8 +466,10 @@ and the 4-gate 28-06 harness all PASS. Gate-A pins bit-exact, LT-322504 = 80.0 a
 ### 9.3 29-06-2025 normal-op steady anchors (C2 discriminator attempt)
 
 `Urea_NormalOp_29-06-2025_Trends.xlsx`, sheet "30s Interpolated (SYNTHETIC)", 1921 rows
-@30 s, 08:59 29-06 → 00:59 30-06, load 99.1–101.3 %. **No LT-322504 / LIC-322501 / level
-tag → C2 discriminator absent; re-export requested.** Steady means (hourly anchors):
+@30 s, 08:59 29-06 → 00:59 30-06, load 99.1–101.3 %. No LT-322504 / LIC-322501 / level
+tag in this export. **C2 was subsequently closed (user directive) on the 28-06
+15:23–16:01 window instead — see §8-C2; the 29-06 re-export request is moot.**
+Steady means (hourly anchors), retained as normal-op reference:
 
 | Tag | Steady value | Design / reference |
 |---|---|---|

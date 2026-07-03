@@ -78,11 +78,12 @@ Headlines:
   (ISA-5.1 letter Y). η_v fit degeneracy flagged: only η_v·ρ_cfg = 601.6 kg/m³ constrained;
   committed (0.980, 613.9) is one solution — conservation-neutral. Caveat comments added at
   `NH3_RHO` / `PUMP_ETA_V` in main.py (comment-only; Gate-A probe re-run post-edit: bit-exact).
-- **C2 reactor level RESIDUAL**: 99.94 % plateau = liquid-full-to-top-tap OR radiometric density
-  cross-sensitivity (Beer–Lambert, Berthold) — not separable from synthetic anchors; datasheet
-  NLL 80 % pin stands. Discriminator: steady 100 %-load LT-322504 trend. **Update session 3:**
-  29-06 normal-op export received — NO LT-322504 column → still open, re-export requested
-  (same window + LT-322504-3 + LIC-322501). See Task-5 section §C2 below.
+- **C2 reactor level — CLOSED session 3 (user directive)**: 28-06 window 15:23–16:01 declared
+  steady state. LT-322504-3 = 99.94 dead flat at load 95–97 %, HIC-322605 = 48.05. Post-Task-5
+  engine reproduces it emergently: L_eq = 20·0.96·(60/48.05) = 23.98 m > top tap 20.3 m ⇒ LT
+  clamps 100.0 (probe: LT 100.000 by 1800 s, head 23.36 m @15000 s, LV op 43.87 vs field 44.32).
+  Verdict = liquid-full above top tap under field lineup; NLL 80 % stays the DESIGN point; no edit.
+  Report §8-C2 + §9.3. (Earlier 29-06 re-export request moot.)
 - **C3 lineup deltas CLOSED**: operator inputs, not equations.
 - **C4 P_syn CLOSED**: PT-329201 in bar g ⇒ 14:01 peak 139.6 barg = 140.6 bara ≈ design 140.7;
   16:01 easing follows PIC SP (operator causality), sim floats on vent capacity. No edit.
@@ -209,15 +210,20 @@ with the bottoms. Per-component conservation exact (split loop untouched).
   (f_cons 1.10602→1.03705, dPsyn 0.0110→0.0, CHECK→OK) — old g_T slip term was an asymmetric
   ripple amplifier at design.
 
-### §C2 status (Task 6, still open)
+### §C2 status — CLOSED (user directive, 28-06 window 15:23–16:01)
 
-User attached `Urea_NormalOp_29-06-2025_Trends.xlsx` (29-06 normal op, 08:59→00:59 30-06,
-1921 rows @30 s, sheet self-labelled SYNTHETIC) as the C2 discriminator — **the export has no
-LT-322504 / LIC-322501 / level tag** → C2 stays open. Re-export of the same window including
-LT-322504-3 (and LIC-322501) requested from user. 29-06 steady anchors logged in the 28-06
-report (§9): LV-322501 ≈ 44.6 %, HIC-322605 ≈ 55.2, PT-329201 ≈ 130.5 barg, AY-322701
-3.19–3.34, FY-322403 ≈ 28.4 t/h, PIC-322203 144.4–145.7 barg, HV-322602 65–66,
-TT-322013 187.1–187.6.
+29-06 normal-op export (`Urea_NormalOp_29-06-2025_Trends.xlsx`) had no LT-322504/LIC/level tag;
+user then ordered the **28-06 15:23:00–16:01:00 window** used as the steady-state discriminator.
+Window: LT-322504-3 = 99.94 **dead flat** (range 0.00), load 95.0–97.0, HIC-322605 47.1–49.0
+(mean 48.05), LV-322501 44.32 (43.25–45.40), PT-329201 135.92 bar g. Post-Task-5 engine
+reproduces the plateau with **no constant changed**:
+L_eq = L_des·(ṁ_in/ṁ_des)·(θ_des/θ) = 20·0.96·(60/48.05) = 23.98 m > 20.3 m top tap ⇒ LT
+clamps 100.0. Probe `scratchpad/probe_c2_close.py`: design hold LT 80.0000 bit-exact; field
+lineup → LT 100.000 by 1800 s, head 23.359 m @15000 s (→23.98), LV op 43.87 vs field 44.32.
+Verdict: hypothesis 1, genuinely liquid-full above top tap under field lineup; density
+cross-sensitivity rejected (can't give dead-flat 99.94 across 2 % load swing; clamped
+transmitter can). NLL 80 % pin = design point, untouched. 29-06 steady anchors retained in
+28-06 report §9.3 as normal-op reference.
 
 ## Files
 
@@ -236,6 +242,7 @@ TT-322013 187.1–187.6.
   `anchors_2806.json`, `analysis_2806_results.json` — 28-06 anchor extraction + 10-target analysis.
 - `verify_sim_vs_2806.py` — 4-gate sim-vs-28-06 harness (session 3 re-run: OVERALL PASS).
 - `verify_task5_lt322504.py`, `s2_settle_trace.py` — Task-5 5-gate probe + S2 long settle.
+- `c2_window_2806.py`, `probe_c2_close.py` — C2 closure: 15:23–16:01 window stats + sim probe.
 
 **Untracked in repo root/backend (NOT mine, left alone — do not commit blindly):**
 `Gemini/`, `Urea Simulation/`, `TECH_DEBT.md`, `fundamentals.md`, several `Combined_*_PFD*.md`,
