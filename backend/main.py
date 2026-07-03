@@ -1483,24 +1483,37 @@ FEED_TD_S = 345.0          # s, NH3/CO2 feed -> synthesis-loop response dead tim
 
 
 def _delay(store: dict, key: str, target: float, td_s: float, dt: float) -> float:
-    """Pure transport delay y(t) = u(t - td) via ring buffer (deque, O(1)/tick).
+    """Pure transport delay y(t) = u(t - td), robust to a VARIABLE sub-step dt.
 
-    Lazy-inits the buffer filled with `target` so the first call (and any constant
-    input) passes through unchanged -> pinned design steady state stays bit-exact.
-    Mass/energy conservative: values are only re-timed, never scaled or created —
-    material "missing" downstream during a transient is exactly the line pack
-    sum(buf)*dt held in transit.  State lives in `store` (State.tlag), keyed by `key`.
+    sim_task advances each real tick in STEP_CAP-bounded sub-steps whose size is not
+    fixed — the remainder sub-step is often a tiny numerical crumb (~1e-8 s).  So the
+    buffer length must NOT be derived from dt (n = td/dt would explode to ~1e10 on a
+    crumb -> MemoryError).  Instead this is a timestamp-tagged FIFO of past inputs,
+    zero-order-held against a per-sub-step sim clock.
+
+    Conservation-safe: every input sample is emitted exactly once (FIFO), only re-timed,
+    never scaled or created.  Pin bit-exact: until td seconds of history accumulate the
+    input passes through unchanged, and a constant input yields a constant output for
+    all t.  State lives in `store` (State.tlag), keyed by `key`.
     """
     if td_s <= 0.0 or dt <= 0.0:
         return target
-    n = max(1, int(round(td_s / dt)))
-    buf = store.get(key)
-    if buf is None or len(buf) != n:
-        buf = deque([target] * n, maxlen=n)
-        store[key] = buf
-    out = buf[0]
-    buf.append(target)      # maxlen=n -> appending evicts buf[0] automatically
-    return out
+    st = store.get(key)
+    if st is None:
+        st = {"t": 0.0, "buf": deque()}          # buf: (entry_time, value), oldest-first
+        store[key] = st
+    st["t"] += dt
+    now = st["t"]
+    buf = st["buf"]
+    buf.append((now, target))
+    cutoff = now - td_s
+    # Drop only superseded samples: keep the newest whose entry_time <= cutoff so the
+    # zero-order hold still has a value to emit on later ticks (O(1) amortized/tick).
+    while len(buf) >= 2 and buf[1][0] <= cutoff:
+        buf.popleft()
+    if buf[0][0] <= cutoff:
+        return buf[0][1]
+    return target                                # history younger than td -> pass-through
 
 
 def _foptd(store: dict, key: str, target: float, tau_s: float, td_s: float,
