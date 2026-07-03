@@ -54,12 +54,12 @@ def tsat_steam(p_bara: float) -> float:
 
 
 # ----- Constants -----
-NH3_RHO         = 604.8          # kg/m^3, design (eff. density NH3 feed @ 25 C)
+NH3_RHO         = 604.8          # kg/m^3, design (eff. density NH3 feed @ 25 C). NIST-validated 2026-07-03: sat. liquid 602.96 @ 25 C; compressed liquid 604.8 corresponds to 25 C / ~29 bar a (pump suction) -> constant is the compressed-liquid density at design suction condition, not an error.
 G               = 9.81
 PUMP_D          = 0.140          # m
 PUMP_L          = 0.205          # m
 PUMP_N_PLGR     = 3
-PUMP_ETA_V      = 0.980         # field-calibrated: DCS 3.6.2025 startup, T-separated fit 0.980+/-0.001 (n=5, flat across 100-142 bar g -> design value, not low-slip artifact). Was 0.95 (assumed, +3.2% under). Conservation-neutral: eta_v cancels in the closed-loop ratio reconstruction (rpm back-computed then mass rebuilt), only SIC-321950 rpm display shifts.
+PUMP_ETA_V      = 0.980         # field-calibrated: DCS 3.6.2025 startup, T-separated fit 0.980+/-0.001 (n=5, flat across 100-142 bar g -> design value, not low-slip artifact). Was 0.95 (assumed, +3.2% under). Conservation-neutral: eta_v cancels in the closed-loop ratio reconstruction (rpm back-computed then mass rebuilt), only SIC-321950 rpm display shifts. CAVEAT (2026-07-03): FY-321401 shown to be a fixed-constant DCS compute tag (28-06 warm-feed slope -0.07% vs -2.1% predicted for live-rho; ISA-5.1 letter Y), so the fit constrains only the product eta_v*rho_cfg = 601.6 kg/m3; 0.980 assumes rho_cfg = rho_sat(17.6 C) = 613.9 kg/m3. Degenerate with the DCS density constant but conservation-neutral either way.
 PUMP_ETA_M      = 0.915
 PUMP_V_PER_REV  = (math.pi/4.0) * PUMP_D**2 * PUMP_L * PUMP_N_PLGR   # m^3/rev
 PUMP_RATED_RPM  = 152.0

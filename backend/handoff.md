@@ -38,7 +38,10 @@ honest-resolution rules as 03-06. Full findings:
 `backend/reports/dcs_anchor_dynamics_2025-06-28.md`.
 
 Headlines:
-- **Pump map 3rd confirmation**: 0.34150 t/h/rpm through-origin vs committed 0.34174 (−0.07 %). No edit.
+- **Pump map 3rd confirmation**: 0.34150 t/h/rpm through-origin vs committed **field** fit 0.34174
+  (−0.07 %). No edit. NB engine mass map at design ρ is 0.33667 t/h/rpm (no 0.34174 in code);
+  +1.4 % field gap = ρ-basis 613.5/604.8 (dcs_tuning_parameters §4.3a); 28-06 warm feed at same
+  slope ⇒ FY-321401 likely fixed-ρ DCS compensation (see 28-06 report §T2 engine-side note).
 - **PT-329201 FOPTD**: τ = 2246±500 s, outside band [2884,4055] — under-resolved (1st anchor
   at 76 % of span, t_d ±700 s trade-off) + τ is trajectory-dependent (faster load ramp).
   **Band unchanged**, stays tied to 03-06 scenario.
@@ -58,6 +61,35 @@ Headlines:
   absent from workbook → T7 HPCC lag not extractable). LT-322504-3 fill = reactor: onset ≤3600 s,
   plateau 99.94 % at 92–97 % load vs model N7 NLL pin 80 % — documented, NOT edited (single
   transmitter, span/zero config ambiguity vs datasheet; report §3-T7).
+
+## 2026-07-03 (later): sim-vs-28-06 verification + contradiction gap-closure (task 4)
+
+**Verification (4-gate probe, scratchpad `verify_sim_vs_2806.py`): 4/4 PASS.**
+- A design hold 600 s: all pins exact (LV 46.0994, strip 50.0, P 140.7, CO2 54.618, pump 127.0131).
+- B 97 % load: LV settles 44.85 % (field 45.4, band [44.2,46.4]); drain-law self-consistency exact:
+  op = 46.1×0.97512/1.00231 = 44.85.
+- C pump map: engine internally exact (1e-16); ρ-basis 613.5/604.8 closes field gap to +0.005 %.
+- D LIC-322501 direct action signs correct (−4.2/+8.3 % on ∓5 % level steps).
+
+**Gap-closure research (report §8, 28-06 report). Register C1–C5, all resolved:**
+- **C1 pump map CLOSED**: NIST compressed-liquid isotherm → `NH3_RHO=604.8` = ρ(25 °C, ~29 bar a)
+  at pump suction — validated, not an error. Live-ρ falsified: 28-06 warm feed (T̄≈27.6 °C) predicts
+  slope −2.1 % if FY-321401 tracked density; observed −0.07 % ⇒ **fixed-constant DCS compute tag**
+  (ISA-5.1 letter Y). η_v fit degeneracy flagged: only η_v·ρ_cfg = 601.6 kg/m³ constrained;
+  committed (0.980, 613.9) is one solution — conservation-neutral. Caveat comments added at
+  `NH3_RHO` / `PUMP_ETA_V` in main.py (comment-only; Gate-A probe re-run post-edit: bit-exact).
+- **C2 reactor level RESIDUAL**: 99.94 % plateau = liquid-full-to-top-tap OR radiometric density
+  cross-sensitivity (Beer–Lambert, Berthold) — not separable from synthetic anchors; datasheet
+  NLL 80 % pin stands. Discriminator: steady 100 %-load LT-322504 trend.
+- **C3 lineup deltas CLOSED**: operator inputs, not equations.
+- **C4 P_syn CLOSED**: PT-329201 in bar g ⇒ 14:01 peak 139.6 barg = 140.6 bara ≈ design 140.7;
+  16:01 easing follows PIC SP (operator causality), sim floats on vent capacity. No edit.
+- **C5 N/C→T CLOSED**: audit 1a upper range reproduces field-negative gain (TT-322010
+  186.6→182.7 over AT701 3.08→4.01); radiometric N/C meter span 2.6–3.4 (UreaKnowHow 2024)
+  brackets design 3.0, field AY rides top of span.
+
+No numeric edit met the sourcing bar (validated / degenerate / design-doc-sourced / operator
+input). Design steady state bit-exact by construction + probe.
 
 ### The bug fixed this session (`e3ee4a6`)
 
@@ -140,7 +172,8 @@ target τ_sim ∈ [2884, 4055] s), never hard-coded.
 
 - PT-329201 FOPTD (03-06): P₀=5.7, P_f=144.0 bar g, τ=3469.5±585.9 s, t_d=344.7±280.3 s, R²=0.9888.
   28-06 fit τ=2246±500 s is under-resolved + trajectory-dependent → band stays [2884,4055] s.
-- Pump map: 0.34174 t/h/rpm through-origin, η_v=0.980 (28-06: 0.34150, −0.07 %, 3rd confirmation).
+- Pump map (field, FY-321401): 0.34174 t/h/rpm through-origin, η_v=0.980 (28-06: 0.34150, −0.07 %,
+  3rd confirmation). Engine mass map at design ρ 604.8: 0.33667 t/h/rpm; ×613.5/604.8 = 0.34152.
 - `LV322501_OPEN_DES` = 46.1 % (field, 28-06 anchors; was datasheet 82.0).
 - Pinned state: LT-322504=80.0000%, strip_level=50.0000%, F_CO2_th=54.618 t/h, F_in_BL_th=42.762 t/h,
   pumpB speed_act=127.0131 rpm, open_act=83.5612 %. Sim tick DT=0.1 s, STEP_CAP=0.5 s, FAST=×60.

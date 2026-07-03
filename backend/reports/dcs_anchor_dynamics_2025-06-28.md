@@ -94,8 +94,21 @@ Quasi-static map on the 6 non-zero anchors, through-origin OLS:
 $$\dot m_{NH_3} = 0.34150\,N \quad \text{t/h per rpm},\qquad \text{RMSE}=0.273\ \text{t/h}$$
 
 residuals (t/h): [+0.468, −0.070, +0.049, −0.408, −0.162, +0.167].
-Committed model map 0.34174 t/h/rpm → deviation **−0.07 %**. This is the **third independent
-confirmation** (field curve → 03-06 anchors → 28-06 anchors). **No edit.**
+Committed **field** map (03-06 anchor fit) 0.34174 t/h/rpm → deviation **−0.07 %**. This is the
+**third independent confirmation** of the DCS FY-321401 mass map (field curve → 03-06 anchors →
+28-06 anchors). **No edit.**
+
+Engine-side note (sim-verification 03-07): the engine's implemented mass map at design density is
+$k_{eng} = V_{rev}\,\eta_v\,60\,\rho_{des}/1000 = 0.0094672 \times 0.980 \times 60 \times 604.8/1000
+= 0.33667$ t/h/rpm — there is **no** 0.34174 constant in code. The +1.4 % field-vs-engine gap is
+exactly the density-basis multiplier already documented in dcs_tuning_parameters.md §4.3(a):
+$0.33667 \times 613.5/604.8 = 0.34152$ (+0.005 % vs the 28-06 fit). Caveat: 28-06 feed was *warm*
+(TT-321001 24.1–29.7 °C, mean ≈ 27 °C) yet FY-321401 returned the same slope as the cold 03-06
+startup (Δ −0.07 %); a true $\rho(T)$ mass flow would differ ≈ 2.3 % between the two startups.
+This implies FY-321401 is computed with a **fixed** density in the DCS flow block, not live-T
+compensation. Not resolvable from the workbook (no independent density/mass reference) → sourcing
+law, documented only. Consequence: SIC-321951 rpm display will read ≈ 1.4 % high vs DCS at matched
+mass flow; mass conservation unaffected (rpm↔mass mapping cancels in the CAS reconstruction).
 
 ### T3 — HV-322602 coupling (partial: TT-322002 absent)
 
@@ -283,3 +296,103 @@ pump map (confirmed, −0.07 %), τ band (X1), FEED_TD_S (T6).
 - Editing hand-valve `*_DES` constants to match operator positions — operator practice ≠
   design basis.
 - Treating T3/T5/T9/T10 secants as transfer-function gains — confounded, sign-unstable.
+
+## 8. Gap-closure research addendum (2026-07-03, task 4)
+
+Deep-research pass over every contradiction between the model equations and the 28-06
+anchor values. Sources: NIST WebBook (REFPROP ammonia), ISA-5.1, Berthold radiometric
+whitepaper, UreaKnowHow 2024 Gholipour radiometric paper. Verdict per item: **closed**
+(root cause identified, no model change warranted) or **residual** (documented ambiguity).
+
+### C1 — Pump mass map: engine 0.33667 vs field 0.34150/0.34174 t/h/rpm — CLOSED
+
+**NIST saturated-liquid NH₃ density** (WebBook, REFPROP):
+
+| T (°C) | 0 | 5 | 10 | 15 | 20 | 25 | 30 | 35 |
+|---|---|---|---|---|---|---|---|---|
+| ρ_sat (kg/m³) | 638.64 | 631.77 | 624.78 | 617.66 | 610.39 | 602.96 | 595.36 | 587.59 |
+
+**NIST compressed-liquid isotherm at 298.15 K**: ρ = 602.96 (sat, 10.03 bar), 604.01
+(21 bar), 604.95 (31 bar), 611.21 (101 bar), 614.56 (141 bar) kg/m³.
+
+1. **Engine constant validated.** `NH3_RHO = 604.8` interpolates NIST 25 °C compressed
+   liquid at ≈ 29 bar a — the pump-suction condition. It is not a mis-keyed saturated
+   density (602.96); it is the design effective suction density. No edit.
+2. **Live-density falsification.** If FY-321401 computed mass from live ρ(T), the 28-06
+   warm feed (TT-321001 mean ≈ 27.6 °C at non-zero anchors → ρ ≈ 599–601 kg/m³) would
+   give slope
+   $$k_{live} = 5.5667\times10^{-4}\,\rho = 0.3345\ \text{t/h/rpm} \quad (-2.1\%\ \text{vs } 0.34174)$$
+   Observed 28-06 fit: 0.34150 (−0.07 %). The −2.1 % shift is > 3× the slope tolerance
+   (±0.0022) derived from the fit RMSE 0.273 t/h → **live-ρ hypothesis rejected;
+   FY-321401 is a fixed-constant DCS computation** (consistent with ISA-5.1: suffix
+   letter Y = relay/compute/convert function).
+3. **Calibration degeneracy (flag).** With FY fixed-k, the 03-06 T-separated fit
+   constrains only the product
+   $$\eta_v\,\rho_{cfg} = \frac{0.34174\times1000}{0.0094672\times60} = 601.6\ \text{kg/m}^3$$
+   The committed pair (η_v = 0.980, ρ_cfg = ρ_sat(17.6 °C) = 613.9) is one solution;
+   (0.985, 610.4 = ρ_sat(20 °C), a common flow-computer reference) is another. The data
+   cannot separate them. Conservation-neutral: only the SIC-321950/951 rpm display shifts
+   between solutions. Documented as caveat at `PUMP_ETA_V` in `main.py`.
+4. **Operator-facing consequence.** The DCS mass display is ≈ +1.4 % above true mass at
+   design suction density (fixed-k ignores feed-T density change). The engine computes
+   true mass — the residual +1.4 % display offset is a DCS artifact, not a model error.
+
+### C2 — LT-322504 plateau 99.94 % vs model NLL pin 80 % — RESIDUAL
+
+Field level saturates at 99.94 % from 92 % load onward; model pins NLL at 80 % of the
+1.5 m span (datasheet UD-AU-322-EC-0006, nozzle N7, top tap 1 m above overflow).
+Two hypotheses, not separable from the synthetic anchors:
+
+1. **Genuinely liquid-full to the top tap.** Overflow entry sits 0.5 m above the bottom
+   tap (33 % of span); sustained operation ≥ 99.9 % implies liquid ≥ 1 m above the
+   overflow lip — possible if the central downcomer entry is submerged and the level
+   rides on the reactor pressure balance during ramp-up.
+2. **Radiometric density cross-sensitivity.** Gamma level gauges infer level from
+   Beer–Lambert attenuation, which depends on ρ·path (Berthold whitepaper). Startup
+   carbamate/melt density above the calibration density biases the reading high.
+   LT-322504-3 suffix indicates a redundant radiometric transmitter.
+
+The datasheet pin (80 %) outranks a synthetic startup anchor under the sourcing law —
+**no pin change**. Discriminator if plant data becomes available: a steady 100 %-load
+trend of LT-322504 (design NLL should read ≈ 80 % if hypothesis 2, ≈ 100 % if 1).
+
+### C3 — Hand-valve / SP lineup deltas — CLOSED (not a model contradiction)
+
+HV-322602 74→60 %, HIC-322604 50→80 %, HIC-322605 60→49 %, TIC-329005 SP 88.1 vs design
+124.6: startup-day operator lineup at 97 % load ≠ design 100 % basis. These are inputs,
+not equations; editing `*_DES` constants to match them would fabricate design data
+(§7 already rejects this). No edit.
+
+### C4 — P_syn at 97 % load: field 135.7 vs sim 141.3 — CLOSED (unit convention + causality)
+
+PT-329201 anchors peak at 139.6 at 14:01 (92 % load). Read as **bar g** (DCS custom for
+PT tags), that is 140.6 bar a — matching design 140.7 bar a to 0.1 bar. The 16:01 value
+135.7 bar g = 136.7 bar a then reflects the operator easing pressure late in ramp-up
+(PIC-322203 SP trace falls 145.3 → 141.7 over the same anchors). The sim's 141.33 bar a
+at 97 % is the free-floating vent-capacity response with no operator SP action — a
+causality difference, not an equation error. Both sit within 3 % of design. No edit.
+
+### C5 — N/C → reactor-T gain direction — CLOSED (directionally verified)
+
+Field secants T9: predominantly negative over AY-322701 = 3.77 → 3.02. Audit test 1a
+upper range (AT-322701 3.08 → 4.01): TT-322010 186.6 → 182.7 °C — **negative gain,
+matching field direction** in the overlapping N/C window. Magnitude untestable (±100 %
+field scatter, §3-T9). Cross-check: the radiometric N/C meter span 2.6–3.4 (Gholipour
+2024, UreaKnowHow) brackets the sim design value 3.0; field AY 3.02–3.77 rides the top
+of that span during ramp — consistent with an instrument near range limit, further
+degrading the field secants. No edit.
+
+### Outcome
+
+| ID | Contradiction | Verdict | Model change |
+|---|---|---|---|
+| C1 | pump map −1.4 % | closed (fixed-k DCS compute tag; NH3_RHO NIST-validated) | comments only |
+| C2 | reactor level 99.94 vs 80 % | residual (2 hypotheses; datasheet outranks anchor) | none |
+| C3 | lineup deltas | closed (operator practice ≠ design) | none |
+| C4 | P_syn deviation direction | closed (bar g convention + SP causality) | none |
+| C5 | N/C→T direction | closed (sim reproduces negative gain in field window) | none |
+
+No numeric constant met the sourcing bar for change: every candidate was either
+validated (NH3_RHO), degenerate (η_v·ρ_cfg), design-doc-sourced (NLL 80 %), or an
+operator input (C3/C4). Design steady state untouched → bit-exactness preserved by
+construction; verified by Gate-A probe post-edit.
