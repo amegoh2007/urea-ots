@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-03 (session 3) · branch `fix/reactor-level-drain-and-vent-coupling` · NOT pushed_
+_Last updated: 2026-07-05 (session 4) · branch `fix/reactor-level-drain-and-vent-coupling` · pushed through `ea07608`_
 
 ## Goal
 
@@ -225,6 +225,58 @@ cross-sensitivity rejected (can't give dead-flat 99.94 across 2 % load swing; cl
 transmitter can). NLL 80 % pin = design point, untouched. 29-06 steady anchors retained in
 28-06 report §9.3 as normal-op reference.
 
+## 2026-07-05 (session 4): MASTER SP 329207 faceplate + 329-1 overlay rescan/reorg
+
+Two tasks, both green, committed **and pushed** as `ea07608` (`e2dae58..ea07608`). Touched only
+frontend + steam telemetry — reactor/stripper engine untouched, all prior pins preserved.
+
+### Task 1 — MASTER SP 329207 faceplate (4-bar LP header control)
+
+ON/OFF master over the three LP-header pressure controllers (PIC-329207A/B/C):
+- **OFF:** each leg operator-owned — PIC-329207A→PV-329207A, B→PV-329207B, C→PV-329207C set/tuned
+  individually.
+- **ON:** user sets ONE master SP; leg SPs derive and lock (no individual edit):
+  $\text{SP}_A=\text{SP}_M+0.1$ (vent), $\text{SP}_B=\text{SP}_M$ (320MT02 turbine make-up),
+  $\text{SP}_C=\text{SP}_M-0.1$ (BL make-up, stream 963). Sub-controller writes ignored while ON.
+- Staggered $\pm0.1$ bar deadband ⇒ header floats in $[\text{SP}_M-0.1,\ \text{SP}_M+0.1]$;
+  $\uparrow P_{LP}\Rightarrow$ leg A vents, $\downarrow P_{LP}\Rightarrow$ legs B/C admit make-up.
+- Constants: `DB_LP=0.1`, `K_207A=3.0`, `K_207B=2.0`, `K_PIC_207=120.0`, `KI_PIC_207=6.0`,
+  `I207_CLAMP=100.0/KI_PIC_207`. Defaults (master 4.4, all AUTO) reproduce the design fixed point
+  bit-for-bit.
+- **Backend** (`main.py` ~L2681, `steam_system.py`): emits `STEAM_SYSTEM.MASTER_SP_329207 {on,sp}`
+  + `PIC_329207A/B/C {pv,sp,op,mode}` (A.op=`pv207a_pct`, B.op=`pv207b_pct`, C.op=`valve_963_pct`).
+- **Frontend** (`app.js`, `index.html`, `overlays.js`): `OTS_FACE.msp` faceplate; dispatch in
+  `overlays.js activate()` routes `fp==='MASTER_SP_329207'` to it BEFORE the generic `CTRL_RE`.
+
+### Task 2 — deep rescan of tagged 329-1 DCS shot → reorganise + complete overlays
+
+Rescanned `New folder/329-1/329-1 tagged.PNG` (1056×502). Overlay transform:
+STAGE px = tagged px × (**1.2936**, **1.4343**) — `.screen.shot{background-size:100% 100%}` stretches
+the backdrop to the 1366×720 stage. Rewrote `OV['screen-329-1']` (single logical block) →
+**36 entries** (11 bound ind, 7 avalve, 2 pump, 12 white-frame ind, 4 nav):
+- Repositioned every tile to its rescanned value-box centre; fixed grossly mislocated
+  HV-329601 (410,533 → 140,438) and LIC-329502 (847,540 → 744,625).
+- **Relabelled `PIC-329207` → `PI-329207`** — plain 2nd header-P indicator (bind `LP.P_bara`);
+  faceplate/mode/note dropped (`PI-` doesn't match `CTRL_RE` so no controller pop-up).
+- Added controller trio **PIC-329207A@(983,112) / B@(1184,75) / C@(317,143)**, all
+  `fp:'MASTER_SP_329207'`.
+- **Added missing tags:** HIC-329601, HIC-329602, HV-329602, LV-329502, STARTUP SW, O₂-scavenger
+  dosing pumps 329U001-M01/M02.
+- PV-329207A/B/C now bind `PIC_329207A/B/C.op` (C was `LP_MAKEUP.PV_329207C`).
+- `AS_BUILT_screen-329-1.md` synced: entry counts, bind map, MASTER-SP physics.
+
+### Verification (all green)
+
+- `node --check frontend/overlays.js` clean; 36 unique keys; every avalve has a bind, every nav a
+  goto.
+- On-disk `main.py` emits the PIC_329207A/B/C trio `{pv,sp,op,mode}` (L2681-2698) → all 20
+  screen-329-1 binds code-backed. (Prior session: port-8011 test-server probe `probe_msp.py` passed
+  ALL master-SP assertions — A.sp=4.5/B=4.4/C=4.3, sub-writes locked while ON, OFF→independent;
+  `run_full_audit` EXIT 0.)
+- **Caveat:** user's live server (PID 5764, port 8000) predates these edits — its packet lacks
+  `PIC_329207A/B/C` (bind probe MISS on 9 keys). NOT a code defect; new tiles render live only after
+  that server restarts (barred from restarting it).
+
 ## Files
 
 **Committed / active source:**
@@ -232,6 +284,11 @@ transmitter can). NLL 80 % pin = design point, untouched. 29-06 steady anchors r
   LT-322504 display decoupling (shadow machinery deleted, ~L2140) + stripper slip-direction fix
   (`mod × min(g_T,1)`, ~L640).
 - `backend/handoff.md` — this file.
+- `backend/steam_system.py` — 4-level steam network; session 4: MASTER SP 329207 ON/OFF + ±0.1
+  staggered leg handlers.
+- `frontend/overlays.js` — session 4: `OV['screen-329-1']` 36-entry rescan/reorg + MASTER-SP trio.
+- `frontend/app.js`, `frontend/index.html` — session 4: `MASTER_SP_329207` faceplate + dispatch.
+- `AS_BUILT_screen-329-1.md` (repo root) — 329-1 as-built (session 4 sync).
 - `backend/reports/dcs_anchor_dynamics_2025-06-03.md` — 03-06 anchor report (+LIC closure note).
 - `backend/reports/dcs_anchor_dynamics_2025-06-28.md` — **28-06 anchor report (this session)**.
 - `launch.bat` (repo root) — the launcher the desktop shortcuts target. Fine, unchanged.
@@ -289,7 +346,7 @@ transmitter can). NLL 80 % pin = design point, untouched. 29-06 steady anchors r
 
 ## Next steps (if work resumes)
 
-1. **Push** the unpushed commits to origin — only on explicit user request.
+1. ~~**Push** the unpushed commits to origin~~ — **DONE (session 4): pushed `e2dae58..ea07608`.**
 2. **Optional transient acceptance check (report §6.4):** cold-start sim, confirm emergent
    τ_sim ∈ [2884, 4055] s, t_d,sim ≤ 572 s, P_f ∈ [137.5, 150.5] bar g. Proves the delay
    reproduces observed dynamics (suites above only prove conservation/bit-exactness/no-crash).
