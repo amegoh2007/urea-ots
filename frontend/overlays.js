@@ -160,6 +160,42 @@
       { k: 'tt004',  t: 'ind', x: 1037, y: 619, tag: 'TT-322004', bind: 'STRIP_322E001.TT_322004', u: 'C', dec: 1 },
       { k: 'pt3201', t: 'ind', x: 1187, y: 617, tag: 'PT-323201' },
     ],
+    'screen-329-1': [
+      // ===== 25-bar BL supply header (stream 901 ex 320E006) =====
+      { k: 'pt251',  t: 'ind', x: 137, y: 598, tag: 'PT-329251',  bind: 'STEAM_SYSTEM.SUPPLY_25BAR.P_bara', u: 'BAR A', dec: 2 },
+      { k: 'tt101',  t: 'ind', x: 212, y: 616, tag: 'TT-329101',  bind: 'STEAM_SYSTEM.SUPPLY_25BAR.TI_sat', u: 'C',     dec: 1 },
+      { k: 'ft403',  t: 'ind', x: 61,  y: 626, tag: 'FT-329403' },                                       // supply flow — no dedicated packet stream, white frame
+      // ===== 329D005 HP saturator (stream 902; PIC-329204 / PV-329204) =====
+      { k: 'pic204', t: 'ind',    x: 335, y: 612, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.MP.P_bara',     u: 'BAR A', dec: 2 },   // 329D005 = 322E001 shell P
+      { k: 'pv204',  t: 'avalve', x: 307, y: 666, tag: 'PV-329204',  bind: 'STEAM_SYSTEM.MP.supply_pct', u: '%',     dec: 1 },
+      { k: 'hv601',  t: 'avalve', x: 410, y: 533, tag: 'HV-329601',  bind: 'STEAM_SYSTEM.HP_VENT.pct',   u: '%',     dec: 1 },   // 329D005 atm vent
+      // ===== 329D009 MP 9-bar drum (split-range PIC-329205 : PV-329205A admit / PV-329205B let-down) =====
+      { k: 'pic205', t: 'ind',    x: 663, y: 392, tag: 'PIC-329205', bind: 'STEAM_SYSTEM.PIC_329205.pv', u: 'BAR A', dec: 2,
+        mode: 'STEAM_SYSTEM.PIC_329205.mode', note: 'up P9 => PV-329205B let-down (9->4 bar) opens; down P9 => PV-329205A admits 25-bar BL steam' },
+      { k: 'pv205a', t: 'avalve', x: 567, y: 493, tag: 'PV-329205A', bind: 'STEAM_SYSTEM.DRUM_9BAR.admit_pct',   u: '%', dec: 1 },
+      { k: 'pv205b', t: 'avalve', x: 826, y: 317, tag: 'PV-329205B', bind: 'STEAM_SYSTEM.DRUM_9BAR.letdown_pct', u: '%', dec: 1 },
+      // ===== 322D001A/B LP drums + 4-bar header master (PIC-329207 A/B/C) =====
+      { k: 'tt001',  t: 'ind',    x: 608, y: 266, tag: 'TT-329001',  bind: 'STEAM_SYSTEM.LP.TI_sat',  u: 'C',     dec: 1 },   // temp inside 322D001A/B
+      { k: 'pi206',  t: 'ind',    x: 656, y: 148, tag: 'PI-329206',  bind: 'STEAM_SYSTEM.LP.P_bara',  u: 'BAR A', dec: 2 },
+      { k: 'pic207', t: 'ind',    x: 785, y: 148, tag: 'PIC-329207', bind: 'STEAM_SYSTEM.PIC_329207.pv', u: 'BAR A', dec: 2,
+        mode: 'STEAM_SYSTEM.PIC_329207.mode', note: 'up header P => PIC vents; down P => 25-bar make-up (963) admits to hold master SP' },
+      { k: 'pv207c', t: 'avalve', x: 280, y: 432, tag: 'PV-329207C', bind: 'STEAM_SYSTEM.LP_MAKEUP.PV_329207C', u: '%', dec: 1 },
+      // ===== unmodelled loops on this screen -> WHITE FRAME (drum levels, turbine/vent valves, master SP) =====
+      { k: 'msp',    t: 'ind', x: 75,   y: 54,  tag: 'MASTER-SP' },
+      { k: 'lic504', t: 'ind', x: 369,  y: 202, tag: 'LIC-329504' },
+      { k: 'lv504',  t: 'ind', x: 212,  y: 270, tag: 'LV-329504'  },
+      { k: 'lic503', t: 'ind', x: 983,  y: 443, tag: 'LIC-329503' },
+      { k: 'lv503',  t: 'ind', x: 997,  y: 569, tag: 'LV-329503'  },
+      { k: 'lic502', t: 'ind', x: 847,  y: 540, tag: 'LIC-329502' },
+      { k: 'ft407',  t: 'ind', x: 1134, y: 122, tag: 'FT-329407'  },   // 320MT02 turbine steam flow
+      { k: 'pv207a', t: 'ind', x: 867,  y: 162, tag: 'PV-329207A' },   // 4-bar vent (master-driven)
+      { k: 'pv207b', t: 'ind', x: 1182, y: 176, tag: 'PV-329207B' },   // 320MT02 turbine (master-driven)
+      // ===== screen-nav hotspots: boundary exchangers with live 322-1 home screen =====
+      { k: 'nav-e002a', t: 'nav', x: 48, y: 158, w: 80, h: 24, tag: '322E002 -> 322-1', goto: 'screen-322-1' },
+      { k: 'nav-e002b', t: 'nav', x: 68, y: 317, w: 80, h: 24, tag: '322E002 -> 322-1', goto: 'screen-322-1' },
+      { k: 'nav-e001a', t: 'nav', x: 68, y: 446, w: 80, h: 24, tag: '322E001 -> 322-1', goto: 'screen-322-1' },
+      { k: 'nav-e001b', t: 'nav', x: 68, y: 490, w: 80, h: 24, tag: '322E001 -> 322-1', goto: 'screen-322-1' },
+    ],
   };
 
   let pos = {};

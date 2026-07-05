@@ -2661,6 +2661,18 @@ def step_sim(dt: float) -> dict:
                 "m_963_th":   round(s.steam.m_963 * 3.6, 2),
                 "m_pic_th":   round(s.steam.m_pic * 3.6, 2),        # PIC-329207A/B vent(+)/make-up(-)
             },
+            "PIC_329205": {                      # 329D009 split-range faceplate (PV=9-bar drum P)
+                "pv":   round(s.steam.P_9, 2),                      # bar a
+                "sp":   round(s.steam.pic205_sp, 2),
+                "op":   round(s.steam.valve_admit9_pct - s.steam.valve_letdown_pct, 1),  # net split % (+205A admit / -205B let-down)
+                "mode": s.steam.pic205_mode,
+            },
+            "PIC_329207": {                      # 4-bar header master faceplate (PV=LP header P)
+                "pv":   round(s.steam.P_LP, 2),                     # bar a
+                "sp":   round(s.steam.pic207_sp, 2),
+                "op":   round(s.steam.m_pic * 3.6, 2),             # vent(+)/make-up(-) t/h
+                "mode": s.steam.pic207_mode,
+            },
         },
         "REACT_322R001": {                       # HP Urea Reactor 322R001 -> 322E001 / 322E003
             "TT_322005":   round(s.react_T_node[3], 1),  # N6 A top (EL +21700) — node-4 DYNAMIC profile
@@ -2888,6 +2900,20 @@ def handle_cmd(cmd: dict):
     elif t == "steam_963_set":                 # PV-329207C+HV-329602 BL(25)->4-bar header make-up (963)
         if "op" in cmd:
             s.steam.valve_963_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "pic329205_set":                 # 329D009 split-range PIC-329205 (mode/SP only; design-neutral)
+        m = str(cmd.get("mode", s.steam.pic205_mode)).upper()
+        if m in ("AUTO", "MAN"):
+            s.steam.pic205_mode = m            # MAN freezes 205A/205B; operator uses steam_letdown_set etc.
+        if "sp" in cmd:
+            s.steam.pic205_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
+
+    elif t == "pic329207_set":                 # 4-bar header master PIC-329207 (mode/SP only; design-neutral)
+        m = str(cmd.get("mode", s.steam.pic207_mode)).upper()
+        if m in ("AUTO", "MAN"):
+            s.steam.pic207_mode = m            # MAN freezes vent/make-up (m_pic=0, i_pic held -> bumpless)
+        if "sp" in cmd:
+            s.steam.pic207_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
 
     elif t == "trigger_fault" or (t == "set" and str(cmd.get("id", "")).lower().endswith("_fault")):
         # Instructor mechanical equipment-fault toggle (lube-oil abstraction).  Sets pump["fault"] to
