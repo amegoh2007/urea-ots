@@ -10,6 +10,8 @@ New folder/
 *.ico
 *.svg
 *.webp
+# runtime DCS screen backgrounds are required assets, not source binaries -> keep versioned
+!frontend/img/screen-*.png
 
 # --- documents / datasheets ---
 *.pdf
