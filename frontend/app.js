@@ -17,6 +17,7 @@ function connect(){
     render322(s);
     if(window.refreshF50) window.refreshF50(s);
     if(window.refreshF51) window.refreshF51(s);
+    if(window.refreshMSP) window.refreshMSP(s);
     if(window.OV_apply) window.OV_apply(s);
   };
   ws.onclose = () => setTimeout(connect, 1000);
@@ -162,7 +163,7 @@ document.getElementById('ratioSP').addEventListener('keydown', e=>{
 // Operators expect ENTER to commit the value they typed. On faceplates with no Enter handler the keypress
 // does nothing, so the next telemetry packet overwrites the field and the entry appears to "revert to 0".
 // One handler covers every faceplate modal; the SET button is each modal's single primary button.
-const FACEPLATE_MODALS = '#hicModal,#picModal,#hic2Modal,#ctlModal,#f50,#f51';
+const FACEPLATE_MODALS = '#hicModal,#picModal,#hic2Modal,#ctlModal,#f50,#f51,#mspModal';
 document.addEventListener('keydown', e=>{
   if(e.key!=='Enter') return;
   const ae=document.activeElement;
@@ -786,4 +787,120 @@ connect();
   // Enter-to-SET handled globally for all faceplates (see FACEPLATE_MODALS handler).
 
   f('f50-close').onclick = () => modal.classList.remove('show');
+})();
+
+// ---------- MASTER SP faceplate: 4-bar steam header ON/OFF cascade over PIC-329207A/B/C ----------
+// Source of truth = backend STEAM_SYSTEM telemetry; commands go over WS via send().
+//   ON  : one MASTER SP fans out & locks the trio  (A=SP+0.1 vent / B=SP turbine / C=SP-0.1 admit).
+//   OFF : the three sub-controllers are independent (operator sets each SP / mode / MAN opening).
+(function(){
+  const f = id => document.getElementById(id);
+  const modal = f('mspModal');
+  if(!modal) return;
+  const LEGS = ['a','b','c'];
+  const CMD  = { a:'pic329207a_set', b:'pic329207b_set', c:'pic329207c_set' };
+  const KEY  = { a:'PIC_329207A', b:'PIC_329207B', c:'PIC_329207C' };
+  const modeOf = {};                       // last-seen per-leg mode (drives OP-input gating)
+  let masterOn = false;
+
+  const ss  = s => (s && s.STEAM_SYSTEM) || null;
+  const num = v => (typeof v === 'number' && isFinite(v)) ? v : NaN;
+
+  function setMsg(txt, ok){
+    const el = f('msp-msg');
+    el.textContent = txt || '';
+    el.style.color = ok ? '#7fffae' : '#ff7f7f';
+  }
+
+  // enable/disable inputs & buttons per ON/OFF and per-leg mode
+  function applyGates(){
+    const chip = f('msp-mode');
+    chip.textContent = masterOn ? 'ON' : 'OFF';
+    chip.className   = 'mspmode' + (masterOn ? ' on' : '');
+    f('msp-on').classList.toggle('active', masterOn);
+    f('msp-off').classList.toggle('active', !masterOn);
+    f('msp-sp').disabled = !masterOn;                       // master SP editable only when ON
+    LEGS.forEach(L => {
+      const man = (modeOf[L] === 'MAN');
+      f('msp-'+L+'-sp').disabled = masterOn;                // sub SP editable only when OFF
+      f('msp-'+L+'-op').disabled = masterOn || !man;        // OP editable only OFF & MAN
+      f('msp-'+L+'-auto').disabled = masterOn;
+      f('msp-'+L+'-man').disabled  = masterOn;
+      f('msp-'+L+'-auto').classList.toggle('active', modeOf[L] === 'AUTO');
+      f('msp-'+L+'-man').classList.toggle('active', man);
+    });
+  }
+
+  function fill(s){
+    const S = ss(s); if(!S) return;
+    const m = S.MASTER_SP_329207 || {};
+    const ae = document.activeElement;
+    masterOn = !!m.on;
+    if(ae !== f('msp-pv')) f('msp-pv').value = fmt(m.pv);
+    if(ae !== f('msp-sp')) f('msp-sp').value = fmt(m.sp);
+    LEGS.forEach(L => {
+      const d = S[KEY[L]] || {};
+      modeOf[L] = d.mode || modeOf[L] || 'AUTO';
+      if(ae !== f('msp-'+L+'-sp')) f('msp-'+L+'-sp').value = fmt(d.sp);
+      if(ae !== f('msp-'+L+'-op')) f('msp-'+L+'-op').value = fmt(d.op);
+    });
+    applyGates();
+    f('msp-note').textContent = masterOn
+      ? 'MASTER ON: A=SP+0.1 (vent) / B=SP (turbine) / C=SP-0.1 (BL admit) — locked to AUTO.'
+      : 'MASTER OFF: PIC-329207A/B/C independent — set each SP / mode (OP in MAN).';
+  }
+
+  function open(){
+    if(lastState) fill(lastState); else setMsg('waiting for telemetry...', false);
+    modal.classList.add('show');
+  }
+  window.OTS_FACE = window.OTS_FACE || {};
+  window.OTS_FACE.msp = open;
+
+  // live render from WS while open
+  window.refreshMSP = function(s){
+    if(!modal.classList.contains('show')) return;
+    fill(s);
+  };
+
+  // ON / OFF cascade toggle -> immediate command
+  f('msp-on').onclick  = () => { send({type:'master207_set', on:true});  setMsg('MASTER ON', true); };
+  f('msp-off').onclick = () => { send({type:'master207_set', on:false}); setMsg('MASTER OFF', true); };
+
+  // per-leg mode buttons (honored backend-side only when MASTER OFF)
+  LEGS.forEach(L => {
+    ['auto','man'].forEach(md => {
+      f('msp-'+L+'-'+md).onclick = () => {
+        if(masterOn) return;
+        modeOf[L] = md.toUpperCase();
+        send({type:CMD[L], mode:modeOf[L]});
+        applyGates();
+      };
+    });
+  });
+
+  // SET -> ON: master SP ; OFF: each leg's SP (+ OP when that leg is MAN)
+  f('msp-set').onclick = () => {
+    if(masterOn){
+      const v = parseFloat(f('msp-sp').value);
+      if(isNaN(v)){ setMsg('enter a numeric MASTER SP', false); return; }
+      send({type:'master207_set', sp:v});
+      setMsg('MASTER SP set', true);
+      return;
+    }
+    let n = 0;
+    LEGS.forEach(L => {
+      const sp = parseFloat(f('msp-'+L+'-sp').value);
+      const msg = {type:CMD[L]};
+      if(!isNaN(sp)){ msg.sp = sp; n++; }
+      if(modeOf[L] === 'MAN'){
+        const op = parseFloat(f('msp-'+L+'-op').value);
+        if(!isNaN(op)){ msg.op = op; n++; }
+      }
+      if(msg.sp !== undefined || msg.op !== undefined) send(msg);
+    });
+    setMsg(n ? 'sub-controllers set' : 'nothing to set', n > 0);
+  };
+
+  f('msp-close').onclick = () => modal.classList.remove('show');
 })();

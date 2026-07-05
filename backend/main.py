@@ -2667,11 +2667,34 @@ def step_sim(dt: float) -> dict:
                 "op":   round(s.steam.valve_admit9_pct - s.steam.valve_letdown_pct, 1),  # net split % (+205A admit / -205B let-down)
                 "mode": s.steam.pic205_mode,
             },
-            "PIC_329207": {                      # 4-bar header master faceplate (PV=LP header P)
+            "PIC_329207": {                      # 4-bar header (leg-B alias; PV=LP header P)
                 "pv":   round(s.steam.P_LP, 2),                     # bar a
                 "sp":   round(s.steam.pic207_sp, 2),
-                "op":   round(s.steam.m_pic * 3.6, 2),             # vent(+)/make-up(-) t/h
+                "op":   round(s.steam.m_pic * 3.6, 2),             # net vent(+)/make-up(-) t/h
                 "mode": s.steam.pic207_mode,
+            },
+            "MASTER_SP_329207": {                # 4-bar header MASTER SP faceplate (ON/OFF cascade)
+                "on": s.steam.master207_on,
+                "sp": round(s.steam.master207_sp, 2),              # bar a
+                "pv": round(s.steam.P_LP, 2),
+            },
+            "PIC_329207A": {                     # vent PV-329207A (SP = master + 0.1)
+                "pv":   round(s.steam.P_LP, 2),
+                "sp":   round(s.steam.pic207a_sp, 2),
+                "op":   round(s.steam.pv207a_pct, 1),              # valve %
+                "mode": s.steam.pic207a_mode,
+            },
+            "PIC_329207B": {                     # turbine 320MT02 make-up PV-329207B (SP = master)
+                "pv":   round(s.steam.P_LP, 2),
+                "sp":   round(s.steam.pic207_sp, 2),
+                "op":   round(s.steam.pv207b_pct, 1),              # valve %
+                "mode": s.steam.pic207_mode,
+            },
+            "PIC_329207C": {                     # BL admit PV-329207C (SP = master - 0.1)
+                "pv":   round(s.steam.P_LP, 2),
+                "sp":   round(s.steam.pic207c_sp, 2),
+                "op":   round(s.steam.valve_963_pct, 1),           # valve %
+                "mode": s.steam.pic207c_mode,
             },
         },
         "REACT_322R001": {                       # HP Urea Reactor 322R001 -> 322E001 / 322E003
@@ -2908,12 +2931,39 @@ def handle_cmd(cmd: dict):
         if "sp" in cmd:
             s.steam.pic205_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
 
-    elif t == "pic329207_set":                 # 4-bar header master PIC-329207 (mode/SP only; design-neutral)
+    elif t == "pic329207_set":                 # 4-bar header leg-B PIC-329207 (mode/SP only; design-neutral)
         m = str(cmd.get("mode", s.steam.pic207_mode)).upper()
         if m in ("AUTO", "MAN"):
-            s.steam.pic207_mode = m            # MAN freezes vent/make-up (m_pic=0, i_pic held -> bumpless)
+            s.steam.pic207_mode = m            # MAN freezes PV-329207B (pv207b_pct held, i_pic held -> bumpless)
         if "sp" in cmd:
             s.steam.pic207_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
+
+    elif t == "master207_set":                 # 4-bar header MASTER SP (ON/OFF cascade over PIC-329207A/B/C)
+        if "on" in cmd:
+            s.steam.master207_on = bool(cmd["on"])
+        if "sp" in cmd:
+            s.steam.master207_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
+
+    elif t in ("pic329207a_set", "pic329207b_set", "pic329207c_set"):
+        # Individual sub-controller writes; honored only when MASTER is OFF (ON locks the trio to master).
+        if not s.steam.master207_on:
+            leg = t[9]                         # 'a' | 'b' | 'c'  in "pic329207X_set"
+            m = str(cmd.get("mode", "")).upper()
+            if leg == "a":
+                if m in ("AUTO", "MAN"): s.steam.pic207a_mode = m
+                if "sp" in cmd: s.steam.pic207a_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
+                if "op" in cmd and s.steam.pic207a_mode == "MAN":
+                    s.steam.pv207a_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+            elif leg == "b":
+                if m in ("AUTO", "MAN"): s.steam.pic207_mode = m
+                if "sp" in cmd: s.steam.pic207_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
+                if "op" in cmd and s.steam.pic207_mode == "MAN":
+                    s.steam.pv207b_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+            else:  # leg == "c"
+                if m in ("AUTO", "MAN"): s.steam.pic207c_mode = m
+                if "sp" in cmd: s.steam.pic207c_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
+                if "op" in cmd and s.steam.pic207c_mode == "MAN":
+                    s.steam.valve_963_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
     elif t == "trigger_fault" or (t == "set" and str(cmd.get("id", "")).lower().endswith("_fault")):
         # Instructor mechanical equipment-fault toggle (lube-oil abstraction).  Sets pump["fault"] to

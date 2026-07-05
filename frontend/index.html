@@ -201,6 +201,20 @@
   .mg50 button.active{background:#0aa64d;border-color:#22ff22;}
   .f50mode{font-weight:bold;font-family:Consolas,monospace;color:var(--pi-alarm);margin-left:6px;}
   .f50mode.auto{color:#22ff22;} .f50mode.cas{color:#ffd000;} .f50mode.oos{color:#ff8a3d;}
+  /* MASTER-SP PIC-329207A/B/C cascade faceplate */
+  .mspmode{font-weight:bold;font-family:Consolas,monospace;color:#ff3030;margin-left:6px;}
+  .mspmode.on{color:#22ff22;}
+  #mspModal .card{min-width:430px;}
+  #mspModal table{width:100%;border-collapse:collapse;font-family:Consolas,monospace;margin:6px 0;}
+  #mspModal th,#mspModal td{border:1px solid #555;padding:3px 5px;text-align:center;font-size:12px;}
+  #mspModal th{color:#8fd0ff;font-weight:normal;}
+  #mspModal td input{width:60px;text-align:right;}
+  #mspModal .mgm button{margin:0 2px;width:auto;padding:1px 7px;font-size:11px;}
+  #mspModal .mgm button.active{background:#0aa64d;border-color:#22ff22;}
+  #mspModal .mgm button:disabled{opacity:.35;cursor:not-allowed;}
+  #mspModal input:disabled,#mspModal input[readonly]{opacity:.5;}
+  #msp-on.active{background:#0aa64d;border-color:#22ff22;}
+  #msp-off.active{background:#a63a0a;border-color:#ff8a3d;}
 </style>
 </head>
 <body>
@@ -668,6 +682,50 @@
     <div class="btns">
       <button class="primary" id="f51-set">SET</button>
       <button id="f51-close">Close</button>
+    </div>
+  </div>
+</div>
+
+<!-- MASTER SP faceplate: 4-bar steam header ON/OFF cascade over PIC-329207A/B/C -->
+<div class="modal" id="mspModal">
+  <div class="card">
+    <h3>MASTER SP &mdash; 4-bar STEAM HEADER (PIC-329207)<span id="msp-mode" class="mspmode">OFF</span></h3>
+    <div class="row"><label>Header PV (bar a)</label><input id="msp-pv" type="number" step="0.01" readonly></div>
+    <div class="row"><label>MASTER SP (bar a)</label><input id="msp-sp" type="number" step="0.1"></div>
+    <div class="row"><label>Cascade</label>
+      <div class="mgm">
+        <button id="msp-on">ON</button>
+        <button id="msp-off">OFF</button>
+      </div>
+    </div>
+    <table>
+      <thead><tr><th>Sub-controller</th><th>SP (bar a)</th><th>OP (%)</th><th>Mode</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>PIC-329207A<br><span style="color:#8fd0ff">vent PV-329207A</span></td>
+          <td><input id="msp-a-sp" type="number" step="0.1"></td>
+          <td><input id="msp-a-op" type="number" step="1" min="0" max="100"></td>
+          <td class="mgm"><button data-mode="AUTO" id="msp-a-auto">AUTO</button><button data-mode="MAN" id="msp-a-man">MAN</button></td>
+        </tr>
+        <tr>
+          <td>PIC-329207B<br><span style="color:#8fd0ff">turbine 320MT02</span></td>
+          <td><input id="msp-b-sp" type="number" step="0.1"></td>
+          <td><input id="msp-b-op" type="number" step="1" min="0" max="100"></td>
+          <td class="mgm"><button data-mode="AUTO" id="msp-b-auto">AUTO</button><button data-mode="MAN" id="msp-b-man">MAN</button></td>
+        </tr>
+        <tr>
+          <td>PIC-329207C<br><span style="color:#8fd0ff">BL admit PV-329207C</span></td>
+          <td><input id="msp-c-sp" type="number" step="0.1"></td>
+          <td><input id="msp-c-op" type="number" step="1" min="0" max="100"></td>
+          <td class="mgm"><button data-mode="AUTO" id="msp-c-auto">AUTO</button><button data-mode="MAN" id="msp-c-man">MAN</button></td>
+        </tr>
+      </tbody>
+    </table>
+    <div id="msp-note" style="font-size:11px;color:#ffd27f;min-height:14px;margin:2px 0;"></div>
+    <div id="msp-msg" style="font-size:11px;min-height:14px;margin:2px 0;"></div>
+    <div class="btns">
+      <button class="primary" id="msp-set">SET</button>
+      <button id="msp-close">Close</button>
     </div>
   </div>
 </div>

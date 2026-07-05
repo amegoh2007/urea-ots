@@ -91,6 +91,23 @@ K_PIC_LP     = 8.0      # proportional vent/make-up gain   [ (kg/s)/bar ]
 KI_PIC_LP    = 0.4      # integral vent/make-up gain        [ (kg/s)/(bar.s) ]
 M_PIC_CLAMP  = 10.0     # anti-windup clamp on the integral contribution [ kg/s ]
 
+# ---------------------------------------------------------------- MASTER-SP trio PIC-329207A/B/C
+#   The lumped LP PIC above resolves into three staggered sub-controllers on the 4-bar header.
+#   MASTER ON : user sets one master SP; the trio fans out and locks to it --
+#       PIC-329207A (vent PV-329207A, atm)          SP = master + DB_LP   (highest -> opens first on over-P)
+#       PIC-329207B (turbine 320MT02 make-up)       SP = master            (== header master)
+#       PIC-329207C (BL 25-bar admit PV-329207C)    SP = master - DB_LP   (lowest  -> opens first on under-P)
+#   MASTER OFF: the three loops are independent (operator sets each SP / mode / MAN opening).
+#   At design P_LP=4.400 (master 4.4 -> SP_A=4.5/SP_B=4.4/SP_C=4.3): eA=-0.1 & eC=-0.1 floor both
+#   one-sided integrals at 0, eB=0 -> all three valves shut -> m_vent=m_turbine=m_963=0 -> net trim 0.
+#   Header self-balances (M_USERS_LP == M_HPCC_DES == 3.0) so the fixed point is bit-for-bit unchanged.
+DB_LP      = 0.1        # bar, master-SP stagger: A=SP+DB_LP (vent) / C=SP-DB_LP (make-up)
+K_207A     = 3.0        # PV-329207A vent valve coeff  (P_LP -> atm)          [ (kg/s)/sqrt(bar) ]
+K_207B     = 2.0        # PV-329207B turbine 320MT02 make-up coeff (25 -> LP) [ (kg/s)/sqrt(bar) ]
+K_PIC_207  = 120.0      # sub-controller proportional gain                    [ %/bar ]
+KI_PIC_207 = 6.0        # sub-controller integral gain                        [ %/(bar.s) ]
+I207_CLAMP = 100.0 / KI_PIC_207   # one-sided integral clamp (integral term <= 100 %)
+
 # ---------------------------------------------------------------- 9-bar header PIC (split-range PIC-329205)
 #   329D009 held at SP by a split-range controller:
 #     P_9 > SP: PV-329205A closes (BL admit -> 0), then PV-329205B opens (vent excess to 4-bar).
@@ -158,8 +175,21 @@ class SteamState:
     # --- controller mode / SP (design-neutral; defaults reproduce the fixed point bit-for-bit) ---
     pic205_mode: str = "AUTO"           # PIC-329205: AUTO=split-range; MAN=freeze split writes (operator holds 205A/205B)
     pic205_sp:   float = P_9_SP_BARA    # 9-bar drum SP (bar a)
-    pic207_mode: str = "AUTO"           # PIC-329207: AUTO=PI vent/make-up; MAN=freeze m_pic=0 (bumpless integral hold)
-    pic207_sp:   float = P_LP_SP_BARA   # 4-bar header master SP (bar a)
+    pic207_mode: str = "AUTO"           # PIC-329207 == leg B (turbine make-up): AUTO=PI; MAN=freeze valve, hold integral
+    pic207_sp:   float = P_LP_SP_BARA   # 4-bar header master SP (bar a) == leg-B SP
+    # --- MASTER-SP trio (leg B reuses pic207_sp / pic207_mode / i_pic / valve pv207b_pct; leg C reuses valve_963_pct) ---
+    master207_on: bool  = True                  # ON=one SP fans out A=+DB/B/C=-DB & locks; OFF=3 independent loops
+    master207_sp: float = P_LP_SP_BARA          # master SP (bar a); 4.4 -> B=4.4 / A=4.5 / C=4.3
+    pic207a_mode: str   = "AUTO"                # PIC-329207A vent      (SP = master + DB_LP)
+    pic207a_sp:   float = P_LP_SP_BARA + DB_LP
+    pic207c_mode: str   = "AUTO"                # PIC-329207C BL admit  (SP = master - DB_LP)
+    pic207c_sp:   float = P_LP_SP_BARA - DB_LP
+    pv207a_pct:   float = 0.0                   # PV-329207A vent opening (%)
+    pv207b_pct:   float = 0.0                   # PV-329207B turbine make-up opening (%)
+    i_207a:       float = 0.0                   # PIC-329207A integral (one-sided, bar.s-scaled)
+    i_207c:       float = 0.0                   # PIC-329207C integral (one-sided, bar.s-scaled)
+    m_vent:       float = 0.0                   # PV-329207A vent flow (kg/s)
+    m_turbine:    float = 0.0                   # PV-329207B turbine make-up flow (kg/s)
 
 
 def step_steam(state: SteamState, dt: float,
@@ -202,25 +232,47 @@ def step_steam(state: SteamState, dt: float,
     # desuperheat water bringing 9-bar let-down to saturated 4-bar
     m_water = m_ld9 * (H_G_MP - H_G_LP) / (H_G_LP - H_W)
 
-    # -- stream 963: BL -> 4-bar header (PV-329207C + HV-329602) --
+    # -- MASTER-SP fan-out: ON stamps the staggered trio SPs and locks all three to AUTO --
+    if state.master207_on:
+        state.pic207a_sp   = state.master207_sp + DB_LP   # leg A vent  (opens first on over-P)
+        state.pic207_sp    = state.master207_sp           # leg B == header master
+        state.pic207c_sp   = state.master207_sp - DB_LP   # leg C admit (opens first on under-P)
+        state.pic207a_mode = state.pic207_mode = state.pic207c_mode = "AUTO"
+
+    # -- PIC-329207A vent (reverse-acting: P_LP > SP_A -> open PV-329207A to atm) --
+    if state.pic207a_mode == "AUTO":
+        eA = state.P_LP - state.pic207a_sp
+        state.i_207a = max(0.0, min(I207_CLAMP, state.i_207a + eA * dt))
+        state.pv207a_pct = max(0.0, min(100.0, K_PIC_207 * eA + KI_PIC_207 * state.i_207a))
+    # MAN: pv207a_pct frozen; i_207a held -> bumpless return to AUTO
+    m_vent = _valve_flow(K_207A, state.pv207a_pct, state.P_LP, 1.01325)
+
+    # -- PIC-329207B turbine 320MT02 make-up (direct: P_LP < SP_B -> open PV-329207B) --
+    if state.pic207_mode == "AUTO":
+        eB = state.pic207_sp - state.P_LP
+        state.i_pic = max(0.0, min(I207_CLAMP, state.i_pic + eB * dt))
+        state.pv207b_pct = max(0.0, min(100.0, K_PIC_207 * eB + KI_PIC_207 * state.i_pic))
+    # MAN: pv207b_pct frozen; i_pic held -> bumpless return to AUTO
+    m_turbine = _valve_flow(K_207B, state.pv207b_pct, state.P_SUP, state.P_LP)
+
+    # -- PIC-329207C BL 25-bar admit (direct: P_LP < SP_C -> open PV-329207C/HV-329602) --
+    if state.pic207c_mode == "AUTO":
+        eC = state.pic207c_sp - state.P_LP
+        state.i_207c = max(0.0, min(I207_CLAMP, state.i_207c + eC * dt))
+        state.valve_963_pct = max(0.0, min(100.0, K_PIC_207 * eC + KI_PIC_207 * state.i_207c))
+    # MAN: valve_963_pct frozen; i_207c held -> bumpless return to AUTO
     m_963 = _valve_flow(K_963, state.valve_963_pct, state.P_SUP, state.P_LP)
 
-    # -- 4-bar header PIC (PI vent/make-up; lumped master-SP A/B/C) --
-    if state.pic207_mode == "AUTO":
-        err = state.P_LP - state.pic207_sp
-        state.i_pic += err * dt
-        state.i_pic = max(-M_PIC_CLAMP / KI_PIC_LP, min(M_PIC_CLAMP / KI_PIC_LP, state.i_pic))
-        m_pic = K_PIC_LP * err + KI_PIC_LP * state.i_pic
-    else:                     # MAN: freeze vent/make-up; i_pic held -> bumpless return to AUTO
-        m_pic = 0.0
+    # net header trim = vent(+ out) - turbine(- in); leg C (m_963) accounted separately in the balance
+    m_pic = m_vent - m_turbine
 
     # -- node mass balances --
     #   329D005 (HP):  in 902 ; out stripper + HP vent
     dP_MP = (m_supply - m_strip_consume - m_vent_hp) / C_MP
     #   329D009 (9-bar): in 903 ; out 9->4 let-down (+ later 9-bar users = 0)
     dP_9  = (m_903 - m_ld9) / C_9
-    #   322D001A/B (4-bar): in HPCC + let-down + desuperheat + 963 ; out users + PIC vent
-    dP_LP = (m_hpcc_gen + m_ld9 + m_water + m_963 - M_USERS_LP - m_pic) / C_LP
+    #   322D001A/B (4-bar): in HPCC + let-down + desuperheat + 963(C) + turbine(B) ; out users + vent(A)
+    dP_LP = (m_hpcc_gen + m_ld9 + m_water + m_963 + m_turbine - M_USERS_LP - m_vent) / C_LP
 
     state.P_MP = max(0.0, state.P_MP + dt * dP_MP)
     state.P_9  = max(0.0, state.P_9 + dt * dP_9)
@@ -229,6 +281,7 @@ def step_steam(state: SteamState, dt: float,
     # publish diagnostics (m_ld field carries the 9->4 let-down for back-compat telemetry)
     state.m_supply, state.m_903, state.m_ld = m_supply, m_903, m_ld9
     state.m_963, state.m_water, state.m_vent_hp, state.m_pic = m_963, m_water, m_vent_hp, m_pic
+    state.m_vent, state.m_turbine = m_vent, m_turbine
     return state
 
 
