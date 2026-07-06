@@ -117,6 +117,19 @@ P_9_SP_BARA = 9.0
 K_PIC_9     = 40.0     # split gain: % valve travel per bar error
 DB_9        = 0.02     # bar dead-band about SP (both legs shut inside)
 
+# ---------------------------------------------------------------- HP-saturator PIC (PIC-329204)
+#   329D005 (P_MP, 19.7 bar a) held at SP by direct-acting PI on the BL supply valve PV-329204:
+#     P_MP < SP -> open PV-329204 (admit more 25-bar steam) ; P_MP > SP -> close it.
+#   Bias-anchored on the design seed opening (_seed_supply_pct, ~50 %): at design P_MP=SP the
+#   error and integral are both 0, so the valve holds the seed exactly and the pinned fixed point
+#   is bit-for-bit unchanged.  Gains are controller tuning (not physical constants) -> Sourcing Law
+#   clean.  step_steam is gated OFF during the boot-pin settle, so this loop cannot perturb any
+#   design-pinned constant.
+P_HP_SP_BARA = P_HP_BARA   # 19.7 bar a design SP for the HP saturator
+K_PIC_204    = 40.0        # proportional gain [ %/bar ]  (under-P opens supply)
+KI_PIC_204   = 2.0         # integral gain     [ %/(bar.s) ]
+I204_CLAMP   = 50.0 / KI_PIC_204   # two-sided integral clamp (integral term within +/-50 %)
+
 # ---------------------------------------------------------------- design throughputs (probe / seed)
 M_STRIP_DES = 39400.0 / 1850.0   # kg/s (21.297), design MP steam consumed by HP-stripper reboiler == STRIP_DUTY_DES_KW / lambda_MP (main.py design duty; MP header consume is design-pinned constant)
 M_HPCC_DES  = 3.0      # kg/s, design LP steam raised in the HP carbamate condenser
@@ -150,6 +163,9 @@ def _seed_supply_pct() -> float:
     return min(100.0, M_STRIP_DES / (K_902 * dP) * 100.0)
 
 
+_SUPPLY_BIAS = _seed_supply_pct()   # design-seed PV-329204 opening; PIC-329204 bias anchor (bit-exact fixed point)
+
+
 @dataclass
 class SteamState:
     # --- node pressures (bar a) ---
@@ -173,6 +189,9 @@ class SteamState:
     m_pic:    float = 0.0            # 4-bar header PIC vent(+)/make-up(-)
     i_pic:    float = 0.0            # bar.s, 4-bar PIC integral accumulator
     # --- controller mode / SP (design-neutral; defaults reproduce the fixed point bit-for-bit) ---
+    pic204_mode: str = "AUTO"           # PIC-329204: AUTO=hold P_MP at SP via PV-329204; MAN=freeze supply valve
+    pic204_sp:   float = P_HP_SP_BARA   # 329D005 HP-saturator SP (bar a) == 19.7
+    i_204:       float = 0.0            # bar.s, PIC-329204 integral accumulator (held in MAN -> bumpless)
     pic205_mode: str = "AUTO"           # PIC-329205: AUTO=split-range; MAN=freeze split writes (operator holds 205A/205B)
     pic205_sp:   float = P_9_SP_BARA    # 9-bar drum SP (bar a)
     pic207_mode: str = "AUTO"           # PIC-329207 == leg B (turbine make-up): AUTO=PI; MAN=freeze valve, hold integral
@@ -204,6 +223,14 @@ def step_steam(state: SteamState, dt: float,
     """
     # -- BL supply header held at boundary (site 25-bar main) --
     state.P_SUP = P_SUP_BARA
+
+    # -- PIC-329204 HP-saturator pressure (direct PI about the seed opening: under-P -> open supply) --
+    if state.pic204_mode == "AUTO":
+        e204 = state.pic204_sp - state.P_MP
+        state.i_204 = max(-I204_CLAMP, min(I204_CLAMP, state.i_204 + e204 * dt))
+        state.valve_supply_pct = max(0.0, min(100.0,
+            _SUPPLY_BIAS + K_PIC_204 * e204 + KI_PIC_204 * state.i_204))
+    # MAN: valve_supply_pct frozen; i_204 held -> bumpless return to AUTO
 
     # -- stream 902: BL -> 329D005 HP saturator (PV-329204) --
     m_supply = _valve_flow(K_902, state.valve_supply_pct, state.P_SUP, state.P_MP)

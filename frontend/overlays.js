@@ -167,7 +167,8 @@
       { k: 'tt101',  t: 'ind', x: 191, y: 651, tag: 'TT-329101',  bind: 'STEAM_SYSTEM.SUPPLY_25BAR.TI_sat', u: 'C',     dec: 1 },
       { k: 'ft403',  t: 'ind', x: 52,  y: 640, tag: 'FT-329403' },                                       // supply flow — no dedicated packet stream, white frame
       // ===== 329D005 HP saturator (stream 902; PIC-329204 / PV-329204) + HP atm vent HIC/HV-329601 =====
-      { k: 'pic204', t: 'ind',    x: 317, y: 634, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.MP.P_bara',     u: 'BAR A', dec: 2 },   // 329D005 = 322E001 shell P
+      { k: 'pic204', t: 'ind',    x: 317, y: 634, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.PIC_329204.pv', u: 'BAR A', dec: 2,
+        mode: 'STEAM_SYSTEM.PIC_329204.mode', note: 'AUTO holds 329D005 at SP via PV-329204; MAN sets PV-329204 opening directly' },   // 329D005 = 322E001 shell P
       { k: 'pv204',  t: 'avalve', x: 313, y: 703, tag: 'PV-329204',  bind: 'STEAM_SYSTEM.MP.supply_pct', u: '%',     dec: 1 },
       { k: 'hic601', t: 'ind',    x: 211, y: 370, tag: 'HIC-329601', bind: 'STEAM_SYSTEM.HP_VENT.pct',   u: '%',     dec: 1 },   // hand ctrl of 329D005 atm vent
       { k: 'hv601',  t: 'avalve', x: 140, y: 438, tag: 'HV-329601',  bind: 'STEAM_SYSTEM.HP_VENT.pct',   u: '%',     dec: 1 },   // 329D005 atm vent valve

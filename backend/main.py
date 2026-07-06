@@ -2661,6 +2661,12 @@ def step_sim(dt: float) -> dict:
                 "m_963_th":   round(s.steam.m_963 * 3.6, 2),
                 "m_pic_th":   round(s.steam.m_pic * 3.6, 2),        # PIC-329207A/B vent(+)/make-up(-)
             },
+            "PIC_329204": {                      # 329D005 HP-saturator faceplate (PV=MP header P)
+                "pv":   round(s.steam.P_MP, 2),                     # bar a
+                "sp":   round(s.steam.pic204_sp, 2),
+                "op":   round(s.steam.valve_supply_pct, 1),        # PV-329204 opening (%)
+                "mode": s.steam.pic204_mode,
+            },
             "PIC_329205": {                      # 329D009 split-range faceplate (PV=9-bar drum P)
                 "pv":   round(s.steam.P_9, 2),                      # bar a
                 "sp":   round(s.steam.pic205_sp, 2),
@@ -2924,12 +2930,30 @@ def handle_cmd(cmd: dict):
         if "op" in cmd:
             s.steam.valve_963_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
-    elif t == "pic329205_set":                 # 329D009 split-range PIC-329205 (mode/SP only; design-neutral)
+    elif t == "pic329204_set":                 # 329D005 HP-saturator PIC-329204 -> PV-329204 (25->MP supply)
+        m = str(cmd.get("mode", s.steam.pic204_mode)).upper()
+        if m in ("AUTO", "MAN"):
+            s.steam.pic204_mode = m            # MAN freezes valve_supply_pct; i_204 held -> bumpless
+        if "sp" in cmd:
+            s.steam.pic204_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
+        if "op" in cmd and s.steam.pic204_mode == "MAN":
+            s.steam.valve_supply_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "pic329205_set":                 # 329D009 split-range PIC-329205 (mode/SP; op=split-range in MAN)
         m = str(cmd.get("mode", s.steam.pic205_mode)).upper()
         if m in ("AUTO", "MAN"):
-            s.steam.pic205_mode = m            # MAN freezes 205A/205B; operator uses steam_letdown_set etc.
+            s.steam.pic205_mode = m            # MAN freezes AUTO writes; op below drives the split legs
         if "sp" in cmd:
             s.steam.pic205_sp = clamp(_finite(cmd["sp"], "sp"), 0.0, 25.0)
+        if "op" in cmd and s.steam.pic205_mode == "MAN":
+            # single-op split-range: 0-50% -> PV-329205A (admit) 0-100 ; 50-100% -> PV-329205B (let-down) 0-100
+            op = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+            if op <= 50.0:
+                s.steam.valve_admit9_pct  = op * 2.0
+                s.steam.valve_letdown_pct = 0.0
+            else:
+                s.steam.valve_admit9_pct  = 0.0
+                s.steam.valve_letdown_pct = (op - 50.0) * 2.0
 
     elif t == "pic329207_set":                 # 4-bar header leg-B PIC-329207 (mode/SP only; design-neutral)
         m = str(cmd.get("mode", s.steam.pic207_mode)).upper()
