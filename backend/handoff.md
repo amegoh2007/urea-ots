@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-05 (session 4) · branch `fix/reactor-level-drain-and-vent-coupling` · pushed through `ea07608`_
+_Last updated: 2026-07-08 (session 5) · branch `fix/reactor-level-drain-and-vent-coupling` · pushed through `aec3160`_
 
 ## Goal
 
@@ -276,6 +276,57 @@ the backdrop to the 1366×720 stage. Rewrote `OV['screen-329-1']` (single logica
 - **Caveat:** user's live server (PID 5764, port 8000) predates these edits — its packet lacks
   `PIC_329207A/B/C` (bind probe MISS on 9 keys). NOT a code defect; new tiles render live only after
   that server restarts (barred from restarting it).
+
+## 2026-07-08 (session 5): 329-1 steam-drum level loops LIC/LV-329502/503/504 wired to sim
+
+Commit `aec3160` (**pushed**). The three page-329-1 level controllers/valves were bare
+display tags (no bind, no backend state); they now form closed condensate-level loops that
+drive their valves in the engine, per `329-1 mapping and description.md` (authoritative spec).
+
+### The three loops (mapping-faithful)
+
+| Loop | Vessel | Valve action | Inflow → Outflow | Sense |
+|------|--------|-------------|------------------|-------|
+| LIC-329502 | 329D005 HP saturator | LV-329502 drain → 329D009 | in = HP-stripper condensate return (`m_strip_consume`) ; out = LV-329502 | DIRECT |
+| LIC-329503 | 329D009 MP 9-bar drum | LV-329503 drain → 322D001A/B | in = LV-329502 drain (cascade) ; out = LV-329503 | DIRECT |
+| LIC-329504 | 322D001A/B LP drums | LV-329504 make-up ← 329P001A/B | in = LV-329504 ; out = LP boil-off (`m_hpcc_gen`) | REVERSE |
+
+### main.py / steam_system.py edits (all in commit `aec3160`)
+
+- `steam_system.py`: velocity-form PI helper `_level_loop(mode,sp,lvl,op,ep,dt,m_span,m_des,direct,m_ext,valve_out)`
+  — bumpless, clamped 0-100, `op += KC[(e-ep)+dt/TI·e]`, `e=lvl-sp` (direct) / `sp-lvl` (reverse).
+  Design-seeded valve flow `m_valve = m_des·(op/LV_OPEN_DES)`: at seed op=50, sp=50, m_ext=M_DES ⇒ dm=0.
+  Constants block (`LIC_KC=2.5`, `LIC_TI=90`, `M_502/503/504_DES`, `MSPAN_502/503/504` from datasheet
+  geometry), 6 SteamState fields/loop, 3 calls in `step_steam` before `return state`.
+- `m_span` (timescale only, NOT design-pinned): 329D005 horiz ID 1.760 L 5.000 span 1.500 ρ850.25 → 11223 kg;
+  329D009 horiz ID 1.776 L 2.600 span 0.750 ρ892.15 → 3090 kg; 322D001 vert ID 1.600 span 2.000 ρ917 → 3688 kg.
+- `main.py`: `LIC_329502/503/504` telemetry `{pv,sp,op,mode}` in STEAM_SYSTEM block; `lic329502/503/504_set`
+  handlers (uppercase mode; bumpless SP←PV on AUTO entry; op writable only in MAN).
+- `frontend/overlays.js`: LIC tags → `.pv`+`.mode` faceplate (`t:'ind'`); LV tags → `.op` valve (`t:'avalve'`).
+  `frontend/app.js`: T-map routes `LIC-329502/503/504` → `lic329502/503/504_set`.
+
+### Conservation (Resolution B — resolves the negative-makeup contradiction)
+
+Full stripper condensate cascade (~21.3 kg/s) ≫ LP boil-off (3.0 kg/s), so 329D009 drain does NOT feed
+322D001's boiling inventory — it routes to the 329P001 condensate-pump suction/collection. LV-329504
+admits only make-up replacing the 3.0 boil-off. Each loop is a LOCAL conservation-honest balance; every
+stream maps to a real source/sink → 100% conservation, no fabricated flow.
+
+### Bit-exactness argument (holds)
+
+Level loops live in `step_steam`, GATED OFF during both boot-pins (`_STEAM_READY=False`) → level states
+stay at init 50. Post-pin they run but NEVER write P_MP/P_9/P_LP (liquid decoupled from the vapor-pressure
+ODEs). At the design seed all dm/dt=0 → pinned pressure fixed point bit-identical.
+
+### Verification (all green)
+
+- A/B via `git stash`: design fixed point **bit-identical** pre/post edit — P_MP=19.700, P_9=9.000, P_LP=4.400.
+- Isolated `_level_loop` probe: all three loops park at **exactly `lvl=50.0 op=50.0` over 20000 ticks** (dm/dt=0).
+- Disturbance response correct: 502 +20% inflow → re-parks 50.0, op→60% (drains more, DIRECT); 504 +20%
+  boil-off → re-parks ~50, op→60% (refills more, REVERSE). MAN freezes op, ep tracks → bumpless re-AUTO.
+- `main.py` / `overlays.js` / `app.js` syntax clean.
+- Pre-existing baseline `[2]` (PV-329204→0%) + `OVERALL: FAIL` in `steam_system.py` self-test are UNCHANGED
+  by this edit (confirmed A/B) — unrelated to level loops.
 
 ## Files
 
