@@ -177,14 +177,16 @@
         mode: 'STEAM_SYSTEM.PIC_329205.mode', note: 'up P9 => PV-329205B let-down (9->4 bar) opens; down P9 => PV-329205A admits 25-bar BL steam' },
       { k: 'pv205a', t: 'avalve', x: 589, y: 548, tag: 'PV-329205A', bind: 'STEAM_SYSTEM.DRUM_9BAR.admit_pct',   u: '%', dec: 1 },
       { k: 'pv205b', t: 'avalve', x: 847, y: 361, tag: 'PV-329205B', bind: 'STEAM_SYSTEM.DRUM_9BAR.letdown_pct', u: '%', dec: 1 },
-      { k: 'lic503', t: 'ind', x: 1002, y: 505, tag: 'LIC-329503' },   // 329D009 level (unmodelled)
-      { k: 'lv503',  t: 'ind', x: 1002, y: 581, tag: 'LV-329503'  },
+      { k: 'lic503', t: 'ind',    x: 1002, y: 505, tag: 'LIC-329503', bind: 'STEAM_SYSTEM.LIC_329503.pv', u: '%', dec: 1,
+        mode: 'STEAM_SYSTEM.LIC_329503.mode', note: 'AUTO holds 329D009 level via LV-329503 drain to 322D001A/B; MAN sets LV-329503 opening directly' },
+      { k: 'lv503',  t: 'avalve', x: 1002, y: 581, tag: 'LV-329503',  bind: 'STEAM_SYSTEM.LIC_329503.op', u: '%', dec: 1 },
       // ===== 322D001A/B LP drums + 4-bar header pressure indicators (PI-329206 / PI-329207) =====
       { k: 'tt001',  t: 'ind',    x: 614, y: 271, tag: 'TT-329001',  bind: 'STEAM_SYSTEM.LP.TI_sat',  u: 'C',     dec: 1 },   // temp inside 322D001A/B
       { k: 'pi206',  t: 'ind',    x: 625, y: 179, tag: 'PI-329206',  bind: 'STEAM_SYSTEM.LP.P_bara',  u: 'BAR A', dec: 2 },
       { k: 'pi207',  t: 'ind',    x: 753, y: 179, tag: 'PI-329207',  bind: 'STEAM_SYSTEM.LP.P_bara',  u: 'BAR A', dec: 2 },   // 2nd header P indicator
-      { k: 'lic504', t: 'ind', x: 394,  y: 222, tag: 'LIC-329504' },
-      { k: 'lv504',  t: 'ind', x: 194,  y: 294, tag: 'LV-329504'  },
+      { k: 'lic504', t: 'ind',    x: 394,  y: 222, tag: 'LIC-329504', bind: 'STEAM_SYSTEM.LIC_329504.pv', u: '%', dec: 1,
+        mode: 'STEAM_SYSTEM.LIC_329504.mode', note: 'reverse-acting: AUTO holds 322D001A/B level via LV-329504 make-up from 329P001A/B pumps; MAN sets LV-329504 opening directly' },
+      { k: 'lv504',  t: 'avalve', x: 194,  y: 294, tag: 'LV-329504',  bind: 'STEAM_SYSTEM.LIC_329504.op', u: '%', dec: 1 },
       // ===== 4-bar header MASTER SP trio (A vent SP+0.1 / B turbine make-up SP / C BL make-up SP-0.1) =====
       // all 3 controllers open the MASTER SP faceplate (managed as one when MASTER ON).
       { k: 'msp',     t: 'ind', x: 52,  y: 90,  tag: 'MASTER-SP',   fp: 'MASTER_SP_329207' },
@@ -198,9 +200,10 @@
       { k: 'hic602',  t: 'ind',    x: 301,  y: 420, tag: 'HIC-329602' },   // 963 make-up hand ctrl (unmodelled)
       { k: 'hv602',   t: 'ind',    x: 291,  y: 475, tag: 'HV-329602'  },   // 963 make-up isolation (unmodelled)
       { k: 'ft407',   t: 'ind',    x: 1081, y: 141, tag: 'FT-329407'  },   // 320MT02 turbine steam flow
-      // ===== 329D005 level (LIC/LV-329502, unmodelled) + O2-scavenger dosing pumps =====
-      { k: 'lic502',  t: 'ind', x: 744, y: 625, tag: 'LIC-329502' },
-      { k: 'lv502',   t: 'ind', x: 731, y: 697, tag: 'LV-329502'  },
+      // ===== 329D005 level (LIC/LV-329502) + O2-scavenger dosing pumps =====
+      { k: 'lic502',  t: 'ind',    x: 744, y: 625, tag: 'LIC-329502', bind: 'STEAM_SYSTEM.LIC_329502.pv', u: '%', dec: 1,
+        mode: 'STEAM_SYSTEM.LIC_329502.mode', note: 'AUTO holds 329D005 level via LV-329502 drain to 329D009; MAN sets LV-329502 opening directly' },
+      { k: 'lv502',   t: 'avalve', x: 731, y: 697, tag: 'LV-329502',  bind: 'STEAM_SYSTEM.LIC_329502.op', u: '%', dec: 1 },
       { k: 'u001m01', t: 'pump', x: 1262, y: 570, tag: '329U001-M01' },   // O2 scavenger dosing (unmodelled -> local toggle)
       { k: 'u001m02', t: 'pump', x: 1262, y: 651, tag: '329U001-M02' },
       // ===== screen-nav hotspots: boundary exchangers with live 322-1 home screen =====

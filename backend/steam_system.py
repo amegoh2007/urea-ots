@@ -149,6 +149,36 @@ M_USERS_LP = M_HPCC_DES
 #   design and is not fabricated into an in-scope flow it has nowhere to go).
 M_903_DES = 1754.0 / 3600.0   # kg/s, documented ultimate-design reference only (unused in scope)
 
+# ---------------------------------------------------------------- drum level loops (LIC-329502/503/504)
+#   Three condensate-inventory level loops, each a LOCAL mass balance (accumulation = in - out) and
+#   design-seeded so dm/dt=0 at the pinned steady state: level held at SP=50% with the seed valve
+#   opening -> the fixed point is bit-for-bit unchanged.  step_steam is gated OFF during the boot-pin
+#   settle (_STEAM_READY=False), so these cannot perturb any design-pinned header pressure; and the
+#   level states never write P_MP/P_9/P_LP (liquid inventory decoupled from the vapor-pressure ODEs).
+#   Control sense (PID_No_107_1 / 329-1 mapping):
+#     LIC-329502  329D005 condensate drain -> 329D009  : DIRECT  (level>SP -> open LV-329502 -> drain^)
+#     LIC-329503  329D009 condensate drain -> 322D001  : DIRECT  (level>SP -> open LV-329503 -> drain^)
+#     LIC-329504  322D001 make-up f. 329P001A/B pumps  : REVERSE (level>SP -> close LV-329504 -> make-up v)
+#   Cascade conservation: the 329D005->329D009 drain carries the full HP-stripper condensate return
+#   (M_STRIP_DES); the 329D009 drain discharges to the 329P001 condensate-pump suction (collection),
+#   and LV-329504 admits only the make-up replacing the LP boil-off raised in the HPCC (M_HPCC_DES) ->
+#   every stream maps to a real source/sink (100% conservation; no fabricated flow to dodge stiffness).
+#   Mass-per-%level  m_span = rho_liq * A_surface * span  (sets the level TIMESCALE only; NOT design-
+#   pinned).  Datasheet geometry (NSF/Uhde DDS, folder 329-1):
+#     329D005 horiz ID 1.760 m x L 5.000 m, LT-329502 span 1.500 m, rho 850.25 -> ~11223 kg
+#     329D009 horiz ID 1.776 m x L 2.600 m, LT-329503 span 0.750 m, rho 892.15 -> ~ 3090 kg
+#     322D001 vert  ID 1.600 m (A=pi/4 D^2), LT-329504 span 2.000 m, rho 917.0 -> ~ 3688 kg
+LEVEL_SP_DES = 50.0        # %, design normal liquid level (all three drums)
+LV_OPEN_DES  = 50.0        # %, design-seed level-valve opening (valve flow == design draw at this opening)
+LIC_KC       = 2.5         # %op per %level, velocity-form PI proportional gain (controller tuning)
+LIC_TI       = 90.0        # s, velocity-form PI integral time
+M_502_DES    = M_STRIP_DES    # kg/s, 329D005 condensate throughput = HP-stripper condensate return
+M_503_DES    = M_STRIP_DES    # kg/s, 329D009 condensate throughput (cascade from 329D005)
+M_504_DES    = M_HPCC_DES     # kg/s, 322D001 make-up = LP steam boil-off replaced (HPCC raising)
+MSPAN_502    = 850.25 * (1.760 * 5.000) * 1.500         # kg, 329D005 horiz (mid-level chord = ID)
+MSPAN_503    = 892.15 * (1.776 * 2.600) * 0.750         # kg, 329D009 horiz
+MSPAN_504    = 917.0  * (0.78539816 * 1.600 ** 2) * 2.000   # kg, 322D001 vert (A=pi/4*D^2=2.0106 m^2)
+
 
 def _valve_flow(K: float, opening_pct: float, p_up: float, p_down: float) -> float:
     """Incompressible orifice flow (kg/s). Clamps opening to [0,100] and dP to >=0."""
@@ -164,6 +194,28 @@ def _seed_supply_pct() -> float:
 
 
 _SUPPLY_BIAS = _seed_supply_pct()   # design-seed PV-329204 opening; PIC-329204 bias anchor (bit-exact fixed point)
+
+
+def _level_loop(mode, sp, lvl, op, ep, dt, m_span, m_des, direct, m_ext, valve_out):
+    """Advance one drum level loop; return (lvl, op, ep, m_valve).
+
+    Velocity-form PI on the drum level, then a LOCAL mass balance (accumulation = in - out):
+        e        = (lvl-sp) if direct else (sp-lvl)              # direct=drain, reverse=make-up
+        op      <- clamp(op + KC*((e-ep) + dt/TI*e), 0, 100)     # AUTO only; frozen in MAN
+        m_valve  = m_des * (op / LV_OPEN_DES)                    # design-seeded valve flow (kg/s)
+        dm       = (m_ext - m_valve) if valve_out else (m_valve - m_ext)   # in - out
+        lvl     <- clamp(lvl + dm*dt/m_span*100, 0, 100)
+    ep is tracked every tick (incl. MAN) -> bumpless MAN->AUTO.  Seeded op==LV_OPEN_DES with
+    m_ext==m_des gives m_valve==m_ext -> dm==0 -> level parks at SP (design bit-exact).
+    """
+    e = (lvl - sp) if direct else (sp - lvl)
+    if mode == "AUTO":
+        op = max(0.0, min(100.0, op + LIC_KC * ((e - ep) + (dt / LIC_TI) * e)))
+    ep = e
+    m_valve = m_des * (max(0.0, min(100.0, op)) / LV_OPEN_DES)
+    dm = (m_ext - m_valve) if valve_out else (m_valve - m_ext)
+    lvl = max(0.0, min(100.0, lvl + dm * dt / m_span * 100.0))
+    return lvl, op, ep, m_valve
 
 
 @dataclass
@@ -209,6 +261,22 @@ class SteamState:
     i_207c:       float = 0.0                   # PIC-329207C integral (one-sided, bar.s-scaled)
     m_vent:       float = 0.0                   # PV-329207A vent flow (kg/s)
     m_turbine:    float = 0.0                   # PV-329207B turbine make-up flow (kg/s)
+    # --- drum level loops (LIC-329502/503/504); design-seeded -> dm/dt=0 at pin (bit-exact) ---
+    lic502_mode: str   = "AUTO"          # 329D005 level (LT-329502) -> LV-329502 drain to 329D009 (direct)
+    lic502_sp:   float = LEVEL_SP_DES    # level SP (%)
+    lic502_lvl:  float = LEVEL_SP_DES    # 329D005 condensate level (%)
+    lic502_op:   float = LV_OPEN_DES     # LV-329502 opening (%)
+    lic502_ep:   float = 0.0             # velocity-PI previous error (bumpless MAN->AUTO)
+    lic503_mode: str   = "AUTO"          # 329D009 level (LT-329503) -> LV-329503 drain to 322D001 (direct)
+    lic503_sp:   float = LEVEL_SP_DES
+    lic503_lvl:  float = LEVEL_SP_DES    # 329D009 condensate level (%)
+    lic503_op:   float = LV_OPEN_DES     # LV-329503 opening (%)
+    lic503_ep:   float = 0.0
+    lic504_mode: str   = "AUTO"          # 322D001 level (LT-329504) -> LV-329504 make-up f.329P001 (reverse)
+    lic504_sp:   float = LEVEL_SP_DES
+    lic504_lvl:  float = LEVEL_SP_DES    # 322D001 water level (%)
+    lic504_op:   float = LV_OPEN_DES     # LV-329504 opening (%)
+    lic504_ep:   float = 0.0
 
 
 def step_steam(state: SteamState, dt: float,
@@ -309,6 +377,21 @@ def step_steam(state: SteamState, dt: float,
     state.m_supply, state.m_903, state.m_ld = m_supply, m_903, m_ld9
     state.m_963, state.m_water, state.m_vent_hp, state.m_pic = m_963, m_water, m_vent_hp, m_pic
     state.m_vent, state.m_turbine = m_vent, m_turbine
+
+    # -- drum level loops (LIC-329502/503/504): local condensate inventories, design-seeded --
+    #    502: 329D005 drain->329D009  (in = HP-stripper condensate return = m_strip_consume)
+    #    503: 329D009 drain->322D001  (in = 502 drain = cascade)
+    #    504: 322D001 make-up f.329P001 pumps (out = LP boil-off = m_hpcc_gen ; reverse-acting)
+    #    All seeded so dm/dt=0 at design; liquid inventory never writes the header pressures.
+    state.lic502_lvl, state.lic502_op, state.lic502_ep, m_lv502 = _level_loop(
+        state.lic502_mode, state.lic502_sp, state.lic502_lvl, state.lic502_op, state.lic502_ep,
+        dt, MSPAN_502, M_502_DES, direct=True,  m_ext=m_strip_consume, valve_out=True)
+    state.lic503_lvl, state.lic503_op, state.lic503_ep, m_lv503 = _level_loop(
+        state.lic503_mode, state.lic503_sp, state.lic503_lvl, state.lic503_op, state.lic503_ep,
+        dt, MSPAN_503, M_503_DES, direct=True,  m_ext=m_lv502,        valve_out=True)
+    state.lic504_lvl, state.lic504_op, state.lic504_ep, _ = _level_loop(
+        state.lic504_mode, state.lic504_sp, state.lic504_lvl, state.lic504_op, state.lic504_ep,
+        dt, MSPAN_504, M_504_DES, direct=False, m_ext=m_hpcc_gen,     valve_out=False)
     return state
 
 

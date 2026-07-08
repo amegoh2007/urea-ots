@@ -483,7 +483,7 @@ function render322(s){
     const st=load(), o=parseFloat(op.value), p=parseFloat(sp.value);
     st[cur.tag]={ mode, op:isNaN(o)?null:o, sp:isNaN(p)?null:p };
     save(st);
-    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set', 'PIC-329204':'pic329204_set', 'PIC-329205':'pic329205_set', 'PIC-329207':'pic329207_set', 'HIC-329601':'steam_hpvent_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
+    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set', 'PIC-329204':'pic329204_set', 'PIC-329205':'pic329205_set', 'PIC-329207':'pic329207_set', 'HIC-329601':'steam_hpvent_set', 'LIC-329502':'lic329502_set', 'LIC-329503':'lic329503_set', 'LIC-329504':'lic329504_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
     const msg={type:T[cur.tag]||'controller_set', id:cur.tag, mode};
     if(mode==='MAN'  && !isNaN(o)) msg.op=o;
     if(mode==='AUTO' && !isNaN(p)) msg.sp=p;

@@ -2702,6 +2702,24 @@ def step_sim(dt: float) -> dict:
                 "op":   round(s.steam.valve_963_pct, 1),           # valve %
                 "mode": s.steam.pic207c_mode,
             },
+            "LIC_329502": {                      # 329D005 HP-saturator level -> LV-329502 drain to 329D009
+                "pv":   round(s.steam.lic502_lvl, 1),              # level %
+                "sp":   round(s.steam.lic502_sp, 1),
+                "op":   round(s.steam.lic502_op, 1),               # LV-329502 %
+                "mode": s.steam.lic502_mode,
+            },
+            "LIC_329503": {                      # 329D009 MP-drum level -> LV-329503 drain to 322D001A/B
+                "pv":   round(s.steam.lic503_lvl, 1),              # level %
+                "sp":   round(s.steam.lic503_sp, 1),
+                "op":   round(s.steam.lic503_op, 1),               # LV-329503 %
+                "mode": s.steam.lic503_mode,
+            },
+            "LIC_329504": {                      # 322D001A/B LP-drum level -> LV-329504 make-up f.329P001
+                "pv":   round(s.steam.lic504_lvl, 1),              # level %
+                "sp":   round(s.steam.lic504_sp, 1),
+                "op":   round(s.steam.lic504_op, 1),               # LV-329504 %
+                "mode": s.steam.lic504_mode,
+            },
         },
         "REACT_322R001": {                       # HP Urea Reactor 322R001 -> 322E001 / 322E003
             "TT_322005":   round(s.react_T_node[3], 1),  # N6 A top (EL +21700) — node-4 DYNAMIC profile
@@ -2954,6 +2972,39 @@ def handle_cmd(cmd: dict):
             else:
                 s.steam.valve_admit9_pct  = 0.0
                 s.steam.valve_letdown_pct = (op - 50.0) * 2.0
+
+    elif t == "lic329502_set":                 # 329D005 level LIC-329502 -> LV-329502 (drain to 329D009)
+        m = str(cmd.get("mode", s.steam.lic502_mode)).upper()
+        if m in ("AUTO", "MAN"):
+            if m == "AUTO" and s.steam.lic502_mode != "AUTO":     # bumpless SP<-PV on AUTO entry
+                s.steam.lic502_sp = clamp(s.steam.lic502_lvl, 0.0, 100.0)
+            s.steam.lic502_mode = m            # MAN freezes LV-329502 (op held; ep updated -> bumpless)
+        if "sp" in cmd:
+            s.steam.lic502_sp = clamp(_finite(cmd["sp"], "lic_sp"), 0.0, 100.0)
+        if "op" in cmd and s.steam.lic502_mode == "MAN":
+            s.steam.lic502_op = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "lic329503_set":                 # 329D009 level LIC-329503 -> LV-329503 (drain to 322D001A/B)
+        m = str(cmd.get("mode", s.steam.lic503_mode)).upper()
+        if m in ("AUTO", "MAN"):
+            if m == "AUTO" and s.steam.lic503_mode != "AUTO":     # bumpless SP<-PV on AUTO entry
+                s.steam.lic503_sp = clamp(s.steam.lic503_lvl, 0.0, 100.0)
+            s.steam.lic503_mode = m            # MAN freezes LV-329503 (op held; ep updated -> bumpless)
+        if "sp" in cmd:
+            s.steam.lic503_sp = clamp(_finite(cmd["sp"], "lic_sp"), 0.0, 100.0)
+        if "op" in cmd and s.steam.lic503_mode == "MAN":
+            s.steam.lic503_op = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "lic329504_set":                 # 322D001A/B level LIC-329504 -> LV-329504 (make-up f.329P001)
+        m = str(cmd.get("mode", s.steam.lic504_mode)).upper()
+        if m in ("AUTO", "MAN"):
+            if m == "AUTO" and s.steam.lic504_mode != "AUTO":     # bumpless SP<-PV on AUTO entry
+                s.steam.lic504_sp = clamp(s.steam.lic504_lvl, 0.0, 100.0)
+            s.steam.lic504_mode = m            # MAN freezes LV-329504 (op held; ep updated -> bumpless)
+        if "sp" in cmd:
+            s.steam.lic504_sp = clamp(_finite(cmd["sp"], "lic_sp"), 0.0, 100.0)
+        if "op" in cmd and s.steam.lic504_mode == "MAN":
+            s.steam.lic504_op = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
     elif t == "pic329207_set":                 # 4-bar header leg-B PIC-329207 (mode/SP only; design-neutral)
         m = str(cmd.get("mode", s.steam.pic207_mode)).upper()
