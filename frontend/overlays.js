@@ -212,6 +212,45 @@
       { k: 'nav-e001a', t: 'nav', x: 68, y: 446, w: 80, h: 24, tag: '322E001 -> 322-1', goto: 'screen-322-1' },
       { k: 'nav-e001b', t: 'nav', x: 68, y: 490, w: 80, h: 24, tag: '322E001 -> 322-1', goto: 'screen-322-1' },
     ],
+    // ============================ 323-1  LP RECIRCULATION & PRE-EVAPORATION ============================
+    // coords = STAGE 1366x720 (tagged native 1287x612 scaled x1.06138 / y1.17647).  bind -> RECIRC_323 telemetry tree.
+    // unbound `ind` = WHITE FRAME (unmodelled boundary/downstream, tag text only).  3 cascade slaves flagged cas:true.
+    'screen-323-1': [
+      // ---- 323C003 rectifying column / 323E002 heater : isenthalpic letdown -> 4.1 bar, hold 135 C ----
+      { k: 'tt001', t: 'ind', x: 255, y: 133, tag: 'TT-323001', bind: 'RECIRC_323.C003.feed_T',   u: 'C',     dec: 1 },   // feed ex 322E001
+      { k: 'tt002', t: 'ind', x: 388, y: 496, tag: 'TT-323002', bind: 'RECIRC_323.C003.TT_323002', u: 'C',     dec: 1 },   // column bottoms 135 C
+      { k: 'pt201', t: 'ind', x: 482, y: 232, tag: 'PT-323201', bind: 'RECIRC_323.C003.P_bara',    u: 'BAR A', dec: 2 },
+      { k: 'tic07', t: 'ind', x: 448, y: 441, tag: 'TIC-323007', bind: 'RECIRC_323.C003.TIC_323007.pv', mode: 'RECIRC_323.C003.TIC_323007.mode', u: 'C',     dec: 1, note: 'master: cascades PIC-329202 steam-P to 323E002 to hold 135 C' },
+      { k: 'pic02', t: 'ind', x: 137, y: 244, tag: 'PIC-329202', bind: 'RECIRC_323.C003.PIC_329202.pv', mode: 'RECIRC_323.C003.PIC_329202.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-323007; drives PV-329202 steam to 323E002' },
+      { k: 'pv02',  t: 'avalve', x: 108, y: 333, tag: 'PV-329202', bind: 'RECIRC_323.C003.PIC_329202.op', u: '%', dec: 1 },
+      { k: 'lic01', t: 'ind', x: 482, y: 289, tag: 'LIC-323501', bind: 'RECIRC_323.C003.LIC_323501.pv', mode: 'RECIRC_323.C003.LIC_323501.mode', u: '%', dec: 1, note: 'holds 323C003 level via LV-323501 bottoms drain to 323F004' },
+      { k: 'lv01',  t: 'avalve', x: 469, y: 381, tag: 'LV-323501', bind: 'RECIRC_323.C003.LIC_323501.op', u: '%', dec: 1 },
+      { k: 'lic01b',t: 'ind', x: 177, y: 555, tag: 'LIC-323501', bind: 'RECIRC_323.C003.LIC_323501.pv', mode: 'RECIRC_323.C003.LIC_323501.mode', u: '%', dec: 1 },   // dup readout, recycle line
+      { k: 'lv01b', t: 'avalve', x: 162, y: 625, tag: 'LV-323501', bind: 'RECIRC_323.C003.LIC_323501.op', u: '%', dec: 1 },   // dup valve symbol
+      // ---- 323F004 flash tank : adiabatic flash -> 1.13 bar, ~106 C ----
+      { k: 'tt14',  t: 'ind', x: 695, y: 361, tag: 'TT-323014', bind: 'RECIRC_323.F004.TT_323005', u: 'C', dec: 1 },
+      { k: 'lic05', t: 'ind', x: 761, y: 279, tag: 'LIC-323505', bind: 'RECIRC_323.F004.LIC_323505.pv', mode: 'RECIRC_323.F004.LIC_323505.mode', u: '%', dec: 1, note: 'holds 323F004 level via LV-323505 drain to 323F010 pre-evaporator' },
+      { k: 'lv05',  t: 'avalve', x: 751, y: 527, tag: 'LV-323505', bind: 'RECIRC_323.F004.LIC_323505.op', u: '%', dec: 1 },
+      // ---- 323F010 / 323E010 pre-evaporator : vacuum 0.46 bar, hold 99 C ----
+      { k: 'pt204', t: 'ind', x: 996, y: 244, tag: 'PT-323204', bind: 'RECIRC_323.F010.P_bara', u: 'BAR A', dec: 2 },
+      { k: 'tic12', t: 'ind', x: 1040, y: 418, tag: 'TIC-323012', bind: 'RECIRC_323.F010.TIC_323012.pv', mode: 'RECIRC_323.F010.TIC_323012.mode', u: 'C', dec: 1, note: 'master: cascades PIC-329208 steam-P to 323E010 to hold 99 C' },
+      { k: 'pic08', t: 'ind', x: 1153, y: 309, tag: 'PIC-329208', bind: 'RECIRC_323.F010.PIC_329208.pv', mode: 'RECIRC_323.F010.PIC_329208.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-323012; drives PV-329208 steam to 323E010' },
+      { k: 'pv08',  t: 'avalve', x: 1140, y: 391, tag: 'PV-329208', bind: 'RECIRC_323.F010.PIC_329208.op', u: '%', dec: 1 },
+      // ---- 323D002 urea solution tank : atmospheric, two-compartment (I active 80 m3 / II passive 300 m3) ----
+      { k: 'tt103', t: 'ind', x: 761, y: 707, tag: 'TT-323103', bind: 'RECIRC_323.D002.T_C',      u: 'C', dec: 1 },
+      { k: 'lt504', t: 'ind', x: 817, y: 665, tag: 'LT-323504', bind: 'RECIRC_323.D002.LI_comp2', u: '%', dec: 1 },   // passive compartment II
+      { k: 'lic07', t: 'ind', x: 1087, y: 665, tag: 'LIC-323507', bind: 'RECIRC_323.D002.LIC_323507.pv', mode: 'RECIRC_323.D002.LIC_323507.mode', u: '%', dec: 1, note: 'master: active compartment I level cascades FIC-324401 product flow' },
+      { k: 'fic01', t: 'ind', x: 1270, y: 674, tag: 'FIC-324401', bind: 'RECIRC_323.D002.FIC_324401.pv', mode: 'RECIRC_323.D002.FIC_324401.mode', u: 'T/H', dec: 2, cas: true, note: 'slave: CAS follows LIC-323507; product to 324 evap via 323P003 A/B' },
+      // ---- WHITE FRAMES : unmodelled boundary / downstream (tag only; bind when upstream modelled) ----
+      { k: 'pic203',  t: 'ind', x: 609,  y: 122, tag: 'PIC-323203' },   // off-gas header P -> GCB
+      { k: 'tt004',   t: 'ind', x: 439,  y: 124, tag: 'TT-323004'  },   // top vapor line
+      { k: 'hic605',  t: 'ind', x: 992,  y: 142, tag: 'HIC-323605' },   // 324E002 vent hand ctrl
+      { k: 'pv203',   t: 'ind', x: 1220, y: 142, tag: 'PV-323203'  },   // GCB off-gas valve
+      { k: 'hv605',   t: 'ind', x: 1058, y: 199, tag: 'HV-323605'  },   // 324E002 vent valve
+      { k: 'pic4202', t: 'ind', x: 1277, y: 209, tag: 'PIC-324202' },   // 324E002 pressure
+      { k: 'fic5407', t: 'ind', x: 1214, y: 468, tag: 'FIC-335407' },   // 335 pump flow (downstream unit)
+      { k: 'fv5407',  t: 'ind', x: 1116, y: 549, tag: 'FV-335407'  },   // 335 valve (downstream unit)
+    ],
   };
 
   let pos = {};

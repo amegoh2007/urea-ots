@@ -458,6 +458,7 @@ function render322(s){
   };
   const open=(o)=>{
     cur=o; ttl.textContent=o.tag;
+    if(bCas) bCas.style.display = o.cas ? '' : 'none';   // CAS button only for cascade slaves (o.cas)
     const v = o.bind ? gp(window.OTS_LAST||{}, o.bind) : null;
     pv.value = (v==null||v==='') ? '—' : (v + (o.u?(' '+o.u):''));
     curPV = (v==null||v==='') ? null : parseFloat(v);
@@ -477,13 +478,13 @@ function render322(s){
   };
   bMan.onclick =()=>applyMode('MAN');
   bAuto.onclick=()=>{ if(mode!=='AUTO' && curPV!=null) sp.value = curPV; applyMode('AUTO'); };  // bumpless: SP<-PV on MAN->AUTO
-  if(bCas) bCas.style.display='none';   // single non-cascade loops -> no CAS source; hide dead button
+  if(bCas) bCas.onclick=()=>applyMode('CAS');   // cascade slaves (o.cas) enable CAS -> master-driven SP
   const apply=()=>{
     if(!cur) return;
     const st=load(), o=parseFloat(op.value), p=parseFloat(sp.value);
     st[cur.tag]={ mode, op:isNaN(o)?null:o, sp:isNaN(p)?null:p };
     save(st);
-    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set', 'PIC-329204':'pic329204_set', 'PIC-329205':'pic329205_set', 'PIC-329207':'pic329207_set', 'HIC-329601':'steam_hpvent_set', 'LIC-329502':'lic329502_set', 'LIC-329503':'lic329503_set', 'LIC-329504':'lic329504_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
+    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set', 'PIC-329204':'pic329204_set', 'PIC-329205':'pic329205_set', 'PIC-329207':'pic329207_set', 'HIC-329601':'steam_hpvent_set', 'LIC-329502':'lic329502_set', 'LIC-329503':'lic329503_set', 'LIC-329504':'lic329504_set', 'TIC-323007':'r323_ctrl_set', 'PIC-329202':'r323_ctrl_set', 'LIC-323501':'r323_ctrl_set', 'LIC-323505':'r323_ctrl_set', 'TIC-323012':'r323_ctrl_set', 'PIC-329208':'r323_ctrl_set', 'LIC-323507':'r323_ctrl_set', 'FIC-324401':'r323_ctrl_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
     const msg={type:T[cur.tag]||'controller_set', id:cur.tag, mode};
     if(mode==='MAN'  && !isNaN(o)) msg.op=o;
     if(mode==='AUTO' && !isNaN(p)) msg.sp=p;
