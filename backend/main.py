@@ -432,6 +432,278 @@ R323_D002_M_I_FULL  = R323_D002_VOL_I_M3  * R323_D002_RHO                 # kg a
 R323_D002_M_II_FULL = R323_D002_VOL_II_M3 * R323_D002_RHO                 # kg at 100% Comp II
 R323_D002_M_I_DES   = R323_D002_M_I_FULL  * (R323_D002_LVL_SP/100.0)
 
+# ==========================================================================
+#  UNITS 323-2 / 328-1 / 328-2 — LP RECIRCULATION & DESORPTION
+#  Screens 323-2 (LP carbamate condensation), 328-1 (desorption/hydrolysis
+#  train), 328-2 (LP absorber + carbamate collection). Design anchors:
+#  Combined 1750 MTPD 100%-load PFD-21/22 MB + LPCC/desorber/hydrolyser DS.
+#
+#  Design-fixed-point discipline (identical to Unit 323-1 above):
+#    * every design flow is a Python expression over the existing R323_*
+#      constants, or over anchors defined here IN DEPENDENCY ORDER — never a
+#      re-typed PFD number — so the boot state is bit-exact.  (e.g.
+#      R323_M305_DES = (24582/130582)*130482 = 24563.4, NOT the raw 24582.)
+#    * every holdup ODE   dM/dt = Σṁ_in − ṁ_vap − ṁ_out          = 0 at design
+#    * every thermal ODE  M·cp·dT/dt = Σṁ_in·cp·(T_in−T) + Q − ṁ_vap·λ = 0 at
+#      design, with the unknown λ (phase change) or UA/Q (exchanger) BACK-
+#      SOLVED here so the RHS is exactly 0 at the design seed.
+#    * every flow = live valve/speed stroke normalised to its design stroke;
+#      every vapour/vent = design split-fraction × live inflow.
+#  These screens only READ Unit-323 outputs (feed-forward) -> the 135/106/99°C
+#  boundaries stay isolated by construction.
+#
+#  Whole-network mass closure (design, kg/h) — verified to close exactly:
+#    328D003 Comp I : in 719+720+721+V001(3579) = 34868 = out 735+402+401
+#    Comp II        : in 744(31478)             = out 755(31478)
+#    322C001        : in 755+GCB+CPL(900)       = vent + 756(33358); abs 980
+#    323E003        : in 305+718B+776+797+756   = 321(1323)+744(31478)+308
+#    323E011        : in 701+702+786+321+402    = v011(3099)+718 liq;  +401 -> D011
+#    328C002        : in 738+748+750+775(40434) = 737(6665)+743(33769)
+#    328C003        : in 746+911(34874)         = 748(812)+747(34062)
+#    328C004        : in 749+931(40557)         = 750(6833)+739(33724)
+#    328D001        : in 737(6665)+718A         = 786(276)+775(1675)+776(8274)
+# ==========================================================================
+R3232_CP = 3.0     # kJ/kg·K  LP-carbamate / condensate train (323E003, 323E011)
+R328_CP  = 4.0     # kJ/kg·K  desorber / hydrolyser aqueous train (328C002/003/004)
+A328_CP  = 4.0     # kJ/kg·K  LP absorber 322C001 aqueous liquor
+
+# ---- boundary (fixed) feed streams  (kg/h @ °C) ----
+R3232_M797_DES = 1758.0 ; R3232_M797_T = 46.0     # inert-laden recycle -> 323E003
+R3232_M702_DES = 440.0  ; R3232_M702_T = 45.0     # flash recycle       -> 323E011
+A328_CPL_DES   = 900.0  ; A328_CPL_T   = 30.0     # process condensate  -> 322C001
+A328_D003_M719 = 26768.0; A328_D003_M719_T = 45.0 # 719 -> 328D003 Comp I
+A328_D003_M720 = 2758.0 ; A328_D003_M720_T = 40.0 # 720 -> 328D003 Comp I
+A328_D003_M721 = 1763.0 ; A328_D003_M721_T = 41.0 # 721 -> 328D003 Comp I
+
+# ==========================================================================
+#  328C002  Desorber-I  (bottoms 139 °C ; top 117 °C ; floats on PIC-328202)
+#  Reboil heat = latent of the two hot recycle OVHDs 748(@188)+750(@140) that
+#  CONDENSE here; the stripped OVHD 737 is generated (latent λ737 back-solved).
+# ==========================================================================
+R328_C002_M738_DES = 31114.0                                # 738 liquid feed (=735 via 328E007)
+R328_C002_M748_DES = 812.0                                  # 748 hydrolyser-I OVHD (condenses)
+R328_C002_M750_DES = 6833.0                                 # 750 desorber-II OVHD (condenses)
+R328_C002_M775_DES = 1675.0                                 # 775 reflux from 328D001
+R328_C002_IN_DES   = (R328_C002_M738_DES + R328_C002_M748_DES
+                      + R328_C002_M750_DES + R328_C002_M775_DES)          # 40434
+R328_C002_PHI737   = 6665.0 / 40434.0                       # OVHD split -> 328D001 (737)
+R328_C002_M737_DES = R328_C002_PHI737 * R328_C002_IN_DES    # 6665
+R328_C002_M743_DES = R328_C002_IN_DES - R328_C002_M737_DES  # 33769 bottoms -> hydrolyser
+R328_C002_T_BOT = 139.0 ; R328_C002_T_TOP = 117.0
+R328_C002_T738 = 114.0 ; R328_C002_T748 = 188.0 ; R328_C002_T750 = 140.0
+R328_D001_T = 61.0                                          # 775 reflux temperature (from 328D001)
+R328_C002_M_TAU_S = 900.0
+R328_C002_M_DES   = R328_C002_M743_DES/3600.0 * R328_C002_M_TAU_S         # 8442 kg
+R328_C002_LAM748 = 2000.0 ; R328_C002_LAM750 = 2100.0       # kJ/kg condensation of recycle OVHDs
+# sensible net onto the 139°C bottoms (kW), then λ737 closes M·cp·dT/dt = 0:
+R328_C002_SENS = ((R328_C002_M738_DES*(R328_C002_T738 - R328_C002_T_BOT)
+                   + R328_C002_M775_DES*(R328_D001_T   - R328_C002_T_BOT)
+                   + R328_C002_M748_DES*(R328_C002_T748 - R328_C002_T_BOT)
+                   + R328_C002_M750_DES*(R328_C002_T750 - R328_C002_T_BOT))
+                  / 3600.0 * R328_CP)                                     # kW
+R328_C002_LAM737 = ((R328_C002_SENS
+                     + R328_C002_M748_DES/3600.0*R328_C002_LAM748
+                     + R328_C002_M750_DES/3600.0*R328_C002_LAM750)
+                    / (R328_C002_M737_DES/3600.0))                        # kJ/kg (~1879)
+
+# ==========================================================================
+#  328C003  Hydrolyser  (200 °C, 16.8 bar a, MP-steam 911, 1 h residence)
+#  Hydrolysis  NH2CONH2 + H2O <=> 2NH3 + CO2  is ENDOTHERMIC; MP steam 911
+#  supplies it.  λ748_gen (OVHD generation latent) lumps the reaction endotherm
+#  and is back-solved so M·cp·dT/dt = 0 at design.
+# ==========================================================================
+R328_C003_M746_DES = R328_C002_M743_DES                     # 33769 feed via 328E021 (cold)
+R328_C003_M911_DES = 1105.0                                 # MP-steam strip (FIC-326402)
+R328_C003_M911_DH  = 2235.0                                 # kJ/kg MP-steam enthalpy drop
+R328_C003_IN_DES   = R328_C003_M746_DES + R328_C003_M911_DES              # 34874
+R328_C003_PHI748   = 812.0 / 34874.0                        # OVHD split -> 328C002 (748)
+R328_C003_M748_DES = R328_C003_PHI748 * R328_C003_IN_DES    # 812
+R328_C003_M747_DES = R328_C003_IN_DES - R328_C003_M748_DES  # 34062 bottoms -> desorber-II
+R328_C003_T = 200.0 ; R328_C003_T746 = 190.0
+R328_C003_P_BARA = 16.8 ; R328_C003_P_KP = 0.02
+R328_C003_PV_OP_DES = 50.0                                  # PV-328203 OVHD stroke
+R328_C003_M_DES = R328_C003_M747_DES/3600.0 * 3600.0        # 34062 kg (1 h residence)
+# λ748_gen back-solve: m746·cp·(190−200) + m911·ΔH − m748·λ748 = 0
+R328_C003_LAM748 = ((R328_C003_M746_DES/3600.0*R328_CP*(R328_C003_T746 - R328_C003_T)
+                     + R328_C003_M911_DES/3600.0*R328_C003_M911_DH)
+                    / (R328_C003_M748_DES/3600.0))                        # kJ/kg (~1378)
+
+# ==========================================================================
+#  328C004  Desorber-II  (143 °C, LP-steam 931, 900 s residence)
+# ==========================================================================
+R328_C004_M749_DES = R328_C003_M747_DES                     # 34062 feed via 328E021 (hot)
+R328_C004_M931_DES = 6495.0                                 # LP-steam strip (FIC-328401)
+R328_C004_M931_DH  = 2136.0                                 # kJ/kg LP-steam enthalpy drop
+R328_C004_IN_DES   = R328_C004_M749_DES + R328_C004_M931_DES             # 40557
+R328_C004_PHI750   = 6833.0 / 40557.0                       # OVHD split -> 328C002 (750)
+R328_C004_M750_DES = R328_C004_PHI750 * R328_C004_IN_DES    # 6833
+R328_C004_M739_DES = R328_C004_IN_DES - R328_C004_M750_DES  # 33724 bottoms -> 328E007 -> boundary
+R328_C004_T = 143.0 ; R328_C004_T749 = 148.0
+R328_C004_M_TAU_S = 900.0
+R328_C004_M_DES   = R328_C004_M739_DES/3600.0 * R328_C004_M_TAU_S         # 8431 kg
+R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C004_T)
+                     + R328_C004_M931_DES/3600.0*R328_C004_M931_DH)
+                    / (R328_C004_M750_DES/3600.0))                        # kJ/kg (~2130)
+# FFIC-328401 master ratio  m931/m735  (steam-to-feed, held on desorber-II load)
+R328_FFIC_RATIO_DES = R328_C004_M931_DES / R328_C002_M738_DES             # 0.20876
+
+# ==========================================================================
+#  323E011 + 323D011  (LP carbamate condenser + drum, 45 °C, 1.13 bar a)
+#  Combined 9400 kg/h datasheet closes the E011 inlet exactly.  Vapour v011
+#  (3100/9400) -> 323C005; liquid + FIC-323401 flush 401 -> 323D011 -> 718.
+# ==========================================================================
+R3232_E011_M701_DES = R323_M701_DES                         # 4426.6 flash vapour ex 323F004
+R3232_E011_M786_DES = 276.0                                 # vent from 328D001 (stream 786)
+R3232_E011_M321_DES = R3232_M797_DES*0.0 + 1323.0           # 323E003 vent (stream 321)
+R3232_E011_M402_DES = 2931.0                                # 328D003 Comp-I wash (FIC-323402)
+R3232_E011_IN_DES   = (R3232_E011_M701_DES + R3232_M702_DES + R3232_E011_M786_DES
+                       + R3232_E011_M321_DES + R3232_E011_M402_DES)       # 9396.6
+R3232_E011_PHIV     = 3100.0 / 9400.0                       # vapour split -> 323C005 (v011)
+R3232_E011_MV_DES   = R3232_E011_PHIV * R3232_E011_IN_DES   # 3098.8
+R3232_E011_M401_DES = 823.0                                 # 328D003 Comp-I flush (FIC-323401)
+R3232_D011_M718_DES = (R3232_E011_IN_DES - R3232_E011_MV_DES) + R3232_E011_M401_DES  # 7120.8
+R3232_M718A_DES = 0.5 * R3232_D011_M718_DES                 # 3560.4 -> 328D001
+R3232_M718B_DES = 0.5 * R3232_D011_M718_DES                 # 3560.4 -> 323E003
+R3232_E011_T = 45.0 ; R3232_E011_T701 = 106.0 ; R3232_E011_T786 = 61.0
+R3232_E011_P_BARA = 1.13 ; R3232_E011_P_KP = 0.05
+R3232_E011_PV_OP_DES = 25.0                                 # PIC-323203 vent stroke
+R3232_D011_M_TAU_S = 600.0
+R3232_D011_M_DES   = R3232_D011_M718_DES/3600.0 * R3232_D011_M_TAU_S      # 1186.8 kg
+R3232_E011_Q_DES_KW = 3440.0                                # datasheet condenser duty
+R3232_E011_UA_KW    = R3232_E011_Q_DES_KW / (R3232_E011_T - 35.0)         # kW/K vs 35°C CW
+# λ_v011 (vapour-generation latent) closes the drum energy balance at 45°C:
+R3232_E011_SENS = ((R3232_E011_M701_DES*(R3232_E011_T701 - R3232_E011_T)
+                    + R3232_M702_DES*(R3232_M702_T       - R3232_E011_T)
+                    + R3232_E011_M786_DES*(R3232_E011_T786 - R3232_E011_T)
+                    + R3232_E011_M321_DES*(74.0          - R3232_E011_T)
+                    + R3232_E011_M402_DES*(56.0          - R3232_E011_T))
+                   / 3600.0 * R3232_CP)                                   # kW
+R3232_E011_LAMV = ((R3232_E011_SENS - R3232_E011_Q_DES_KW)
+                   / (R3232_E011_MV_DES/3600.0)) * -1.0                   # kJ/kg (>0)
+
+# ==========================================================================
+#  328D001  Desorber-I reflux drum (61 °C, 2.6 bar a); 328E004 condenses 737
+# ==========================================================================
+R328_D001_M737_DES  = R328_C002_M737_DES                    # 6665 OVHD vapour in
+R328_D001_M718A_DES = R3232_M718A_DES                       # 3560.4 recycle in
+R328_D001_IN_DES    = R328_D001_M737_DES + R328_D001_M718A_DES
+R328_D001_M786_DES  = 276.0                                 # vent -> 323E011
+R328_D001_M775_DES  = R328_C002_M775_DES                    # 1675 reflux -> 328C002 (FIC-328404)
+R328_D001_M776_DES  = R328_D001_IN_DES - R328_D001_M786_DES - R328_D001_M775_DES  # 8274.4 -> 323E003
+R328_D001_M774_DES  = R328_D001_M775_DES + R328_D001_M776_DES             # 9949 (PFD 774 ✓)
+R328_D001_T718A = 45.0
+R328_D001_M_FULL = 20900.0
+R328_D001_LVL_SP = 50.5
+R328_D001_M_DES  = R328_D001_M_FULL * (R328_D001_LVL_SP/100.0)            # 10554.5 kg
+R328_D001_P_BARA = 2.6 ; R328_D001_P_KP = 0.05
+R328_D001_PV_OP_DES = 50.0                                  # PIC-328202 vent stroke
+R328_D001_LV_OP_DES = 50.0                                  # LV-328501 stroke
+R328_D001_FIC404_OP_DES = 30.2                              # FIC-328404 (775 reflux) stroke
+R328_E004_Q_DES_KW = 4357.0                                 # datasheet condenser duty
+R328_E004_TV_OP_DES = 50.0                                  # TV-328002 CW stroke
+# λ737_cond (condensation latent) closes drum energy balance at 61°C:
+R328_D001_SENS = ((R328_D001_M737_DES*(R328_C002_T_TOP - R328_D001_T)
+                   + R328_D001_M718A_DES*(R328_D001_T718A - R328_D001_T))
+                  / 3600.0 * R328_CP)                                     # kW
+R328_D001_LAM737 = ((R328_E004_Q_DES_KW - R328_D001_SENS)
+                    / (R328_D001_M737_DES/3600.0))                        # kJ/kg (~2163)
+
+# ==========================================================================
+#  322C001  LP absorber (43 °C, 3.9 bar a); GCB off-gas boot-pinned at runtime
+# ==========================================================================
+A328_M755_DES = 31478.0                                     # Comp-II draw via 322P002
+A328_ABS_DES  = 980.0                                       # NH3/CO2 absorbed into liquor
+A328_M756_DES = A328_M755_DES + A328_CPL_DES + A328_ABS_DES # 33358 -> 323E003 wash feed
+A328_C001_T = 43.0 ; A328_M755_T = 40.0
+A328_C001_P_BARA = 3.9 ; A328_C001_P_KP = 0.02
+A328_PIC_OP_DES = 67.8                                      # PIC-322201 vent stroke
+A328_LIC_OP_DES = 50.0                                      # LIC-322502 -> LV-322502 stroke
+A328_C001_M_TAU_S = 600.0
+A328_C001_M_DES = A328_M756_DES/3600.0 * A328_C001_M_TAU_S  # 5559.7 kg
+A328_QFLOOD_KW  = 500.0                                     # XV-322915 steam-flood latent load
+# GCB boot-pin globals (lazy-pinned in step_sim Stage I; reset in _pin_hpcc_ua):
+A328_GCB_DES    = None   # kg/h off-gas from HV-322604 at the settled design seed
+A328_GCB_T      = None   # °C off-gas temperature
+A328_PHI_ABS    = None   # absorbed fraction 980/GCB_DES
+A328_VENT_DES   = None   # kg/h vented = GCB_DES − 980
+A328_LAMBDA_ABS = None   # kJ/kg absorption enthalpy (back-solved at pin for T=43)
+
+# ==========================================================================
+#  323E003 + 323D001 + 323P001  LPCC (74 °C, tempered-water cooled, 3.2 bar a)
+# ==========================================================================
+R3232_E003_M305_DES  = R323_M305_DES                        # 24563.4 top vapour ex 323C003
+R3232_E003_M718B_DES = R3232_M718B_DES                      # 3560.4
+R3232_E003_M776_DES  = R328_D001_M776_DES                   # 8274.4
+R3232_E003_M797_DES  = R3232_M797_DES                       # 1758
+R3232_E003_M756_DES  = A328_M756_DES                        # 33358
+R3232_E003_IN_DES    = (R3232_E003_M305_DES + R3232_E003_M718B_DES + R3232_E003_M776_DES
+                        + R3232_E003_M797_DES + R3232_E003_M756_DES)      # 71514.2
+R3232_E003_PHI321 = 1323.0 / (R3232_E003_M305_DES + R3232_E003_M797_DES)  # vent split on (305+797)
+R3232_E003_M321_DES = R3232_E003_PHI321 * (R3232_E003_M305_DES + R3232_E003_M797_DES)  # 1323
+R3232_E003_PHI744 = 31478.0 / A328_M756_DES                 # wash split on 756 -> Comp II
+R3232_E003_M744_DES = R3232_E003_PHI744 * A328_M756_DES      # 31478
+R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES - R3232_E003_M744_DES  # 38713.2
+R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
+R3232_E003_T744 = R3232_E003_T - 30.0                       # 44 °C wash to Comp II
+R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.03
+R3232_E003_PV_OP_DES = 25.0                                 # PV-323202 vent stroke
+R3232_D001_M_FULL = 11.10 * 1218.0                          # 13519.8 kg (V·ρ)
+R3232_D001_LVL_SP = 50.0
+R3232_D001_M_DES  = R3232_D001_M_FULL * (R3232_D001_LVL_SP/100.0)         # 6759.9 kg
+R3232_E003_Q_DES_KW = 14000.0                               # tempered-water duty (LPCC datasheet)
+R3232_E003_UA_KW    = R3232_E003_Q_DES_KW / (R3232_E003_T - R3232_TW_T)   # 1000 kW/K vs T_tw
+R3232_E003_M_COND_DES = R3232_E003_M305_DES + R3232_E003_M797_DES - R3232_E003_M321_DES  # 24998.4
+# λ_cond back-solve: Σṁ_in·cp·(T_in−74) + ṁ_cond·λ − Q_cw = 0
+R3232_E003_SENS = ((R3232_E003_M305_DES *(R3232_E003_T305    - R3232_E003_T)
+                    + R3232_E003_M718B_DES*(R3232_E011_T      - R3232_E003_T)
+                    + R3232_E003_M776_DES *(R328_D001_T       - R3232_E003_T)
+                    + R3232_E003_M797_DES *(R3232_M797_T      - R3232_E003_T)
+                    + R3232_E003_M756_DES *(A328_C001_T       - R3232_E003_T))
+                   / 3600.0 * R3232_CP)                                   # kW
+R3232_E003_LAMC = ((R3232_E003_Q_DES_KW - R3232_E003_SENS)
+                   / (R3232_E003_M_COND_DES/3600.0))                      # kJ/kg
+R3232_P001_RPM_DES = R3232_E003_M308_DES / (1218.0 * 0.5046)              # 62.99 rpm (SIC-323901)
+
+# ==========================================================================
+#  323C005 + 328V001 + 328D003  (LP absorber vent scrub + carbamate collector)
+# ==========================================================================
+A323_C005_MV_DES   = R3232_E011_MV_DES                      # 3098.8 vapour in ex 323E011
+A323_C005_MAKEUP   = ((R328_C002_M738_DES + R3232_E011_M401_DES + R3232_E011_M402_DES
+                       - A328_D003_M719 - A328_D003_M720 - A328_D003_M721)
+                      - A323_C005_MV_DES)                   # 480.2: makeup water back-solved
+#   so bot_c005 (=MV_DES+MAKEUP) exactly closes 328D003 Comp-I: in_compI == out_compI at design.
+A323_C005_BOT_DES  = A323_C005_MV_DES + A323_C005_MAKEUP    # 3579 -> 328V001 -> Comp I
+A323_C005_T = 55.0 ; A323_C005_MAKEUP_T = 30.0
+A323_C005_M_TAU_S = 300.0
+A323_C005_M_DES = A323_C005_BOT_DES/3600.0 * A323_C005_M_TAU_S            # 298.2 kg
+A323_C005_LAM = ((A323_C005_MV_DES/3600.0*R3232_CP*(R3232_E011_T - A323_C005_T)
+                  + A323_C005_MAKEUP/3600.0*4.0*(A323_C005_MAKEUP_T - A323_C005_T))
+                 / (A323_C005_MV_DES/3600.0)) * -1.0                      # kJ/kg absorbed
+A328_D003_MI_FULL = 280.50 * 992.0                          # Comp I  (V·ρ)  278256 kg
+A328_D003_MII_FULL = 168.30 * 992.0                         # Comp II       166954 kg
+A328_D003_MI_DES  = A328_D003_MI_FULL * 0.50               # 139128 kg
+A328_D003_MII_DES = A328_D003_MII_FULL * 0.50              # 83477 kg
+A328_D003_M343_DES = R328_C002_M738_DES + R3232_E011_M402_DES + R3232_E011_M401_DES  # 34868 out
+A328_D003_TI = 56.0 ; A328_D003_TII = 44.0
+A328_D003_V001_T = A323_C005_T                             # 55 °C V001 pass-through
+# Comp I carbamate-formation exotherm 2NH3+CO2<=>NH2COONH4 (λ_I on total inflow):
+A328_D003_LAM_I = -A328_CP * (
+      A328_D003_M719*(A328_D003_M719_T - A328_D003_TI)
+    + A328_D003_M720*(A328_D003_M720_T - A328_D003_TI)
+    + A328_D003_M721*(A328_D003_M721_T - A328_D003_TI)
+    + A323_C005_BOT_DES*(A328_D003_V001_T - A328_D003_TI)
+    ) / (A328_D003_M719 + A328_D003_M720 + A328_D003_M721 + A323_C005_BOT_DES)  # 42.2858: exact back-solve, P_compI==0 at 56C seed
+
+# ==========================================================================
+#  328E021 A/B  (hydrolyser feed/effluent interchanger, two shells in series)
+#  Heats C002 bottoms 139->190 (cold) with C003 bottoms 200->148 (hot).
+# ==========================================================================
+R328_E021_EPS  = 1913.6 / (37.52 * 61.0)                    # 0.836 effectiveness
+R328_E021_LOSS = 54.4                                       # kW shell heat loss (closes both anchors)
+R328_E007_EPS  = 0.6667                                     # 328E007 feed/effluent interchanger
+R328_E007_LOSS = 18.3                                       # kW shell heat loss
+R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 boundary
+
 
 def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float,
                     scrub_level_frac: float = 1.0) -> dict:
@@ -1592,6 +1864,22 @@ def _lag1(store: dict, key: str, target: float, tau_s: float, dt: float) -> floa
     return val
 
 
+def _fic_flow(c: dict, design: float, op_des: float, store: dict, key: str,
+              dt: float, tau_s: float = 5.0, cas_sp=None) -> float:
+    """Design-normalised flow-controller step.  Delivered flow = design*(op/op_des).
+
+    The plant is a pure-gain flow element (valve stroke -> flow); its PV is the delivered
+    flow lagged tau_s so the measurement forms a proper first-order loop (|z|<1, stable).
+    `c["op"]` from the previous tick sets this tick's pre-lag flow, `_ctrl_ipd` then advances
+    the controller.  Bit-exact at design:  op==op_des  ->  pre==design  ->  pv==design==sp
+    ->  du==0  ->  op stays op_des  ->  flow==design.  Mutates `c` (velocity form) in place.
+    """
+    pre = design * (c["op"] / op_des)
+    pv  = _lag1(store, key, pre, tau_s, dt)
+    op  = _ctrl_ipd(c, pv, dt, cas_sp)
+    return design * (op / op_des)
+
+
 # --- Empirical transport dead time (DCS 03-06-2025 anchor analysis) -------------------
 #  Feed-introduction propagation: dead time bracketed to <=572 s, best estimate 345 s
 #  (PT-329201 FOPTD fit, R2=0.9888; see reports/dcs_anchor_dynamics_2025-06-03.md §1.2).
@@ -1901,6 +2189,220 @@ class State:
                            "Kc": 1.5, "Ti": 30.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 150.0}
 
+        # ==================================================================
+        #  UNITS 323-2 / 328-1 / 328-2 — LP RECIRCULATION & DESORPTION state
+        #  Lumped liquid holdups (kg), bulk temps (C), section pressures (bar a)
+        #  seeded at the design fixed point so dM/dt = dT/dt = dP/dt = 0 at boot.
+        #  Controllers are inline velocity-I-PD dicts (EU) stepped by _ctrl_ipd,
+        #  every one seeded pv==sp==pv1==pv2 -> du==0 (bit-exact boot).  Design
+        #  strokes normalise every flow so the whole network closes at design.
+        # ==================================================================
+        # ---- 323E011 + 323D011  LP carbamate condenser + drum (45 C, 1.13 bar a)
+        self.r3232_e011_M = R3232_D011_M_DES
+        self.r3232_e011_T = R3232_E011_T
+        self.r3232_e011_P = R3232_E011_P_BARA
+        # ---- 323E003 + 323D001 + 323P001  LPCC (74 C, tempered water, 3.2 bar a)
+        self.r3232_e003_T = R3232_E003_T
+        self.r3232_d001_M = R3232_D001_M_DES
+        self.r3232_d001_P = R3232_D001_P_BARA
+        # ---- 328C002 Desorber-I (bottoms 139 C) / 328D001 reflux drum (61 C, 2.6)
+        self.a328_c002_M = R328_C002_M_DES
+        self.a328_c002_T = R328_C002_T_BOT
+        self.a328_d001_M = R328_D001_M_DES
+        self.a328_d001_T = R328_D001_T
+        self.a328_d001_P = R328_D001_P_BARA
+        # ---- 328C003 Hydrolyser (200 C, 16.8 bar a) / 328C004 Desorber-II (143 C)
+        self.a328_c003_M = R328_C003_M_DES
+        self.a328_c003_T = R328_C003_T
+        self.a328_c003_P = R328_C003_P_BARA
+        self.a328_c004_M = R328_C004_M_DES
+        self.a328_c004_T = R328_C004_T
+        # ---- 322C001 LP absorber (43 C, 3.9 bar a)
+        self.a328_c001_M = A328_C001_M_DES
+        self.a328_c001_T = A328_C001_T
+        self.a328_c001_P = A328_C001_P_BARA
+        # ---- 323C005 vent scrub (55 C) / 328D003 carbamate collector (Comp I 56, II 44)
+        self.a323_c005_M  = A323_C005_M_DES
+        self.a323_c005_T  = A323_C005_T
+        self.a328_d003_MI  = A328_D003_MI_DES
+        self.a328_d003_MII = A328_D003_MII_DES
+        self.a328_d003_TI  = A328_D003_TI
+        self.a328_d003_TII = A328_D003_TII
+
+        # -- 323-2 controllers -------------------------------------------------
+        # PIC-323202 LPCC/323D001 vent pressure -> PV-323202 (DIRECT: P>SP -> vent more).
+        self.PIC_323202 = {"mode": "AUTO", "op": R3232_E003_PV_OP_DES,
+                           "sp": R3232_D001_P_BARA, "pv": R3232_D001_P_BARA,
+                           "pv1": R3232_D001_P_BARA, "pv2": R3232_D001_P_BARA,
+                           "Kc": 5.0, "Ti": 40.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 2.0, "sp_hi": 5.0}
+        # PIC-323203 323E011/D011 vent pressure -> PV-323203 (DIRECT).
+        self.PIC_323203 = {"mode": "AUTO", "op": R3232_E011_PV_OP_DES,
+                           "sp": R3232_E011_P_BARA, "pv": R3232_E011_P_BARA,
+                           "pv1": R3232_E011_P_BARA, "pv2": R3232_E011_P_BARA,
+                           "Kc": 5.0, "Ti": 40.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.5, "sp_hi": 2.0}
+        # LIC-323502 323D001 drum level (master) -> SIC-323901 pump-speed demand (DIRECT).
+        self.LIC_323502 = {"mode": "AUTO", "op": R3232_P001_RPM_DES,
+                           "sp": R3232_D001_LVL_SP, "pv": R3232_D001_LVL_SP,
+                           "pv1": R3232_D001_LVL_SP, "pv2": R3232_D001_LVL_SP,
+                           "Kc": 1.5, "Ti": 300.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # SIC-323901 323P001 LPCC pump speed (slave, rpm) -> m_308 (REVERSE).
+        self.SIC_323901 = {"mode": "CAS", "op": R3232_P001_RPM_DES,
+                           "sp": R3232_P001_RPM_DES, "pv": R3232_P001_RPM_DES,
+                           "pv1": R3232_P001_RPM_DES, "pv2": R3232_P001_RPM_DES,
+                           "Kc": 1.0, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # SIC-323902 323P001 standby pump speed (MAN 0, spare).
+        self.SIC_323902 = {"mode": "MAN", "op": 0.0,
+                           "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
+                           "Kc": 1.0, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # LIC-323503 tempered-water 323D003 seal level -> display trim (DIRECT).
+        self.LIC_323503 = {"mode": "AUTO", "op": 50.0,
+                           "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
+                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # TIC-323013 323E003 tempered-water outlet temp -> TV-323013 (DIRECT cooling).
+        self.TIC_323013 = {"mode": "CAS", "op": 50.0,
+                           "sp": R3232_E003_T, "pv": R3232_E003_T,
+                           "pv1": R3232_E003_T, "pv2": R3232_E003_T,
+                           "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 60.0, "sp_hi": 90.0}
+        # FIC-323401 328D003 Comp-I flush 401 -> FV-323401 (REVERSE flow).
+        self.FIC_323401 = {"mode": "AUTO", "op": 50.0,
+                           "sp": R3232_E011_M401_DES, "pv": R3232_E011_M401_DES,
+                           "pv1": R3232_E011_M401_DES, "pv2": R3232_E011_M401_DES,
+                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 2000.0}
+        # FIC-323402 328D003 Comp-I wash 402 -> FV-323402 (REVERSE flow).
+        self.FIC_323402 = {"mode": "AUTO", "op": 50.0,
+                           "sp": R3232_E011_M402_DES, "pv": R3232_E011_M402_DES,
+                           "pv1": R3232_E011_M402_DES, "pv2": R3232_E011_M402_DES,
+                           "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: g=2931/50=58.6, M=Kc*a*g/a units; loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=70 (damped-oscillatory band 51-102, rings on disturbance). Kc=0.5 -> M=29, coef 0.43 monotone.
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 6000.0}
+        # FIC-323405 323E003 wash-water trim -> FV-323405 (REVERSE, display trim).
+        self.FIC_323405 = {"mode": "AUTO", "op": 50.0,
+                           "sp": 1000.0, "pv": 1000.0, "pv1": 1000.0, "pv2": 1000.0,
+                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 2000.0}
+        # FIC-323418 323C005 makeup water -> FV-323418 (REVERSE flow).
+        self.FIC_323418 = {"mode": "AUTO", "op": 50.0,
+                           "sp": A323_C005_MAKEUP, "pv": A323_C005_MAKEUP,
+                           "pv1": A323_C005_MAKEUP, "pv2": A323_C005_MAKEUP,
+                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 1000.0}
+
+        # -- 328-1 controllers (desorption / hydrolysis train) -----------------
+        # LIC-328501 328D001 reflux-drum level -> LV-328501 (DIRECT, 776 -> 323E003).
+        self.LIC_328501 = {"mode": "AUTO", "op": R328_D001_LV_OP_DES,
+                           "sp": R328_D001_LVL_SP, "pv": R328_D001_LVL_SP,
+                           "pv1": R328_D001_LVL_SP, "pv2": R328_D001_LVL_SP,
+                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # PIC-328202 328D001 vent pressure -> PV-328202 (DIRECT, 786 vent -> 323E011).
+        self.PIC_328202 = {"mode": "AUTO", "op": R328_D001_PV_OP_DES,
+                           "sp": R328_D001_P_BARA, "pv": R328_D001_P_BARA,
+                           "pv1": R328_D001_P_BARA, "pv2": R328_D001_P_BARA,
+                           "Kc": 5.0, "Ti": 40.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 1.5, "sp_hi": 4.0}
+        # TIC-328002 328E004 CW to condenser -> TV-328002 (DIRECT cooling, hold drum 61 C).
+        self.TIC_328002 = {"mode": "AUTO", "op": R328_E004_TV_OP_DES,
+                           "sp": R328_D001_T, "pv": R328_D001_T,
+                           "pv1": R328_D001_T, "pv2": R328_D001_T,
+                           "Kc": 3.0, "Ti": 200.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 45.0, "sp_hi": 80.0}
+        # FIC-328404 328D001 reflux 775 -> FV-328404 (REVERSE flow, remote-CAS capable).
+        self.FIC_328404 = {"mode": "CAS", "op": R328_D001_FIC404_OP_DES,
+                           "sp": R328_D001_M775_DES, "pv": R328_D001_M775_DES,
+                           "pv1": R328_D001_M775_DES, "pv2": R328_D001_M775_DES,
+                           "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: g=1675/30.2=55.5, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=67 (damped-oscillatory 51-102). Kc=0.5 -> M=27.7, coef 0.46 monotone.
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 4000.0}
+        # FIC-326402 328C003 hydrolyser MP-steam 911 -> FV-326402 (REVERSE flow, CAS).
+        self.FIC_326402 = {"mode": "CAS", "op": 50.0,
+                           "sp": R328_C003_M911_DES, "pv": R328_C003_M911_DES,
+                           "pv1": R328_C003_M911_DES, "pv2": R328_C003_M911_DES,
+                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 3000.0}
+        # PIC-328203 328C003 hydrolyser OVHD pressure -> PV-328203 (DIRECT, 16.8 bar a).
+        self.PIC_328203 = {"mode": "AUTO", "op": R328_C003_PV_OP_DES,
+                           "sp": R328_C003_P_BARA, "pv": R328_C003_P_BARA,
+                           "pv1": R328_C003_P_BARA, "pv2": R328_C003_P_BARA,
+                           "Kc": 4.0, "Ti": 60.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 12.0, "sp_hi": 20.0}
+        # FFIC-328401 328C004 desorber-II steam/feed RATIO master (m931/m738).
+        self.FFIC_328401 = {"mode": "AUTO", "op": R328_C004_M931_DES,
+                            "sp": R328_FFIC_RATIO_DES, "pv": R328_FFIC_RATIO_DES,
+                            "pv1": R328_FFIC_RATIO_DES, "pv2": R328_FFIC_RATIO_DES,
+                            "Kc": 0.8, "Ti": 40.0, "Td": 0.0, "act": +1.0,
+                            "op_lo": 0.0, "op_hi": 12000.0, "sp_lo": 0.0, "sp_hi": 0.5}
+        # FIC-328401 328C004 LP-steam 931 slave (REVERSE flow) <- FFIC-328401 demand.
+        self.FIC_328401 = {"mode": "CAS", "op": 50.0,
+                           "sp": R328_C004_M931_DES, "pv": R328_C004_M931_DES,
+                           "pv1": R328_C004_M931_DES, "pv2": R328_C004_M931_DES,
+                           "Kc": 0.30, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.30: PV in kg/h, process gain g=6495/50=129.9; loop coef 1-Kc*a*g, a=dt/(tau+dt)=0.0196; Kc=1.2 gives coef -2.06 (unstable 0<->100 limit cycle). Kc<0.39 monotonic; 0.30 -> coef 0.24, 2.6x margin.
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 12000.0}
+        # TIC-328008 328E007 effluent-side outlet temp -> display trim (DIRECT).
+        self.TIC_328008 = {"mode": "AUTO", "op": 50.0,
+                           "sp": R328_E007_TC_OUT, "pv": R328_E007_TC_OUT,
+                           "pv1": R328_E007_TC_OUT, "pv2": R328_E007_TC_OUT,
+                           "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 90.0, "sp_hi": 130.0}
+        # TIC-328012 328E021 cold-side outlet temp -> display trim (DIRECT).
+        self.TIC_328012 = {"mode": "AUTO", "op": 50.0,
+                           "sp": R328_C003_T746, "pv": R328_C003_T746,
+                           "pv1": R328_C003_T746, "pv2": R328_C003_T746,
+                           "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 150.0, "sp_hi": 200.0}
+        # LIC-328503 328C002 desorber-I bottoms level -> LV-328503 (DIRECT, 743 -> hydrolyser).
+        self.LIC_328503 = {"mode": "AUTO", "op": 50.0,
+                           "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
+                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # LIC-328504 328C004 desorber-II bottoms level -> LV-328504 (DIRECT, 739 -> 328E007).
+        self.LIC_328504 = {"mode": "AUTO", "op": 50.0,
+                           "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
+                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # LIC-328505 328C003 hydrolyser bottoms level -> LV-328505 (DIRECT, 747 -> desorber-II).
+        self.LIC_328505 = {"mode": "AUTO", "op": 50.0,
+                           "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
+                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # FIC-328402 328D003 Comp-I -> Comp-II transfer 744 wash -> FV-328402 (REVERSE flow).
+        self.FIC_328402 = {"mode": "AUTO", "op": 50.0,
+                           "sp": R3232_E003_M744_DES, "pv": R3232_E003_M744_DES,
+                           "pv1": R3232_E003_M744_DES, "pv2": R3232_E003_M744_DES,
+                           "Kc": 0.06, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0}
+        # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
+        self.FIC_328406 = {"mode": "MAN", "op": 0.0,
+                           "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
+                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0}
+
+        # -- 328-2 controllers (LP absorber 322C001) ---------------------------
+        # PIC-322201 322C001 absorber vent pressure -> PV-322201 (DIRECT, 3.9 bar a).
+        self.PIC_322201 = {"mode": "AUTO", "op": A328_PIC_OP_DES,
+                           "sp": A328_C001_P_BARA, "pv": A328_C001_P_BARA,
+                           "pv1": A328_C001_P_BARA, "pv2": A328_C001_P_BARA,
+                           "Kc": 5.0, "Ti": 40.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 2.5, "sp_hi": 5.5}
+        # LIC-322502 322C001 sump level -> LV-322502 (DIRECT, 755 draw via 322P002).
+        self.LIC_322502 = {"mode": "AUTO", "op": A328_LIC_OP_DES,
+                           "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
+                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+
+        # Auxiliary pump roster (running duty / standby spare); toggled via aux_pump_toggle.
+        self.aux_pumps = {"323P001A": {"on": True,  "mode": "AUTO"}, "323P001B": {"on": False, "mode": "AUTO"},
+                          "322P002A": {"on": True,  "mode": "AUTO"}, "322P002B": {"on": False, "mode": "AUTO"},
+                          "328P001A": {"on": True,  "mode": "AUTO"}, "328P001B": {"on": False, "mode": "AUTO"},
+                          "328P003A": {"on": True,  "mode": "AUTO"}, "328P003B": {"on": False, "mode": "AUTO"}}
+        # XV-322915 steam-flood valve (trip 22.1: 322C001 TT-322015 > 57 C -> latch open).
+        self.XV_322915 = False
+
         # ext override
         self.ext_override = False
         # sim-speed mode (set_sim_mode cmd): "SLOW" = real-time/realistic (default, anchor), "FAST" = accelerated
@@ -1908,8 +2410,8 @@ class State:
         # trips: live initiator conditions (instantaneous) + latched state (P1-2).
         #   A latch holds once set and can only be cleared by an operator trip_reset AND
         #   the live condition having recovered -> a tripped pump cannot self-restart.
-        self.trips        = {"21_2": False, "21_4": False, "21_8": False, "21_10": False}
-        self.trip_latched = {"21_2": False, "21_4": False, "21_8": False, "21_10": False}
+        self.trips        = {"21_2": False, "21_4": False, "21_8": False, "21_10": False, "22_1": False}
+        self.trip_latched = {"21_2": False, "21_4": False, "21_8": False, "21_10": False, "22_1": False}
         # L3 phase-boundary diagnostics (mushy-zone / crystallization detection, Batch 2)
         self.flags = {"SCRUBBER_SOLIDIFICATION": False,
                       "STRIPPER_SOLIDIFICATION": False,
@@ -2631,6 +3133,216 @@ def step_sim(dt: float) -> dict:
     s.r323_d002_M_I  = max(M_I_new, 1.0)
     s.r323_d002_M_II = clamp(s.r323_d002_M_II + d002_overflow, 0.0, R323_D002_M_II_FULL)
 
+    # ======================================================================
+    #  UNITS 323-2 / 328-1 / 328-2  — LP RECIRCULATION & DESORPTION
+    #  Feed-forward 9-stage state-space model (dependency order).  Every
+    #  holdup ODE  dM/dt = Σṁ_in − ṁ_vap − ṁ_out = 0 and every thermal ODE
+    #  M·cp·dT/dt = Σṁ_in·cp·(T_in−T) + Q − ṁ_vap·λ = 0 at the design seed
+    #  (λ / UA back-solved in the constants block above).  Seven recycle
+    #  tears are read one-tick-delayed via s.tlag.get(key, design) and
+    #  rewritten at the end -> stable, bit-exact at design.  Live upstream
+    #  feeds: m_305 (323C003 top vapour), m_701 (323F004 flash vapour),
+    #  hv604 (HV-322604 off-gas -> 322C001).
+    # ======================================================================
+    mv011_prev = s.tlag.get("R3232_v011", R3232_E011_MV_DES)
+    m748_prev  = s.tlag.get("R328_748",   R328_C002_M748_DES)
+    m750_prev  = s.tlag.get("R328_750",   R328_C002_M750_DES)
+    m775_prev  = s.tlag.get("R328_775",   R328_C002_M775_DES)
+    m718A_prev = s.tlag.get("R3232_718A", R3232_M718A_DES)
+    m744_prev  = s.tlag.get("R3232_744",  R3232_E003_M744_DES)
+    m718B_prev = s.tlag.get("R3232_718B", R3232_M718B_DES)
+    m931_prev  = s.tlag.get("R328_M931",  R328_C004_M931_DES)
+
+    # ----- Stage 1 : 323C005 vent scrub -> 328V001 -> Comp-I feed ---------
+    Tc005    = s.a323_c005_T
+    m_makeup = _fic_flow(s.FIC_323418, A323_C005_MAKEUP, 50.0, s.tlag, "F_323418", dt)
+    in_c005  = mv011_prev + m_makeup
+    bot_c005 = A323_C005_BOT_DES * (s.a323_c005_M / A323_C005_M_DES)      # -> V001 @ 55°C
+    P_c005   = (mv011_prev/3600.0*R3232_CP*(R3232_E011_T       - Tc005)
+                + m_makeup/3600.0*4.0   *(A323_C005_MAKEUP_T   - Tc005)
+                + mv011_prev/3600.0*A323_C005_LAM)
+    s.a323_c005_T = Tc005 + P_c005*dt/max(s.a323_c005_M*R3232_CP, 1e-6)
+    s.a323_c005_M = max(s.a323_c005_M + (in_c005 - bot_c005)/3600.0*dt, 1.0)
+
+    # ----- Stage 2 : 328D003  Comp-I (formation) + Comp-II (collector) ----
+    TI       = s.a328_d003_TI
+    m_401    = _fic_flow(s.FIC_323401, R3232_E011_M401_DES, 50.0, s.tlag, "F_323401", dt)
+    m_402    = _fic_flow(s.FIC_323402, R3232_E011_M402_DES, 50.0, s.tlag, "F_323402", dt)
+    m_735    = R328_C002_M738_DES * (s.a328_d003_MI / A328_D003_MI_DES)   # -> 738 via 328E007
+    in_compI = A328_D003_M719 + A328_D003_M720 + A328_D003_M721 + bot_c005
+    out_compI= m_735 + m_401 + m_402
+    P_compI  = ((A328_D003_M719*(A328_D003_M719_T - TI)
+                 + A328_D003_M720*(A328_D003_M720_T - TI)
+                 + A328_D003_M721*(A328_D003_M721_T - TI)
+                 + bot_c005     *(A328_D003_V001_T  - TI))/3600.0*A328_CP
+                + in_compI/3600.0*A328_D003_LAM_I)
+    s.a328_d003_TI = TI + P_compI*dt/max(s.a328_d003_MI*A328_CP, 1e-6)
+    s.a328_d003_MI = max(s.a328_d003_MI + (in_compI - out_compI)/3600.0*dt, 1.0)
+    TII      = s.a328_d003_TII
+    run_p002 = s.aux_pumps["322P002A"]["on"] or s.aux_pumps["322P002B"]["on"]
+    m_755    = A328_M755_DES * (s.a328_d003_MII / A328_D003_MII_DES) * (1.0 if run_p002 else 0.0)
+    P_compII = m744_prev/3600.0*A328_CP*(R3232_E003_T744 - TII)          # 744 in @ 44 = TII
+    s.a328_d003_TII = TII + P_compII*dt/max(s.a328_d003_MII*A328_CP, 1e-6)
+    s.a328_d003_MII = max(s.a328_d003_MII + (m744_prev - m_755)/3600.0*dt, 1.0)
+
+    # ----- Stage 3 : 328C002  Desorber-I (bottoms 139°C, floats PIC-328202)
+    Tc002    = s.a328_c002_T
+    m_738    = m_735
+    in_c002  = m_738 + m748_prev + m750_prev + m775_prev
+    m_737    = R328_C002_PHI737 * in_c002                                 # OVHD split -> 328D001
+    lvl_c002 = s.a328_c002_M / R328_C002_M_DES * 50.0
+    lic503_op= _ctrl_ipd(s.LIC_328503, lvl_c002, dt)
+    m_743    = R328_C002_M743_DES * (lic503_op / 50.0)                    # bottoms -> hydrolyser
+    sens_c002= ((m_738*(R328_C002_T738 - Tc002)
+                 + m775_prev*(R328_D001_T   - Tc002)
+                 + m748_prev*(R328_C002_T748 - Tc002)
+                 + m750_prev*(R328_C002_T750 - Tc002))/3600.0*R328_CP)
+    P_c002   = (sens_c002 + m748_prev/3600.0*R328_C002_LAM748
+                + m750_prev/3600.0*R328_C002_LAM750
+                - m_737/3600.0*R328_C002_LAM737)
+    s.a328_c002_T = Tc002 + P_c002*dt/max(s.a328_c002_M*R328_CP, 1e-6)
+    s.a328_c002_M = max(s.a328_c002_M + (in_c002 - m_737 - m_743)/3600.0*dt, 1.0)
+
+    # ----- Stage 4 : 328C003  Hydrolyser (200°C, MP-steam 911) -----------
+    Tc003    = s.a328_c003_T
+    m_746    = m_743                                                     # via 328E021 (190°C)
+    m_911    = _fic_flow(s.FIC_326402, R328_C003_M911_DES, 50.0, s.tlag, "F_326402", dt)
+    in_c003  = m_746 + m_911
+    pic203b_op = _ctrl_ipd(s.PIC_328203, s.a328_c003_P, dt)
+    m_748    = R328_C003_M748_DES * (pic203b_op / R328_C003_PV_OP_DES)    # OVHD relief -> 328C002
+    gen748   = R328_C003_PHI748 * in_c003
+    lvl_c003 = s.a328_c003_M / R328_C003_M_DES * 50.0
+    lic505_op= _ctrl_ipd(s.LIC_328505, lvl_c003, dt)
+    m_747    = R328_C003_M747_DES * (lic505_op / 50.0)                    # bottoms -> desorber-II
+    sens_c003= m_746/3600.0*R328_CP*(R328_C003_T746 - Tc003)
+    P_c003   = sens_c003 + m_911/3600.0*R328_C003_M911_DH - m_748/3600.0*R328_C003_LAM748
+    s.a328_c003_P = max(s.a328_c003_P + R328_C003_P_KP*(gen748 - m_748)/3600.0*dt, 0.1)
+    s.a328_c003_T = Tc003 + P_c003*dt/max(s.a328_c003_M*R328_CP, 1e-6)
+    s.a328_c003_M = max(s.a328_c003_M + (in_c003 - m_748 - m_747)/3600.0*dt, 1.0)
+
+    # ----- Stage 5 : 328C004  Desorber-II (143°C, LP-steam 931, FFIC) -----
+    Tc004    = s.a328_c004_T
+    m_749    = m_747                                                     # via 328E021 (148°C)
+    ffic_pv  = _lag1(s.tlag, "FF_ratio", m931_prev/max(m_738, 1e-6), 5.0, dt)
+    ffic_op  = _ctrl_ipd(s.FFIC_328401, ffic_pv, dt)                     # 931-flow demand (kg/h)
+    m_931    = _fic_flow(s.FIC_328401, R328_C004_M931_DES, 50.0, s.tlag, "F_328401", dt, cas_sp=ffic_op)
+    in_c004  = m_749 + m_931
+    m_750    = R328_C004_PHI750 * in_c004                                # OVHD split -> 328C002
+    lvl_c004 = s.a328_c004_M / R328_C004_M_DES * 50.0
+    lic504_op= _ctrl_ipd(s.LIC_328504, lvl_c004, dt)
+    m_739    = R328_C004_M739_DES * (lic504_op / 50.0)                    # bottoms -> 328E007 boundary
+    sens_c004= m_749/3600.0*R328_CP*(R328_C004_T749 - Tc004)
+    P_c004   = sens_c004 + m_931/3600.0*R328_C004_M931_DH - m_750/3600.0*R328_C004_LAM750
+    s.a328_c004_T = Tc004 + P_c004*dt/max(s.a328_c004_M*R328_CP, 1e-6)
+    s.a328_c004_M = max(s.a328_c004_M + (in_c004 - m_750 - m_739)/3600.0*dt, 1.0)
+
+    # ----- Stage 6 : 328D001  Desorber-I reflux drum (61°C, 328E004) -----
+    Td001    = s.a328_d001_T
+    in_d001  = m_737 + m718A_prev
+    pic202b_op = _ctrl_ipd(s.PIC_328202, s.a328_d001_P, dt)
+    m_786_d001 = R328_D001_M786_DES * (pic202b_op / R328_D001_PV_OP_DES)  # vent -> 323E011
+    gen786   = R328_D001_M786_DES * (m_737 / R328_D001_M737_DES)
+    m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt)
+    lvl_d001_328 = s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP
+    lic501_op= _ctrl_ipd(s.LIC_328501, lvl_d001_328, dt)
+    m_776    = R328_D001_M776_DES * (lic501_op / R328_D001_LV_OP_DES)     # draw -> 323E003
+    tic002_op= _ctrl_ipd(s.TIC_328002, Td001, dt)
+    Q_e004   = R328_E004_Q_DES_KW * (tic002_op / R328_E004_TV_OP_DES)
+    sens_d001= ((m_737*(R328_C002_T_TOP - Td001)
+                 + m718A_prev*(R328_D001_T718A - Td001))/3600.0*R328_CP)
+    P_d001   = sens_d001 + m_737/3600.0*R328_D001_LAM737 - Q_e004
+    s.a328_d001_P = max(s.a328_d001_P + R328_D001_P_KP*(gen786 - m_786_d001)/3600.0*dt, 0.1)
+    s.a328_d001_T = Td001 + P_d001*dt/max(s.a328_d001_M*R328_CP, 1e-6)
+    s.a328_d001_M = max(s.a328_d001_M + (in_d001 - m_786_d001 - m_775 - m_776)/3600.0*dt, 1.0)
+
+    # ----- Stage 7 : 322C001  LP absorber (43°C, live GCB off-gas) --------
+    Tc001    = s.a328_c001_T
+    gcb_m    = hv604["mass_kgh"]
+    gcb_T    = hv604["T_out"]
+    pic201_op= _ctrl_ipd(s.PIC_322201, s.a328_c001_P, dt)
+    lvl_c001 = s.a328_c001_M / A328_C001_M_DES * 50.0
+    lic502c_op = _ctrl_ipd(s.LIC_322502, lvl_c001, dt)
+    m_756    = A328_M756_DES * (lic502c_op / A328_LIC_OP_DES)             # liquor draw -> 323E003
+    Q_flood  = A328_QFLOOD_KW if s.XV_322915 else 0.0                     # trip 22.1 steam flood
+    if A328_GCB_DES is None:                                              # pre-pin: design absorb, hold P
+        abs_c001  = A328_ABS_DES
+        vent_c001 = max(gcb_m - abs_c001, 0.0)
+    else:                                                                # post-pin: live off-gas
+        abs_c001  = A328_PHI_ABS * gcb_m
+        vent_c001 = A328_VENT_DES * (pic201_op / A328_PIC_OP_DES)
+        s.a328_c001_P = max(s.a328_c001_P
+                            + A328_C001_P_KP*((gcb_m - abs_c001) - vent_c001)/3600.0*dt, 0.1)
+    if A328_LAMBDA_ABS is not None:
+        sens_c001 = ((m_755*(A328_M755_T - Tc001) + A328_CPL_DES*(A328_CPL_T - Tc001))/3600.0*A328_CP
+                     + gcb_m*(gcb_T - Tc001)/3600.0*A328_CP)
+        P_c001    = sens_c001 + abs_c001/3600.0*A328_LAMBDA_ABS + Q_flood
+        s.a328_c001_T = Tc001 + P_c001*dt/max(s.a328_c001_M*A328_CP, 1e-6)
+    s.a328_c001_M = max(s.a328_c001_M + (m_755 + A328_CPL_DES + abs_c001 - m_756)/3600.0*dt, 1.0)
+
+    # ----- Stage 8 : 323E003 + 323D001  LPCC (74°C, tempered water) -------
+    Te003    = s.r3232_e003_T
+    in_e003  = m_305 + m718B_prev + m_776 + R3232_M797_DES + m_756
+    pic202_op= _ctrl_ipd(s.PIC_323202, s.r3232_d001_P, dt)
+    m_321    = R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)   # vent -> 323E011
+    gen321   = R3232_E003_PHI321 * (m_305 + R3232_M797_DES)
+    m_744    = _fic_flow(s.FIC_328402, R3232_E003_M744_DES, 50.0, s.tlag, "F_328402", dt)  # wash -> Comp-II
+    lvl_d001_323 = s.r3232_d001_M / R3232_D001_M_DES * R3232_D001_LVL_SP
+    lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master
+    rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
+    sic_op   = _ctrl_ipd(s.SIC_323901, rpm_pv, dt, lic502_op)            # cascade slave (speed)
+    m_308    = R3232_E003_M308_DES * (sic_op / R3232_P001_RPM_DES)        # condensate -> boundary
+    tic13_op = _ctrl_ipd(s.TIC_323013, Te003, dt)
+    Q_e003   = R3232_E003_UA_KW * (Te003 - R3232_TW_T) * (tic13_op / 50.0)
+    m_cond   = m_305 + R3232_M797_DES - m_321
+    sens_e003= ((m_305*(R3232_E003_T305 - Te003)
+                 + m718B_prev*(R3232_E011_T - Te003)
+                 + m_776    *(R328_D001_T  - Te003)
+                 + R3232_M797_DES*(R3232_M797_T - Te003)
+                 + m_756    *(A328_C001_T  - Te003))/3600.0*R3232_CP)
+    P_e003   = sens_e003 + m_cond/3600.0*R3232_E003_LAMC - Q_e003
+    s.r3232_d001_P = max(s.r3232_d001_P + R3232_D001_P_KP*(gen321 - m_321)/3600.0*dt, 0.1)
+    s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
+    s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_744 - m_308)/3600.0*dt, 1.0)
+
+    # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
+    Te011    = s.r3232_e011_T
+    in_e011  = m_701 + R3232_M702_DES + m_786_d001 + m_321 + m_402
+    pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
+    m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
+    gen_v011 = R3232_E011_PHIV * in_e011
+    liq_e011 = in_e011 - m_v011
+    m_718_tot= liq_e011 + m_401                                          # + FIC-323401 flush -> 323D011
+    m_718A   = 0.5 * m_718_tot                                           # -> 328D001
+    m_718B   = 0.5 * m_718_tot                                           # -> 323E003
+    Q_e011   = R3232_E011_UA_KW * (Te011 - 35.0)
+    sens_e011= ((m_701*(R3232_E011_T701 - Te011)
+                 + R3232_M702_DES*(R3232_M702_T   - Te011)
+                 + m_786_d001*(R3232_E011_T786    - Te011)
+                 + m_321*(74.0 - Te011)
+                 + m_402*(56.0 - Te011))/3600.0*R3232_CP)
+    P_e011   = sens_e011 + m_v011/3600.0*R3232_E011_LAMV - Q_e011
+    s.r3232_e011_P = max(s.r3232_e011_P + R3232_E011_P_KP*(gen_v011 - m_v011)/3600.0*dt, 0.1)
+    s.r3232_e011_T = Te011 + P_e011*dt/max(s.r3232_e011_M*R3232_CP, 1e-6)
+    s.r3232_e011_M = max(s.r3232_e011_M + (in_e011 + m_401 - m_v011 - m_718A - m_718B)/3600.0*dt, 1.0)
+
+    # ----- recycle-tear writes (one-tick delay -> next step reads these) --
+    s.tlag["R3232_v011"] = m_v011
+    s.tlag["R328_748"]   = m_748
+    s.tlag["R328_750"]   = m_750
+    s.tlag["R328_775"]   = m_775
+    s.tlag["R3232_718A"] = m_718A
+    s.tlag["R3232_744"]  = m_744
+    s.tlag["R3232_718B"] = m_718B
+    s.tlag["R328_M931"]  = m_931
+
+    # ----- auxiliary faceplate trims (stepped for liveness; off the network)
+    _ctrl_ipd(s.FIC_323405, 1000.0, dt)
+    _ctrl_ipd(s.LIC_323503, 50.0, dt)
+    _ctrl_ipd(s.TIC_328008, R328_E007_TC_OUT, dt)
+    _ctrl_ipd(s.TIC_328012, R328_C003_T746, dt)
+    _ctrl_ipd(s.SIC_323902, s.SIC_323902["op"], dt)
+    _ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)
+
     # ----- Trips (P1-2 stateful interlocks) -----
     # Live initiator conditions (instantaneous). 21_2 = Urea-Synthesis main trip; its initiators
     #   per the trip schedule include loss of NH3 supply head (tank empty here) and the
@@ -2679,6 +3391,21 @@ def step_sim(dt: float) -> dict:
         s.pumpA["on"] = False    # Trip 21.8: stop HP-NH3 pump 321P002A
     if s.trip_latched["21_10"]:
         s.pumpB["on"] = False    # Trip 21.10: stop HP-NH3 pump 321P002B
+
+    # ----- Trip 22.1 (LP absorber 322C001 over-temperature steam-flood) -----
+    #   TT-322015 > 57 C latches the steam-flood valve XV-322915 OPEN to inert/quench the
+    #   absorber off-gas space.  Hysteretic self-clear once the bed cools below 55 C returns
+    #   manual control of XV-322915 to the operator (no dedicated reset control on the overlay).
+    #   The flood duty Q_FLOOD = A328_QFLOOD_KW is consumed one tick later in stage-7 physics
+    #   (the flood valve is read at the top of the step).  At design Tc001 ~ 43 C the condition
+    #   is False -> XV shut, Q_FLOOD = 0 -> steady state stays bit-exact.
+    s.trips["22_1"] = s.a328_c001_T > 57.0
+    if s.trips["22_1"]:
+        s.trip_latched["22_1"] = True
+    elif s.a328_c001_T < 55.0:
+        s.trip_latched["22_1"] = False
+    if s.trip_latched["22_1"]:
+        s.XV_322915 = True
 
     # Discharge header
     # Discharge header: affinity-law developed head droops with motive (pump-speed) fraction.
@@ -2920,6 +3647,145 @@ def step_sim(dt: float) -> dict:
                                "op": round(s.FIC_324401["op"], 1), "mode": s.FIC_324401["mode"]},
             },
         },
+        "LPCC_3232": {                           # Screen 323-2 : LP Carbamate Condenser train
+            "E003": {                            # 323E003 LPCC + 323D001 carbamate separator (74°C)
+                "TT_323003":  round(s.r3232_e003_T, 1),                    # shell liquid temp (C, hold 74)
+                "P_bara":     round(s.r3232_d001_P, 2),                    # 323D001 pressure (bar a)
+                "LI_323502":  round(s.r3232_d001_M / R3232_D001_M_FULL * 100.0, 1),
+                "in305_th":   round(m_305 / 1000.0, 2),                    # 323C003 vapour in (t/h)
+                "carbamate308_th": round(m_308 / 1000.0, 2),              # 323P001 carbamate -> HP (t/h)
+                "vent321_th": round(m_321 / 1000.0, 2),                    # PV-323202 vent -> 323E011 (t/h)
+                "wash744_th": round(m_744 / 1000.0, 2),                    # FIC-328402 wash -> 328D003-II (t/h)
+                "liquor756_th": round(m_756 / 1000.0, 2),                  # 322C001 liquor feed (t/h)
+                "PIC_323202": {"pv": round(s.PIC_323202["pv"], 2), "sp": round(s.PIC_323202["sp"], 2),
+                               "op": round(s.PIC_323202["op"], 1), "mode": s.PIC_323202["mode"]},
+                "LIC_323502": {"pv": round(s.LIC_323502["pv"], 1), "sp": round(s.LIC_323502["sp"], 1),
+                               "op": round(s.LIC_323502["op"], 1), "mode": s.LIC_323502["mode"]},
+                "SIC_323901": {"pv": round(s.SIC_323901["pv"], 1), "sp": round(s.SIC_323901["sp"], 1),
+                               "op": round(s.SIC_323901["op"], 1), "mode": s.SIC_323901["mode"]},
+                "SIC_323902": {"pv": round(s.SIC_323902["pv"], 1), "sp": round(s.SIC_323902["sp"], 1),
+                               "op": round(s.SIC_323902["op"], 1), "mode": s.SIC_323902["mode"]},
+                "TIC_323013": {"pv": round(s.TIC_323013["pv"], 1), "sp": round(s.TIC_323013["sp"], 1),
+                               "op": round(s.TIC_323013["op"], 2), "mode": s.TIC_323013["mode"]},
+                "FIC_328402": {"pv": round(s.FIC_328402["pv"], 1), "sp": round(s.FIC_328402["sp"], 1),
+                               "op": round(s.FIC_328402["op"], 1), "mode": s.FIC_328402["mode"]},
+            },
+            "E011": {                            # 323E011 LP carbamate condenser + 323D011 (45°C)
+                "TT_323011":  round(s.r3232_e011_T, 1),                    # shell liquid temp (C, hold 45)
+                "P_bara":     round(s.r3232_e011_P, 2),                    # 323D011 pressure (bar a)
+                "LI_323D011": round(s.r3232_e011_M / R3232_D011_M_DES * 50.0, 1),
+                "in701_th":   round(m_701 / 1000.0, 2),                    # 323F004 flash vapour in (t/h)
+                "vap011_th":  round(m_v011 / 1000.0, 2),                   # PIC-323203 vapour -> 323C005 (t/h)
+                "carb718A_th":round(m_718A / 1000.0, 2),                   # -> 328D001 (t/h)
+                "carb718B_th":round(m_718B / 1000.0, 2),                   # -> 323E003 (t/h)
+                "PIC_323203": {"pv": round(s.PIC_323203["pv"], 2), "sp": round(s.PIC_323203["sp"], 2),
+                               "op": round(s.PIC_323203["op"], 1), "mode": s.PIC_323203["mode"]},
+                "FIC_323401": {"pv": round(s.FIC_323401["pv"], 1), "sp": round(s.FIC_323401["sp"], 1),
+                               "op": round(s.FIC_323401["op"], 1), "mode": s.FIC_323401["mode"]},
+                "FIC_323402": {"pv": round(s.FIC_323402["pv"], 1), "sp": round(s.FIC_323402["sp"], 1),
+                               "op": round(s.FIC_323402["op"], 1), "mode": s.FIC_323402["mode"]},
+            },
+            "C005": {                            # 323C005 off-gas scrubber -> 328V001
+                "TT_323C005": round(s.a323_c005_T, 1),                     # scrub liquid temp (C, hold 55)
+                "LI_323503":  round(s.a323_c005_M / A323_C005_M_DES * 50.0, 1),
+                "bot_th":     round(bot_c005 / 1000.0, 2),                 # bottoms -> 328V001 (t/h)
+                "FIC_323418": {"pv": round(s.FIC_323418["pv"], 1), "sp": round(s.FIC_323418["sp"], 1),
+                               "op": round(s.FIC_323418["op"], 1), "mode": s.FIC_323418["mode"]},
+                "FIC_323405": {"pv": round(s.FIC_323405["pv"], 1), "sp": round(s.FIC_323405["sp"], 1),
+                               "op": round(s.FIC_323405["op"], 1), "mode": s.FIC_323405["mode"]},
+                "LIC_323503": {"pv": round(s.LIC_323503["pv"], 1), "sp": round(s.LIC_323503["sp"], 1),
+                               "op": round(s.LIC_323503["op"], 1), "mode": s.LIC_323503["mode"]},
+            },
+        },
+        "DESORB_328": {                          # Screen 328-1 : Desorption / Hydrolysis train
+            "C002": {                            # 328C002 Desorber-I (bottoms 139°C)
+                "TT_328C002": round(s.a328_c002_T, 1),                     # bottom temp (C, hold 139)
+                "LI_328503":  round(s.a328_c002_M / R328_C002_M_DES * 50.0, 1),
+                "feed738_th": round(m_738 / 1000.0, 2),                    # 328D003 feed via 328E007 (t/h)
+                "ovhd737_th": round(m_737 / 1000.0, 2),                    # top vapour -> 328D001 (t/h)
+                "bot743_th":  round(m_743 / 1000.0, 2),                    # bottoms -> 328C003 (t/h)
+                "LIC_328503": {"pv": round(s.LIC_328503["pv"], 1), "sp": round(s.LIC_328503["sp"], 1),
+                               "op": round(s.LIC_328503["op"], 1), "mode": s.LIC_328503["mode"]},
+            },
+            "C003": {                            # 328C003 Hydrolyser (200°C, MP steam)
+                "TT_328C003": round(s.a328_c003_T, 1),                     # temp (C, hold 200)
+                "P_bara":     round(s.a328_c003_P, 2),
+                "LI_328505":  round(s.a328_c003_M / R328_C003_M_DES * 50.0, 1),
+                "steam911_th":round(m_911 / 1000.0, 2),                    # FIC-326402 MP steam (t/h)
+                "ovhd748_th": round(m_748 / 1000.0, 2),                    # relief -> 328C002 (t/h)
+                "bot747_th":  round(m_747 / 1000.0, 2),                    # bottoms -> 328C004 (t/h)
+                "PIC_328203": {"pv": round(s.PIC_328203["pv"], 2), "sp": round(s.PIC_328203["sp"], 2),
+                               "op": round(s.PIC_328203["op"], 1), "mode": s.PIC_328203["mode"]},
+                "LIC_328505": {"pv": round(s.LIC_328505["pv"], 1), "sp": round(s.LIC_328505["sp"], 1),
+                               "op": round(s.LIC_328505["op"], 1), "mode": s.LIC_328505["mode"]},
+                "FIC_326402": {"pv": round(s.FIC_326402["pv"], 1), "sp": round(s.FIC_326402["sp"], 1),
+                               "op": round(s.FIC_326402["op"], 1), "mode": s.FIC_326402["mode"]},
+                "TIC_328012": {"pv": round(s.TIC_328012["pv"], 1), "sp": round(s.TIC_328012["sp"], 1),
+                               "op": round(s.TIC_328012["op"], 2), "mode": s.TIC_328012["mode"]},
+            },
+            "C004": {                            # 328C004 Desorber-II (143°C, LP steam, FFIC ratio)
+                "TT_328C004": round(s.a328_c004_T, 1),                     # temp (C, hold 143)
+                "LI_328504":  round(s.a328_c004_M / R328_C004_M_DES * 50.0, 1),
+                "steam931_th":round(m_931 / 1000.0, 2),                    # FIC-328401 LP steam (t/h)
+                "ovhd750_th": round(m_750 / 1000.0, 2),                    # relief -> 328C002 (t/h)
+                "bot739_th":  round(m_739 / 1000.0, 2),                    # bottoms -> 328E007 boundary (t/h)
+                "FFIC_328401":{"pv": round(s.FFIC_328401["pv"], 4), "sp": round(s.FFIC_328401["sp"], 4),
+                               "op": round(s.FFIC_328401["op"], 1), "mode": s.FFIC_328401["mode"]},
+                "FIC_328401": {"pv": round(s.FIC_328401["pv"], 1), "sp": round(s.FIC_328401["sp"], 1),
+                               "op": round(s.FIC_328401["op"], 1), "mode": s.FIC_328401["mode"]},
+                "LIC_328504": {"pv": round(s.LIC_328504["pv"], 1), "sp": round(s.LIC_328504["sp"], 1),
+                               "op": round(s.LIC_328504["op"], 1), "mode": s.LIC_328504["mode"]},
+            },
+            "D001": {                            # 328D001 Desorber-I reflux drum (61°C, 328E004)
+                "TT_328D001": round(s.a328_d001_T, 1),                     # temp (C, hold 61)
+                "P_bara":     round(s.a328_d001_P, 2),
+                "LI_328501":  round(s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP, 1),
+                "vent786_th": round(m_786_d001 / 1000.0, 2),               # PIC-328202 vent -> 323E011 (t/h)
+                "reflux775_th":round(m_775 / 1000.0, 2),                   # FIC-328404 reflux -> 328C002 (t/h)
+                "draw776_th": round(m_776 / 1000.0, 2),                    # LV-328501 draw -> 323E003 (t/h)
+                "PIC_328202": {"pv": round(s.PIC_328202["pv"], 2), "sp": round(s.PIC_328202["sp"], 2),
+                               "op": round(s.PIC_328202["op"], 1), "mode": s.PIC_328202["mode"]},
+                "LIC_328501": {"pv": round(s.LIC_328501["pv"], 1), "sp": round(s.LIC_328501["sp"], 1),
+                               "op": round(s.LIC_328501["op"], 1), "mode": s.LIC_328501["mode"]},
+                "FIC_328404": {"pv": round(s.FIC_328404["pv"], 1), "sp": round(s.FIC_328404["sp"], 1),
+                               "op": round(s.FIC_328404["op"], 1), "mode": s.FIC_328404["mode"]},
+                "TIC_328002": {"pv": round(s.TIC_328002["pv"], 1), "sp": round(s.TIC_328002["sp"], 1),
+                               "op": round(s.TIC_328002["op"], 2), "mode": s.TIC_328002["mode"]},
+                "TIC_328008": {"pv": round(s.TIC_328008["pv"], 1), "sp": round(s.TIC_328008["sp"], 1),
+                               "op": round(s.TIC_328008["op"], 2), "mode": s.TIC_328008["mode"]},
+            },
+        },
+        "ABSORB_328": {                          # Screen 328-2 : LP Absorber + recirc collector
+            "C001": {                            # 322C001 LP off-gas absorber (43°C, live GCB)
+                "TT_322015":  round(s.a328_c001_T, 1),                     # liquid temp (C, hold 43; trip>57)
+                "P_bara":     round(s.a328_c001_P, 2),
+                "LI_322502":  round(s.a328_c001_M / A328_C001_M_DES * 50.0, 1),
+                "gcb_th":     round(gcb_m / 1000.0, 2),                    # HV-322604 off-gas in (t/h)
+                "gcb_T":      round(gcb_T, 1),                             # off-gas temp (C)
+                "abs_th":     round(abs_c001 / 1000.0, 2),                 # NH3/CO2 absorbed (t/h)
+                "vent_th":    round(vent_c001 / 1000.0, 2),               # inert vent -> atm (t/h)
+                "liquor756_th": round(m_756 / 1000.0, 2),                 # LV-322502 draw -> 323E003 (t/h)
+                "XV_322915":  bool(s.XV_322915),                          # steam-flood trip valve (22.1)
+                "PIC_322201": {"pv": round(s.PIC_322201["pv"], 2), "sp": round(s.PIC_322201["sp"], 2),
+                               "op": round(s.PIC_322201["op"], 1), "mode": s.PIC_322201["mode"]},
+                "LIC_322502": {"pv": round(s.LIC_322502["pv"], 1), "sp": round(s.LIC_322502["sp"], 1),
+                               "op": round(s.LIC_322502["op"], 1), "mode": s.LIC_322502["mode"]},
+            },
+            "D003": {                            # 328D003 recirc collector (Comp-I 56°C / Comp-II 44°C)
+                "TT_328I":    round(s.a328_d003_TI, 1),                    # Comp-I temp (C, hold 56)
+                "TT_328II":   round(s.a328_d003_TII, 1),                   # Comp-II temp (C, hold 44)
+                "LI_328I":    round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1),
+                "LI_328II":   round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1),
+                "form735_th": round(m_735 / 1000.0, 2),                    # Comp-I formation -> 328C002 (t/h)
+                "collect755_th": round(m_755 / 1000.0, 2),                 # 322P002 collector -> 322C001 (t/h)
+                "FIC_323401": {"pv": round(s.FIC_323401["pv"], 1), "sp": round(s.FIC_323401["sp"], 1),
+                               "op": round(s.FIC_323401["op"], 1), "mode": s.FIC_323401["mode"]},
+                "FIC_328406": {"pv": round(s.FIC_328406["pv"], 1), "sp": round(s.FIC_328406["sp"], 1),
+                               "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"]},
+                "P002A":      {"on": s.aux_pumps["322P002A"]["on"], "mode": s.aux_pumps["322P002A"]["mode"]},
+                "P002B":      {"on": s.aux_pumps["322P002B"]["on"], "mode": s.aux_pumps["322P002B"]["mode"]},
+            },
+        },
         "HPCC_322E002": {                        # HP Carbamate Condenser 322E002 -> 322R001
             "TT_322012":   round(d_TT322012, 1),         # tube feed 1: ejector-disch liquid temp (C, lagged)
             "TT_322013":   round(d_TT322013, 1),         # tube feed 2: stripper-top gas temp (C, lagged)
@@ -3132,7 +3998,42 @@ R323_CTRL_MODES = {
     "PIC_329208": ("MAN", "AUTO", "CAS"),
     "LIC_323507": ("MAN", "AUTO"),
     "FIC_324401": ("MAN", "AUTO", "CAS"),
+    # -- 323-2 (LP recirculation) ------------------------------------------
+    "PIC_323202": ("MAN", "AUTO"),
+    "PIC_323203": ("MAN", "AUTO"),
+    "LIC_323502": ("MAN", "AUTO"),          # drum-level master -> SIC-323901
+    "SIC_323901": ("MAN", "AUTO", "CAS"),   # pump-speed slave
+    "SIC_323902": ("MAN",),                 # standby pump, MAN-0 spare
+    "LIC_323503": ("MAN", "AUTO"),
+    "TIC_323013": ("MAN", "AUTO", "CAS"),
+    "FIC_323401": ("MAN", "AUTO"),
+    "FIC_323402": ("MAN", "AUTO"),
+    "FIC_323405": ("MAN", "AUTO"),
+    "FIC_323418": ("MAN", "AUTO"),
+    # -- 328-1 (desorption / hydrolysis) -----------------------------------
+    "LIC_328501": ("MAN", "AUTO"),
+    "PIC_328202": ("MAN", "AUTO"),
+    "TIC_328002": ("MAN", "AUTO"),
+    "FIC_328404": ("MAN", "AUTO", "CAS"),
+    "FIC_326402": ("MAN", "AUTO", "CAS"),
+    "PIC_328203": ("MAN", "AUTO"),
+    "FFIC_328401": ("MAN", "AUTO"),         # steam/feed ratio master
+    "FIC_328401": ("MAN", "AUTO", "CAS"),   # LP-steam slave
+    "TIC_328008": ("MAN", "AUTO"),
+    "TIC_328012": ("MAN", "AUTO"),
+    "LIC_328503": ("MAN", "AUTO"),
+    "LIC_328504": ("MAN", "AUTO"),
+    "LIC_328505": ("MAN", "AUTO"),
+    "FIC_328402": ("MAN", "AUTO"),
+    "FIC_328406": ("MAN",),                 # standby transfer pump, MAN-0 spare
+    # -- 328-2 (LP absorber) -----------------------------------------------
+    "PIC_322201": ("MAN", "AUTO"),
+    "LIC_322502": ("MAN", "AUTO"),
 }
+
+# Auxiliary running/standby pump pairs toggled from the 323-2/328 overlays.
+AUX_PUMPS = ("323P001A", "323P001B", "322P002A", "322P002B",
+             "328P001A", "328P001B", "328P003A", "328P003B")
 
 
 def handle_cmd(cmd: dict):
@@ -3190,6 +4091,28 @@ def handle_cmd(cmd: dict):
             s.XV_322901 = not s.XV_322901
         elif cmd["id"] == "322902":
             s.XV_322902 = not s.XV_322902
+        elif cmd["id"] == "322915":
+            # 322C001 steam-flood valve.  Operator may CLOSE at will; the OPEN command is
+            #   auto-latched by trip 22.1 (TT-322015 > 57 C) and cannot be forced open while
+            #   the live over-temperature cause persists.
+            if s.XV_322915:
+                s.XV_322915 = False
+            elif not s.trip_latched.get("22_1", False):
+                s.XV_322915 = True
+
+    elif t == "aux_pump_toggle":
+        # {"type":"aux_pump_toggle","id":"322P002A"[,"mode":"AUTO"|"MAN"]}  running/standby spare.
+        pid = str(cmd.get("id", ""))
+        if pid in AUX_PUMPS:
+            p = s.aux_pumps[pid]
+            if "mode" in cmd:
+                m = str(cmd["mode"]).upper()
+                if m in ("AUTO", "MAN"):
+                    p["mode"] = m
+            if "on" in cmd:
+                p["on"] = bool(cmd["on"])
+            else:
+                p["on"] = not p["on"]
 
     elif t == "ext_override":
         s.ext_override = bool(cmd["value"])
@@ -3720,7 +4643,36 @@ def _pin_hpcc_ua():
                                    #   valve (max 6 kg/s << 29.8) so makeup could not match boil-off and
                                    #   the level drained to 0 at startup.
     _STEAM_READY = True                              # arm step_steam for live operation
-    state = State()                                  # discard the second transient (fresh design seed)
+    state = State()                                  # fresh MAN design seed for the GCB capture below
+
+    # ---- pin the 322C001 LP-absorber GCB off-gas design point (live HV-322604 JT product) at the MAN
+    #   runtime seed, mirroring the reactor-mass pin.  The absorber runs PRE-PIN (T/P frozen, mass
+    #   self-closed) through every settle above because A328_GCB_DES stays None until set here, so the
+    #   warm-up never perturbs it.  Capture the settled-design off-gas from one MAN-seed step, then
+    #   back-solve LAMBDA_ABS so the post-pin live energy balance sums to 0 at design (Tc001 == 43 C,
+    #   bit-exact) while activating the live absorber dynamics off-design.
+    global A328_GCB_DES, A328_GCB_T, A328_PHI_ABS, A328_VENT_DES, A328_LAMBDA_ABS, hv_322604
+    _orig_hv = hv_322604
+    _caphv   = {}
+    def _cap_hv(offgas, T_in, hic_pct, p_up):
+        rr = _orig_hv(offgas, T_in, hic_pct, p_up)
+        _caphv["m"] = rr["mass_kgh"]; _caphv["T"] = rr["T_out"]
+        return rr
+    hv_322604 = _cap_hv
+    step_sim(0.1)                                    # one MAN-seed step (absorber pre-pin -> holds)
+    hv_322604 = _orig_hv
+    _gcb_m = _caphv["m"]; _gcb_T = _caphv["T"]
+    # SAME stage-7 sensible-heat kernel, evaluated at the pinned design off-gas and Tc001 == A328_C001_T:
+    _sens_pin = ((A328_M755_DES*(A328_M755_T - A328_C001_T)
+                  + A328_CPL_DES*(A328_CPL_T - A328_C001_T))/3600.0*A328_CP
+                 + _gcb_m*(_gcb_T - A328_C001_T)/3600.0*A328_CP)
+    A328_GCB_DES    = _gcb_m
+    A328_GCB_T      = _gcb_T
+    A328_PHI_ABS    = A328_ABS_DES / _gcb_m          # absorbed fraction (PHI_ABS*GCB_DES == A328_ABS_DES)
+    A328_VENT_DES   = _gcb_m - A328_ABS_DES          # design vent = off-gas − absorbed
+    A328_LAMBDA_ABS = -_sens_pin*3600.0/A328_ABS_DES # back-solved -> P_c001 == 0 at design (bit-exact)
+
+    state = State()                                  # discard the capture step (fresh design seed)
     last_packet = {}
 
 
@@ -3753,6 +4705,7 @@ def _apply_pin(d: dict) -> None:
     global _STEAM_READY, state, last_packet
     global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES
     global HPCC_NC_DES_LIVE
+    global A328_GCB_DES, A328_GCB_T, A328_PHI_ABS, A328_VENT_DES, A328_LAMBDA_ABS
     import steam_system as _ss
     HPCC_UA            = d["HPCC_UA"]
     REACT_MASS_DES     = tuple(d["REACT_MASS_DES"])
@@ -3765,6 +4718,11 @@ def _apply_pin(d: dict) -> None:
     HPCC_NC_DES_LIVE   = d.get("HPCC_NC_DES_LIVE", REACT_L_FEED_DES)   # bubble_p fN anchor (design melt N/C)
     _ss.M_USERS_LP     = d["M_USERS_LP"]
     _ss.M_504_DES      = d["M_USERS_LP"]   # LV-329504 makeup == design LP boil-off (see _pin_hpcc_ua)
+    A328_GCB_DES       = d["A328_GCB_DES"]
+    A328_GCB_T         = d["A328_GCB_T"]
+    A328_PHI_ABS       = d["A328_PHI_ABS"]
+    A328_VENT_DES      = d["A328_VENT_DES"]
+    A328_LAMBDA_ABS    = d["A328_LAMBDA_ABS"]
     _STEAM_READY       = True
     state              = State()         # fresh design seed (the settle transient is never persisted)
     last_packet        = {}
@@ -3783,6 +4741,11 @@ def _collect_pin() -> dict:
         "REACT_X_DES":        REACT_X_DES,
         "HPCC_NC_DES_LIVE":   HPCC_NC_DES_LIVE,
         "M_USERS_LP":         _ss.M_USERS_LP,
+        "A328_GCB_DES":       A328_GCB_DES,
+        "A328_GCB_T":         A328_GCB_T,
+        "A328_PHI_ABS":       A328_PHI_ABS,
+        "A328_VENT_DES":      A328_VENT_DES,
+        "A328_LAMBDA_ABS":    A328_LAMBDA_ABS,
     }
 
 
