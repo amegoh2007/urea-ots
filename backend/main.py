@@ -705,6 +705,91 @@ R328_E007_LOSS = 18.3                                       # kW shell heat loss
 R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 boundary
 
 
+# ==========================================================================
+#  UNIT 324  —  TWO-STAGE VACUUM EVAPORATION  (Screens 324-1 / 324-1B)
+#  Feed  = 323D002 product delivered by FIC-324401 (m_324, live): 80 % urea,
+#          ~99 C.  Product = 98.6 % urea melt to 335 finishing.
+#    Stage 1  Evaporator I   324E001 (heater) + 324F001 (separator)
+#             HARD anchors : 0.33  bar a vacuum, hold 130 C, urea 80 % -> 95 %.
+#    Stage 2  Evaporator II  324E003 (heater) + 324F003 (separator)
+#             HARD anchors : 0.131 bar a vacuum, hold 140 C, urea 95 % -> 98.6 %.
+#  Urea is strictly conserved (zero urea in the vapour).  Each stage removes
+#  exactly the water needed to hit its concentration anchor, so the design
+#  mass balance is a pure function of the *live* feed and boots bit-exact:
+#      U   = w_in  * feed                         (urea, conserved)
+#      P1  = U / w_ev1 ,   V1 = feed - P1         (Stage-1 melt / vapour)
+#      P2  = U / w_ev2 ,   V2 = P1   - P2         (Stage-2 melt / vapour)
+#  Latent / UA coefficients are back-solved at the seed so dT/dt = 0 exactly
+#  at the 130/140 C fixed points; each vacuum is held by a PIC-324202/324203
+#  false-air bleed balanced against a fixed-capacity ejector pull.
+# ==========================================================================
+R324_CP_SOLN   = R323_CP_SOLN                     # 2.5 kJ/kg.K lumped urea-melt cp
+R324_W_IN      = 0.80                             # feed urea mass fraction (ex 323D002)
+R324_W_EV1     = 0.95                             # Evaporator-I product frac (HARD)
+R324_W_EV2     = 0.986                            # Evaporator-II product frac (HARD)
+R324_FEED_T_C  = R323_F010_T_SP_C                 # 99 C feed boundary (stream ex 323)
+
+# --- design mass balance (kg/h) : derived from the live design feed -----------
+R324_FEED_DES  = R323_M324_DES                    # = R323_M317_DES tank throughput
+R324_U_DES     = R324_W_IN  * R324_FEED_DES       # urea mass flow (conserved end-to-end)
+R324_P1_DES    = R324_U_DES / R324_W_EV1          # Stage-1 melt @95 %
+R324_V1_DES    = R324_FEED_DES - R324_P1_DES      # Stage-1 vapour -> 324E002 condenser
+R324_P2_DES    = R324_U_DES / R324_W_EV2          # Stage-2 melt @98.6 % (final product)
+R324_V2_DES    = R324_P1_DES  - R324_P2_DES       # Stage-2 vapour -> 324E005 condenser
+
+# --- Stage 1 : Evaporator I  324E001 / 324F001  (0.33 bar a, hold 130 C) ------
+R324_F001_P_BARA = 0.33                           # bar a separator vacuum boundary (HARD)
+R324_E001_T_SP_C = 130.0                          # C melt boundary (HARD)
+R324_LAM_V1      = 2174.0                          # kJ/kg water latent @130 C
+R324_E001_OP_DES = 90.0                           # % PIC-329203 design steam-valve stroke
+R324_E001_PCHEST_DES = R324_E001_OP_DES/100.0 * R323_P_STEAM_SUP   # bar a steam-chest press.
+# Q_E001 = feed sensible (99->130) + latent(V1) ; kW
+R324_E001_Q_DES_KW = (R324_FEED_DES/3600.0*R324_CP_SOLN*(R324_E001_T_SP_C - R324_FEED_T_C)
+                      + R324_V1_DES/3600.0*R324_LAM_V1)
+R324_E001_UA_KW  = R324_E001_Q_DES_KW / (tsat_steam(R324_E001_PCHEST_DES) - R324_E001_T_SP_C)
+R324_F001_M_TAU_S = 180.0                          # s melt residence -> separator holdup
+R324_F001_LVL_SP  = 55.0                           # % (LIC-free gravity leg, indicative)
+R324_F001_M_DES   = R324_P1_DES/3600.0 * R324_F001_M_TAU_S
+R324_F001_M_FULL  = R324_F001_M_DES / (R324_F001_LVL_SP/100.0)
+# vacuum : PIC-324202 false-air bleed balances the 324F002 ejector pull at design
+R324_F001_P_KP    = 0.02                           # bar a per (kg/s) net vapour imbalance
+R324_F001_FA_DES  = 250.0                           # kg/h design false-air (PV-324202)
+R324_PV202_OP_DES = 50.0                            # % PV-324202 design stroke
+R324_F001_EJPULL_DES = R324_V1_DES + R324_F001_FA_DES   # ejector pull = gen + air at design
+
+# --- Stage 2 : Evaporator II 324E003 / 324F003  (0.131 bar a, hold 140 C) -----
+R324_F003_P_BARA = 0.131                           # bar a deep-vacuum boundary (HARD)
+R324_E003_T_SP_C = 140.0                           # C melt boundary (HARD)
+R324_LAM_V2      = 2144.0                           # kJ/kg water latent @140 C
+R324_E003_OP_DES = 90.0                             # % PIC-329212 design steam-valve stroke
+R324_E003_PCHEST_DES = R324_E003_OP_DES/100.0 * R323_P_STEAM_SUP
+# Q_E003 = P1 sensible (130->140) + latent(V2) ; kW
+R324_E003_Q_DES_KW = (R324_P1_DES/3600.0*R324_CP_SOLN*(R324_E003_T_SP_C - R324_E001_T_SP_C)
+                      + R324_V2_DES/3600.0*R324_LAM_V2)
+R324_E003_UA_KW  = R324_E003_Q_DES_KW / (tsat_steam(R324_E003_PCHEST_DES) - R324_E003_T_SP_C)
+R324_F003_M_TAU_S = 180.0
+R324_F003_LVL_SP  = 54.7                            # % LIC-324501 setpoint (tagged screenshot)
+R324_F003_M_DES   = R324_P2_DES/3600.0 * R324_F003_M_TAU_S
+R324_F003_M_FULL  = R324_F003_M_DES / (R324_F003_LVL_SP/100.0)
+R324_F003_P_KP    = 0.02
+R324_F003_FA_DES  = 120.0                            # kg/h design false-air (PV-324203)
+R324_PV203_OP_DES = 50.0
+R324_F003_EJPULL_DES = R324_V2_DES + R324_F003_FA_DES
+
+# --- LIC-324501 split-range melt drain : LV-A forward (335P001) / LV-B recycle -
+#     op 50->100 % strokes LV-A 0->100 % (forward) ; op 50->0 % strokes LV-B
+#     0->100 % (recycle back to Stage-1 feed).  op_des 75 % -> LV-A 50 %, LV-B 0.
+R324_LIC501_OP_DES = 75.0
+R324_LVA_SPAN      = R324_P2_DES / 0.50             # kg/h at 100 % LV-A stroke
+R324_LVB_SPAN      = R324_P1_DES                    # kg/h at 100 % LV-B recycle stroke
+
+# --- FFIC-335406 UF85 ratio injection : m_uf85 = ratio * forward melt ----------
+R324_UF_RATIO      = 0.005                          # UF85 / product melt (biuret guard)
+R324_UF85_RHO      = 1320.0                          # kg/m3 UF85 (335D007)
+R324_M_UF_DES      = R324_UF_RATIO * R324_P2_DES     # design UF85 injection (kg/h)
+R324_FIC405_OP_DES = 50.0                            # % FIC-335405 slave design stroke
+
+
 def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float,
                     scrub_level_frac: float = 1.0) -> dict:
     """322F001 HP ejector: mix live motive NH3 with entrained 322E003 carbamate.
@@ -2190,6 +2275,78 @@ class State:
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 150.0}
 
         # ==================================================================
+        #  UNIT 324 — TWO-STAGE EVAPORATION controllers + lumped state.
+        #  Every controller seeded pv==sp==pv1==pv2 -> du==0 (bit-exact boot);
+        #  every holdup/temp/pressure seeded at its design fixed point so
+        #  dM/dt = dT/dt = dP/dt = 0 at t=0.  Steam is a TIC->PIC cascade
+        #  (master demand in bar a chest-pressure, slave in % valve stroke);
+        #  vacuum is a false-air PIC around a fixed boundary.
+        # ==================================================================
+        # ---- Stage 1 steam : TIC-324001 (130 C) -> PIC-329203 (steam chest) ----
+        self.TIC_324001 = {"mode": "AUTO", "op": R324_E001_PCHEST_DES,
+                           "sp": R324_E001_T_SP_C, "pv": R324_E001_T_SP_C,
+                           "pv1": R324_E001_T_SP_C, "pv2": R324_E001_T_SP_C,
+                           "Kc": 2.0, "Ti": 120.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": R323_P_STEAM_SUP,
+                           "sp_lo": 0.0, "sp_hi": 200.0}
+        self.PIC_329203 = {"mode": "CAS", "op": R324_E001_OP_DES,
+                           "sp": R324_E001_PCHEST_DES, "pv": R324_E001_PCHEST_DES,
+                           "pv1": R324_E001_PCHEST_DES, "pv2": R324_E001_PCHEST_DES,
+                           "Kc": 1.5, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0,
+                           "sp_lo": 0.0, "sp_hi": R323_P_STEAM_SUP}
+        # ---- Stage 2 steam : TIC-324002 (140 C) -> PIC-329212 (steam chest) ----
+        self.TIC_324002 = {"mode": "AUTO", "op": R324_E003_PCHEST_DES,
+                           "sp": R324_E003_T_SP_C, "pv": R324_E003_T_SP_C,
+                           "pv1": R324_E003_T_SP_C, "pv2": R324_E003_T_SP_C,
+                           "Kc": 2.0, "Ti": 120.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": R323_P_STEAM_SUP,
+                           "sp_lo": 0.0, "sp_hi": 200.0}
+        self.PIC_329212 = {"mode": "CAS", "op": R324_E003_OP_DES,
+                           "sp": R324_E003_PCHEST_DES, "pv": R324_E003_PCHEST_DES,
+                           "pv1": R324_E003_PCHEST_DES, "pv2": R324_E003_PCHEST_DES,
+                           "Kc": 1.5, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0,
+                           "sp_lo": 0.0, "sp_hi": R323_P_STEAM_SUP}
+        # ---- Vacuum : PIC-324202 (324F001) / PIC-324203 (324F003) false air ----
+        #      REVERSE acting: pressure below SP -> admit more false air (op up).
+        self.PIC_324202 = {"mode": "AUTO", "op": R324_PV202_OP_DES,
+                           "sp": R324_F001_P_BARA, "pv": R324_F001_P_BARA,
+                           "pv1": R324_F001_P_BARA, "pv2": R324_F001_P_BARA,
+                           "Kc": 1.0, "Ti": 40.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 1.0}
+        self.PIC_324203 = {"mode": "AUTO", "op": R324_PV203_OP_DES,
+                           "sp": R324_F003_P_BARA, "pv": R324_F003_P_BARA,
+                           "pv1": R324_F003_P_BARA, "pv2": R324_F003_P_BARA,
+                           "Kc": 1.0, "Ti": 40.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 1.0}
+        # ---- LIC-324501 split-range 324F003 drain : LV-A forward / LV-B recycle
+        #      DIRECT acting: level above SP -> drain more (op up).
+        self.LIC_324501 = {"mode": "AUTO", "op": R324_LIC501_OP_DES,
+                           "sp": R324_F003_LVL_SP, "pv": R324_F003_LVL_SP,
+                           "pv1": R324_F003_LVL_SP, "pv2": R324_F003_LVL_SP,
+                           "Kc": 1.2, "Ti": 300.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # ---- FFIC-335406 UF85 ratio station -> FIC-335405 flow slave -----------
+        self.FFIC_335406 = {"mode": "AUTO", "op": R324_UF_RATIO,
+                            "sp": R324_UF_RATIO, "pv": R324_UF_RATIO,
+                            "pv1": R324_UF_RATIO, "pv2": R324_UF_RATIO,
+                            "Kc": 0.5, "Ti": 60.0, "Td": 0.0, "act": +1.0,
+                            "op_lo": 0.0, "op_hi": 0.05, "sp_lo": 0.0, "sp_hi": 0.05}
+        self.FIC_335405 = {"mode": "CAS", "op": R324_FIC405_OP_DES,
+                           "sp": R324_M_UF_DES / 1000.0, "pv": R324_M_UF_DES / 1000.0,
+                           "pv1": R324_M_UF_DES / 1000.0, "pv2": R324_M_UF_DES / 1000.0,
+                           "Kc": 1.0, "Ti": 15.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 1.0}
+        # ---- Unit 324 lumped physical state (seeded at design fixed point) -----
+        self.r324_e001_T = R324_E001_T_SP_C          # C  324E001/F001 melt temp
+        self.r324_f001_M = R324_F001_M_DES           # kg 324F001 melt holdup
+        self.r324_f001_P = R324_F001_P_BARA          # bar a 324F001 vacuum
+        self.r324_e003_T = R324_E003_T_SP_C          # C  324E003/F003 melt temp
+        self.r324_f003_M = R324_F003_M_DES           # kg 324F003 melt holdup
+        self.r324_f003_P = R324_F003_P_BARA          # bar a 324F003 vacuum
+
+        # ==================================================================
         #  UNITS 323-2 / 328-1 / 328-2 — LP RECIRCULATION & DESORPTION state
         #  Lumped liquid holdups (kg), bulk temps (C), section pressures (bar a)
         #  seeded at the design fixed point so dM/dt = dT/dt = dP/dt = 0 at boot.
@@ -3335,6 +3492,96 @@ def step_sim(dt: float) -> dict:
     s.tlag["R3232_718B"] = m_718B
     s.tlag["R328_M931"]  = m_931
 
+    # ======================================================================
+    #  UNIT 324 — TWO-STAGE VACUUM EVAPORATION  (rigorous, conservative)
+    #  Feed = m_324 (kg/h, 80% urea, ~99 C) delivered by FIC-324401.  LV-B
+    #  recycle (98.6% melt) is read one tick delayed and re-blended into the
+    #  Stage-1 feed.  Each stage runs a TIC->PIC steam cascade that sets the
+    #  chest pressure -> Q = UA*(tsat(p_chest) - T); urea is conserved so the
+    #  water evaporated is fixed exactly by the concentration anchor, and the
+    #  energy/mass/pressure ODEs integrate the live sub-step dt.  UA/λ were
+    #  back-solved at the seed so dM/dt = dT/dt = dP/dt = 0 at design.  Vacuum
+    #  is held by a false-air PIC balanced against a fixed ejector pull.
+    #      HARD anchors: Stage 1 0.33 bar a / 130 C / 80->95 % ;
+    #                    Stage 2 0.131 bar a / 140 C / 95->98.6 %.
+    # ======================================================================
+    cp324      = R324_CP_SOLN
+    recyc_prev = s.tlag.get("R324_recyc", 0.0)                                # LV-B recycle (kg/h, 98.6%)
+
+    # ---- Stage 1 : Evaporator I 324E001 + separator 324F001 (0.33 bar a, 130 C) --
+    feed1_m    = max(m_324, 0.0) + recyc_prev                                 # blended Stage-1 feed (kg/h)
+    urea1_in   = R324_W_IN*max(m_324, 0.0) + R324_W_EV2*recyc_prev            # urea into Stage 1 (kg/h)
+    tic1_op    = _ctrl_ipd(s.TIC_324001, s.r324_e001_T, dt)                   # steam chest-P demand (bar a)
+    pic203_pv  = clamp(s.PIC_329203["op"]/100.0*R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)
+    pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
+    p_chest_e001 = clamp(pic203_op/100.0*R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
+    Q_e001_kw  = R324_E001_UA_KW*(tsat_steam(p_chest_e001) - s.r324_e001_T)   # Evap-I duty (kW)
+    p1_m       = urea1_in / R324_W_EV1                                        # melt @95% to hold conc (kg/h)
+    v1_m       = max(feed1_m - p1_m, 0.0)                                     # water vapour -> 324E002 (kg/h)
+    P_e001     = (feed1_m/3600.0*cp324*(R324_FEED_T_C - s.r324_e001_T)
+                  + Q_e001_kw - v1_m/3600.0*R324_LAM_V1)                      # net kW on holdup
+    M_f001_pre = s.r324_f001_M
+    s.r324_e001_T = s.r324_e001_T + P_e001*dt/max(M_f001_pre*cp324, 1e-6)
+    m_p1       = p1_m                                                         # barometric leg -> Stage 2 (kg/h)
+    s.r324_f001_M = max(M_f001_pre + (feed1_m - v1_m - m_p1)/3600.0*dt, 1.0)
+    # vacuum: PIC-324202 false-air bleed balanced against 324F002 ejector pull
+    fa202_m    = R324_F001_FA_DES * (s.PIC_324202["op"]/max(R324_PV202_OP_DES, 1e-6))
+    _ctrl_ipd(s.PIC_324202, s.r324_f001_P, dt)                               # false-air stroke (%)
+    s.r324_f001_P = clamp(s.r324_f001_P
+                          + R324_F001_P_KP*((v1_m + fa202_m) - R324_F001_EJPULL_DES)/3600.0*dt,
+                          0.05, 1.0)
+
+    # ---- Stage 2 : Evaporator II 324E003 + separator 324F003 (0.131 bar a, 140 C) -
+    feed2_m    = m_p1                                                         # Stage-1 melt (95%) -> Stage 2
+    urea2_in   = R324_W_EV1 * feed2_m                                         # urea into Stage 2 (kg/h)
+    tic2_op    = _ctrl_ipd(s.TIC_324002, s.r324_e003_T, dt)                   # steam chest-P demand (bar a)
+    pic212_pv  = clamp(s.PIC_329212["op"]/100.0*R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)
+    pic212_op  = _ctrl_ipd(s.PIC_329212, pic212_pv, dt, cas_sp=tic2_op)       # steam valve stroke (%)
+    p_chest_e003 = clamp(pic212_op/100.0*R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
+    Q_e003_kw  = R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T)   # Evap-II duty (kW)
+    p2_gen     = urea2_in / R324_W_EV2                                        # melt @98.6% produced (kg/h)
+    v2_m       = max(feed2_m - p2_gen, 0.0)                                   # water vapour -> 324E005 (kg/h)
+    P_e003     = (feed2_m/3600.0*cp324*(R324_E001_T_SP_C - s.r324_e003_T)
+                  + Q_e003_kw - v2_m/3600.0*R324_LAM_V2)                      # net kW on holdup
+    M_f003_pre = s.r324_f003_M
+    s.r324_e003_T = s.r324_e003_T + P_e003*dt/max(M_f003_pre*cp324, 1e-6)
+    # LIC-324501 split-range drain: LV-A forward (335P001) / LV-B recycle (Stage 1)
+    lvl_f003   = clamp(s.r324_f003_M / R324_F003_M_FULL * 100.0, 0.0, 100.0)
+    lic501_op  = _ctrl_ipd(s.LIC_324501, lvl_f003, dt)                       # split-range command (%)
+    lva_stroke = clamp((lic501_op - 50.0)*2.0, 0.0, 100.0)                    # LV-A forward stroke (%)
+    lvb_stroke = clamp((50.0 - lic501_op)*2.0, 0.0, 100.0)                    # LV-B recycle stroke (%)
+    m_fwd      = lva_stroke/100.0 * R324_LVA_SPAN                             # forward melt (kg/h)
+    m_recyc    = lvb_stroke/100.0 * R324_LVB_SPAN                             # recycle melt -> Stage 1 (kg/h)
+    s.r324_f003_M = max(M_f003_pre + (feed2_m - v2_m - m_fwd - m_recyc)/3600.0*dt, 1.0)
+    # vacuum: PIC-324203 deep-vacuum false-air bleed vs 324F004 ejector pull
+    fa203_m    = R324_F003_FA_DES * (s.PIC_324203["op"]/max(R324_PV203_OP_DES, 1e-6))
+    _ctrl_ipd(s.PIC_324203, s.r324_f003_P, dt)
+    s.r324_f003_P = clamp(s.r324_f003_P
+                          + R324_F003_P_KP*((v2_m + fa203_m) - R324_F003_EJPULL_DES)/3600.0*dt,
+                          0.02, 1.0)
+
+    # ---- UF85 ratio injection (FFIC-335406 ratio station -> FIC-335405 flow) ------
+    #  Feed-forward: UF85 = active ratio * forward melt.  Controllers stepped for
+    #  faceplate liveness; UF85 is an external additive (biuret guard), off the
+    #  urea-conservation network.
+    uf_ratio   = clamp(s.FFIC_335406["op"], 0.0, R324_UF_RATIO*4.0)           # active ratio (holds 0.005)
+    m_uf       = uf_ratio * m_fwd                                             # UF85 injection (kg/h)
+    m_product  = m_fwd + m_uf                                                 # final 98.6% melt + UF85 -> 335
+    _ctrl_ipd(s.FFIC_335406, R324_UF_RATIO, dt)                              # ratio station liveness
+    _fic_flow(s.FIC_335405, R324_M_UF_DES/1000.0, R324_FIC405_OP_DES,
+              s.tlag, "R324_UF", dt, cas_sp=m_uf/1000.0)                      # FIC-335405 slave liveness (t/h)
+
+    # ---- condensation train sinks (conservative pass-through boundary) -----------
+    #  Stage vapours + false air are pulled by ejectors 324F002/F004 through the
+    #  vacuum condensers 324E002/E005/E006/E007: water condenses (-> 328D003 process
+    #  condensate) and the non-condensables (false air) vent via 324F005.  Modelled
+    #  as boundary sinks so the 324 envelope closes:  V1+V2 -> condensate,
+    #  false air -> vent.
+    m_324_cond = v1_m + v2_m                                                  # total process condensate (kg/h)
+    m_324_vent = fa202_m + fa203_m                                            # non-condensable vent (kg/h)
+    # ---- recycle tear write (one-tick delay -> next step reads it) ---------------
+    s.tlag["R324_recyc"] = m_recyc
+
     # ----- auxiliary faceplate trims (stepped for liveness; off the network)
     _ctrl_ipd(s.FIC_323405, 1000.0, dt)
     _ctrl_ipd(s.LIC_323503, 50.0, dt)
@@ -3784,6 +4031,57 @@ def step_sim(dt: float) -> dict:
                                "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"]},
                 "P002A":      {"on": s.aux_pumps["322P002A"]["on"], "mode": s.aux_pumps["322P002A"]["mode"]},
                 "P002B":      {"on": s.aux_pumps["322P002B"]["on"], "mode": s.aux_pumps["322P002B"]["mode"]},
+            },
+        },
+        "EVAP_324": {                            # Screens 324-1 / 324-1B : two-stage vacuum evaporation
+            "E001": {                            # Screen 324-1 : Evaporator I 324E001 / 324F001 (130 C, 0.33 bar a)
+                "TT_324001":   round(s.r324_e001_T, 1),                       # melt temp (C, hold 130)
+                "PT_324202":   round(s.r324_f001_P, 3),                       # separator vacuum (bar a, hold 0.33)
+                "LI_324F001":  round(s.r324_f001_M / R324_F001_M_FULL * 100.0, 1),
+                "feed_th":     round(feed1_m / 1000.0, 2),                    # blended Stage-1 feed (t/h)
+                "vapour_th":   round(v1_m / 1000.0, 2),                       # water vapour -> 324E002 (t/h)
+                "melt_th":     round(m_p1 / 1000.0, 2),                       # 95% melt -> Stage 2 (t/h)
+                "urea_pct":    round(R324_W_EV1 * 100.0, 1),                  # product conc (95 %, HARD)
+                "p_chest_bara":round(p_chest_e001, 2),                        # steam chest press. (bar a)
+                "Q_kW":        round(Q_e001_kw, 0),                           # Evap-I duty (kW)
+                "TIC_324001":  {"pv": round(s.TIC_324001["pv"], 1), "sp": round(s.TIC_324001["sp"], 1),
+                                "op": round(s.TIC_324001["op"], 2), "mode": s.TIC_324001["mode"]},
+                "PIC_329203":  {"pv": round(s.PIC_329203["pv"], 2), "sp": round(s.PIC_329203["sp"], 2),
+                                "op": round(s.PIC_329203["op"], 1), "mode": s.PIC_329203["mode"]},
+                "PIC_324202":  {"pv": round(s.PIC_324202["pv"], 3), "sp": round(s.PIC_324202["sp"], 3),
+                                "op": round(s.PIC_324202["op"], 1), "mode": s.PIC_324202["mode"]},
+                "FIC_324401":  {"pv": round(s.FIC_324401["pv"], 2), "sp": round(s.FIC_324401["sp"], 2),
+                                "op": round(s.FIC_324401["op"], 1), "mode": s.FIC_324401["mode"]},
+            },
+            "E003": {                            # Screen 324-1B : Evaporator II 324E003 / 324F003 (140 C, 0.131 bar a)
+                "TT_324002":   round(s.r324_e003_T, 1),                       # melt temp (C, hold 140)
+                "PT_324203":   round(s.r324_f003_P, 3),                       # deep vacuum (bar a, hold 0.131)
+                "LI_324F003":  round(s.r324_f003_M / R324_F003_M_FULL * 100.0, 1),
+                "feed_th":     round(feed2_m / 1000.0, 2),                    # 95% melt from Stage 1 (t/h)
+                "vapour_th":   round(v2_m / 1000.0, 2),                       # water vapour -> 324E005 (t/h)
+                "melt_fwd_th": round(m_fwd / 1000.0, 2),                      # LV-A forward melt (t/h)
+                "recyc_th":    round(m_recyc / 1000.0, 2),                    # LV-B recycle -> Stage 1 (t/h)
+                "urea_pct":    round(R324_W_EV2 * 100.0, 1),                  # product conc (98.6 %, HARD)
+                "product_th":  round(m_product / 1000.0, 2),                  # final melt + UF85 -> 335 (t/h)
+                "uf85_kgh":    round(m_uf, 1),                                # UF85 injection (kg/h)
+                "p_chest_bara":round(p_chest_e003, 2),                        # steam chest press. (bar a)
+                "Q_kW":        round(Q_e003_kw, 0),                           # Evap-II duty (kW)
+                "TIC_324002":  {"pv": round(s.TIC_324002["pv"], 1), "sp": round(s.TIC_324002["sp"], 1),
+                                "op": round(s.TIC_324002["op"], 2), "mode": s.TIC_324002["mode"]},
+                "PIC_329212":  {"pv": round(s.PIC_329212["pv"], 2), "sp": round(s.PIC_329212["sp"], 2),
+                                "op": round(s.PIC_329212["op"], 1), "mode": s.PIC_329212["mode"]},
+                "PIC_324203":  {"pv": round(s.PIC_324203["pv"], 3), "sp": round(s.PIC_324203["sp"], 3),
+                                "op": round(s.PIC_324203["op"], 1), "mode": s.PIC_324203["mode"]},
+                "LIC_324501":  {"pv": round(s.LIC_324501["pv"], 1), "sp": round(s.LIC_324501["sp"], 1),
+                                "op": round(s.LIC_324501["op"], 1), "mode": s.LIC_324501["mode"]},
+                "FFIC_335406": {"pv": round(s.FFIC_335406["pv"], 4), "sp": round(s.FFIC_335406["sp"], 4),
+                                "op": round(s.FFIC_335406["op"], 4), "mode": s.FFIC_335406["mode"]},
+                "FIC_335405":  {"pv": round(s.FIC_335405["pv"], 3), "sp": round(s.FIC_335405["sp"], 3),
+                                "op": round(s.FIC_335405["op"], 1), "mode": s.FIC_335405["mode"]},
+            },
+            "VAC": {                             # vacuum condensation train (324E002/E005/E006/E007 + ejectors)
+                "condensate_th": round(m_324_cond / 1000.0, 2),              # V1+V2 -> 328D003 (t/h)
+                "vent_kgh":      round(m_324_vent, 1),                        # non-condensable vent -> atm (kg/h)
             },
         },
         "HPCC_322E002": {                        # HP Carbamate Condenser 322E002 -> 322R001

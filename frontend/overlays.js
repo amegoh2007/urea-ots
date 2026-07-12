@@ -366,6 +366,84 @@
       { k: 'nav-321', t: 'nav', x: 44, y: 189, w: 90, h: 22, tag: '321E001 -> 321-1', goto: 'screen-321-1' },
       { k: 'e2003w',  t: 'ind', x: 44, y: 315, tag: '322E003'    },
     ],
+    // ============================ 324-1  EVAPORATION STAGE 1 (324E001 vacuum evaporator / 324F001 separator) ============================
+    // coords = STAGE 1366x720 (native 1357x647 scaled x1.006632 / y1.112828).  root EVAP_324.E001; cross-refs RECIRC_323.D002 / .F010.
+    'screen-324-1': [
+      // ---- 324E001 / 324F001 vacuum evaporator : E001 block ----
+      { k: 'pic4202', t: 'ind', x: 672, y: 67,  tag: 'PIC-324202', bind: 'EVAP_324.E001.PIC_324202.pv', mode: 'EVAP_324.E001.PIC_324202.mode', u: 'BAR A', dec: 3, note: 'holds 324F001 vacuum 0.33 bar a via false-air PV-324202' },
+      { k: 'pt4201',  t: 'ind', x: 455, y: 164, tag: 'PT-324201',  bind: 'EVAP_324.E001.PT_324202', u: 'BAR A', dec: 3, note: '324F001 separator pressure' },
+      { k: 'tic4001', t: 'ind', x: 458, y: 282, tag: 'TIC-324001', bind: 'EVAP_324.E001.TIC_324001.pv', mode: 'EVAP_324.E001.TIC_324001.mode', u: 'C', dec: 1, note: 'master: holds melt 130 C; cascades PIC-329203 chest steam-P' },
+      { k: 'pic9203', t: 'ind', x: 206, y: 274, tag: 'PIC-329203', bind: 'EVAP_324.E001.PIC_329203.pv', mode: 'EVAP_324.E001.PIC_329203.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-324001; steam to 324E001 chest via PV-329203' },
+      { k: 'pv9203',  t: 'avalve', x: 111, y: 334, tag: 'PV-329203', bind: 'EVAP_324.E001.PIC_329203.op', u: '%', dec: 1 },
+      { k: 'fic4401', t: 'ind', x: 260, y: 521, tag: 'FIC-324401', bind: 'RECIRC_323.D002.FIC_324401.pv', mode: 'RECIRC_323.D002.FIC_324401.mode', u: 'T/H', dec: 2, cas: true, note: 'slave: CAS follows 323 LIC-323507; 80% carbamate feed to 324E001 via FV-324401' },
+      { k: 'fv4401',  t: 'avalve', x: 317, y: 541, tag: 'FV-324401', bind: 'RECIRC_323.D002.FIC_324401.op', u: '%', dec: 1 },
+      // ---- 323 cross-refs (upstream 323D002 sump / 323F010 recirc heater drawn on 324-1) ----
+      { k: 'lt3507',  t: 'ind', x: 141, y: 523, tag: 'LT-323507',  bind: 'RECIRC_323.D002.LIC_323507.pv', u: '%', dec: 1, note: '323D002 comp I level (master of FIC-324401)' },
+      { k: 'pt3204',  t: 'ind', x: 760, y: 250, tag: 'PT-323204',  bind: 'RECIRC_323.F010.P_bara', u: 'BAR A', dec: 2 },
+      { k: 'tic3012', t: 'ind', x: 525, y: 504, tag: 'TIC-323012', bind: 'RECIRC_323.F010.TIC_323012.pv', mode: 'RECIRC_323.F010.TIC_323012.mode', u: 'C', dec: 1 },
+      { k: 'pic9208', t: 'ind', x: 835, y: 437, tag: 'PIC-329208', bind: 'RECIRC_323.F010.PIC_329208.pv', mode: 'RECIRC_323.F010.PIC_329208.mode', u: 'BAR A', dec: 2, cas: true },
+      { k: 'pv9208',  t: 'avalve', x: 845, y: 524, tag: 'PV-329208', bind: 'RECIRC_323.F010.PIC_329208.op', u: '%', dec: 1 },
+      // ---- WHITE FRAMES : unmodelled analyzer / steam-condensate / hand valves / downstream ----
+      { k: 'py4201w',  t: 'ind', x: 455,  y: 220, tag: 'PY-324201'  },
+      { k: 'lic9505w', t: 'ind', x: 211,  y: 376, tag: 'LIC-329505' },
+      { k: 'lv9505w',  t: 'ind', x: 189,  y: 432, tag: 'LV-329505'  },
+      { k: 'hic3605w', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605' },
+      { k: 'hv3605w',  t: 'ind', x: 642,  y: 201, tag: 'HV-323605'  },
+      { k: 'hic9605w', t: 'ind', x: 921,  y: 134, tag: 'HIC-329605' },
+      { k: 'hv9605w',  t: 'ind', x: 926,  y: 191, tag: 'HV-329605'  },
+      { k: 'pic3203w', t: 'ind', x: 1208, y: 469, tag: 'PIC-323203' },
+      { k: 'p3003aw',  t: 'ind', x: 235,  y: 610, tag: '323P003A'   },
+      { k: 'p3003bw',  t: 'ind', x: 234,  y: 668, tag: '323P003B'   },
+      // ---- nav hotspots (right-edge stream sinks) ----
+      { k: 'nav-323c005', t: 'nav', x: 1299, y: 172, w: 92, h: 24, tag: '323C005 -> 323-2',  goto: 'screen-323-2'  },
+      { k: 'nav-328d003', t: 'nav', x: 1299, y: 206, w: 92, h: 24, tag: '328D003 -> 328-2',  goto: 'screen-328-2'  },
+      { k: 'nav-323f010', t: 'nav', x: 1299, y: 278, w: 92, h: 24, tag: '323F010 -> 323-1',  goto: 'screen-323-1'  },
+      { k: 'nav-324e003', t: 'nav', x: 1299, y: 364, w: 92, h: 24, tag: '324E003 -> 324-1b', goto: 'screen-324-1b' },
+    ],
+    // ============================ 324-1b  EVAPORATION STAGE 2 (324E003 deep-vacuum evaporator / 324F003 separator) + 335 finishing tie-in ============================
+    // coords = STAGE 1366x720 (native 1359x648 scaled x1.005151 / y1.111111).  root EVAP_324.E003; downstream 335 unmodelled -> WHITE.
+    'screen-324-1b': [
+      // ---- 324E003 / 324F003 deep-vacuum evaporator : E003 block ----
+      { k: 'pic4203', t: 'ind', x: 362, y: 72,  tag: 'PIC-324203', bind: 'EVAP_324.E003.PIC_324203.pv', mode: 'EVAP_324.E003.PIC_324203.mode', u: 'BAR A', dec: 3, note: 'holds 324F003 deep vacuum 0.131 bar a via false-air PV-324203' },
+      { k: 'pv4203',  t: 'avalve', x: 106, y: 120, tag: 'PV-324203', bind: 'EVAP_324.E003.PIC_324203.op', u: '%', dec: 1 },
+      { k: 'pt4204',  t: 'ind', x: 384, y: 193, tag: 'PT-324204', bind: 'EVAP_324.E003.PT_324203', u: 'BAR A', dec: 3, note: '324F003 separator pressure' },
+      { k: 'tic4002', t: 'ind', x: 375, y: 281, tag: 'TIC-324002', bind: 'EVAP_324.E003.TIC_324002.pv', mode: 'EVAP_324.E003.TIC_324002.mode', u: 'C', dec: 1, note: 'master: holds melt 140 C; cascades PIC-329212 chest steam-P' },
+      { k: 'pic9212', t: 'ind', x: 136, y: 271, tag: 'PIC-329212', bind: 'EVAP_324.E003.PIC_329212.pv', mode: 'EVAP_324.E003.PIC_329212.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-324002; steam to 324E003 chest via PV-329212' },
+      { k: 'pv9212',  t: 'avalve', x: 97,  y: 332, tag: 'PV-329212', bind: 'EVAP_324.E003.PIC_329212.op', u: '%', dec: 1 },
+      // ---- 324F003 product level : split-range LIC-324501 (LV-A forward / LV-B recycle) ----
+      { k: 'lic4501', t: 'ind', x: 507, y: 371, tag: 'LIC-324501', bind: 'EVAP_324.E003.LIC_324501.pv', mode: 'EVAP_324.E003.LIC_324501.mode', u: '%', dec: 1, note: 'split-range: LV-324501A forward to 335 / LV-324501B recycle to 324E001' },
+      { k: 'li4f003', t: 'ind', x: 538, y: 410, tag: 'LI-324F003', bind: 'EVAP_324.E003.LI_324F003', u: '%', dec: 1 },
+      { k: 'lv4501a', t: 'avalve', x: 711, y: 347, tag: 'LV-324501A', bind: 'EVAP_324.E003.LIC_324501.op', u: '%', dec: 1 },
+      { k: 'lv4501b', t: 'avalve', x: 598, y: 622, tag: 'LV-324501B', bind: 'EVAP_324.E003.LIC_324501.op', u: '%', dec: 1 },
+      // ---- 335 UF85 injection : FFIC-335406 ratio master -> FIC-335405 slave ----
+      { k: 'ffic5406', t: 'ind', x: 1020, y: 573, tag: 'FFIC-335406', bind: 'EVAP_324.E003.FFIC_335406.pv', mode: 'EVAP_324.E003.FFIC_335406.mode', u: 'RATIO', dec: 4, note: 'UF85-to-product ratio; MV sets FIC-335405 SP' },
+      { k: 'fic5405a', t: 'ind', x: 927, y: 509, tag: 'FIC-335405A', bind: 'EVAP_324.E003.FIC_335405.pv', mode: 'EVAP_324.E003.FIC_335405.mode', u: 'T/H', dec: 3, cas: true, note: 'slave: CAS follows FFIC-335406; UF85 inject to product' },
+      // ---- DCS override boxes ----
+      { k: 'ovr4501a', t: 'ovrd', x: 741, y: 408, tag: 'EXT-OVR LV-324501A' },
+      { k: 'ovrtrip',  t: 'ovrd', x: 741, y: 547, tag: 'TRIP_35_3'         },
+      { k: 'ovr4501b', t: 'ovrd', x: 698, y: 667, tag: 'EXT-OVR LV-324501B' },
+      { k: 'ovr5602',  t: 'ovrd', x: 940, y: 462, tag: 'EXT-OVR HV-335602' },
+      // ---- WHITE FRAMES : downstream 335 finishing / analyzer / hand valves / pumps (unmodelled) ----
+      { k: 'ay4701w',  t: 'ind', x: 375,  y: 240, tag: 'AY-324701'   },
+      { k: 'fic5401w', t: 'ind', x: 907,  y: 322, tag: 'FIC-335401'  },
+      { k: 'hic5602w', t: 'ind', x: 980,  y: 369, tag: 'HIC-335602'  },
+      { k: 'hv5602w',  t: 'ind', x: 975,  y: 436, tag: 'HV-335602'   },
+      { k: 'ffy5406w', t: 'ind', x: 1076, y: 462, tag: 'FFY-335406'  },
+      { k: 'fic5405bw',t: 'ind', x: 935,  y: 649, tag: 'FIC-335405B' },
+      { k: 'hv5609w',  t: 'ind', x: 851,  y: 509, tag: 'HV-335609'   },
+      { k: 'hv5610w',  t: 'ind', x: 851,  y: 649, tag: 'HV-335610'   },
+      { k: 'lt5507w',  t: 'ind', x: 1287, y: 619, tag: 'LT-335507'   },
+      { k: 'r001w',    t: 'ind', x: 1292, y: 361, tag: '335R001A/B'  },
+      { k: 'd004w',    t: 'ind', x: 1303, y: 417, tag: '335D004'     },
+      { k: 'p001aw',   t: 'ind', x: 513,  y: 456, tag: '335P001A'    },
+      { k: 'p001bw',   t: 'ind', x: 513,  y: 500, tag: '335P001B'    },
+      { k: 'p002w',    t: 'ind', x: 811,  y: 588, tag: '335P002'     },
+      { k: 'p006w',    t: 'ind', x: 1223, y: 453, tag: '335P006'     },
+      // ---- nav hotspots ----
+      { k: 'nav-324e001', t: 'nav', x: 40,   y: 170, w: 80, h: 24, tag: '324E001 -> 324-1', goto: 'screen-324-1' },
+      { k: 'nav-328v001', t: 'nav', x: 1299, y: 172, w: 92, h: 24, tag: '328V001 -> 328-2', goto: 'screen-328-2' },
+      { k: 'nav-328d3b',  t: 'nav', x: 1299, y: 206, w: 92, h: 24, tag: '328D003 -> 328-2', goto: 'screen-328-2' },
+    ],
   };
 
   let pos = {};
