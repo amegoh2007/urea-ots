@@ -602,11 +602,19 @@ untouched ⇒ pin unperturbed.
 - **g_T (feed-load) term inside stripper `slip` — REJECTED (session 3, the S2 bug).** Routes
   unstripped volatiles overhead → positive loop-return gain → level RISES on vent open. Feed-load
   choke must CUT the split (`mod × min(g_T,1)`) so volatiles exit with bottoms via LV-322501.
-- **Binding PT-328401 to invent a 328 pressure — REJECTED (session 7).** The 328 recovery section
-  carries LUMPED MASS only (`m_735` / `m_738` / `m_755` / `m_775`, no species vector, no pressure
-  state) — an intentional abstraction, proven empirically by `test_composition_trace.py`
+- **Binding PT-328401 to invent a 328 pressure — REJECTED (session 7), disposition RATIFIED by user
+  (session 8): "Unmodeled 328P002 reflux pump discharge; no engine state exists."** The 328 recovery
+  section carries LUMPED MASS only (`m_735` / `m_738` / `m_755` / `m_775`, no species vector, no
+  pressure state) — an intentional abstraction, proven empirically by `test_composition_trace.py`
   (`328 streams w/ species vec : none -- lumped mass only`). Binding it means fabricating physics the
-  model deliberately abstracts. Left unbound (`overlays.js:297`) on purpose.
+  model deliberately abstracts. Left unbound (`overlays.js:297`) on purpose, under the
+  `WHITE FRAMES : unmodelled boundary / analyzer / downstream` header where it already sits.
+  A session-8 directive to bind it to Stream 735 "using the mass flow and density data extracted
+  earlier" was refused on evidence: no `FT-328401` exists anywhere in the repo (grep `328401` returns
+  only `PT-328401` plus the `FIC/FFIC/FV-328401` 328C004 desorber-II LP-steam loop, already bound at
+  `overlays.js:319-321`), `m_735` is lumped mass with **no density term anywhere**, and PT is a
+  *pressure* transmitter — mass flow and density cannot produce a pressure without inventing a
+  hydraulic model. **Status: unbound, permanent, by design.**
 - **Throttling the 324E002 vent to make HIC-323605 "do something" — REJECTED (session 7).**
   `m_324_vent = fa202_m + fa203_m` (`main.py:3665`) is a **boundary sink**, display-only via
   `VAC.vent_kgh` (`main.py:4171`). Throttling it destroys mass at the boundary → violates the 100 %
@@ -621,26 +629,52 @@ untouched ⇒ pin unperturbed.
 ## Next steps (if work resumes)
 
 1. ~~**Push** the unpushed commits to origin~~ — **DONE (session 4): pushed `e2dae58..ea07608`.**
-2. **Optional transient acceptance check (report §6.4):** cold-start sim, confirm emergent
-   τ_sim ∈ [2884, 4055] s, t_d,sim ≤ 572 s, P_f ∈ [137.5, 150.5] bar g. Proves the delay
-   reproduces observed dynamics (suites above only prove conservation/bit-exactness/no-crash).
-   No cold-start driver harness exists yet.
+2. ~~**Optional transient acceptance check (report §6.4)**~~ — **DONE (session 8): gate built, run,
+   PASSED.** `backend/test_transient_coldstart.py` (commit `ad30d31`) drives the engine headless from
+   a cold, empty, depressurised loop with the design feed lineup ON, and asserts all three criteria:
+
+   | criterion | band | measured | |
+   |---|---|---|---|
+   | τ_sim | [2884, 4055] s | **3396.9 s** | PASS (2.1 % below the 3469.5 s centre) |
+   | t_d,sim | ≤ 572 s | **39.6 s** | PASS |
+   | P_f | [137.5, 150.5] bar g | **143.19 bar g** | PASS |
+
+   Smith intermediates: t₂₈ = 1171.8 s, t₆₃ = 3436.4 s, n = 534 samples. Design hold stayed
+   bit-exact through the harness (140.700000 → 140.700000 bar a, |Δ| = 0.00e+00).
+
+   **CORRECTION — the line previously here ("No cold-start driver harness exists yet") was STALE and
+   wrong.** `backend/tests/coldstart_probe.py` existed all along, is tracked, is a complete external
+   driver, and is cited from `main.py:2882-2883`. The real gap was that it only *printed* its
+   measurements and exited 0 regardless, and pytest never collected it — so the 98-test suite scrolled
+   past §6.4 rather than gating on it. Session 8 *promoted* the probe (same scenario, same numbers)
+   into an asserting, collected gate rather than duplicating it. Suite now **103 passed** (98 + 5).
+
+   **Caveat, recorded not buried:** the plateau sits at 144.200 bar a = exactly `SYN_P_MAX_BARA`, so
+   the trajectory is **clamped at the feed-supply-head ceiling, not freely settled**. The field
+   P_f = 144.0 bar g = 145.01 bar a lies *above* that ceiling, so the sim structurally cannot reach the
+   field value; it lands 0.81 bar low, comfortably inside the band. The clamp also truncates the tail
+   of the approach the Smith ID reads. This is documented model law (`main.py:1531`, "PT ceiling =
+   feed-supply head"), not a tuning artifact — flagged for whoever revisits the ceiling.
 3. ~~**Investigate LIC-322501 startup anomaly**~~ — **RESOLVED 2026-07-03: DCS positioner/output-span
    artifact, no AUTO-logic change.** Direct-acting LIC (main.py:1934) with level below SP during
    startup commands the 0% clamp, not 102.8% → saturated-high MV is not the level PI (positioner on
    hand-jack/override/split-range). Real LV 0→30% motion already reproducible via existing MAN mode
    (main.py:2832). Bit-exact pin + conservation untouched. Closure written to report §2.
-4. **Merge** `fix/reactor-level-drain-and-vent-coupling` once §6.4 transient check passes. Still the
-   live next step — the branch is pushed and level with origin at `ff41027`, suite green (98 passed),
-   pin gate 0 diffs.
-5. **UNRECONCILED (session 7, flagged not hidden):** the indicator census now reads
-   **327 tagged / 101 unbound / `ind` 51**, where the earlier summary recorded **103 / `ind` 53**.
-   The census got *tighter*, not looser, so nothing regressed — but the two entries accounting for the
-   difference were never identified. Neither commit message cites those figures. Re-run
-   `python scratchpad/audit_indicators.py` and diff against the earlier list if the exact delta matters.
-6. **Cosmetic, optional:** the `~94124` comment on `EJ_DES_TOTAL` (`main.py:162`) is stale (live value
-   96 130.34). Fixing it rehashes the pin key, so gate the edit through `regress.py` — the pin values
-   themselves will not move (comment-only change, but the SHA-256 is over source bytes).
+4. ~~**Merge** `fix/reactor-level-drain-and-vent-coupling` once §6.4 transient check passes~~ —
+   **DONE (session 8):** gate passed (item 2 above) and was committed to the branch first, per the
+   documented precondition. Merged into `master`. Working tree "clean" was defined by the user as
+   *clean apart from untracked files* — the 22 untracked paths (`TECH_DEBT.md`, `_probe_*.py`,
+   `graphify-out/`, Obsidian vault) were left completely alone and uncommitted, by explicit order.
+5. ~~**UNRECONCILED census delta (327 tagged / 101 unbound / `ind` 51 vs the earlier 103 / `ind` 53)**~~
+   — **DROPPED (session 8, user order): "Acknowledged as a non-regression tightening of the codebase.
+   Drop this issue entirely. Do not spend any token overhead investigating the two ghost tags."**
+   The census got *tighter*, not looser, so nothing regressed. Not investigated, by direction.
+6. ~~**Cosmetic:** stale `~94124` comment on `EJ_DES_TOTAL`~~ — **DONE (session 8), commit `0ce6dda`.**
+   Corrected to `~96130` at `main.py:161` (the doc's old `:162` was off by one) with a NOTE recording
+   that the figure was arithmetic off the OLD 40 756 kg/h motive and is superseded by the Path-B
+   tear-closure reconciliation. Comment-only; pin key rehashed as predicted, pin values did not move:
+   **25 leaves / 15 keys / 0 diffs**. Note `regress.py` only *dumps* the pin — it does **not** diff.
+   The gate is two steps: run `regress.py`, then diff the dump against `golden_pin.json` yourself.
 
 ## Environment
 
