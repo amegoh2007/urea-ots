@@ -53,6 +53,29 @@ def tsat_steam(p_bara: float) -> float:
     return 1810.94 / (8.14019 - math.log10(p_mmhg)) - 244.485
 
 
+def psat_water_bara(T_C: float) -> float:
+    """Saturated-water vapour pressure [bar a] from temperature [deg C].
+
+    Forward form of the tsat_steam Antoine correlation (same coefficients):
+        log10(P_mmHg) = 8.14019 - 1810.94 / (244.485 + T_C),  P_bara = P_mmHg / 750.0617.
+    """
+    p_mmhg = 10.0 ** (8.14019 - 1810.94 / (244.485 + T_C))
+    return p_mmhg / 750.0616827
+
+
+# ----- Modelling scope boundary (§7.7 P6-B) -----
+# The following 6 P&ID tags are intentionally NOT modelled: they are out-of-envelope
+# auxiliaries with no mass/energy coupling to any modelled unit (no stream on the PFD/HMB
+# crosses the sim boundary through them), so their omission cannot perturb conservation or
+# the design fingerprint. Listed here as an explicit scope declaration, not a TODO:
+#   323D003  - unit 323-2 auxiliary drum   (off-envelope, no HMB stream)
+#   329E002  - unit 329 auxiliary exchanger (off-envelope, no HMB stream)
+#   329E004  - unit 329 auxiliary exchanger (off-envelope, no HMB stream)
+#   329P004  - unit 329 auxiliary pump      (off-envelope, no HMB stream)
+#   329U001  - unit 329 auxiliary package   (off-envelope, no HMB stream)
+#   335D007  - unit 335 auxiliary drum      (off-envelope, no HMB stream)
+# Any future coupling of these tags MUST re-source from PFD/HMB before adding state.
+
 # ----- Constants -----
 NH3_RHO         = 604.8          # kg/m^3, design (eff. density NH3 feed @ 25 C). NIST-validated 2026-07-03: sat. liquid 602.96 @ 25 C; compressed liquid 604.8 corresponds to 25 C / ~29 bar a (pump suction) -> constant is the compressed-liquid density at design suction condition, not an error.
 G               = 9.81
@@ -362,6 +385,7 @@ R323_FEED_DES_KGH   = STRIP_BOT_DES_KGH        # 130482 kg/h, live = drain_kgh
 R323_FEED_DES_T_C   = STRIP_T_DOWN_DES_C       # 119 C, live = TT_323001
 R323_C003_P_BARA    = 4.1                       # bar a, rectifier operating pressure
 R323_C003_T_SP_C    = 135.0                     # C, bottom-liquid boundary (stream 314)
+R323_C003_T313_C    = 121.0                     # C, column-bottom sump liquid (PFD-20 stream 313, TT-323002)
 R323_PHI_V305       = 24582.0 / 130582.0        # 0.188249 vapor split -> LPCC (stream 305)
 R323_305_T_C        = 119.0                     # C, top vapor to 323E003 LPCC
 R323_E002_Q_DES_KW  = 5858.0                    # kW, design heater duty (PDS: Q=5858, A=535)
@@ -371,6 +395,14 @@ R323_C003_M_TAU_S   = 120.0                     # s, liquid residence -> holdup 
 R323_C003_LVL_SP    = 60.0                      # %, LIC-323501 level setpoint
 R323_C003_RHO       = 1250.0                    # kg/m3, ~135 C bottom liquor
 R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
+# Dynamic column pressure PT-323201 (hydraulic coupling to LV-322501 via top-vapour flow 305).
+#   First-order relaxation of P_C003 toward a flow-scaled target so opening LV-322501 (drain_kgh up
+#   -> m_feed_323 up -> m_305 up) forward-accumulates head:
+#     P_tgt = P_des + K_P * (m_305 - m_305,des) / m_305,des      [bar a]
+#     dP/dt = (P_tgt - P) / tau_P
+#   Seed-exact: at design m_305 == R323_M305_DES => P_tgt == R323_C003_P_BARA => dP/dt == 0 (pin invariant).
+R323_C003_P_GAIN    = 1.20                      # bar a per unit fractional top-vapour excess
+R323_C003_P_TAU_S   = 90.0                      # s, column vapour-space pressure relaxation
 
 # --- Stage 2: Flash Tank 323F004 (adiabatic flash 4.1 -> 1.13 bar a, -> 106 C)
 R323_F004_P_BARA    = 1.13                      # bar a, flash pressure
@@ -380,6 +412,13 @@ R323_F004_M_TAU_S   = 180.0                     # s, liquid residence
 R323_F004_LVL_SP    = 60.0                      # %
 R323_F004_RHO       = 1180.0                    # kg/m3, ~106 C liquor
 R323_LV505_OP_DES   = 50.0                      # %, LV-323505 design stroke
+# Dynamic flash pressure 323F004 (hydraulic coupling to LV-323501 via bottom-drain / flash-vapour 701).
+#   Opening LV-323501 (m_314 up) raises flash-vapour m_701 into the LP node read by PIC-323203:
+#     P_tgt = P_des + K_P * (m_701 - m_701,des) / m_701,des      [bar a]
+#     dP/dt = (P_tgt - P) / tau_P
+#   Seed-exact: at design m_701 == R323_M701_DES => P_tgt == R323_F004_P_BARA => dP/dt == 0 (pin invariant).
+R323_F004_P_GAIN    = 0.45                      # bar a per unit fractional flash-vapour excess
+R323_F004_P_TAU_S   = 90.0                      # s, flash-drum pressure relaxation
 
 # --- Stage 3: Pre-evaporator 323E010 + Separator 323F010 (vacuum 0.46 bar a, hold 99 C)
 R323_F010_P_BARA    = 0.46                      # bar a, FIXED vacuum boundary (Ejector I 324F002)
@@ -520,6 +559,7 @@ R328_C003_PHI748   = 812.0 / 34874.0                        # OVHD split -> 328C
 R328_C003_M748_DES = R328_C003_PHI748 * R328_C003_IN_DES    # 812
 R328_C003_M747_DES = R328_C003_IN_DES - R328_C003_M748_DES  # 34062 bottoms -> desorber-II
 R328_C003_T = 200.0 ; R328_C003_T746 = 190.0
+R328_C003_DT_DES = R328_C003_T - R328_C003_T746            # 10 C differential (TT-328013 bottom - TT-328012 3rd tray), TIC-328012
 R328_C003_P_BARA = 16.8 ; R328_C003_P_KP = 0.02
 R328_C003_PV_OP_DES = 50.0                                  # PV-328203 OVHD stroke
 R328_C003_M_DES = R328_C003_M747_DES/3600.0 * 3600.0        # 34062 kg (1 h residence)
@@ -703,6 +743,7 @@ R328_E021_LOSS = 54.4                                       # kW shell heat loss
 R328_E007_EPS  = 0.6667                                     # 328E007 feed/effluent interchanger
 R328_E007_LOSS = 18.3                                       # kW shell heat loss
 R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 boundary
+R328_D001_OFFGAS_H2O_DES = 100.0 * psat_water_bara(R328_E007_TC_OUT) / R328_D001_P_BARA   # ~62.9 mol% sat H2O in offgas -> 328E004 (TT-328008 114C, PIC-328202 2.6 bara)
 
 
 # ==========================================================================
@@ -725,16 +766,16 @@ R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 b
 # ==========================================================================
 R324_CP_SOLN   = R323_CP_SOLN                     # 2.5 kJ/kg.K lumped urea-melt cp
 R324_W_IN      = 0.80                             # feed urea mass fraction (ex 323D002)
-R324_W_EV1     = 0.95                             # Evaporator-I product frac (HARD)
-R324_W_EV2     = 0.986                            # Evaporator-II product frac (HARD)
+R324_W_EV1     = 0.9431                           # Evaporator-I product frac (HARD; HMB 324, was 0.95)
+R324_W_EV2     = 0.9771                           # Evaporator-II product frac (HARD; HMB 324, was 0.986)
 R324_FEED_T_C  = R323_F010_T_SP_C                 # 99 C feed boundary (stream ex 323)
 
 # --- design mass balance (kg/h) : derived from the live design feed -----------
 R324_FEED_DES  = R323_M324_DES                    # = R323_M317_DES tank throughput
 R324_U_DES     = R324_W_IN  * R324_FEED_DES       # urea mass flow (conserved end-to-end)
-R324_P1_DES    = R324_U_DES / R324_W_EV1          # Stage-1 melt @95 %
+R324_P1_DES    = R324_U_DES / R324_W_EV1          # Stage-1 melt @94.31 %
 R324_V1_DES    = R324_FEED_DES - R324_P1_DES      # Stage-1 vapour -> 324E002 condenser
-R324_P2_DES    = R324_U_DES / R324_W_EV2          # Stage-2 melt @98.6 % (final product)
+R324_P2_DES    = R324_U_DES / R324_W_EV2          # Stage-2 melt @97.71 % (final product)
 R324_V2_DES    = R324_P1_DES  - R324_P2_DES       # Stage-2 vapour -> 324E005 condenser
 
 # --- Stage 1 : Evaporator I  324E001 / 324F001  (0.33 bar a, hold 130 C) ------
@@ -784,7 +825,7 @@ R324_LVA_SPAN      = R324_P2_DES / 0.50             # kg/h at 100 % LV-A stroke
 R324_LVB_SPAN      = R324_P1_DES                    # kg/h at 100 % LV-B recycle stroke
 
 # --- FFIC-335406 UF85 ratio injection : m_uf85 = ratio * forward melt ----------
-R324_UF_RATIO      = 0.005                          # UF85 / product melt (biuret guard)
+R324_UF_RATIO      = 697.0 / R324_P2_DES            # UF85/melt: HMB stream 697 = 697 kg/h abs @design (biuret guard); was 0.005 (376.3 kg/h)
 R324_UF85_RHO      = 1320.0                          # kg/m3 UF85 (335D007)
 R324_M_UF_DES      = R324_UF_RATIO * R324_P2_DES     # design UF85 injection (kg/h)
 R324_FIC405_OP_DES = 50.0                            # % FIC-335405 slave design stroke
@@ -911,19 +952,46 @@ def _ctrl_ipd(c: dict, pv: float, dt: float, cas_sp: float = None) -> float:
     c keys: mode {'MAN','AUTO','CAS'}, op, sp, pv, pv1, pv2, Kc, Ti, Td,
             act (+1 REVERSE: op rises when pv < sp | -1 DIRECT: op rises when pv > sp),
             op_lo, op_hi, sp_lo, sp_hi.
+    Optional keys (default inert, byte-identical when absent), mirroring controllers.py PID:
+            Tf (s, derivative 1st-order filter time; <=0 -> unfiltered legacy 2nd-difference),
+            Dz (EU error deadzone half-width; 0 -> no deadzone), dfilt (filtered-derivative state).
     In CAS the remote `cas_sp` (clamped to the sp span) overwrites the local sp.
-    Velocity law:  du = act * Kc * [ -(pv - pv1) + (dt/Ti)*(sp - pv) - Td*(pv - 2*pv1 + pv2)/dt ]
+    Velocity law:  du = act * Kc * [ -(pv - pv1) + I(sp,pv) + D(pv) ]
+        I = 0 if |sp-pv| < Dz else (dt/Ti)*(sp - pv)                        (Dz=0 -> always active)
+        D = -Td*(pv - 2*pv1 + pv2)/dt                          (Tf<=0, legacy 2nd-difference form)
+          = G_k - G_{k-1},  G_k = Tf/(Tf+dt)*G_{k-1} - Td/(Tf+dt)*(pv-pv1)       (Tf>0, filtered)
     Non-finite PV/SP freezes op at the last good value (bumpless hold).  At the design
     seed pv == sp == pv1 == pv2 -> du = 0, so the boot fixed point is preserved bit-exact.
-    act=-1,Td=0 reduces to the existing LIC-322501 velocity-PI form."""
+    act=-1,Td=0 reduces to the existing LIC-322501 velocity-PI form.  With Tf=0,Dz=0 the term
+    grouping collapses byte-identically to the legacy du expression (IEEE x + (-y) == x - y)."""
     if not _pv_ok(pv, c["sp"]):
         return clamp(c["op"], c["op_lo"], c["op_hi"])              # freeze last-good on bad PV
     if c["mode"] == "CAS" and cas_sp is not None:
         c["sp"] = clamp(cas_sp, c["sp_lo"], c["sp_hi"])           # remote setpoint from master
     pv1 = c["pv1"]; pv2 = c["pv2"]
     if c["mode"] in ("AUTO", "CAS"):
-        d2 = (pv - 2.0 * pv1 + pv2) / dt if dt > 0.0 else 0.0
-        du = c["act"] * c["Kc"] * (-(pv - pv1) + (dt / c["Ti"]) * (c["sp"] - pv) - c["Td"] * d2)
+        p = -(pv - pv1)
+        err = c["sp"] - pv
+        Dz = c.get("Dz", 0.0)
+        i = 0.0 if abs(err) < Dz else (dt / c["Ti"]) * err        # Dz=0 -> abs(err)<0 never -> inert
+        # Td sentinel decode: official Td = -1 means "derivative disabled"; a negative derivative
+        # time is non-physical and, un-guarded, flips the D-term sign (+d2) injecting a wrong-way
+        # kick on every transient.  Clamp <0 -> 0 (disabled) so the sentinel is honoured exactly.
+        Td = c["Td"]
+        if Td < 0.0:
+            Td = 0.0
+        Tf = c.get("Tf", 0.0)
+        if dt <= 0.0:
+            d = 0.0
+        elif Tf <= 0.0:
+            d2 = (pv - 2.0 * pv1 + pv2) / dt
+            d = -Td * d2                                          # == -(Td*d2): legacy term, bit-exact
+        else:
+            g_prev = c.get("dfilt", 0.0)
+            g_k = (Tf / (Tf + dt)) * g_prev - (Td / (Tf + dt)) * (pv - pv1)
+            d = g_k - g_prev
+            c["dfilt"] = g_k
+        du = c["act"] * c["Kc"] * (p + i + d)
         c["op"] = clamp(c["op"] + du, c["op_lo"], c["op_hi"])
     c["pv2"] = pv1
     c["pv1"] = pv
@@ -1409,6 +1477,12 @@ SCRUB_CCW_RHO_OUT    = 961.9     # kg/m³, water @ 95 C
 SCRUB_FV409_DES_PCT  = 60.0      # %, FV-329409 design opening (FIC-329409 -> CCW flow)
 SCRUB_TV005_DES_PCT  = 50.0      # %, TV-329005 design opening (TIC-329005 -> 329E002 branch)
 # F4: CCW loops are now real first-order plant lag + velocity I-PD (no algebraic SP-pin island).
+# §7.6 P5-A provenance: the two TAU_S below are CALIBRATED instrument-response lags fit to CCW step
+#   data, NOT hydraulically derived -- FIC_329409_TAU_S = FV-329409 actuator stroke + FT filter (fast
+#   circ pump, ~3 s); TIC_329005_TAU_S = tempered-water thermal mass + RTD lag (~25 s). Both are inner
+#   loops subordinate to the feed dead time (FEED_TD_S), so they cannot shift the synthesis-loop FOPTD
+#   fingerprint [tau 2884..4055 s, t_d<=572 s]; that invariant is regression-asserted in
+#   test_foptd_fingerprint.py, which must pass after ANY change to these constants.
 FIC_329409_TAU_S     = 3.0       # s, FV-329409 flow-loop plant lag (fast circulation pump)
 FIC_329409_KC        = 0.08      # %OP per t/h, REVERSE-acting velocity gain (PV in raw t/h, O(300))
 FIC_329409_TI        = 6.0       # s, integral time
@@ -2219,8 +2293,10 @@ class State:
         # Liquid inventories (kg) and bulk temperatures (C)
         self.r323_c003_M = R323_C003_M_DES        # 323C003 rectifier bottom holdup
         self.r323_c003_T = R323_C003_T_SP_C        # 135 C
+        self.r323_c003_P = R323_C003_P_BARA        # PT-323201 column pressure (dynamic, hydraulic coupling)
         self.r323_f004_M = R323_F004_M_DES         # 323F004 flash-tank holdup
         self.r323_f004_T = R323_F004_T_SP_C        # 106 C
+        self.r323_f004_P = R323_F004_P_BARA        # 323F004 flash pressure (dynamic, read by PIC-323203 LP node)
         self.r323_f010_M = R323_F010_M_DES         # 323F010 pre-evap separator holdup
         self.r323_f010_T = R323_F010_T_SP_C        # 99 C
         self.r323_d002_M_I  = R323_D002_M_I_DES    # 323D002 Compartment I (active, 80 m3)
@@ -2231,7 +2307,7 @@ class State:
         self.TIC_323007 = {"mode": "AUTO", "op": R323_E002_PCHEST_DES,
                            "sp": R323_C003_T_SP_C, "pv": R323_C003_T_SP_C,
                            "pv1": R323_C003_T_SP_C, "pv2": R323_C003_T_SP_C,
-                           "Kc": 2.0, "Ti": 500.0, "Td": -1.0, "act": +1.0,
+                           "Kc": 2.0, "Ti": 500.0, "Td": 0.0, "act": +1.0,  # official Td=-1 (deriv disabled) -> 0.0
                            "op_lo": 0.0, "op_hi": R323_P_STEAM_SUP, "sp_lo": 50.0, "sp_hi": 160.0}
         self.PIC_329202 = {"mode": "CAS", "op": R323_E002_OP_DES,
                            "sp": R323_E002_PCHEST_DES, "pv": R323_E002_PCHEST_DES,
@@ -2500,18 +2576,18 @@ class State:
                            "pv1": R328_C004_M931_DES, "pv2": R328_C004_M931_DES,
                            "Kc": 0.30, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.30: PV in kg/h, process gain g=6495/50=129.9; loop coef 1-Kc*a*g, a=dt/(tau+dt)=0.0196; Kc=1.2 gives coef -2.06 (unstable 0<->100 limit cycle). Kc<0.39 monotonic; 0.30 -> coef 0.24, 2.6x margin.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 12000.0}
-        # TIC-328008 328E007 effluent-side outlet temp -> display trim (DIRECT).
+        # TIC-328008 inferential: offgas H2O content to reflux condenser 328E004 (mol%), from TT-328008 & PIC-328202.
         self.TIC_328008 = {"mode": "AUTO", "op": 50.0,
-                           "sp": R328_E007_TC_OUT, "pv": R328_E007_TC_OUT,
-                           "pv1": R328_E007_TC_OUT, "pv2": R328_E007_TC_OUT,
+                           "sp": R328_D001_OFFGAS_H2O_DES, "pv": R328_D001_OFFGAS_H2O_DES,
+                           "pv1": R328_D001_OFFGAS_H2O_DES, "pv2": R328_D001_OFFGAS_H2O_DES,
                            "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 90.0, "sp_hi": 130.0}
-        # TIC-328012 328E021 cold-side outlet temp -> display trim (DIRECT).
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # TIC-328012 differential temp controller: TT-328013 (bottom 200) - TT-328012 (3rd tray 190) = 10 C.
         self.TIC_328012 = {"mode": "AUTO", "op": 50.0,
-                           "sp": R328_C003_T746, "pv": R328_C003_T746,
-                           "pv1": R328_C003_T746, "pv2": R328_C003_T746,
+                           "sp": R328_C003_DT_DES, "pv": R328_C003_DT_DES,
+                           "pv1": R328_C003_DT_DES, "pv2": R328_C003_DT_DES,
                            "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 150.0, "sp_hi": 200.0}
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 30.0}
         # LIC-328503 328C002 desorber-I bottoms level -> LV-328503 (DIRECT, 743 -> hydrolyser).
         self.LIC_328503 = {"mode": "AUTO", "op": 50.0,
                            "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
@@ -2898,7 +2974,7 @@ def step_sim(dt: float) -> dict:
     dT_col   = REACT_DT_COL_DES * conv_fac
     T_old     = list(s.react_T_node)
     T_up      = hpcc["T_prod"]                               # node-0 upstream = LIVE HPCC two-phase feed T (cascade)
-    flow_frac = clamp(react["co2_scale"], 0.0, 1.0)          # m_dot/m_dot_des proxy: tau-scale + loss gate
+    flow_frac = max(clamp(react["co2_scale"], 0.0, 1.0), 1.0e-3)  # m_dot/m_dot_des proxy (§7.6 P5-B: floor 1e-3>0 so tau_n=tau_des/flow_frac stays finite as load->0; bit-exact at design, co2_scale>>1e-3); tau-scale + loss gate
     new_T     = []
     for n in range(4):
         # Fix-1/2: flow-scaled residence  tau_n = tau_des/flow_frac  (-> +inf as flow collapses, zero-flow
@@ -3239,6 +3315,10 @@ def step_sim(dt: float) -> dict:
     M_c003_pre = s.r323_c003_M
     s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp323, 1e-6)
     s.r323_c003_M = max(M_c003_pre + (m_feed_323 - m_305 - m_314) / 3600.0 * dt, 1.0)
+    #  PT-323201 hydraulic coupling: forward pressure accumulation from live top-vapour flow (305).
+    #  Opening LV-322501 raises drain_kgh -> m_feed_323 -> m_305 > design => P relaxes UP toward target.
+    p_c003_tgt = R323_C003_P_BARA + R323_C003_P_GAIN * (m_305 - R323_M305_DES) / R323_M305_DES
+    s.r323_c003_P = clamp(s.r323_c003_P + (p_c003_tgt - s.r323_c003_P) / R323_C003_P_TAU_S * dt, 1.0, 12.0)
 
     # ---- Stage 2: Flash Tank 323F004  (adiabatic letdown 4.1 -> 1.13 bar, hold 106 C) --------
     m_701     = R323_PHI_V701 * m_314                                             # flash vapor -> LPCC (701, kg/h)
@@ -3250,6 +3330,10 @@ def step_sim(dt: float) -> dict:
     M_f004_pre = s.r323_f004_M
     s.r323_f004_T = s.r323_f004_T + P_f004 * dt / max(M_f004_pre * cp323, 1e-6)
     s.r323_f004_M = max(M_f004_pre + (m_314 - m_701 - m_319) / 3600.0 * dt, 1.0)
+    #  323F004 hydraulic coupling: forward pressure accumulation from live flash-vapour flow (701).
+    #  Opening LV-323501 raises m_314 -> m_701 > design => flash-drum P relaxes UP (feeds PIC-323203 LP node).
+    p_f004_tgt = R323_F004_P_BARA + R323_F004_P_GAIN * (m_701 - R323_M701_DES) / R323_M701_DES
+    s.r323_f004_P = clamp(s.r323_f004_P + (p_f004_tgt - s.r323_f004_P) / R323_F004_P_TAU_S * dt, 0.3, 6.0)
 
     # ---- Stage 3: Pre-evaporator 323F010 + Heater 323E010  (vacuum 0.46 bar, hold 99 C) ------
     #  Cascade  TIC-323012 (temp master) -> PIC-329208 (LP-steam chest-P slave) -> heater duty.
@@ -3516,7 +3600,7 @@ def step_sim(dt: float) -> dict:
     pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
     p_chest_e001 = clamp(pic203_op/100.0*R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
     Q_e001_kw  = R324_E001_UA_KW*(tsat_steam(p_chest_e001) - s.r324_e001_T)   # Evap-I duty (kW)
-    p1_m       = urea1_in / R324_W_EV1                                        # melt @95% to hold conc (kg/h)
+    p1_m       = urea1_in / R324_W_EV1                                        # melt @94.31% to hold conc (kg/h)
     v1_m       = max(feed1_m - p1_m, 0.0)                                     # water vapour -> 324E002 (kg/h)
     P_e001     = (feed1_m/3600.0*cp324*(R324_FEED_T_C - s.r324_e001_T)
                   + Q_e001_kw - v1_m/3600.0*R324_LAM_V1)                      # net kW on holdup
@@ -3539,7 +3623,7 @@ def step_sim(dt: float) -> dict:
     pic212_op  = _ctrl_ipd(s.PIC_329212, pic212_pv, dt, cas_sp=tic2_op)       # steam valve stroke (%)
     p_chest_e003 = clamp(pic212_op/100.0*R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
     Q_e003_kw  = R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T)   # Evap-II duty (kW)
-    p2_gen     = urea2_in / R324_W_EV2                                        # melt @98.6% produced (kg/h)
+    p2_gen     = urea2_in / R324_W_EV2                                        # melt @97.71% produced (kg/h)
     v2_m       = max(feed2_m - p2_gen, 0.0)                                   # water vapour -> 324E005 (kg/h)
     P_e003     = (feed2_m/3600.0*cp324*(R324_E001_T_SP_C - s.r324_e003_T)
                   + Q_e003_kw - v2_m/3600.0*R324_LAM_V2)                      # net kW on holdup
@@ -3585,8 +3669,8 @@ def step_sim(dt: float) -> dict:
     # ----- auxiliary faceplate trims (stepped for liveness; off the network)
     _ctrl_ipd(s.FIC_323405, 1000.0, dt)
     _ctrl_ipd(s.LIC_323503, 50.0, dt)
-    _ctrl_ipd(s.TIC_328008, R328_E007_TC_OUT, dt)
-    _ctrl_ipd(s.TIC_328012, R328_C003_T746, dt)
+    _ctrl_ipd(s.TIC_328008, 100.0 * psat_water_bara(R328_E007_TC_OUT) / max(s.a328_d001_P, 0.1), dt)   # inferential offgas H2O mol% (TT-328008 114C, PIC-328202)
+    _ctrl_ipd(s.TIC_328012, s.a328_c003_T - R328_C003_T746, dt)              # differential PV: TT-328013 (bottom) - TT-328012 (3rd tray)
     _ctrl_ipd(s.SIC_323902, s.SIC_323902["op"], dt)
     _ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)
 
@@ -3847,8 +3931,8 @@ def step_sim(dt: float) -> dict:
         },
         "RECIRC_323": {                          # Unit 323 - LP Recirculation & Pre-Evaporation
             "C003": {                            # Rectifying Column 323C003 + Recirc Heater 323E002
-                "TT_323002":  round(s.r323_c003_T, 1),                       # bottom liquid temp (C, hold 135)
-                "P_bara":     R323_C003_P_BARA,                              # column pressure (bar a)
+                "TT_323002":  round(s.r323_c003_T - (R323_C003_T_SP_C - R323_C003_T313_C), 1),  # stream 313 sump (PFD-20 121C = 314 drain 135 - reboiler rise)
+                "P_bara":     round(s.r323_c003_P, 2),                       # PT-323201 column pressure (bar a, dynamic)
                 "LI_323501":  round(s.r323_c003_M / R323_C003_M_FULL * 100.0, 1),  # level (%)
                 "feed_th":    round(m_feed_323 / 1000.0, 2),                 # feed from 322E001 (t/h)
                 "feed_T":     round(T_feed_323, 1),                          # feed temp (C, TT-323001)
@@ -3864,7 +3948,7 @@ def step_sim(dt: float) -> dict:
             },
             "F004": {                            # Flash Tank 323F004 (adiabatic 4.1 -> 1.13 bar)
                 "TT_323005":  round(s.r323_f004_T, 1),                       # flash temp (C, hold 106)
-                "P_bara":     R323_F004_P_BARA,
+                "P_bara":     round(s.r323_f004_P, 2),                       # flash pressure (bar a, dynamic)
                 "LI_323505":  round(s.r323_f004_M / R323_F004_M_FULL * 100.0, 1),
                 "v701_th":    round(m_701 / 1000.0, 2),                      # flash vapor -> LPCC (t/h)
                 "drain319_th":round(m_319 / 1000.0, 2),                      # drain -> pre-evaporator (t/h)
@@ -3947,6 +4031,7 @@ def step_sim(dt: float) -> dict:
         "DESORB_328": {                          # Screen 328-1 : Desorption / Hydrolysis train
             "C002": {                            # 328C002 Desorber-I (bottoms 139°C)
                 "TT_328C002": round(s.a328_c002_T, 1),                     # bottom temp (C, hold 139)
+                "TT_328007":  round(R328_E007_TH_OUT, 1),                  # 328E007 process (hot) outlet -> 740 boundary (89C)
                 "LI_328503":  round(s.a328_c002_M / R328_C002_M_DES * 50.0, 1),
                 "feed738_th": round(m_738 / 1000.0, 2),                    # 328D003 feed via 328E007 (t/h)
                 "ovhd737_th": round(m_737 / 1000.0, 2),                    # top vapour -> 328D001 (t/h)
@@ -3956,6 +4041,7 @@ def step_sim(dt: float) -> dict:
             },
             "C003": {                            # 328C003 Hydrolyser (200°C, MP steam)
                 "TT_328C003": round(s.a328_c003_T, 1),                     # temp (C, hold 200)
+                "TT_328012":  round(R328_C003_T746, 1),                    # 3rd-tray / 746 absolute (C, 190) - TT-328011/TT-328012 display
                 "P_bara":     round(s.a328_c003_P, 2),
                 "LI_328505":  round(s.a328_c003_M / R328_C003_M_DES * 50.0, 1),
                 "steam911_th":round(m_911 / 1000.0, 2),                    # FIC-326402 MP steam (t/h)
@@ -3985,6 +4071,7 @@ def step_sim(dt: float) -> dict:
             },
             "D001": {                            # 328D001 Desorber-I reflux drum (61°C, 328E004)
                 "TT_328D001": round(s.a328_d001_T, 1),                     # temp (C, hold 61)
+                "TT_328008":  round(R328_E007_TC_OUT, 1),                  # 328E007 cold-out / Desorber-I top (C, 114) - TT-328008/TT-328010 display
                 "P_bara":     round(s.a328_d001_P, 2),
                 "LI_328501":  round(s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP, 1),
                 "vent786_th": round(m_786_d001 / 1000.0, 2),               # PIC-328202 vent -> 323E011 (t/h)
@@ -4041,7 +4128,7 @@ def step_sim(dt: float) -> dict:
                 "feed_th":     round(feed1_m / 1000.0, 2),                    # blended Stage-1 feed (t/h)
                 "vapour_th":   round(v1_m / 1000.0, 2),                       # water vapour -> 324E002 (t/h)
                 "melt_th":     round(m_p1 / 1000.0, 2),                       # 95% melt -> Stage 2 (t/h)
-                "urea_pct":    round(R324_W_EV1 * 100.0, 1),                  # product conc (95 %, HARD)
+                "urea_pct":    round(R324_W_EV1 * 100.0, 1),                  # product conc (94.31 %, HARD)
                 "p_chest_bara":round(p_chest_e001, 2),                        # steam chest press. (bar a)
                 "Q_kW":        round(Q_e001_kw, 0),                           # Evap-I duty (kW)
                 "TIC_324001":  {"pv": round(s.TIC_324001["pv"], 1), "sp": round(s.TIC_324001["sp"], 1),
@@ -4061,7 +4148,7 @@ def step_sim(dt: float) -> dict:
                 "vapour_th":   round(v2_m / 1000.0, 2),                       # water vapour -> 324E005 (t/h)
                 "melt_fwd_th": round(m_fwd / 1000.0, 2),                      # LV-A forward melt (t/h)
                 "recyc_th":    round(m_recyc / 1000.0, 2),                    # LV-B recycle -> Stage 1 (t/h)
-                "urea_pct":    round(R324_W_EV2 * 100.0, 1),                  # product conc (98.6 %, HARD)
+                "urea_pct":    round(R324_W_EV2 * 100.0, 1),                  # product conc (97.71 %, HARD)
                 "product_th":  round(m_product / 1000.0, 2),                  # final melt + UF85 -> 335 (t/h)
                 "uf85_kgh":    round(m_uf, 1),                                # UF85 injection (kg/h)
                 "p_chest_bara":round(p_chest_e003, 2),                        # steam chest press. (bar a)

@@ -28,17 +28,22 @@ class PID:
     Returns delta-u pre-direction (sigma), pre-slew, pre-output-clamp.
     Stores only PV_{k-1} and PV_{k-2} — no integral accumulator to wind up."""
 
-    def __init__(self, Kc: float, Ti: float, Td: float = 0.0):
+    def __init__(self, Kc: float, Ti: float, Td: float = 0.0,
+                 Tf: float = 0.0, Dz: float = 0.0):
         self.Kc = Kc
         self.Ti = Ti
         self.Td = Td
+        self.Tf = Tf            # s, derivative 1st-order filter time (0 -> unfiltered, inert)
+        self.Dz = Dz            # EU error deadzone half-width (0 -> no deadzone, inert)
         self._pv1: Optional[float] = None   # PV_{k-1}
         self._pv2: Optional[float] = None   # PV_{k-2}
+        self._dfilt: float = 0.0            # G_{k-1}: filtered position-derivative (per-unit-Kc)
 
     def reset(self) -> None:
         """Clear PV history so next step is like a fresh start."""
         self._pv1 = None
         self._pv2 = None
+        self._dfilt = 0.0
 
     def step(self, sp: float, pv: float, dt: float) -> float:
         """Compute delta-u = Kc*(P + I + D).
@@ -50,9 +55,23 @@ class PID:
             self._pv2 = pv
 
         p = -(pv - self._pv1)
-        i = (dt / max(self.Ti, 1e-9)) * (sp - pv)
-        d = (-self.Td * (pv - 2.0 * self._pv1 + self._pv2) / dt
-             if dt > 0 else 0.0)
+        # Integral term with optional error deadzone (Dz=0 -> abs(err)<0 never true -> inert):
+        err = sp - pv
+        i = 0.0 if abs(err) < self.Dz else (dt / max(self.Ti, 1e-9)) * err
+        # Derivative term. Tf<=0 -> legacy 2nd-difference velocity form (byte-identical, inert
+        # default). Tf>0 -> 1st-order-filtered position-derivative G_k, velocity increment
+        # d = G_k - G_{k-1}. Collapses EXACTLY to the legacy term as Tf->0 (unit-tested):
+        #   G_k = Tf/(Tf+dt)*G_{k-1} - Td/(Tf+dt)*(PV_k-PV_{k-1}); Kc applied on return.
+        if dt <= 0:
+            d = 0.0
+        elif self.Tf <= 0.0:
+            d = -self.Td * (pv - 2.0 * self._pv1 + self._pv2) / dt
+        else:
+            g_prev = self._dfilt
+            g_k = ((self.Tf / (self.Tf + dt)) * g_prev
+                   - (self.Td / (self.Tf + dt)) * (pv - self._pv1))
+            d = g_k - g_prev
+            self._dfilt = g_k
 
         self._pv2 = self._pv1
         self._pv1 = pv
@@ -73,6 +92,8 @@ class Controller:
         Kc: float = 2.0,
         Ti: float = 8.0,
         Td: float = 0.0,
+        Tf: float = 0.0,             # derivative filter time (0 -> inert); source: Constraint List
+        Dz: float = 0.0,             # error deadzone half-width (0 -> inert); source: Constraint List
         action: str = "REVERSE",     # "REVERSE" sigma=+1  |  "DIRECT" sigma=-1
         op_lo: float = 0.0,
         op_hi: float = 100.0,
@@ -89,7 +110,7 @@ class Controller:
         self.sp_lo, self.sp_hi = sp_lo, sp_hi
         self.rate = rate
         self.fail_action = fail_action
-        self._pid = PID(Kc=Kc, Ti=Ti, Td=Td)
+        self._pid = PID(Kc=Kc, Ti=Ti, Td=Td, Tf=Tf, Dz=Dz)
 
         self.mode: str = "MAN"
         self.sp: float = sp if sp is not None else (sp_lo + sp_hi) / 2.0
@@ -109,6 +130,10 @@ class Controller:
     def Ti(self) -> float: return self._pid.Ti
     @property
     def Td(self) -> float: return self._pid.Td
+    @property
+    def Tf(self) -> float: return self._pid.Tf
+    @property
+    def Dz(self) -> float: return self._pid.Dz
 
     def _sigma(self) -> float:
         return 1.0 if self.action == "REVERSE" else -1.0
@@ -147,11 +172,14 @@ class Controller:
         self.bias = _clamp(v, -CAS_BIAS_LIM, CAS_BIAS_LIM)
 
     def set_tuning(self, *, Kc: Optional[float] = None,
-                   Ti: Optional[float] = None, Td: Optional[float] = None) -> None:
+                   Ti: Optional[float] = None, Td: Optional[float] = None,
+                   Tf: Optional[float] = None, Dz: Optional[float] = None) -> None:
         """Bumpless tuning update. Legal in any mode."""
         if Kc is not None: self._pid.Kc = Kc
         if Ti is not None: self._pid.Ti = Ti
         if Td is not None: self._pid.Td = Td
+        if Tf is not None: self._pid.Tf = Tf
+        if Dz is not None: self._pid.Dz = Dz
 
     # -- sim tick (called from step_sim under _ctrl_lock)
 
@@ -216,6 +244,8 @@ class Controller:
                 "Kc": self._pid.Kc,
                 "Ti": self._pid.Ti,
                 "Td": self._pid.Td,
+                "Tf": self._pid.Tf,
+                "Dz": self._pid.Dz,
             },
             "limits": {
                 "op_lo": self.op_lo, "op_hi": self.op_hi,

@@ -255,6 +255,78 @@ def test_to_packet_values():
     assert pkt["fail_action"] == "FC"
 
 
+# ===== PID Tf derivative filter + Dz deadzone (P3-A) =====
+
+def _run_seq(pid, seq, dt):
+    return [pid.step(sp, pv, dt) for (sp, pv) in seq]
+
+
+def test_pid_tf_zero_matches_legacy():
+    """Tf=0 path is byte-identical to the legacy 2nd-difference derivative."""
+    seq = [(80.0, 70.0), (80.0, 72.0), (80.0, 71.0), (80.0, 75.0), (80.0, 74.5)]
+    Kc, Ti, Td, dt = 1.7, 8.0, 2.0, 0.5
+    outs = _run_seq(PID(Kc=Kc, Ti=Ti, Td=Td, Tf=0.0), seq, dt)
+    pv1 = pv2 = seq[0][1]
+    ref = []
+    for sp, pv in seq:                                   # independent legacy recomputation
+        p = -(pv - pv1); i = (dt / Ti) * (sp - pv); d = -Td * (pv - 2 * pv1 + pv2) / dt
+        ref.append(Kc * (p + i + d)); pv2 = pv1; pv1 = pv
+    for o, r in zip(outs, ref):
+        assert approx(o, r, 0.0), f"Tf=0 got {o}, legacy {r}"   # tol=0 -> exact
+
+
+def test_pid_tf_collapses_to_legacy_as_tf_small():
+    """Filtered derivative with tiny Tf -> legacy term within float tol."""
+    seq = [(50.0, 50.0), (50.0, 52.0), (50.0, 51.0), (50.0, 55.0)]
+    dt = 0.5
+    leg = _run_seq(PID(Kc=1.0, Ti=1e9, Td=3.0, Tf=0.0), seq, dt)
+    flt = _run_seq(PID(Kc=1.0, Ti=1e9, Td=3.0, Tf=1e-9), seq, dt)
+    for a, b in zip(leg, flt):
+        assert approx(a, b, 1e-6), f"legacy {a} vs filt {b}"
+
+
+def test_pid_tf_attenuates_derivative_kick():
+    """On a PV step, larger Tf yields a SMALLER first derivative increment."""
+    step = [(0.0, 0.0), (0.0, 0.0), (0.0, 10.0)]   # huge Ti kills I -> isolate D
+    dt = 1.0
+    d0 = _run_seq(PID(Kc=1.0, Ti=1e12, Td=5.0, Tf=0.0), step, dt)[-1]
+    d1 = _run_seq(PID(Kc=1.0, Ti=1e12, Td=5.0, Tf=4.0), step, dt)[-1]
+    assert abs(d1) < abs(d0), f"filtered |{d1}| should be < unfiltered |{d0}|"
+
+
+def test_pid_dz_zero_is_inert():
+    """Dz=0 -> integral identical to legacy pure-integral first step."""
+    d = PID(Kc=1.0, Ti=10.0, Td=0.0, Dz=0.0).step(80.0, 79.0, 1.0)
+    assert approx(d, (1.0 / 10.0) * (80.0 - 79.0)), f"got {d}"
+
+
+def test_pid_dz_zeros_integral_inside_band():
+    """|err| < Dz -> integral suppressed; first step P=D=0 -> delta 0."""
+    d = PID(Kc=1.0, Ti=10.0, Td=0.0, Dz=5.0).step(80.0, 78.0, 1.0)   # err=2 < 5
+    assert approx(d, 0.0, 1e-12), f"inside deadzone should give 0, got {d}"
+
+
+def test_pid_dz_active_outside_band():
+    """|err| >= Dz -> integral acts normally."""
+    d = PID(Kc=1.0, Ti=10.0, Td=0.0, Dz=1.0).step(80.0, 70.0, 1.0)   # err=10 >= 1
+    assert approx(d, (1.0 / 10.0) * 10.0), f"got {d}"
+
+
+def test_pid_reset_clears_dfilt():
+    """reset() zeros the derivative filter state."""
+    pid = PID(Kc=1.0, Ti=1e12, Td=3.0, Tf=4.0)
+    pid.step(0.0, 0.0, 1.0); pid.step(0.0, 10.0, 1.0)
+    assert pid._dfilt != 0.0
+    pid.reset()
+    assert pid._dfilt == 0.0
+
+
+def test_to_packet_includes_tf_dz():
+    """to_packet() exposes Tf/Dz in tuning block."""
+    pkt = Controller("TAG", Kc=1.0, Ti=8.0, Td=0.5, Tf=2.0, Dz=1.5).to_packet()
+    assert approx(pkt["tuning"]["Tf"], 2.0) and approx(pkt["tuning"]["Dz"], 1.5)
+
+
 if __name__ == "__main__":
     tests = [v for k, v in sorted(globals().items())
              if k.startswith("test_") and callable(v)]

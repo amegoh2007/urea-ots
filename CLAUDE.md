@@ -15,7 +15,7 @@
 * **Skill Mandate:** Mandatory to use the most appropriate skills in all phases (Bash, `grep`, plan-and-execute). Never guess paths or state variables; prove assumptions via search.
 * **Baseline Regression:** Mathematically/programmatically test against the 100% design anchor before confirming code. Discard and recalculate if mass/energy drifts at steady state.
 * **Scope Lock:** Build strictly ONE unit at a time.
-* **UI Enforcement:** Automatically apply `ui_guidelines.md` upon receiving a DCS screenshot.
+* **UI Enforcement (READ-FIRST MANDATE):** ALWAYS read `ui_guidelines.md` in full BEFORE generating, editing, or scaffolding ANY frontend page/screen/overlay/faceplate — not only on receiving a DCS screenshot. Every new page must conform to its stage (1366×720), typography (`--val-font` + Arial/Segoe/Consolas stacks and the px catalogue), `:root` color tokens, overlay element dimensions, and controller-faceplate pattern. Never introduce fonts, sizes, or colors outside the guideline; never hardcode a color that has a `:root` token.
 
 ## 3. Documentation & Version Control
 * **Continuous Docs:** Autonomously update `Urea OTS — As-Built Mathematical Reference` to reflect model changes.

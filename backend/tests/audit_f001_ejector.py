@@ -38,9 +38,9 @@ def chk(cond, msg):
     print("   [%s] %s" % ("PASS" if cond else "FAIL", msg))
     if not cond: fails.append(msg)
 
-# TECH-DEBT tracked known-failures (xfail): asserted but do NOT fail the suite.  Used for the
-#   phi_sp positive-law helper mismatch (see TECH-DEBT note at phi_sp def below).  Recorded
-#   transparently in the closing report so the audit stays green without hiding the gap.
+# TECH-DEBT tracked known-failures (xfail): asserted but do NOT fail the suite.  Formerly held
+#   the phi_sp positive-law helper mismatch, now RECONCILED to the negative law (real chk).  The
+#   facility is retained for any future tracked gap; currently empty (no XFAILs).
 xfails = []
 def xchk(cond, msg):
     print("   [%s] %s" % ("PASS" if cond else "XFAIL", msg))
@@ -51,14 +51,13 @@ MOT_LIVE = main.EJ_MOTIVE_DES_LIVE if main.EJ_MOTIVE_DES_LIVE is not None else M
 TM       = EJ_MOTIVE_T_DES_C
 def ejp(pm=1.0, t_mot=None, opn=EJ_OPEN_DES, frac=1.0):       # drive by phi_m on the LIVE pin basis
     return ejector_322f001(MOT_LIVE*pm, TM if t_mot is None else t_mot, opn, frac)
-# TECH-DEBT (Phase-2, Path-B): this helper encodes the SUPERSEDED *POSITIVE* spindle law
-#   phi_sp = R^((opn-74)/100) (opening -> MORE suction).  main.py:140-146 implements the
-#   corrected *NEGATIVE* law phi_sp = R^((74-opn)/100): the 321P002 PD-pump-fed jet runs at
-#   CONSTANT motive mass, so CLOSING the spindle (smaller free area) RAISES jet momentum and
-#   thus suction.  Helper and model are reciprocals -> the model-vs-helper sweep (xchk below)
-#   is a tracked XFAIL.  Left unchanged per directive ("leave phi_sp alone"); fix = re-derive
-#   helper to the negative law, out of Option-1 scope.
-def phi_sp(opn):  return EJ_SPINDLE_R ** ((clamp(opn,10.0,100.0) - EJ_OPEN_DES)/100.0)
+# RECONCILED (Phase-2, Path-B closed): this helper now encodes the corrected *NEGATIVE* spindle
+#   law phi_sp = R^((74-opn)/100), matching main.py:140-146.  The 321P002 PD-pump-fed jet runs at
+#   CONSTANT motive mass, so CLOSING the spindle (smaller free area) RAISES jet momentum and thus
+#   suction (opening -> LESS suction).  Helper and model now agree -> the model-vs-helper sweep
+#   (chk below) is a real PASS.  (Superseded POSITIVE helper R^((opn-74)/100) was the reciprocal;
+#   its XFAIL is now closed.)
+def phi_sp(opn):  return EJ_SPINDLE_R ** ((EJ_OPEN_DES - clamp(opn,10.0,100.0))/100.0)
 def f_stall(pm):  return clamp((pm-EJ_STALL_PHI)/(EJ_STALL_REC-EJ_STALL_PHI),0.0,1.0)**EJ_STALL_EXP
 
 bar = "=" * 116
@@ -117,14 +116,14 @@ for pm in (0.5, 0.8, 1.0, 1.3, 1.5):
     print("      phi_m=%.2f | m_suc=%11.3f  expect=%11.3f" % (pm, r["suction_kgh"], exp))
 chk(lin_ok, "healthy band: m_suc == EJ_SUC_TOT_DES * phi_m bit-exact (mu ~ const, capacity tracks motive)")
 chk(abs(phi_sp(EJ_OPEN_DES) - 1.0) < 1e-12, "phi_sp(74) == R^0 == 1.0 bit-exact (design opening)")
-chk(phi_sp(60) < phi_sp(74) < phi_sp(90), "phi_sp monotone-INCREASING with opening (POSITIVE spindle law)")
-chk(abs(phi_sp(83.3333)/phi_sp(16.6667) - (1.0/0.60)) < 1e-3, "phi_sp datasheet anchor: ratio(theta83.33/theta16.67) == 1.00/0.60")
+chk(phi_sp(90) < phi_sp(74) < phi_sp(60), "phi_sp monotone-DECREASING with opening (NEGATIVE spindle law: open -> less suction)")
+chk(abs(phi_sp(83.3333)/phi_sp(16.6667) - (0.60/1.00)) < 1e-3, "phi_sp datasheet anchor: ratio(theta83.33/theta16.67) == 0.60/1.00")
 sp_ok = True
 for opn in (40.0, 60.0, 74.0, 90.0, 100.0):
     sp_ok &= abs(ejp(1.0, opn=opn)["suction_kgh"]/EJ_SUC_TOT_DES - phi_sp(opn)) < 1e-9
-# TECH-DEBT XFAIL: model implements NEGATIVE law (main.py:140-146), helper is POSITIVE law ->
-#   reciprocals -> mismatch expected.  Tracked, not fixed (see phi_sp TECH-DEBT note).
-xchk(sp_ok, "m_suc scales by phi_sp == R^((open-74)/100) across opening sweep [XFAIL: helper=POSITIVE law, model=NEGATIVE law main.py:140-146]")
+# RECONCILED: model implements NEGATIVE law (main.py:140-146), helper now negative law too ->
+#   agree -> real PASS (was a tracked XFAIL; see phi_sp RECONCILED note above).
+chk(sp_ok, "m_suc scales by phi_sp == R^((74-open)/100) across opening sweep (helper==model, NEGATIVE law main.py:140-146)")
 print("\n   f_stall knee  clamp((phi_m-0.20)/(0.35-0.20),0,1)^2  (deep-stall band [0.20,0.35]):")
 print("      phi_m | f_stall   doc")
 knee_ok = True

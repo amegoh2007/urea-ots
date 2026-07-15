@@ -328,6 +328,86 @@ ODEs). At the design seed all dm/dt=0 → pinned pressure fixed point bit-identi
 - Pre-existing baseline `[2]` (PV-329204→0%) + `OVERALL: FAIL` in `steam_system.py` self-test are UNCHANGED
   by this edit (confirmed A/B) — unrelated to level loops.
 
+## 2026-07-12 (session 6): Unit 324 two-stage vacuum evaporation — backend + DCS overlays 324-1 / 324-1b
+
+Commit `411080c` (**pushed**, `92c6bbe..411080c` on `fix/reactor-level-drain-and-vent-coupling`). New
+end-of-plant evaporation section: 80 % urea melt → 98.6 % prilling-grade product across two vacuum
+stages + a vacuum-condensation train, tied into the existing Unit 323 recirculation effluent. Fully
+dynamic, mass/energy-conserving; all prior 322/323/328/329 pins preserved (additive `+298` diff, 194
+lines 324-tagged, zero collateral edits to existing engine).
+
+### Backend physics (`main.py`, EVAP_324 block)
+
+Two falling-film vacuum evaporators in series, each an equilibrium flash pinned to a HARD thermal +
+concentration boundary; boundaries are the **discard gate** (any drift ⇒ iteration rejected).
+
+| Stage | Vessel(s) | Vacuum | Temp | Urea in→out | Heat |
+|-------|-----------|--------|------|-------------|------|
+| Evap I  | 324E001 heater / 324F001 separator | 0.330 bar a | **EXACTLY 130 °C** | 80 % → 95 % | LP steam chest, UA·ΔT |
+| Evap II | 324E003 heater / 324F003 separator | 0.131 bar a | **EXACTLY 140 °C** | 95 % → 98.6 % | LP steam chest, UA·ΔT |
+
+- **Water removal** = flash of the excess H₂O to hit target urea mass-fraction at the stage `T`;
+  vapour load sets the condenser/ejector duty. Overhead vapours → vacuum-condensation train
+  **324E002 / 324E005 / 324E006 / 324E007** + steam-jet ejectors **324F002 / 324F004 / 324F005**
+  (inter/after-condensers). Condensate collected, non-condensables vented. 100 % conservation:
+  feed(+UF85) in ≡ condensate + product out (recycle internal).
+- **UF85 injection**: 0.3763 t/h (376.3 kg/h) urea-formaldehyde 85 % into Evap II product as
+  anti-caking / crushing-strength additive — ratio-controlled (below).
+- Design anchors (kg/h): held bit-exact at boot; `smoke_324.py` regression envelope closes to
+  machine precision (packet display shows −3.7 kg/h = 0.004 %, pure round-1/2-dec artifact of 5
+  telemetry fields, NOT model drift).
+
+### Controls (I-PD + cascade)
+
+- **TIC-324001 → PIC-329203** (Evap I temp master → LP chest-pressure slave, cascade).
+- **TIC-324002 → PIC-329212** (Evap II temp master → LP chest-pressure slave, cascade).
+- **PIC-324202 / PIC-324203** vacuum control via **false-air bleed** — PV-324202 / PV-324203 admit
+  atmospheric air to hold separator pressure at 0.330 / 0.131 bar a (raise P ⇒ crack bleed).
+- **LIC-324501 split-range**: single `.op` drives **LV-324501A** (forward to product, x711 y347) +
+  **LV-324501B** (recycle back, x598 y622) — 324F003 sump level.
+- **Ratio FFIC-335406 → FIC-335405**: UF85 injection ratioed to product flow (FFIC ratio-SP ×
+  product ⇒ FIC-335405 flow SP = 0.3763 t/h).
+
+### UI overlays (`overlays.js`, `index.html`)
+
+Image-backed DCS overlays, 1366×720 stage. Native shots: 324-1 = 1357×647 (sx ×1.006632, sy ×1.112828);
+324-1b = 1359×648 (sx ×1.005151, sy ×1.111111). Backdrops `frontend/img/screen-324-1.png` (177498 B) /
+`screen-324-1b.png` (267971 B), both committed. Tabs auto-register from DOM.
+
+- **screen-324-1** (Evap I): **26 boxes** — bound readouts TT-324001/PT-324202/LI-324F001, controllers
+  TIC-324001 & cascade slave PIC-329203, vacuum PIC-324202, cross-refs to Unit 323 (FIC-324401,
+  LT-323507, PT-323204, TIC-323012, PIC-329208), 4 nav hotspots, WHITE frames for unmodelled tags.
+- **screen-324-1b** (Evap II): **34 boxes** — TT-324002/PT-324203/PT-324204/LI-324F003, controllers
+  TIC-324002 & slave PIC-329212, vacuum PIC-324203, LIC-324501 split-range (both LV bind `.op`),
+  FFIC-335406 (RATIO dec4) → FIC-335405A (T/H), OVRD boxes (EXT-OVR LV-A/LV-B, HV-335602, TRIP_35_3),
+  3 nav hotspots, WHITE frames.
+- **WHITE frames** (tag-only, unmodelled downstream/analyzers): 324-1 = PY-324201, LIC/LV-329505,
+  HIC/HV-323605, HIC/HV-329605, PIC-323203, 323P003A/B. 324-1b = AY-324701, FIC-335401, HIC/HV-335602,
+  FFY-335406, FIC-335405B, HV-335609/610, LT-335507, 335R001A/B, 335D004, 335P001A/B, 335P002, 335P006.
+
+### Unit 323 tie-in (domino)
+
+No `plant_state.md` in repo — tie-in wired directly and captured in commit body. Unit 324 feed = existing
+Unit 323 recirculation effluent via **`RECIRC_323.D002.FIC_324401`** (92.70 t/h, cross-ref not duplicated
+into EVAP_324). Level/pressure/temp cross-refs bind to proven-live `RECIRC_323.D002` / `RECIRC_323.F010`
+keys (verified against existing 323-1 rows) rather than shadow keys — no double state, conservation intact.
+
+### Verification (all green)
+
+- `smoke_324.py` (200×0.1 s): **Stage1 130.000000 °C** (drift +6.3e-11), **Stage2 140.000000 °C**
+  (drift +1.4e-11), F001 0.330000 bara, F003 0.131000 bara, urea **95.0 / 98.6 exact**, envelope
+  closure −3.7 kg/h (display rounding). No iteration discarded — anchors held to ~1e-11.
+- Controller boot: all 9 (TIC/PIC/LIC/FFIC/FIC) park at seed `op` (bumpless).
+- `node --check overlays.js` clean; browser live-validated 26/34 boxes at exact stage coords, values
+  streaming over `/ws`; native image dims confirmed 1357×647 / 1359×648.
+- Prior pins (322/323/328/329) untouched — additive diff only.
+
+### Not staged (intentional)
+
+`CLAUDE.md`, `ui_guidelines.md`, and probe/scratch files left unstaged. Only 5 files committed by path:
+`backend/main.py`, `frontend/overlays.js`, `frontend/index.html`, `frontend/img/screen-324-1.png`,
+`frontend/img/screen-324-1b.png`.
+
 ## Files
 
 **Committed / active source:**

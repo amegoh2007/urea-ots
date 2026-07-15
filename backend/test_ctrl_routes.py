@@ -31,7 +31,9 @@ def test_get_single_tag_schema():
     pkt = r.json()
     for key in ("mode", "pv", "sp", "mv", "tuning", "limits", "status"):
         assert key in pkt, f"missing key {key!r}"
-    assert pkt["mode"] == "MAN"
+    # Bug-6 boot mode (main.py State.__init__): the running pump-B speed controller boots on
+    #   CASCADE as slave to the N/C ratio master.  SIC_321950 is the MAN one (pump A is OFF standby).
+    assert pkt["mode"] == "CAS"
 
 
 def test_get_unknown_tag_404():
@@ -106,6 +108,7 @@ def test_set_op_in_auto_returns_409():
 
 def test_set_op_in_man():
     c = fresh()
+    c.post("/api/ctrl/SIC_321951", json={"set_mode": "MAN"})   # boots on CAS (Bug-6 boot mode)
     r = c.post("/api/ctrl/SIC_321951", json={"set_op": 55.0})
     assert r.status_code == 200
     pkt = c.get("/api/ctrl/SIC_321951").json()
@@ -116,6 +119,7 @@ def test_set_op_in_man():
 
 def test_set_bias_in_man_returns_409():
     c = fresh()
+    c.post("/api/ctrl/SIC_321951", json={"set_mode": "MAN"})   # boots on CAS (Bug-6 boot mode)
     r = c.post("/api/ctrl/SIC_321951", json={"set_bias": 2.5})
     assert r.status_code == 409
 

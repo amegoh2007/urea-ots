@@ -89,8 +89,8 @@ function render(s){
   setPI('totalizer', s.totalizer, 'T', false);
   setPI('PI_321201', s.PI_321201, 'BAR G', s.PI_321201_alarm);
   setPI('PI_321202', s.PI_321202, 'BAR G', s.PI_321202_alarm);
-  setPI('PY_321201', s.PY_321201, 'BAR A', false);
-  setPI('PY_321202', s.PY_321202, 'BAR A', false);
+  setPI('PY_321201', s.PY_321201 - 1.01325, 'BAR G', false);   // barg = bara - 1 atm
+  setPI('PY_321202', s.PY_321202 - 1.01325, 'BAR G', false);
   setPI('PDY_321203', s.PDY_321203, 'BAR', s.PDY_321203_alarm);
   setPI('PDY_321204', s.PDY_321204, 'BAR', s.PDY_321204_alarm);
   setPI('PI_disch', s.PI_disch, 'BAR G', false);
@@ -334,11 +334,11 @@ function render322(s){
   setPI('EJ_suction', e.suction_kgh,'KG/H', false);
   setPI('EJ_mu',      e.mu,         'μ', false);
   setPI('TT_322012',  e.TT_322012,  'C',     false);
-  setPI('EJ_Pdisch',  e.PI_disch,   'BAR A', false);
+  setPI('EJ_Pdisch',  e.PI_disch - 1.01325,   'BAR G', false);   // barg = bara - 1 atm
   setPI('EJ_total',   e.total_th,   'T/H',   false);
   setPI('EJ_MW',      e.MW,         'KG/KMOL', false);
   setPI('TI_322002',  178.8,        'C',     false);   // design suction temp (322E003 boundary)
-  setPI('PI_329201',  e.PI_disch,   'BAR A', false);   // HP loop pressure
+  setPI('PI_329201',  e.PI_disch - 1.01325,   'BAR G', false);   // HP loop pressure (barg = bara - 1 atm)
   setPI('HIC_322602', e.HIC_322602, '%',     false);
   const hv=document.getElementById('hv-op'); if(hv) hv.textContent = fmt(e.HIC_322602)+' %';
   if(window.OTS_FACE && window.OTS_FACE.hicSync) window.OTS_FACE.hicSync();   // keep the open HV faceplate's field live (any hand valve)
@@ -360,7 +360,9 @@ function render322(s){
   // tag (HIC or HV form) -> backend command + payload field. Hand-valve setpoint = opening only.
   const CMD={ 'HIC-322602':{t:'hic_set',   f:'value'}, 'HV-322602':{t:'hic_set',   f:'value'},
               'HIC-322605':{t:'hic605_set',f:'op'},    'HV-322605':{t:'hic605_set',f:'op'},
-              'HIC-322604':{t:'hic604_set',f:'op'},    'HV-322604':{t:'hic604_set',f:'op'} };
+              'HIC-322604':{t:'hic604_set',f:'op'},    'HV-322604':{t:'hic604_set',f:'op'},
+              'HIC-329601':{t:'steam_hpvent_set',f:'op'}, 'HV-329601':{t:'steam_hpvent_set',f:'op'},
+              'HIC-329602':{t:'steam_963_set',   f:'op'}, 'HV-329602':{t:'steam_963_set',   f:'op'} };
   const NOTE={ '322602':'↓ opening ⇒ ↑ 322E003 suction (↑ μ)' };
   let cur=null;   // overlay currently shown -> drives the SET command + live prefill
   const apply=()=>{ const v=parseFloat(inp.value); if(isNaN(v)) return;
@@ -401,14 +403,14 @@ function render322(s){
   mMan.onclick=()=>setMode('MAN');
   mAuto.onclick=()=>{ if(mode!=='AUTO' && pv && pv.value!=='') sp.value = parseFloat(pv.value); setMode('AUTO'); };  // bumpless: SP<-PV on MAN->AUTO (mirrors backend snap)
   const open=()=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{};
-    if(pv) pv.value = c.PIC_322203!=null ? c.PIC_322203 : '';
-    if(sp) sp.value = c.PIC_sp!=null ? c.PIC_sp : (c.PIC_322203!=null ? c.PIC_322203 : '');
+    if(pv) pv.value = c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '';   // display barg = bara - 1 atm
+    if(sp) sp.value = c.PIC_sp!=null ? (c.PIC_sp - 1.01325) : (c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '');
     if(op) op.value = c.PIC_op!=null ? c.PIC_op : '';
     setMode(c.PIC_mode||'AUTO'); m.classList.add('show'); };
   const apply=()=>{ const o=parseFloat(op.value), p=parseFloat(sp.value);
     const msg={type:'pic_set', mode};
-    if(mode==='MAN'  && !isNaN(o)) msg.op=o;   // MAN: send valve opening only
-    if(mode==='AUTO' && !isNaN(p)) msg.sp=p;   // AUTO: send setpoint only
+    if(mode==='MAN'  && !isNaN(o)) msg.op=o;             // MAN: send valve opening only
+    if(mode==='AUTO' && !isNaN(p)) msg.sp=p + 1.01325;   // AUTO: send setpoint (barg entry -> bara for engine)
     send(msg); };
   btn.onclick=apply;
   window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { pic: open });   // overlay PIC-322203 left-click -> faceplate
@@ -484,7 +486,7 @@ function render322(s){
     const st=load(), o=parseFloat(op.value), p=parseFloat(sp.value);
     st[cur.tag]={ mode, op:isNaN(o)?null:o, sp:isNaN(p)?null:p };
     save(st);
-    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set', 'PIC-329204':'pic329204_set', 'PIC-329205':'pic329205_set', 'PIC-329207':'pic329207_set', 'HIC-329601':'steam_hpvent_set', 'LIC-329502':'lic329502_set', 'LIC-329503':'lic329503_set', 'LIC-329504':'lic329504_set', 'TIC-323007':'r323_ctrl_set', 'PIC-329202':'r323_ctrl_set', 'LIC-323501':'r323_ctrl_set', 'LIC-323505':'r323_ctrl_set', 'TIC-323012':'r323_ctrl_set', 'PIC-329208':'r323_ctrl_set', 'LIC-323507':'r323_ctrl_set', 'FIC-324401':'r323_ctrl_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
+    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set', 'PIC-329204':'pic329204_set', 'PIC-329205':'pic329205_set', 'PIC-329207':'pic329207_set', 'HIC-329601':'steam_hpvent_set', 'LIC-329502':'lic329502_set', 'LIC-329503':'lic329503_set', 'LIC-329504':'lic329504_set', 'TIC-323007':'r323_ctrl_set', 'PIC-329202':'r323_ctrl_set', 'LIC-323501':'r323_ctrl_set', 'LIC-323505':'r323_ctrl_set', 'TIC-323012':'r323_ctrl_set', 'PIC-329208':'r323_ctrl_set', 'LIC-323507':'r323_ctrl_set', 'FIC-324401':'r323_ctrl_set', 'TIC-323013':'r323_ctrl_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
     const msg={type:T[cur.tag]||'controller_set', id:cur.tag, mode};
     if(mode==='MAN'  && !isNaN(o)) msg.op=o;
     if(mode==='AUTO' && !isNaN(p)) msg.sp=p;
@@ -806,6 +808,7 @@ connect();
 
   const ss  = s => (s && s.STEAM_SYSTEM) || null;
   const num = v => (typeof v === 'number' && isFinite(v)) ? v : NaN;
+  const bg  = v => { const n = num(v); return isFinite(n) ? n - 1.01325 : v; };   // absolute bara -> gauge barg for display
 
   function setMsg(txt, ok){
     const el = f('msp-msg');
@@ -837,12 +840,12 @@ connect();
     const m = S.MASTER_SP_329207 || {};
     const ae = document.activeElement;
     masterOn = !!m.on;
-    if(ae !== f('msp-pv')) f('msp-pv').value = fmt(m.pv);
-    if(ae !== f('msp-sp')) f('msp-sp').value = fmt(m.sp);
+    if(ae !== f('msp-pv')) f('msp-pv').value = fmt(bg(m.pv));
+    if(ae !== f('msp-sp')) f('msp-sp').value = fmt(bg(m.sp));
     LEGS.forEach(L => {
       const d = S[KEY[L]] || {};
       modeOf[L] = d.mode || modeOf[L] || 'AUTO';
-      if(ae !== f('msp-'+L+'-sp')) f('msp-'+L+'-sp').value = fmt(d.sp);
+      if(ae !== f('msp-'+L+'-sp')) f('msp-'+L+'-sp').value = fmt(bg(d.sp));
       if(ae !== f('msp-'+L+'-op')) f('msp-'+L+'-op').value = fmt(d.op);
     });
     applyGates();
@@ -885,7 +888,7 @@ connect();
     if(masterOn){
       const v = parseFloat(f('msp-sp').value);
       if(isNaN(v)){ setMsg('enter a numeric MASTER SP', false); return; }
-      send({type:'master207_set', sp:v});
+      send({type:'master207_set', sp:v + 1.01325});   // barg entry -> bara for engine
       setMsg('MASTER SP set', true);
       return;
     }
@@ -893,7 +896,7 @@ connect();
     LEGS.forEach(L => {
       const sp = parseFloat(f('msp-'+L+'-sp').value);
       const msg = {type:CMD[L]};
-      if(!isNaN(sp)){ msg.sp = sp; n++; }
+      if(!isNaN(sp)){ msg.sp = sp + 1.01325; n++; }   // barg entry -> bara for engine
       if(modeOf[L] === 'MAN'){
         const op = parseFloat(f('msp-'+L+'-op').value);
         if(!isNaN(op)){ msg.op = op; n++; }

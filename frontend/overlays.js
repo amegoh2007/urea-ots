@@ -43,7 +43,7 @@
       { k: 'nca',  t: 'ind', x: 296,  y: 522, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
       { k: 'ncb',  t: 'ind', x: 300,  y: 587, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
       { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LI_321501',  u: '%',     dec: 1 },
-      { k: 'ft3',  t: 'ind', x: 93,   y: 452, tag: 'FT-322403' },                       // unbound -> empty slot
+      { k: 'ft3',  t: 'ind', x: 93,   y: 452, tag: 'FT-322403', bind: 'CO2_FEED.FT_322403', u: 'NM3/H', dec: 0 },   // CO2 feed 320K002 -> XV-322902 -> 322E001
       // ---- pumps ----
       { k: 'pa',  t: 'pump', x: 861,  y: 445, bind: 'pumpA', id: 'A', tag: '321P002A' },
       { k: 'pb',  t: 'pump', x: 1087, y: 445, bind: 'pumpB', id: 'B', tag: '321P002B' },
@@ -147,18 +147,20 @@
       { k: 'tt008',  t: 'ind', x: 543,  y: 297, tag: 'TT-322008', bind: 'REACT_322R001.TT_322008', u: 'C', dec: 1 },
       { k: 'tt010',  t: 'ind', x: 597,  y: 335, tag: 'TT-322010', bind: 'HPCC_322E002.TT_322010', u: 'C', dec: 1 },   // 322E002 liquid product temp -> 322R001
       { k: 'h605',   t: 'ind', x: 830,  y: 325, tag: 'HIC-322605', bind: 'REACT_322R001.HIC_322605', u: '%', dec: 1, face: 'hic' },
-      { k: 'pt9206', t: 'ind', x: 1242, y: 145, tag: 'PT-329206' },
+      { k: 'pt9206', t: 'ind', x: 1242, y: 145, tag: 'PT-329206', bind: 'STEAM_SYSTEM.LP.P_bara', u: 'BAR A', dec: 2 },   // LP header P (same node as PI-329206)
       { k: 'tt9001', t: 'ind', x: 1048, y: 259, tag: 'TT-329001', bind: 'HPCC_322E002.TT_329001', u: 'C', dec: 1 },   // 322D001 A/B condensate -> 322E002 shell (BFW feed)
       { k: 'py9207', t: 'ind', x: 1094, y: 208, tag: 'PY-329207B' },
       { k: 'tt014',  t: 'ind', x: 638,  y: 398, tag: 'TT-322014', bind: 'STRIP_322E001.TT_322014', u: 'C', dec: 1 },
       { k: 'hv605',  t: 'ind', x: 823,  y: 392, tag: 'HV-322605', bind: 'REACT_322R001.HV_322605', u: '%', dec: 1, face: 'hic' },
       { k: 'lic501', t: 'ind', x: 861,  y: 471, tag: 'LIC-322501', bind: 'STRIP_322E001.LIC_322501.pv', u: '%', dec: 1, mode: 'STRIP_322E001.LIC_322501.mode' },
-      { k: 'pic9204',t: 'ind', x: 1113, y: 380, tag: 'PIC-329204' },
-      { k: 'hic9601',t: 'ind', x: 1127, y: 489, tag: 'HIC-329601' },
+      { k: 'pic9204',t: 'ind', x: 1113, y: 380, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.PIC_329204.pv', u: 'BAR A', dec: 2,
+        mode: 'STEAM_SYSTEM.PIC_329204.mode', note: 'AUTO holds 329D005 at SP via PV-329204; MAN sets PV-329204 opening directly' },   // 329D005 = 322E001 shell P
+      { k: 'hic9601',t: 'ind', x: 1127, y: 489, tag: 'HIC-329601', bind: 'STEAM_SYSTEM.HP_VENT.pct', u: '%', dec: 1, face: 'hic' },
       { k: 'ft9403', t: 'ind', x: 1127, y: 520, tag: 'FT-329403' },
       { k: 'lv501',  t: 'ind', x: 1110, y: 612, tag: 'LV-322501', bind: 'STRIP_322E001.LV_322501', u: '%', dec: 1 },
       { k: 'tt004',  t: 'ind', x: 1037, y: 619, tag: 'TT-322004', bind: 'STRIP_322E001.TT_322004', u: 'C', dec: 1 },
-      { k: 'pt3201', t: 'ind', x: 1187, y: 617, tag: 'PT-323201' },
+      { k: 'pt3201', t: 'ind', x: 1187, y: 617, tag: 'PT-323201', bind: 'RECIRC_323.C003.P_bara', u: 'BAR A', dec: 2,
+        note: 'rect col 323C003 pressure; rises with top-vapour 305 as LV-322501 opens (K_P = 1.20 bar a per unit fractional gas-phase excess)' },
     ],
     'screen-329-1': [
       // Positions rescanned from tagged 329-1 shot (value-box centres, transform x*1.2936 / y*1.4343).
@@ -170,8 +172,8 @@
       { k: 'pic204', t: 'ind',    x: 317, y: 634, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.PIC_329204.pv', u: 'BAR A', dec: 2,
         mode: 'STEAM_SYSTEM.PIC_329204.mode', note: 'AUTO holds 329D005 at SP via PV-329204; MAN sets PV-329204 opening directly' },   // 329D005 = 322E001 shell P
       { k: 'pv204',  t: 'avalve', x: 313, y: 703, tag: 'PV-329204',  bind: 'STEAM_SYSTEM.MP.supply_pct', u: '%',     dec: 1 },
-      { k: 'hic601', t: 'ind',    x: 211, y: 370, tag: 'HIC-329601', bind: 'STEAM_SYSTEM.HP_VENT.pct',   u: '%',     dec: 1 },   // hand ctrl of 329D005 atm vent
-      { k: 'hv601',  t: 'avalve', x: 140, y: 438, tag: 'HV-329601',  bind: 'STEAM_SYSTEM.HP_VENT.pct',   u: '%',     dec: 1 },   // 329D005 atm vent valve
+      { k: 'hic601', t: 'ind',    x: 211, y: 370, tag: 'HIC-329601', bind: 'STEAM_SYSTEM.HP_VENT.pct',   u: '%',     dec: 1, face: 'hic' },   // hand ctrl of 329D005 atm vent
+      { k: 'hv601',  t: 'ind',    x: 140, y: 438, tag: 'HV-329601',  bind: 'STEAM_SYSTEM.HP_VENT.pct',   u: '%',     dec: 1, face: 'hic' },   // 329D005 atm vent valve
       // ===== 329D009 MP 9-bar drum (split-range PIC-329205 : PV-329205A admit / PV-329205B let-down) =====
       { k: 'pic205', t: 'ind',    x: 653, y: 430, tag: 'PIC-329205', bind: 'STEAM_SYSTEM.PIC_329205.pv', u: 'BAR A', dec: 2,
         mode: 'STEAM_SYSTEM.PIC_329205.mode', note: 'up P9 => PV-329205B let-down (9->4 bar) opens; down P9 => PV-329205A admits 25-bar BL steam' },
@@ -197,8 +199,8 @@
       { k: 'pv207a',  t: 'avalve', x: 828,  y: 178, tag: 'PV-329207A', bind: 'STEAM_SYSTEM.PIC_329207A.op', u: '%', dec: 1 },   // 4-bar vent valve (leg A)
       { k: 'pv207b',  t: 'avalve', x: 1190, y: 215, tag: 'PV-329207B', bind: 'STEAM_SYSTEM.PIC_329207B.op', u: '%', dec: 1 },   // 320MT02 turbine make-up valve (leg B)
       { k: 'pv207c',  t: 'avalve', x: 301,  y: 383, tag: 'PV-329207C', bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1 },   // BL make-up valve (leg C, stream 963)
-      { k: 'hic602',  t: 'ind',    x: 301,  y: 420, tag: 'HIC-329602' },   // 963 make-up hand ctrl (unmodelled)
-      { k: 'hv602',   t: 'ind',    x: 291,  y: 475, tag: 'HV-329602'  },   // 963 make-up isolation (unmodelled)
+      { k: 'hic602',  t: 'ind',    x: 301,  y: 420, tag: 'HIC-329602', bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1, face: 'hic' },   // 963 make-up hand ctrl -> PV-329207C opening
+      { k: 'hv602',   t: 'ind',    x: 291,  y: 475, tag: 'HV-329602',  bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1, face: 'hic' },   // 963 make-up isolation -> PV-329207C opening
       { k: 'ft407',   t: 'ind',    x: 1081, y: 141, tag: 'FT-329407'  },   // 320MT02 turbine steam flow
       // ===== 329D005 level (LIC/LV-329502) + O2-scavenger dosing pumps =====
       { k: 'lic502',  t: 'ind',    x: 744, y: 625, tag: 'LIC-329502', bind: 'STEAM_SYSTEM.LIC_329502.pv', u: '%', dec: 1,
@@ -241,13 +243,15 @@
       { k: 'lt504', t: 'ind', x: 817, y: 665, tag: 'LT-323504', bind: 'RECIRC_323.D002.LI_comp2', u: '%', dec: 1 },   // passive compartment II
       { k: 'lic07', t: 'ind', x: 1087, y: 665, tag: 'LIC-323507', bind: 'RECIRC_323.D002.LIC_323507.pv', mode: 'RECIRC_323.D002.LIC_323507.mode', u: '%', dec: 1, note: 'master: active compartment I level cascades FIC-324401 product flow' },
       { k: 'fic01', t: 'ind', x: 1270, y: 674, tag: 'FIC-324401', bind: 'RECIRC_323.D002.FIC_324401.pv', mode: 'RECIRC_323.D002.FIC_324401.mode', u: 'T/H', dec: 2, cas: true, note: 'slave: CAS follows LIC-323507; product to 324 evap via 323P003 A/B' },
+      { k: 'pic203',  t: 'ind', x: 609,  y: 122, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
+        mode: 'LPCC_3232.E011.PIC_323203.mode', note: '323E011/D011 LP node P; flash vapour 701 (LV-323501 -> 323F004) accumulates it. AUTO holds SP via PV-323203; MAN lets P ramp' },
+      { k: 'tt004',   t: 'ind', x: 439,  y: 124, tag: 'TT-323004', bind: 'RECIRC_323.C003.feed_T', u: 'C', dec: 1 },   // rect col top vapour 119C (flash feed T)
+      { k: 'hic605',  t: 'ind', x: 992,  y: 142, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
+      { k: 'pv203',   t: 'ind', x: 1220, y: 142, tag: 'PV-323203', bind: 'LPCC_3232.E011.PIC_323203.op', u: '%', dec: 1 },   // GCB off-gas valve stroke -> vapour 011 to 323C005
+      { k: 'hv605',   t: 'ind', x: 1058, y: 199, tag: 'HV-323605',  bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent valve -> non-condensable vent flow
+      { k: 'pic4202', t: 'ind', x: 1277, y: 209, tag: 'PIC-324202', bind: 'EVAP_324.E001.PIC_324202.pv', u: 'BAR A', dec: 3,
+        mode: 'EVAP_324.E001.PIC_324202.mode' },   // 324E002 pressure
       // ---- WHITE FRAMES : unmodelled boundary / downstream (tag only; bind when upstream modelled) ----
-      { k: 'pic203',  t: 'ind', x: 609,  y: 122, tag: 'PIC-323203' },   // off-gas header P -> GCB
-      { k: 'tt004',   t: 'ind', x: 439,  y: 124, tag: 'TT-323004'  },   // top vapor line
-      { k: 'hic605',  t: 'ind', x: 992,  y: 142, tag: 'HIC-323605' },   // 324E002 vent hand ctrl
-      { k: 'pv203',   t: 'ind', x: 1220, y: 142, tag: 'PV-323203'  },   // GCB off-gas valve
-      { k: 'hv605',   t: 'ind', x: 1058, y: 199, tag: 'HV-323605'  },   // 324E002 vent valve
-      { k: 'pic4202', t: 'ind', x: 1277, y: 209, tag: 'PIC-324202' },   // 324E002 pressure
       { k: 'fic5407', t: 'ind', x: 1214, y: 468, tag: 'FIC-335407' },   // 335 pump flow (downstream unit)
       { k: 'fv5407',  t: 'ind', x: 1116, y: 549, tag: 'FV-335407'  },   // 335 valve (downstream unit)
     ],
@@ -286,7 +290,7 @@
       { k: 'tv8002', t: 'avalve', x: 835, y: 215, tag: 'TV-328002', bind: 'DESORB_328.D001.TIC_328002.op', u: '%', dec: 1 },
       { k: 'fi8404', t: 'ind', x: 1163, y: 604, tag: 'FI-328404',  bind: 'DESORB_328.D001.FIC_328404.pv', u: 'M3/H', dec: 2 },
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream (tag text only) ----
-      { k: 'tt005w', t: 'ind', x: 43,   y: 244, tag: 'TT-323005'  },   // feed boundary temp
+      { k: 'tt005w', t: 'ind', x: 43,   y: 244, tag: 'TT-323005', bind: 'RECIRC_323.F004.TT_323005', u: 'C', dec: 1 },   // 323F004 flash temp (hold 106 C)
       { k: 'lt506w', t: 'ind', x: 40,   y: 369, tag: 'LT-323506'  },   // 2nd level boundary
       { k: 'p003w',  t: 'ind', x: 373,  y: 72,  tag: '329P003'    },   // 329 pumps (other unit)
       { k: 'tt015w', t: 'ind', x: 503,  y: 235, tag: 'TT-323015'  },   // boundary temp
@@ -328,15 +332,15 @@
       { k: 'fic8402', t: 'ind', x: 672, y: 632, tag: 'FIC-328402', bind: 'LPCC_3232.E003.FIC_328402.pv', mode: 'LPCC_3232.E003.FIC_328402.mode', u: 'M3/H', dec: 2, note: '328 recycle to 323E003 via FV-328402' },
       { k: 'fv8402', t: 'avalve', x: 612, y: 632, tag: 'FV-328402', bind: 'LPCC_3232.E003.FIC_328402.op', u: '%', dec: 1 },
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
-      { k: 'tt8008w', t: 'ind', x: 1009, y: 61,  tag: 'TT-328008' },
-      { k: 'tt8011w', t: 'ind', x: 386,  y: 126, tag: 'TT-328011' },
-      { k: 'tt8010w', t: 'ind', x: 788,  y: 142, tag: 'TT-328010' },
-      { k: 'tt8012w', t: 'ind', x: 271,  y: 218, tag: 'TT-328012' },
+      { k: 'tt8008w', t: 'ind', x: 1009, y: 61,  tag: 'TT-328008', bind: 'DESORB_328.D001.TT_328008', u: 'C', dec: 1 },   // Desorber-I top / E007 cold-out (114C, absolute; TIC-328008 PV now H2O inferential)
+      { k: 'tt8011w', t: 'ind', x: 386,  y: 126, tag: 'TT-328011', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },   // hydrolyser top vapour ~190C (stream 746, absolute)
+      { k: 'tt8010w', t: 'ind', x: 788,  y: 142, tag: 'TT-328010', bind: 'DESORB_328.D001.TT_328008', u: 'C', dec: 1 },   // Desorber-I feed 114C (E007 cold-out, absolute)
+      { k: 'tt8012w', t: 'ind', x: 271,  y: 218, tag: 'TT-328012', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },   // hydrolyser 3rd-tray ~190C (absolute; TIC-328012 PV now differential)
       { k: 'tt8004w', t: 'ind', x: 788,  y: 293, tag: 'TT-328004' },
-      { k: 'tt8013w', t: 'ind', x: 271,  y: 380, tag: 'TT-328013' },
+      { k: 'tt8013w', t: 'ind', x: 271,  y: 380, tag: 'TT-328013', bind: 'DESORB_328.C003.TT_328C003', u: 'C', dec: 1 },   // hydrolyser bottom 200C
       { k: 'tt8009w', t: 'ind', x: 186,  y: 512, tag: 'TT-328009' },
       { k: 'tt8005w', t: 'ind', x: 597,  y: 517, tag: 'TT-328005' },
-      { k: 'tt8007w', t: 'ind', x: 492,  y: 587, tag: 'TT-328007' },
+      { k: 'tt8007w', t: 'ind', x: 492,  y: 587, tag: 'TT-328007', bind: 'DESORB_328.C002.TT_328007', u: 'C', dec: 1 },   // 328E007 process outlet 89C
       { k: 'lt8507w', t: 'ind', x: 1294, y: 380, tag: 'LT-328507' },
       { k: 'ai8701w', t: 'ind', x: 838,  y: 632, tag: 'AI-328701' },   // conductivity analyzer
       { k: 'p006w',   t: 'ind', x: 421,  y: 632, tag: '328P006'   },
@@ -358,9 +362,9 @@
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
       { k: 'ft2404w', t: 'ind', x: 156, y: 161, tag: 'FT-322404' },
       { k: 'ft2402w', t: 'ind', x: 106, y: 257, tag: 'FT-322402' },
-      { k: 'tt3010w', t: 'ind', x: 508, y: 358, tag: 'TT-323010' },
-      { k: 'tt3009w', t: 'ind', x: 624, y: 295, tag: 'TT-323009' },
-      { k: 'tt8015w', t: 'ind', x: 654, y: 420, tag: 'TT-328015' },
+      { k: 'tt3010w', t: 'ind', x: 508, y: 358, tag: 'TT-323010', bind: 'RECIRC_323.F010.TT_323010', u: 'C', dec: 1 },   // pre-evaporator 99C
+      { k: 'tt3009w', t: 'ind', x: 624, y: 295, tag: 'TT-323009', bind: 'LPCC_3232.C005.TT_323C005', u: 'C', dec: 1 },   // atm absorber scrub liquid 55C
+      { k: 'tt8015w', t: 'ind', x: 654, y: 420, tag: 'TT-328015', bind: 'ABSORB_328.D003.TT_328II', u: 'C', dec: 1 },   // NH3 recovery tank Comp-II 44C
       { k: 'p2002w',  t: 'ind', x: 352, y: 599, tag: '322P002'   },
       { k: 'p3003w',  t: 'ind', x: 941, y: 625, tag: '328P003'   },
       { k: 'nav-321', t: 'nav', x: 44, y: 189, w: 90, h: 22, tag: '321E001 -> 321-1', goto: 'screen-321-1' },
@@ -387,11 +391,12 @@
       { k: 'py4201w',  t: 'ind', x: 455,  y: 220, tag: 'PY-324201'  },
       { k: 'lic9505w', t: 'ind', x: 211,  y: 376, tag: 'LIC-329505' },
       { k: 'lv9505w',  t: 'ind', x: 189,  y: 432, tag: 'LV-329505'  },
-      { k: 'hic3605w', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605' },
-      { k: 'hv3605w',  t: 'ind', x: 642,  y: 201, tag: 'HV-323605'  },
+      { k: 'hic3605w', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
+      { k: 'hv3605w',  t: 'ind', x: 642,  y: 201, tag: 'HV-323605',  bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent valve -> non-condensable vent flow
       { k: 'hic9605w', t: 'ind', x: 921,  y: 134, tag: 'HIC-329605' },
       { k: 'hv9605w',  t: 'ind', x: 926,  y: 191, tag: 'HV-329605'  },
-      { k: 'pic3203w', t: 'ind', x: 1208, y: 469, tag: 'PIC-323203' },
+      { k: 'pic3203w', t: 'ind', x: 1208, y: 469, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
+        mode: 'LPCC_3232.E011.PIC_323203.mode', note: '323E011/D011 LP node P; flash vapour 701 (LV-323501 -> 323F004) accumulates it. AUTO holds SP via PV-323203; MAN lets P ramp' },
       { k: 'p3003aw',  t: 'ind', x: 235,  y: 610, tag: '323P003A'   },
       { k: 'p3003bw',  t: 'ind', x: 234,  y: 668, tag: '323P003B'   },
       // ---- nav hotspots (right-edge stream sinks) ----
@@ -542,11 +547,13 @@
     } else { // ind
       const b = el.querySelector('b'), sp = el.querySelector('.ou'), mt = el.querySelector('.mt');   // stable nodes (built once); update text only so a click isn't swallowed by per-tick innerHTML churn
       if (!o.bind) { if (b) b.textContent = o.tag; if (sp) sp.textContent = ''; if (mt) { mt.textContent = ''; mt.className = 'mt'; } return; }   // empty slot keeps tag text
-      const v = gp(lastS, o.bind);
+      let v = gp(lastS, o.bind);
+      let u = o.u;
+      if (u === 'BAR A' && typeof v === 'number') { v = v - 1.01325; u = 'BARG'; }   // Domain 1a: all PT/PIC show gauge pressure (barg = bara - 1 atm)
       if (b) b.textContent = fmt(v, o.dec);
-      if (sp) sp.textContent = o.u || '';
+      if (sp) sp.textContent = u || '';
       if (mt) { const ml = modeLetter(o); mt.textContent = ml; mt.className = 'mt' + (ml ? ' m-' + ml : ''); }   // controller mode badge (A/M/E/O); '' for non-controllers
-      el.dataset.tip = o.tag + (o.u ? ' [' + o.u + ']' : '') + (modeLetter(o) ? ' — ' + { A: 'AUTO', M: 'MAN', E: 'CAS', O: 'OOS' }[modeLetter(o)] : '');
+      el.dataset.tip = o.tag + (u ? ' [' + u + ']' : '') + (modeLetter(o) ? ' — ' + { A: 'AUTO', M: 'MAN', E: 'CAS', O: 'OOS' }[modeLetter(o)] : '');
     }
   }
   function renderAll() { buildBindMap(); for (const sid in OV) cfg(sid).forEach(o => renderOne(sid, o)); }
