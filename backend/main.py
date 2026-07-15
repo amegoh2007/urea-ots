@@ -158,7 +158,9 @@ _EJ_DES_MASS   = {k: EJ_DES_MASSPCT[k]/100.0*EJ_DES_TOTAL_NAMEPLATE for k in MW_
 _EJ_OVERFLOW_KMOLH = {"CO2": 458.35830512, "CH4": 0.0, "H2": 0.0, "H2O": 674.24844864,
                       "N2": 0.0, "NH3": 1234.46697667, "O2": 0.0, "Urea": 0.43027771, "Biuret": 0.0}
 EJ_SUCTION_KGH = {k: _EJ_OVERFLOW_KMOLH[k] * MW_COMP[k] for k in MW_COMP}   # kg/h reconciled design suction
-EJ_DES_TOTAL   = EJ_MOTIVE_NH3_DES + sum(EJ_SUCTION_KGH.values())           # kg/h reconciled discharge (~94124)
+#   NOTE: the former "~94124" annotation here was stale -- it was arithmetic off the OLD 40756 kg/h
+#   motive and is superseded by the Path-B tear-closure reconciliation (motive re-pinned to 42762.05).
+EJ_DES_TOTAL   = EJ_MOTIVE_NH3_DES + sum(EJ_SUCTION_KGH.values())           # kg/h reconciled discharge (~96130)
 EJ_MU          = sum(EJ_SUCTION_KGH.values()) / EJ_MOTIVE_NH3_DES   # entrainment ~1.3095 (reconciled)
 EJ_OPEN_DES    = 74.0            # %, HV-322602 design opening (HIC-322602 design SP)
 # HV-322602 spindle characteristic (322F001 DDS, item (d)): the diaphragm-actuated parabolic NH3-nozzle
