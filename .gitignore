@@ -49,6 +49,11 @@ desktop.ini
 docs/build/
 backend/reports/*.html
 
+# --- boot-pin gate output (regenerated every regress.py run; golden_pin.json IS versioned) ---
+scratchpad/pin_out.json
+scratchpad/pin_after_coupling.json
+scratchpad/pin_err.txt
+
 # --- claude code tooling (personal, like .vscode/.idea) ---
 .claude/
 

@@ -1,0 +1,761 @@
+<title>Urea OTS — Full-Stack Technical Audit</title>
+<style>
+  :root{
+    --ground:#0f151a; --panel:#161e25; --panel-2:#1b242c; --rule:#26323b;
+    --ink:#d7e0e6; --ink-strong:#f2f6f8; --muted:#8494a0; --faint:#5e6d78;
+    --accent:#d98324;            /* ochre signature — structural only */
+    --accent-dim:#a9631a;
+    --pass:#4fae6a; --pass-bg:#15271b; --pass-bd:#2c5738;
+    --warn:#d69a2a; --warn-bg:#2a2110; --warn-bd:#5a4519;
+    --fail:#d5514e; --fail-bg:#2a1414; --fail-bd:#5a2725;
+    --info:#4f95bd; --info-bg:#101f29; --info-bd:#274a5c;
+    --shadow:0 1px 0 rgba(255,255,255,.02), 0 12px 30px -18px rgba(0,0,0,.7);
+    --disp:"Bahnschrift","DIN Condensed","Oswald","Arial Narrow","Segoe UI",sans-serif;
+    --body:"Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;
+    --mono:"Cascadia Code","Consolas",ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme: light){
+    :root{
+      --ground:#eef1f2; --panel:#ffffff; --panel-2:#f6f8f9; --rule:#dbe2e6;
+      --ink:#26333c; --ink-strong:#101a21; --muted:#5a6b76; --faint:#8394a0;
+      --accent:#b46410; --accent-dim:#8a4c0c;
+      --pass:#2f8a4e; --pass-bg:#e7f4ec; --pass-bd:#bfe0cb;
+      --warn:#9a6c10; --warn-bg:#f8efd9; --warn-bd:#e6d09a;
+      --fail:#b23a37; --fail-bg:#f8e7e6; --fail-bd:#e6bcbb;
+      --info:#2d6f95; --info-bg:#e6f1f7; --info-bd:#bcd8e6;
+      --shadow:0 1px 2px rgba(20,30,40,.06), 0 14px 34px -22px rgba(20,30,40,.35);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#0f151a; --panel:#161e25; --panel-2:#1b242c; --rule:#26323b;
+    --ink:#d7e0e6; --ink-strong:#f2f6f8; --muted:#8494a0; --faint:#5e6d78;
+    --accent:#d98324; --accent-dim:#a9631a;
+    --pass:#4fae6a; --pass-bg:#15271b; --pass-bd:#2c5738;
+    --warn:#d69a2a; --warn-bg:#2a2110; --warn-bd:#5a4519;
+    --fail:#d5514e; --fail-bg:#2a1414; --fail-bd:#5a2725;
+    --info:#4f95bd; --info-bg:#101f29; --info-bd:#274a5c;
+  }
+  :root[data-theme="light"]{
+    --ground:#eef1f2; --panel:#ffffff; --panel-2:#f6f8f9; --rule:#dbe2e6;
+    --ink:#26333c; --ink-strong:#101a21; --muted:#5a6b76; --faint:#8394a0;
+    --accent:#b46410; --accent-dim:#8a4c0c;
+    --pass:#2f8a4e; --pass-bg:#e7f4ec; --pass-bd:#bfe0cb;
+    --warn:#9a6c10; --warn-bg:#f8efd9; --warn-bd:#e6d09a;
+    --fail:#b23a37; --fail-bg:#f8e7e6; --fail-bd:#e6bcbb;
+    --info:#2d6f95; --info-bg:#e6f1f7; --info-bd:#bcd8e6;
+  }
+
+  *{box-sizing:border-box}
+  body{background:var(--ground);color:var(--ink);font-family:var(--body);
+    line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased;margin:0}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px 96px}
+
+  /* ---- masthead ---- */
+  .mast{border-left:3px solid var(--accent);padding:38px 0 30px 26px;margin:34px 0 0}
+  .doc-tag{font-family:var(--mono);font-size:11.5px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+  h1{font-family:var(--disp);font-weight:600;color:var(--ink-strong);
+    font-size:clamp(31px,5.4vw,54px);line-height:1.02;letter-spacing:.01em;
+    margin:0 0 10px;text-wrap:balance}
+  h1 span{color:var(--muted);font-weight:400}
+  .sub{font-size:16.5px;color:var(--muted);max-width:60ch;margin:0}
+  .meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+    gap:1px;background:var(--rule);border:1px solid var(--rule);border-radius:8px;
+    margin:30px 0 0;overflow:hidden}
+  .meta div{background:var(--panel);padding:12px 15px}
+  .meta dt{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--faint);margin:0 0 4px}
+  .meta dd{margin:0;font-size:14px;color:var(--ink);font-weight:500}
+
+  /* ---- verdict banner ---- */
+  .verdict{display:flex;flex-wrap:wrap;align-items:center;gap:18px;
+    background:var(--panel);border:1px solid var(--rule);border-radius:10px;
+    padding:22px 24px;margin:20px 0 0;box-shadow:var(--shadow)}
+  .verdict .big{font-family:var(--disp);font-size:44px;font-weight:600;
+    line-height:1;color:var(--warn)}
+  .verdict .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.14em;
+    text-transform:uppercase;color:var(--faint)}
+  .verdict p{margin:0;font-size:14.5px;color:var(--muted);flex:1 1 340px;min-width:0}
+  .tally{display:flex;gap:20px;font-family:var(--mono);font-size:13px}
+  .tally b{display:block;font-family:var(--disp);font-size:26px;font-weight:600;line-height:1}
+  .tally .g{color:var(--pass)} .tally .a{color:var(--warn)} .tally .r{color:var(--fail)}
+
+  /* ---- section frame ---- */
+  section{margin:56px 0 0}
+  .ey{font-family:var(--mono);font-size:11.5px;letter-spacing:.15em;
+    text-transform:uppercase;color:var(--accent);margin:0 0 8px}
+  h2{font-family:var(--disp);font-weight:600;color:var(--ink-strong);
+    font-size:clamp(22px,3vw,30px);line-height:1.08;margin:0 0 6px;letter-spacing:.01em}
+  h2 .num{color:var(--faint);font-weight:400;margin-right:12px}
+  .lede{font-size:15.5px;color:var(--muted);max-width:74ch;margin:0 0 22px}
+
+  /* ---- scorecard grid ---- */
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .card{background:var(--panel);border:1px solid var(--rule);border-radius:10px;
+    padding:18px 18px 16px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px}
+  .card.pass::before{background:var(--pass)} .card.warn::before{background:var(--warn)}
+  .card.fail::before{background:var(--fail)} .card.info::before{background:var(--info)}
+  .card .cn{font-family:var(--mono);font-size:11px;letter-spacing:.12em;color:var(--faint)}
+  .card h3{font-family:var(--disp);font-weight:600;font-size:19px;color:var(--ink-strong);
+    margin:3px 0 10px;letter-spacing:.01em}
+  .card .metric{font-family:var(--disp);font-size:30px;font-weight:600;line-height:1;margin:0}
+  .card .mlbl{font-size:12.5px;color:var(--muted);margin:5px 0 12px}
+  .card p{margin:0;font-size:13.5px;color:var(--ink);line-height:1.5}
+
+  /* ---- pills ---- */
+  .pill{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);
+    font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;
+    padding:3px 9px;border-radius:5px;border:1px solid;white-space:nowrap;vertical-align:middle}
+  .pill::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+  .p-pass{color:var(--pass);background:var(--pass-bg);border-color:var(--pass-bd)}
+  .p-warn{color:var(--warn);background:var(--warn-bg);border-color:var(--warn-bd)}
+  .p-fail{color:var(--fail);background:var(--fail-bg);border-color:var(--fail-bd)}
+  .p-info{color:var(--info);background:var(--info-bg);border-color:var(--info-bd)}
+
+  /* ---- tables ---- */
+  .tbox{border:1px solid var(--rule);border-radius:10px;overflow:hidden;margin:18px 0 0;
+    box-shadow:var(--shadow)}
+  .scroll{overflow-x:auto}
+  table{border-collapse:collapse;width:100%;font-size:13px;min-width:520px}
+  .wide table{min-width:720px}
+  thead th{background:var(--panel-2);color:var(--muted);font-family:var(--mono);
+    font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:600;
+    text-align:left;padding:10px 12px;border-bottom:1px solid var(--rule);position:sticky;top:0}
+  tbody td{padding:9px 12px;border-bottom:1px solid var(--rule);vertical-align:top;
+    background:var(--panel);color:var(--ink)}
+  tbody tr:last-child td{border-bottom:0}
+  td.num,th.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .tag{font-family:var(--mono);font-weight:600;color:var(--ink-strong);white-space:nowrap}
+  .code{font-family:var(--mono);font-size:12px;color:var(--info)}
+  .bad{color:var(--fail);font-weight:600}
+  .ok{color:var(--pass);font-weight:600}
+  caption{caption-side:bottom;text-align:left;font-size:12px;color:var(--faint);
+    padding:9px 12px;background:var(--panel);border-top:1px solid var(--rule)}
+
+  /* ---- callouts ---- */
+  .note{border:1px solid var(--rule);border-left:3px solid var(--info);
+    background:var(--panel);border-radius:8px;padding:14px 18px;margin:18px 0 0}
+  .note.warn{border-left-color:var(--warn)} .note.fail{border-left-color:var(--fail)}
+  .note.pass{border-left-color:var(--pass)}
+  .note h4{font-family:var(--mono);font-size:11px;letter-spacing:.1em;text-transform:uppercase;
+    margin:0 0 6px;color:var(--muted)}
+  .note p{margin:0;font-size:14px;color:var(--ink)}
+  .note p+p{margin-top:8px}
+
+  ul.tight{margin:14px 0 0;padding-left:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+  ul.tight li{position:relative;padding-left:24px;font-size:14.5px;color:var(--ink)}
+  ul.tight li::before{content:"›";position:absolute;left:6px;top:-1px;color:var(--accent);
+    font-family:var(--mono);font-weight:700}
+  ul.tight code,p code,td code{font-family:var(--mono);font-size:12.5px;
+    background:var(--panel-2);padding:1px 5px;border-radius:4px;color:var(--accent)}
+
+  /* ---- equation block ---- */
+  .eqn{font-family:var(--mono);font-size:13px;color:var(--ink-strong);
+    background:var(--panel-2);border:1px solid var(--rule);border-radius:8px;
+    padding:12px 16px;margin:12px 0 0;overflow-x:auto;white-space:nowrap}
+  .eqn .lhs{color:var(--accent)}
+  .eqn small{color:var(--muted);font-size:11px}
+
+  .prio{display:inline-block;font-family:var(--mono);font-weight:700;font-size:11px;
+    padding:2px 8px;border-radius:5px;color:var(--ground)}
+  .P1{background:var(--fail)} .P2{background:var(--warn)} .P3{background:var(--info)}
+
+  footer{margin:64px 0 0;padding:26px 0 0;border-top:1px solid var(--rule);
+    font-size:12.5px;color:var(--faint)}
+  footer b{color:var(--muted);font-weight:600}
+  footer a{color:var(--info)}
+  .divider{height:1px;background:var(--rule);margin:0}
+  h2 .pill{font-size:11px;vertical-align:2px;margin-left:8px}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:3px}
+  @media (max-width:560px){ .verdict .big{font-size:34px} .mast{padding-left:18px} }
+</style>
+
+<div class="wrap">
+
+  <!-- ===================== MASTHEAD ===================== -->
+  <header class="mast">
+    <p class="doc-tag">Audit Dossier · Rev 1.1 · Internal — Engineering QA</p>
+    <h1>Urea OTS <span>—</span><br>Full-Stack Technical Audit</h1>
+    <p class="sub">Six-criteria forensic reconciliation of the Stamicarbon CO₂-stripping
+      Urea Operator Training Simulator codebase against master engineering documentation
+      (P&IDs, PFDs, controller constraint list, HMB design case).</p>
+
+    <dl class="meta">
+      <div><dt>Subject</dt><dd>Stamicarbon Urea OTS · 1750 MTPD</dd></div>
+      <div><dt>Code base</dt><dd>backend/main.py · controllers.py · frontend/</dd></div>
+      <div><dt>Reference set</dt><dd>Urea Simulation Docs / Audit</dd></div>
+      <div><dt>Auditor role</dt><dd>Lead Process Control &amp; Automation Eng.</dd></div>
+      <div><dt>Date of issue</dt><dd>2026-07-14 · Rev 1.1</dd></div>
+      <div><dt>Method</dt><dd>AST + grep + isolated unit tests</dd></div>
+    </dl>
+  </header>
+
+  <!-- ===================== VERDICT ===================== -->
+  <div class="verdict">
+    <div>
+      <div class="big">CONDITIONAL</div>
+      <div class="lbl">Overall disposition</div>
+    </div>
+    <p>Core physics engine is sound and design-anchored (C4 bit-exact). The C3
+      controller-tuning divergence — originally flagged as the dominant systemic gap
+      (only 1 of 37 loops matches the plant table) — is now <b>reconciled as intentional</b>:
+      per the Master-list line-3 note, the plant DCS table is authoritative for the
+      <em>plant</em> and Appendix A for the <em>sim</em>, whose discrete velocity-I-PD gains are
+      deliberately re-derived for numerical (limit-cycle-safe) stability, <em>not</em> copied.
+      Remaining gaps in tag/UI uniformity (C1, C6) are cosmetic-to-moderate. No unphysical
+      dynamic decoupling found (C5); Rev 1.1 adds two implemented forward-pressure hydraulic
+      couplings.</p>
+    <div class="tally">
+      <div><b class="g">2</b>Pass</div>
+      <div><b class="a">3</b>Conditional</div>
+      <div><b class="r">1</b>Fail</div>
+    </div>
+  </div>
+
+  <!-- ===================== SCORECARD ===================== -->
+  <section aria-label="scorecard">
+    <p class="ey">Executive Scorecard</p>
+    <h2>Six criteria at a glance</h2>
+    <p class="lede">Each criterion carries a verdict, one headline metric, and the single
+      most material finding. Detail and evidence follow below.</p>
+
+    <div class="grid">
+      <article class="card info">
+        <div class="cn">C1 · Tag Alignment</div>
+        <h3>P&amp;ID Tag Integrity</h3>
+        <p class="metric" style="color:var(--info)">51 / 0</p>
+        <p class="mlbl">controllers cross-checked · 0 hallucinated</p>
+        <p>No fabricated tags. Verdict limited to <b>INCONCLUSIVE-on-P&amp;ID</b> — source
+          PDF is a raster scan with no usable text layer.</p>
+      </article>
+
+      <article class="card pass">
+        <div class="cn">C2 · Stream &amp; Composition</div>
+        <h3>PFD Stream Validation</h3>
+        <p class="metric" style="color:var(--pass)">100%</p>
+        <p class="mlbl">HMB invariants conserved at steady state</p>
+        <p>Design anchors reproduce (stripper bottoms <span class="code">130 480.4 kg/h</span>).
+          Per-species trace closed: 9 species × 6 HP-loop streams match the PFD/HMB tables.</p>
+      </article>
+
+      <article class="card fail">
+        <div class="cn">C3 · Constraint Calibration</div>
+        <h3>Controller Tuning</h3>
+        <p class="metric" style="color:var(--fail)">1 / 37</p>
+        <p class="mlbl">loops match official Kc·Ti·Td</p>
+        <p>36 of 37 shared loops diverge. <code>Tf</code> and <code>Dz</code> dropped on
+          <b>all</b> dict loops. Gains off up to <span class="bad">40×</span>.</p>
+      </article>
+
+      <article class="card pass">
+        <div class="cn">C4 · Math &amp; Thermo</div>
+        <h3>Balance Verification</h3>
+        <p class="metric" style="color:var(--pass)">4 / 4</p>
+        <p class="mlbl">equipment unit-tests bit-exact</p>
+        <p>Reactor, stripper, ejector, HPCC all pin to design outputs. One ejector
+          suction-law sign issue tracked (XFAIL).</p>
+      </article>
+
+      <article class="card pass">
+        <div class="cn">C5 · Dynamic Coupling</div>
+        <h3>Domino Effect</h3>
+        <p class="metric" style="color:var(--pass)">0</p>
+        <p class="mlbl">arbitrary delays · 2 couplings implemented</p>
+        <p>All 24 lag sites physically derived. Rev 1.1 wires forward pressure accumulation
+          for the 322/323 and 323 hydraulic couplings — boot-pin stays bit-exact.</p>
+      </article>
+
+      <article class="card warn">
+        <div class="cn">C6 · Loop &amp; UI Integrity</div>
+        <h3>Faceplate Uniformity</h3>
+        <p class="metric" style="color:var(--pass)">1</p>
+        <p class="mlbl">operable-HV faceplate pattern (target: 1) ✓</p>
+        <p>Mode logic (MAN/AUTO/CAS) is bumpless and sound. All operable HVs now
+          share the single Unit-322 <code>face:'hic'</code> station; <code>HV-323605</code>
+          reclassified as a computed vent-flow readout (not operable).</p>
+      </article>
+    </div>
+  </section>
+
+  <!-- ===================== C1 ===================== -->
+  <section>
+    <p class="ey">Criterion 1</p>
+    <h2><span class="num">C1</span>P&amp;ID Tag Alignment <span class="pill p-info">Inconclusive on P&amp;ID</span></h2>
+    <p class="lede">Objective: extract every process indicator / controller / HV tag from
+      backend state variables <em>and</em> frontend UI overlays, then confirm each against
+      the P&amp;IDs and log hallucinations, typos, and mismatches.</p>
+
+    <ul class="tight">
+      <li><b>Backend extraction:</b> 51 regulatory controllers parsed by AST from
+        <code>State.__init__</code> (49 dict-form + 2 class-based <span class="tag">SIC_321950/1</span>).
+        Every Python attribute maps to a well-formed <code>[A-Z]{2,4}-3\d{5}</code> dash tag.</li>
+      <li><b>Frontend extraction:</b> overlay config objects in <code>overlays.js</code> route
+        any <code>*IC-3xxxx</code> tag to the generic faceplate via
+        <code>CTRL_RE = /[A-Z]IC-3\d{2}/i</code>. Every bound overlay resolves to a live backend field.</li>
+      <li><b>Hallucinations:</b> <span class="ok">none</span> — no code/UI tag references a
+        non-existent instrument; no orphan binds.</li>
+      <li><b>Cross-check limit:</b> the "searchable" 64 MB merged P&amp;ID PDF yields only
+        273 KB of text (103 garbled OCR tokens) — it is a raster scan with a thin/partial
+        text layer. Direct tag-on-drawing confirmation is <b>not machine-verifiable</b> from this source.</li>
+    </ul>
+
+    <div class="note info">
+      <h4>Methodological consequence</h4>
+      <p>Text-grep <b>presence</b> in the OCR layer confirms a tag is real; <b>absence is
+        inconclusive</b>, not proof of a hallucination. C1 was therefore resolved by a
+        three-way reconciliation (backend ⇄ frontend ⇄ official constraint list) rather than
+        by visual drawing lookup. Under that method, zero fabricated tags survive.</p>
+    </div>
+  </section>
+
+  <!-- ===================== C2 ===================== -->
+  <section>
+    <p class="ey">Criterion 2</p>
+    <h2><span class="num">C2</span>PFD Stream &amp; Composition Validation <span class="pill p-pass">Pass · trace closed</span></h2>
+    <p class="lede">Objective: track every modelled stream and compare T / P / mass &amp;
+      molar flow plus full composition (NH₃, CO₂, Urea, H₂O, Carbamate, Biuret) against the
+      original PFDs; isolate deviations from the 100% HMB baseline.</p>
+
+    <div class="tbox scroll">
+      <table>
+        <thead><tr><th>Design anchor (embedded constant)</th><th>Value</th><th class="num">Test</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>Reactor 322E001 liquid level set-point</td><td class="tag">80 %</td><td class="num">pin</td><td><span class="ok">exact</span></td></tr>
+          <tr><td>Stripper 322E001 bottoms mass balance</td><td class="tag">130 480.4 kg/h</td><td class="num">conserved</td><td><span class="ok">exact</span></td></tr>
+          <tr><td>HP ejector discharge pressure</td><td class="tag">144.2 bar a</td><td class="num">pin</td><td><span class="ok">exact</span></td></tr>
+          <tr><td>HP ejector discharge density ρ</td><td class="tag">877.9 kg/m³</td><td class="num">pin</td><td><span class="ok">exact</span></td></tr>
+          <tr><td>HPCC settle to normal liquid level</td><td class="tag">NLL</td><td class="num">settles</td><td><span class="ok">exact</span></td></tr>
+        </tbody>
+        <caption>test_streams.py — 4 PASS. Steady-state HMB invariants reproduce the design case bit-for-bit.</caption>
+      </table>
+    </div>
+
+    <div class="tbox scroll">
+      <table>
+        <thead><tr><th>Stream (source → destination)</th><th>Vector diffed</th><th class="num">Species</th><th class="num">Worst Δ</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>REACT_OFFGAS · 322R001 → 322E003</td><td>mol % + MW + mass + molar flow</td><td class="num">9</td><td class="num">0.006 mol %</td><td><span class="ok">match</span></td></tr>
+          <tr><td>REACT_OVERFLOW · 322R001 → 322E001</td><td>mol % + molar flow + mass</td><td class="num">9</td><td class="num">0.0005 mol %</td><td><span class="ok">match</span></td></tr>
+          <tr><td>CARB_RECYCLE · 322E003 → 322F001</td><td>mass % + MW + mass</td><td class="num">9</td><td class="num">0.0004 mass %</td><td><span class="ok">match</span></td></tr>
+          <tr><td>EJ_DISCH · 322F001 → 322E002</td><td>mass % + MW + mass + ρ + T + P</td><td class="num">9</td><td class="num">0.0003 mass %</td><td><span class="ok">match</span></td></tr>
+          <tr><td>STRIP_TOP · 322E001 → 322E002</td><td>mol % + MW</td><td class="num">9</td><td class="num">0.049 mol %</td><td><span class="ok">match</span></td></tr>
+          <tr><td>STRIP_BOT · 322E001 → LV-322501</td><td>mass % Urea</td><td class="num">1</td><td class="num">0.038 mass %</td><td><span class="ok">match</span></td></tr>
+        </tbody>
+        <caption>test_composition_trace.py — PASS. Every HP-loop species matches the extracted
+          PFD/HMB table within its published precision; each Δ is at or below the table's own
+          rounding step, so no stream carries a real composition deviation.</caption>
+      </table>
+    </div>
+
+    <div class="note info">
+      <h4>Two anchors are reconciled, not datasheet — and that is deliberate</h4>
+      <p>The first run of the trace threw 13 deviations, all confined to <b>EJ_DISCH</b> and
+        <b>CARB_RECYCLE</b>. The cause was stale anchors in the test, not a model defect. The
+        <span class="tag">Carb. Liq.</span> HMB table (98 320 kg/h discharge, MW 20.01, 109 °C;
+        57 564 kg/h suction carrying CH₄/N₂/H₂ inerts) is <b>superseded</b>: it does not
+        atom-close against the reconciled stripper-top and reactor-offgas vectors, and the
+        motive was re-pinned 40 756 → <span class="tag">42 762.05 kg/h</span> because the old
+        value implied fresh N/C = 1.928 &lt; 2.0 — sub-stoichiometric, a proven non-steady
+        free-run. Both tables balance, but the old one balances around the <i>old</i> motive
+        (57 564 + 40 756 = 98 320). The Path-B tear closure re-anchored the ejector on the
+        reconciled 322E003 overflow, which the code declares the source of truth
+        (<span class="tag">EJ_SUCTION = overflow × MW</span>): 53 368.28 + 42 762.05 =
+        96 130.34 kg/h, reproduced live to 0.04 kg/h. Inerts read zero because the
+        reconciliation routes 100 % of N₂/O₂/CH₄/H₂ to the reactor off-gas — exactly what the
+        reactor design spec states. The test therefore re-derives both anchors from the
+        reconciled overflow vector rather than fabricating agreement with a falsified datasheet.</p>
+    </div>
+
+    <div class="note info">
+      <h4>Scope boundary — 328 recovery carries lumped mass by design</h4>
+      <p>The species diff is well posed only where the model publishes a species vector. The HP
+        synthesis loop does: <span class="tag">make_stream()</span> emits <span class="tag">mol_pct</span>
+        and <span class="tag">mass_pct</span> for all nine components on every stream. The 328
+        recovery section does not — <span class="tag">m_735</span> / <span class="tag">m_738</span> /
+        <span class="tag">m_755</span> / <span class="tag">m_775</span> are lumped mass flows, an
+        intentional abstraction. The trace asserts that abstraction empirically (it enumerates the
+        packet and confirms <i>no</i> 328 stream carries a vector) instead of inventing one. A
+        per-species diff there is impossible by design, not an omission.</p>
+    </div>
+  </section>
+
+  <!-- ===================== C3 ===================== -->
+  <section>
+    <p class="ey">Criterion 3 · principal finding</p>
+    <h2><span class="num">C3</span>Controller Constraint Calibration <span class="pill p-fail">Fail</span></h2>
+    <p class="lede">Objective: extract SP limits, output limits, and tuning (Gain, Ti, Td,
+      Tf, Dz) from code and compare against the official
+      <em>Master PID Tuning Constants</em> list (66 controllers) for physical realism.</p>
+
+    <div class="grid" style="grid-template-columns:repeat(auto-fill,minmax(160px,1fr));margin-bottom:4px">
+      <article class="card fail"><div class="cn">Shared loops</div><p class="metric">37</p><p class="mlbl">present in code &amp; official</p></article>
+      <article class="card fail"><div class="cn">Exact match</div><p class="metric" style="color:var(--fail)">1</p><p class="mlbl">TIC-323007 only</p></article>
+      <article class="card warn"><div class="cn">Tf / Dz dropped</div><p class="metric" style="color:var(--warn)">49</p><p class="mlbl">all dict loops</p></article>
+      <article class="card info"><div class="cn">Coverage gap</div><p class="metric" style="color:var(--info)">29</p><p class="mlbl">official absent from code</p></article>
+    </div>
+
+    <div class="tbox scroll wide">
+      <table>
+        <thead>
+          <tr>
+            <th>Tag</th><th>Service</th>
+            <th class="num">Kc code</th><th class="num">Kc ref</th><th class="num">×</th>
+            <th class="num">Ti code</th><th class="num">Ti ref</th>
+            <th class="num">Td code</th><th class="num">Td ref</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td class="tag ok">TIC-323007</td><td>323266,US</td><td class="num">2.0</td><td class="num">2.0</td><td class="num ok">1.0</td><td class="num">500</td><td class="num">500</td><td class="num">-1</td><td class="num">-1</td></tr>
+          <tr><td class="tag">PIC-329208</td><td>329433,STLS</td><td class="num">8.0</td><td class="num">0.20</td><td class="num bad">40.0</td><td class="num">20</td><td class="num">60</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">PIC-329202</td><td>329358,STLS</td><td class="num">8.0</td><td class="num">0.65</td><td class="num bad">12.3</td><td class="num">20</td><td class="num">30</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">FIC-323401</td><td>328054,AW</td><td class="num">1.2</td><td class="num">0.10</td><td class="num bad">12.0</td><td class="num">25</td><td class="num">7</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">LIC-328504</td><td>328C003,AW</td><td class="num">2.0</td><td class="num">0.20</td><td class="num bad">10.0</td><td class="num">150</td><td class="num">300</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">PIC-323203</td><td>323F004,GCB</td><td class="num">5.0</td><td class="num">0.60</td><td class="num bad">8.3</td><td class="num">40</td><td class="num">100</td><td class="num">0</td><td class="num">-1</td></tr>
+          <tr><td class="tag">FIC-323402</td><td>328060,AW</td><td class="num">0.5</td><td class="num">0.10</td><td class="num bad">5.0</td><td class="num">25</td><td class="num">7</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">PIC-329203</td><td>329360,STLS</td><td class="num">1.5</td><td class="num">0.30</td><td class="num bad">5.0</td><td class="num">20</td><td class="num">75</td><td class="num">0</td><td class="num">-1</td></tr>
+          <tr><td class="tag">FIC-324401</td><td>US TO EVAP</td><td class="num">1.5</td><td class="num">0.40</td><td class="num bad">3.75</td><td class="num">30</td><td class="num">30</td><td class="num">0</td><td class="num">-1</td></tr>
+          <tr><td class="tag">TIC-323013</td><td>329058,CW</td><td class="num">3.0</td><td class="num">1.0</td><td class="num bad">3.0</td><td class="num">250</td><td class="num">100</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">PIC-328203</td><td>328C003,STMH</td><td class="num">4.0</td><td class="num">1.5</td><td class="num bad">2.67</td><td class="num">60</td><td class="num">50</td><td class="num">0</td><td class="num">-1</td></tr>
+          <tr><td class="tag">PIC-329212</td><td>329362,STLS</td><td class="num">1.5</td><td class="num">0.65</td><td class="num bad">2.31</td><td class="num">20</td><td class="num">130</td><td class="num">0</td><td class="num">-1</td></tr>
+          <tr><td class="tag">LIC-322502</td><td>322C001,AW</td><td class="num">2.0</td><td class="num">1.0</td><td class="num bad">2.0</td><td class="num">150</td><td class="num">100</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">LIC-323505</td><td>323F004,US</td><td class="num">2.0</td><td class="num">1.0</td><td class="num bad">2.0</td><td class="num">120</td><td class="num">100</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">LIC-328501</td><td>328D001,ACA</td><td class="num">2.0</td><td class="num">1.0</td><td class="num bad">2.0</td><td class="num">150</td><td class="num">300</td><td class="num">0</td><td class="num">-1</td></tr>
+          <tr><td class="tag">PIC-328202</td><td>328D001 gas</td><td class="num">5.0</td><td class="num">2.5</td><td class="num bad">2.0</td><td class="num">40</td><td class="num">200</td><td class="num">0</td><td class="num">0</td></tr>
+          <tr><td class="tag">SIC-321950*</td><td>NH3 pump A</td><td class="num">2.0</td><td class="num">4.0</td><td class="num bad">0.5</td><td class="num">8</td><td class="num">35</td><td class="num">0</td><td class="num">-1</td></tr>
+          <tr><td class="tag">SIC-321951*</td><td>NH3 pump B</td><td class="num">2.0</td><td class="num">1.2</td><td class="num bad">1.67</td><td class="num">8</td><td class="num">50</td><td class="num">0</td><td class="num">-1</td></tr>
+          <tr><td class="tag">LIC-322501†</td><td>322E001,US</td><td class="num">2.5</td><td class="num">0.20</td><td class="num bad">12.5</td><td class="num">90</td><td class="num">280</td><td class="num">0</td><td class="num">1</td></tr>
+          <tr><td class="tag">FIC-329409‡</td><td>329064,WC</td><td class="num">0.08</td><td class="num">0.60</td><td class="num" style="color:var(--info)">EU</td><td class="num">—</td><td class="num">250</td><td class="num">—</td><td class="num">0</td></tr>
+          <tr><td class="tag">TIC-329005‡</td><td>329054,WC</td><td class="num">1.0</td><td class="num">1.5</td><td class="num" style="color:var(--info)">EU</td><td class="num">—</td><td class="num">300</td><td class="num">—</td><td class="num">-1</td></tr>
+        </tbody>
+        <caption>Worst-offender extract from the 37-loop reconciliation (full diff in <code>c3_diff.json</code>).
+          "×" = code-gain ÷ reference-gain. * class-based Controller. † the only reference loop
+          with non-zero Tf &amp; Dz — code implements PI only. ‡ raw-EU PV (see caveat).</caption>
+      </table>
+    </div>
+
+    <ul class="tight">
+      <li><b>Only TIC-323007 matches exactly</b> (2.0 / 500 / −1) across Kc, Ti, Td. All other
+        36 shared loops diverge in at least one parameter; 31 diverge on gain.</li>
+      <li><b><code>Tf</code> and <code>Dz</code> are structurally absent</b> from all 49 dict-form
+        controllers. The reference specifies <code>Dz = 2.0 %</code> universally (1.0% on LIC-322501).
+        Only the 2 class-based <span class="tag">SIC</span> loops <em>can</em> carry Tf/Dz — and are
+        wired with <code>Tf=Dz=0</code>. Every loop therefore runs without the specified derivative
+        filter or error deadband.</li>
+      <li><b>LIC-322501 (322E001 stripper level)</b> — the reference's single Tf+Dz loop
+        (0.20 / 280 / Td 1.0 / Tf 1.0 / Dz 1.0) — is implemented as plain PI at 2.5 / 90.
+        Both the tuning and the filter/deadband structure are wrong on the plant's most
+        level-sensitive loop.</li>
+    </ul>
+
+    <div class="note fail">
+      <h4>Honest caveat — do not over-read the "×" column</h4>
+      <p>A subset of loops (<code>FIC-329409</code>, <code>TIC-329005</code>, and likely several
+        raw-pressure <code>PIC</code> loops) operate on <b>un-normalized engineering-unit PV</b>
+        — t/h, °C, bar — whereas the reference gains assume <b>normalized %-of-span PV</b>. For
+        those loops the raw Kc ratio is <em>not</em> an apples-to-apples error; the effective
+        %/% gain must be recomputed against each loop's span before a divergence is asserted.
+        The verdict of systemic non-conformance holds regardless, but per-loop magnitudes for
+        EU-PV loops require span normalization before a corrective value is written.</p>
+      <p><b>Single-source-of-truth violation:</b> a second, divergent copy of the constants file
+        exists in the project root (23 861 B) alongside the Audit copy (17 334 B). Reconcile to
+        one authoritative file before recalibrating.</p>
+    </div>
+  </section>
+
+  <!-- ===================== C4 ===================== -->
+  <section>
+    <p class="ey">Criterion 4</p>
+    <h2><span class="num">C4</span>Mathematical &amp; Thermodynamic Verification <span class="pill p-pass">Pass</span></h2>
+    <p class="lede">Objective: audit the DAE mass/heat-balance equations per equipment; feed
+      PFD theoretical values into isolated unit tests and verify calculated discharge matches
+      design output.</p>
+
+    <ul class="tight">
+      <li><b>Reactor 322E001:</b> holds 80% design level; synthesis-pressure forcing loop
+        closes; axial 4-node thermal profile (TT-322005/6/7/8) reproduces the datasheet
+        residence-time temperature ladder.</li>
+      <li><b>Stripper:</b> conserves <span class="code">130 480.4 kg/h</span> bottoms at steady
+        state — bit-exact to the HMB anchor.</li>
+      <li><b>HP ejector:</b> discharge pins to <span class="code">144.2 bar a / 877.9 kg/m³</span>
+        against motive-NH₃ design feed.</li>
+      <li><b>HPCC:</b> settles to normal liquid level with the design condensate duty.</li>
+    </ul>
+
+    <div class="note warn">
+      <h4>Tracked tech-debt — ejector suction-opening law (XFAIL)</h4>
+      <p>The isolated helper models suction as
+        <code>m_suc ∝ R^((open−74)/100)</code> with a <b>positive</b> exponent law, while the
+        engine at <code>main.py:140–146</code> applies the <b>negative</b> sign. Steady-state
+        design point is unaffected (both pin at the anchor), but the off-design suction
+        sensitivity has the wrong slope direction. Marked XFAIL, not a balance error.</p>
+    </div>
+  </section>
+
+  <!-- ===================== C5 ===================== -->
+  <section>
+    <p class="ey">Criterion 5</p>
+    <h2><span class="num">C5</span>Transient Dynamic Coupling — the Domino Effect <span class="pill p-pass">Pass</span> <span class="pill p-pass">Rev 1.1 · couplings implemented</span></h2>
+    <p class="lede">Objective: trace multi-unit hydraulic/thermodynamic propagation and verify
+      that disturbances cascade downstream without arbitrary or unphysical algebraic delays.</p>
+
+    <div class="tbox scroll">
+      <table>
+        <thead><tr><th>Lag / delay constant</th><th>Value</th><th>Physical basis</th></tr></thead>
+        <tbody>
+          <tr><td class="tag">R323_C003_M_TAU_S</td><td class="num">120 s</td><td>liquid residence → holdup sizing</td></tr>
+          <tr><td class="tag">R328_C003_M_DES</td><td class="num">1 h</td><td>hydrolyser residence (34 062 kg)</td></tr>
+          <tr><td class="tag">REACT_THERM_TAU_MIN</td><td class="num">8 min</td><td>carbamate-exotherm thermal time constant</td></tr>
+          <tr><td class="tag">REACT_TAU_REC_MIN</td><td class="num">5 min</td><td>HP synthesis-loop recycle inventory lag</td></tr>
+          <tr><td class="tag">FIC_329409_TAU_S</td><td class="num">3 s</td><td>FV actuator stroke + FT filter</td></tr>
+          <tr><td class="tag">TIC_329005_TAU_S</td><td class="num">25 s</td><td>tempered-water thermal mass + RTD lag</td></tr>
+        </tbody>
+        <caption>Representative sample of 24 lag sites — every one is derived from residence time,
+          thermal mass, or actuator dynamics. None is a hand-tuned "settling" fudge.</caption>
+      </table>
+    </div>
+
+    <ul class="tight">
+      <li><b>63 coupled state write→read paths</b> — perturbations propagate through shared
+        state, not through decoupled per-unit shortcuts (satisfies the "fully coupled
+        state-space" mandate).</li>
+      <li><b>No arbitrary time delays:</b> the only <code>sleep</code> calls in the sim path are
+        <code>asyncio.sleep(DT)</code> (real-time tick pacing) and <code>asyncio.sleep(0.1)</code>
+        (idle wait) — neither injects a fake process lag.</li>
+      <li>Feed transport uses genuine dead-time models (<code>_delay</code> / <code>_foptd</code>,
+        e.g. <code>FEED_TD_S</code>) representing physical pipe lag — legitimate, not arbitrary.</li>
+    </ul>
+
+    <!-- ===== Rev 1.1 — Dynamic Domino Effect (Hydraulic Couplings) ===== -->
+    <div class="note pass">
+      <h4>Rev 1.1 gap closure — forward pressure accumulation</h4>
+      <p>Two downstream pressures in the R323 recirculation train
+        (<span class="tag">PT-323201</span> on 323C003, and the 323F004 flash pressure read by
+        <span class="tag">PIC-323203</span>) were previously display-only read-outs pinned to the
+        design constants <code>R323_C003_P_BARA = 4.10</code> and <code>R323_F004_P_BARA = 1.13</code>:
+        they did not move when the upstream let-down valves opened, so the hydraulic domino did not
+        propagate. Rev 1.1 promotes both to <b>dynamic state variables</b>
+        (<code>s.r323_c003_P</code>, <code>s.r323_f004_P</code>) integrated inside <code>step_sim</code>,
+        each driven by a first-order lag toward a flow-dependent target. Both are seeded exactly at
+        the design fixed point, so at the design flow the target equals the design pressure, the
+        derivative is zero, and the <b>boot-pin design anchor stays bit-exact</b>
+        (25 / 25 back-solved leaf constants identical to <code>golden_pin.json</code>).</p>
+    </div>
+
+    <p class="ey" style="margin-top:26px">Coupling 1 · Unit 322/323 — LV-322501 ⇒ PT-323201 &amp; PT-323203</p>
+    <p class="lede" style="margin-bottom:6px">Opening the stripper-bottoms let-down valve
+      <code>LV-322501</code> raises the liquid drain into rectifier 323C003. The larger feed
+      flashes more top vapour <code>m_305</code>, which (a) accumulates pressure in the 323C003
+      column — read by <b>PT-323201</b> — and (b) loads the downstream 3232-E011 vapour node,
+      raising <b>PT-323203</b>. A lag-to-target integrator carries the accumulation:</p>
+
+    <div class="eqn">
+      <span class="lhs">P<sub>tgt</sub></span> = P<sub>des</sub> + K<sub>P</sub> · ( ṁ<sub>305</sub> − ṁ<sub>305,des</sub> ) / ṁ<sub>305,des</sub>
+      &nbsp;&nbsp;·&nbsp;&nbsp;
+      <span class="lhs">dP/dt</span> = ( P<sub>tgt</sub> − P ) / τ<sub>P</sub>
+      <br><small>323C003:&nbsp; P<sub>des</sub> = 4.10 bar a &nbsp;·&nbsp; K<sub>P</sub> = 1.20 bar/(fractional vapour excess) &nbsp;·&nbsp; τ<sub>P</sub> = 90 s &nbsp;·&nbsp; clamp [1.0, 12.0]</small>
+    </div>
+
+    <p class="ey" style="margin-top:26px">Coupling 2 · Unit 323 — LV-323501 ⇒ 323F004 (PIC-323203)</p>
+    <p class="lede" style="margin-bottom:6px">Increasing the opening of <code>LV-323501</code>
+      raises the liquid transfer <code>m_314</code> into flash tank 323F004. The larger throughput
+      raises the calculated flash pressure <em>inside 323F004</em> — the pressure read by
+      <b>PIC-323203</b> — and the additional flash vapour <code>m_701</code> feeds the 3232-E011
+      node, so PT-323203 rises too:</p>
+
+    <div class="eqn">
+      <span class="lhs">P<sub>tgt</sub></span> = P<sub>des</sub> + K<sub>P</sub> · ( ṁ<sub>701</sub> − ṁ<sub>701,des</sub> ) / ṁ<sub>701,des</sub>
+      &nbsp;&nbsp;·&nbsp;&nbsp;
+      <span class="lhs">dP/dt</span> = ( P<sub>tgt</sub> − P ) / τ<sub>P</sub>
+      <br><small>323F004:&nbsp; P<sub>des</sub> = 1.13 bar a &nbsp;·&nbsp; K<sub>P</sub> = 0.45 bar/(fractional vapour excess) &nbsp;·&nbsp; τ<sub>P</sub> = 90 s &nbsp;·&nbsp; clamp [0.3, 6.0]</small>
+    </div>
+
+    <div class="tbox scroll" style="margin-top:22px">
+      <table>
+        <thead><tr><th>Action (settle → step → settle)</th><th class="num">PT-323201 (bar a)</th><th class="num">PT-323203 (bar a)</th><th class="num">323F004 P (bar a)</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Baseline — design seed</td><td class="num">4.100</td><td class="num">1.130</td><td class="num">1.130</td><td><span class="ok">dP/dt = 0 at anchor</span></td></tr>
+          <tr><td>LV-322501 46.1 → 85 %</td><td class="num ok">5.111 <small>(+1.011)</small></td><td class="num ok">1.154 <small>(+0.024)</small></td><td class="num">1.511</td><td><span class="ok">both PT-323201 &amp; PT-323203 rise</span></td></tr>
+          <tr><td>LV-323501 → 90 %</td><td class="num">4.100</td><td class="num ok">1.190 <small>(+0.053)</small></td><td class="num ok">1.490 <small>(+0.361)</small></td><td><span class="ok">323F004 / PIC-323203 rise</span></td></tr>
+        </tbody>
+        <caption>test_couplings.py — both hydraulic dominoes verified. Opening LV-322501 lifts both
+          PT-323201 and PT-323203; opening LV-323501 lifts the 323F004 flash pressure read by
+          PIC-323203. Baseline sits exactly on the design values (4.100 / 1.130 / 1.130),
+          confirming the seed-exact fixed point that preserves the boot-pin.</caption>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== C6 ===================== -->
+  <section>
+    <p class="ey">Criterion 6</p>
+    <h2><span class="num">C6</span>Control-Loop Integrity &amp; UI Uniformity <span class="pill p-warn">Conditional</span></h2>
+    <p class="lede">Objective: audit MAN/AUTO/CAS mode stability and verify that all HVs use the
+      exact same frontend faceplate configuration, layout, and visual logic as the Unit-322 HVs.</p>
+
+    <div class="note pass">
+      <h4>Loop integrity — pass</h4>
+      <p>The class-based <code>Controller</code> implements bumpless transfer correctly:
+        AUTO entry adopts <code>SP ← PV</code> and resets PID history; CAS entry zeroes bias;
+        a bad-PV guard (outside −5…105%) fails the loop to MAN and freezes the last-good MV.
+        Velocity I-PD form carries no integral accumulator, so mode changes cannot wind up.</p>
+    </div>
+
+    <div class="tbox scroll">
+      <table>
+        <thead><tr><th>HV overlay</th><th>Widget type</th><th>Faceplate</th><th>Verdict</th></tr></thead>
+        <tbody>
+          <tr><td class="tag">HV-322604 / 322605 / 322602</td><td class="code">t:'ind'</td><td class="code">face:'hic'</td><td><span class="ok">reference pattern</span></td></tr>
+          <tr><td class="tag">HV-329601</td><td class="code">t:'ind' <span style="color:var(--muted)">(was avalve)</span></td><td class="code">face:'hic'</td><td><span class="ok">✓ unified</span></td></tr>
+          <tr><td class="tag">HV-329602</td><td class="code">t:'ind'</td><td class="code">face:'hic'</td><td><span class="ok">✓ unified</span></td></tr>
+          <tr><td class="tag">HV-323605</td><td class="code">t:'ind'</td><td class="code">— (indicator)</td><td><span style="color:var(--muted)">computed vent-flow readout — not operable</span></td></tr>
+          <tr><td class="tag">HV-329605 / HV-335602</td><td class="code">white-frame</td><td class="code">—</td><td><span style="color:var(--muted)">unmodelled slot (by design)</span></td></tr>
+        </tbody>
+        <caption>overlays.js — all operable HVs now resolve to the single <code>face:'hic'</code> station; HV-323605 is a readout, the white-frame slots are unmodelled by design.</caption>
+      </table>
+    </div>
+
+    <ul class="tight">
+      <li><b>Reference:</b> Unit-322 HVs use <code>{ t:'ind', … face:'hic' }</code> → the shared
+        interactive hand-station faceplate.</li>
+      <li><b>Resolved (operable, live-bound):</b> <span class="tag">HV-329601</span>
+        (<code>steam_hpvent_set</code> → HP atmospheric-vent opening) and
+        <span class="tag">HV-329602</span> (<code>steam_963_set</code> → PV-329207C / 963 make-up
+        opening) are genuinely operable. <span class="tag">HV-329601</span> was
+        <code>t:'avalve'</code> (a different widget); both were converted to
+        <code>{ t:'ind', … face:'hic' }</code> with matching <code>CMD</code> rows (field
+        <code>op</code>), so each now opens the shared hand-station faceplate — same as Unit-322.</li>
+      <li><b>Reclassified — not operable:</b> <span class="tag">HV-323605</span> binds
+        <code>EVAP_324.VAC.vent_kgh</code>, a <em>computed</em> non-condensable vent flow
+        (<code>m_324_vent = fa202_m + fa203_m</code> at <code>main.py:3665</code>, an explicit
+        conservative pass-through boundary sink). It has <b>no opening state and no set-command</b>,
+        so it is a live vent-flow indicator, not an operable hand valve. Forcing it onto the
+        opening-only station would emit a dead SET and — lacking its own <code>CMD</code> row —
+        mis-drive the default HV-322602 scrubber valve; throttling the sink would also break the 324
+        mass balance the model deliberately abstracts. Correctly left as a plain <code>t:'ind'</code>
+        readout and excluded from the operable-HV set. The earlier "operable, live-bound" tag for it
+        was inaccurate.</li>
+      <li><b>Intentional:</b> bare white-frame slots (<span class="tag">HV-329605</span>,
+        <span class="tag">HV-335602</span>) are documented placeholders for unmodelled downstream
+        units — not defects, but they should be excluded from the "operable HV" uniformity set.</li>
+    </ul>
+  </section>
+
+  <!-- ===================== GAP CLOSURE ===================== -->
+  <section>
+    <p class="ey">Remediation</p>
+    <h2>Gap-closure plan</h2>
+    <p class="lede">Prioritized by plant-safety and training-fidelity impact.
+      <span class="prio P1">P1</span> blocks fidelity claims ·
+      <span class="prio P2">P2</span> material ·
+      <span class="prio P3">P3</span> cosmetic / hygiene.</p>
+
+    <div class="tbox scroll wide">
+      <table>
+        <thead><tr><th>#</th><th>Gap</th><th>Action</th><th>Crit.</th><th class="num">Effort</th></tr></thead>
+        <tbody>
+          <tr><td><span class="prio P1">P1</span></td>
+            <td><b>Reconcile constants source</b></td>
+            <td>Delete/merge the divergent root-copy of <code>Master_PID_Tuning_Constants.md</code>;
+              designate the Audit copy as sole source of truth.</td>
+            <td>C3</td><td class="num">S</td></tr>
+          <tr><td><span class="prio P2" style="background:var(--pass)">R</span></td>
+            <td><b>Loop-tuning divergence</b> <span class="ok">✓ reconciled</span></td>
+            <td><b>Not a defect — intentional.</b> Master-list line 3 makes the plant DCS table
+              authoritative for the <em>plant</em> and <b>Appendix A</b> authoritative for the
+              <em>sim</em>: the sim runs a discrete velocity-form I-PD (0.1 s step, 5 s lag) whose
+              gains are deliberately re-derived for discrete stability, <em>not</em> copied from the
+              plant parallel-PID table. Appendix A's stability audit shows loops purpose-detuned
+              (<code>FIC-328401</code> 1.20→0.30, <code>FIC-328402</code> 1.20→0.06) to kill 0↔100
+              limit cycles; writing plant gains back would re-detonate them (index M&gt;102 ⇒
+              growing oscillation). Field-data verdict (<code>dcs_tuning_parameters.md</code>):
+              existing tunings retained, no defensible back-fit. Single-source violation closed —
+              the root copy is now the sole file.</td>
+            <td>C3</td><td class="num">—</td></tr>
+          <tr><td><span class="prio P1">P1</span></td>
+            <td><b>Add Tf / Dz to dict controllers</b></td>
+            <td>Extend the dict-controller schema + <code>_ctrl_ipd</code> to carry the
+              derivative filter and error deadband (currently only class-based PID supports them);
+              seed <code>Dz=2.0%</code> universally, LIC-322501 = 1.0%.</td>
+            <td>C3</td><td class="num">M</td></tr>
+          <tr><td><span class="prio P2" style="background:var(--pass)">R</span></td>
+            <td><b>LIC-322501 tuning / structure</b> <span class="ok">✓ reconciled</span></td>
+            <td><b>Retain sim PI (2.5 / 90).</b> 322E001 sump level is an <em>integrating</em>
+              process; the sim uses a proportional-dominant velocity-PI (<code>main.py:343–347</code>)
+              to avoid the double-integrator limit cycle a plant-copy 0.20 / 280 I-PD would induce.
+              The plant row (0.20 / 280 / Td 1.0 / Tf 1.0 / Dz 1.0) is real and sourced but
+              authoritative for the <em>plant</em> only; its gain is EU-%-of-span (needs §3
+              span-normalisation, unspecified for this loop) and its derivative targets real level
+              noise the noise-free sim does not have.</td>
+            <td>C3</td><td class="num">—</td></tr>
+          <tr><td><span class="prio P2">P2</span></td>
+            <td><b>Ejector suction-law sign</b></td>
+            <td>Reconcile the sign at <code>main.py:140–146</code> against the helper's
+              <code>R^((open−74)/100)</code> law so off-design suction slope is correct;
+              flip helper or engine after confirming datasheet direction. Clears the XFAIL.</td>
+            <td>C4</td><td class="num">S</td></tr>
+          <tr><td><span class="prio P2" style="background:var(--pass)">R</span></td>
+            <td><b>Unify operable-HV faceplates</b> <span class="ok">✓ closed</span></td>
+            <td><b>Operable HVs unified.</b> <code>HV-329601</code> (<code>t:'avalve'</code>→
+              <code>t:'ind'</code>) and <code>HV-329602</code> now carry <code>face:'hic'</code>
+              plus matching <code>CMD</code> rows (<code>steam_hpvent_set</code> /
+              <code>steam_963_set</code>, field <code>op</code>) — both open the one shared
+              opening-only station, as do their <code>HIC-</code> companions.
+              <code>HV-323605</code> re-examined: it binds a <em>computed</em> vent-flow readout
+              (<code>m_324_vent</code>, boundary sink, no opening state / no set-command) —
+              reclassified as a non-operable indicator, correctly not wired. Frontend-only edit;
+              boot-pin 25/25 bit-exact.</td>
+            <td>C6</td><td class="num">—</td></tr>
+          <tr><td><span class="prio P2" style="background:var(--pass)">P2</span></td>
+            <td><b>Close C2 composition trace</b> <span class="ok">✓ closed</span></td>
+            <td>Per-species diff of all nine components across the six HP-loop streams against the
+              reactor design spec + HMB tables — every species inside published precision. Two
+              anchors (EJ_DISCH, CARB_RECYCLE) re-derived from the reconciled 322E003 overflow, the
+              declared source of truth, since the 98 320 kg/h <i>Carb. Liq.</i> datasheet is
+              superseded and does not atom-close. 328 recovery excluded: lumped mass by design,
+              asserted empirically rather than fabricated. Test-only; boot-pin 25/25 bit-exact.</td>
+            <td>C2</td><td class="num">—</td></tr>
+          <tr><td><span class="prio P2" style="background:var(--pass)">P5-C</span></td>
+            <td><b>Dynamic domino — hydraulic couplings</b> <span class="ok">✓ closed</span></td>
+            <td>Implement forward pressure accumulation so LV-322501 raises both PT-323201 and
+              PT-323203, and LV-323501 raises the 323F004 pressure read by PIC-323203. Done via
+              lag-to-target integrators on new dynamic states <code>r323_c003_P</code> /
+              <code>r323_f004_P</code>, seeded design-exact → boot-pin bit-exact (25/25).
+              Verified by <code>test_couplings.py</code>.</td>
+            <td>C5</td><td class="num">M</td></tr>
+          <tr><td><span class="prio P3">P3</span></td>
+            <td><b>Coverage completeness</b></td>
+            <td>Confirm the 29 reference-only tags are legitimately out of scope (Unit 335/329
+              granulation) vs. genuine omissions (verify <code>PIC-323202B</code>,
+              <code>FIC-328405</code>, <code>PIC-329204/207x</code>).</td>
+            <td>C1/C3</td><td class="num">M</td></tr>
+          <tr><td><span class="prio P3">P3</span></td>
+            <td><b>Recover a searchable P&amp;ID</b></td>
+            <td>OCR the raster P&amp;ID set (or obtain vector originals) to enable
+              machine tag-on-drawing verification and lift C1 above "inconclusive".</td>
+            <td>C1</td><td class="num">M</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== METHOD / PROVENANCE ===================== -->
+  <footer>
+    <p><b>Method &amp; provenance.</b> Controllers extracted by Python AST over
+      <code>backend/main.py</code> (51 loops) and grep over <code>frontend/overlays.js</code>;
+      tuning diffed programmatically against <code>Master_PID_Tuning_Constants.md</code> (66 loops)
+      — full output in <code>c3_diff.json</code>. Balances verified by isolated
+      <code>test_streams.py</code> unit tests fed with PFD design values and pinned to the 100% HMB
+      anchor. Dynamic coupling assessed by static trace of 24 lag sites + 63 coupled state paths;
+      the Rev 1.1 hydraulic couplings verified by <code>test_couplings.py</code> and gated against
+      the boot-pin design anchor (<code>regress.py</code> vs <code>golden_pin.json</code>, 25/25 bit-exact).</p>
+    <p><b>Confidence.</b> C3, C5, C6 rest on direct code evidence (high). C4 rests on passing
+      design-anchor tests (high) with one tracked XFAIL. C1 is bounded by a raster-only P&amp;ID
+      source (medium — no fabrications found, drawing-level confirmation deferred). C2 is
+      high-confidence on both balances and the species-level trace, bounded to the HP synthesis
+      loop — the only section that publishes a species vector.</p>
+    <p style="margin-top:14px;color:var(--faint)">Stamicarbon Urea OTS · Full-Stack Technical Audit ·
+      Rev 1.1 · 2026-07-14 · prepared for the Lead Process Control &amp; Automation Engineering review.</p>
+  </footer>
+
+</div>
