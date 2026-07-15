@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-15 (session 7) · branch `fix/reactor-level-drain-and-vent-coupling` · pushed through `ff41027`_
+_Last updated: 2026-07-15 (session 8) · branch `master` · pushed through `e300f17`_
 
 ## Goal
 
@@ -15,7 +15,11 @@ Hard constraints (standing user directives):
 - **100% conservation** — mass/energy never created, destroyed, or decoupled to dodge stiffness.
 - **Sourcing law** — thermodynamic equations from verified sources; no fabricated constants.
 - **Design bit-exactness** — the pinned design steady state must stay bit-identical after any edit.
-- Push to `https://github.com/amegoh2007/urea-ots.git` only on explicit request.
+- **Autonomous push** — commit and push to `https://github.com/amegoh2007/urea-ots.git` once a task is
+  complete and verified; do not halt for approval. This **reverses** the former "push only on explicit
+  request" rule, superseded by `CLAUDE.md` §3 (Remote Backup) as of commit `e300f17`.
+- **Mandatory handoff** — `CLAUDE.md` §5 requires this file be updated at the end of every session with
+  the five sections: Goal, Current State, Active Files, Failed Attempts, Next Steps.
 
 ## Current state — six-pillar audit CLOSED, all gaps remediated, committed and pushed
 
@@ -522,6 +526,52 @@ untouched ⇒ pin unperturbed.
 `TECH_DEBT.md`, `Master_PID_Tuning_Constants.md`, `PROMPT_329-1_UI.md`,
 `simulation_audit_and_remediation_plan.md`, `resume_task_b_prompt.md`, `backend/tests/pillar4_audit.py`,
 `backend/tests/repro_bugs_1_4_co2.py`, `backend/tests/_spot_329_1.py`, `backend/test_foptd_fingerprint.py`).
+
+## 2026-07-15 (session 8): §6.4 transient gate, master merge, CLAUDE.md reconciliation
+
+First session governed by the `CLAUDE.md` §5 five-section handoff mandate.
+
+**The Goal.** Close the "Audit Finalization & Transient Merge Gate Protocol", then reconcile the
+divergent `CLAUDE.md` into one authoritative directive set.
+
+**Current State.** Fully operational, nothing mid-edit. Suite **103 passed** (98 + 5 new). Pin gate
+`leaves: 25  keys: 15  diffs: 0` at every checkpoint. All refs level with origin. 22 untracked paths
+deliberately preserved and never staged.
+- §6.4 transient gate **SATISFIED**: τ = **3396.9 s** ∈ [2884, 4055] ✓ (2.1 % under the 3469.5 s centre);
+  t_d = **39.6 s** ≤ 572 ✓; P_f = **143.19 barg** ∈ [137.5, 150.5] ✓. Smith intermediates t28 = 1171.8 s,
+  t63 = 3436.4 s, n = 534 samples. Design hold bit-exact: `140.700000 -> 140.700000 bara (|d| = 0.00e+00)`.
+- **Caveat, flagged not buried:** the plateau `P_f = 144.200 bara` is exactly `SYN_P_MAX_BARA` — clamped at
+  the ceiling, not freely settled. Field `P_f = 144.0 barg` = 145.01 bara **exceeds** the 144.2 bara ceiling,
+  so the sim structurally cannot reach the field value; it lands 0.81 bar low but inside the band. The clamp
+  also truncates the tail the Smith ID reads. Documented model law (`main.py:1531`), not a defect.
+- `a66c532` is the repo's **first merge commit** — history was 100 % linear before it.
+
+**Active Files.**
+- `CLAUDE.md` — rewritten this session to the synthesized rule set (`e300f17`). Now the authority.
+- `backend/handoff.md` — this file; §5 mandates it every session.
+- `backend/test_transient_coldstart.py` — new, 161 lines, 5 tests, committed `ad30d31`.
+- `backend/main.py` — untouched this session (last edit `0ce6dda`, the stale `~94124` comment at `:161`).
+
+**Failed Attempts.**
+- **Trusted `origin/master` without fetching.** Read `4390433` from a stale remote-tracking ref, concluded
+  master was level, pushed → **rejected, non-fast-forward**. `git fetch` then revealed `4390433..59eb9c0`.
+  **Always `git fetch` before trusting any `origin/*` ref.** Did not force-push; investigated and asked.
+- **`git diff --no-index --quiet <(git show …) CLAUDE.md`** → `error: Could not access '/proc/38/fd/63'`,
+  printed a misleading "DIFFERS -- stop". Process substitution is unusable with git here — **not** a real
+  content difference. Verify by blob hash instead (`git rev-parse`, `git ls-files -s`).
+- **Rebase rejected** as the divergence fix: the 43 audit commits are already published on
+  `origin/fix/reactor-level-drain-and-vent-coupling` at `5d7c5ad`; rebasing rewrites published history.
+- **Nearly built a duplicate cold-start driver** — `handoff.md:627` claimed none existed, but
+  `backend/tests/coldstart_probe.py` was tracked all along and cited from `main.py:2882-2883`. The doc was
+  stale. Promoted the existing probe instead of duplicating it.
+- **`regress.py` produced no diff output** — it only *dumps* the pin, never diffs. The gate is TWO steps.
+- Prior-session traps that still bite: PowerShell here-strings `@'…'@` break the Bash tool (use `-F <file>`
+  for multi-line commit messages); always set `PYTHONIOENCODING=utf-8` (else `UnicodeEncodeError` on `→`);
+  never put regex metacharacters in a bash heredoc (`re.PatternError: nothing to repeat`) — write a file;
+  native Windows `python.exe` cannot resolve MSYS `/d/...` paths; `git status` has no `--cached`.
+
+**Next Steps.** No open work item. On resume, re-read `CLAUDE.md` first — the operating directives changed
+materially this session (autonomous push is now ON; the HALT/await-confirmation protocol is GONE).
 
 ## Files
 
