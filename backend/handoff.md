@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-08 (session 5) · branch `fix/reactor-level-drain-and-vent-coupling` · pushed through `aec3160`_
+_Last updated: 2026-07-15 (session 7) · branch `fix/reactor-level-drain-and-vent-coupling` · pushed through `ff41027`_
 
 ## Goal
 
@@ -17,17 +17,21 @@ Hard constraints (standing user directives):
 - **Design bit-exactness** — the pinned design steady state must stay bit-identical after any edit.
 - Push to `https://github.com/amegoh2007/urea-ots.git` only on explicit request.
 
-## Current state — 28-06 anchor analysis DONE, LV-322501 field-calibrated, verified, committed (unpushed)
+## Current state — six-pillar audit CLOSED, all gaps remediated, committed and pushed
 
-Nothing is mid-edit. The feature branch has **local, unpushed** commits ahead of origin.
+Nothing is mid-edit. The feature branch is **level with origin** at `ff41027` and now tracks
+`origin/fix/reactor-level-drain-and-vent-coupling`. All 21 audit tasks closed.
 
 | Commit | Pushed | What |
 |--------|--------|------|
 | `c7c898a` | yes | Pump η_v calibrated 0.95 → 0.980 (matches field curve) |
 | `487d4a1` | yes | Feed transport dead time `FEED_TD_S = 345 s` injected on feed tears + report |
-| `8182420` | **no** | Prior session handoff doc |
-| `e3ee4a6` | **no** | Fix MemoryError in `_delay` under variable sub-step dt |
-| (latest) | **no** | **28-06-2025 anchor analysis + `LV322501_OPEN_DES` 82.0 → 46.1 (field)** (this session) |
+| `8182420` | yes | Prior session handoff doc |
+| `e3ee4a6` | yes | Fix MemoryError in `_delay` under variable sub-step dt |
+| `aec3160` | yes | 329-1 steam-drum level loops LIC/LV-329502/503/504 wired to sim (session 5) |
+| `411080c` | yes | Unit 324 two-stage vacuum evaporation + DCS overlays 324-1 / 324-1b (session 6) |
+| `7b384dc` | yes | **Six-pillar audit gap closure** — ejector suction sign, gas-phase couplings, indicator binds (this session) |
+| `ff41027` | yes | **Audit artifacts** — pin gate + verification instruments + audit report (this session) |
 
 ### This session (2026-07-03, session 2) — 28-06-2025 DCS startup dataset
 
@@ -408,6 +412,117 @@ keys (verified against existing 323-1 rows) rather than shadow keys — no doubl
 `backend/main.py`, `frontend/overlays.js`, `frontend/index.html`, `frontend/img/screen-324-1.png`,
 `frontend/img/screen-324-1b.png`.
 
+## 2026-07-15 (session 7): six-pillar audit — gap closure, indicator scope, hydraulic couplings
+
+Commits `7b384dc` (audit, 11 files, +485/−106) and `ff41027` (artifacts, 8 files, +1185), both
+**pushed** (`411080c..ff41027`). Autonomous execution of the audit gap-closure plan under a standing
+**boot-pin gate**: every code edit re-run through `scratchpad/regress.py` against
+`scratchpad/golden_pin.json` and only confirmed at **25/25 leaves bit-exact**.
+
+### The pin gate (now a committed, repeatable instrument)
+
+`_collect_pin()` (`main.py:5116`) returns a FIXED 15-key / 25-leaf dict of back-solved design
+constants; `_pin_cache_key()` (`main.py:5076`) = SHA-256 over **backend source only** — so editing a
+frontend or doc file cannot perturb it, and the pin is trivially bit-exact for those. Key this
+session: `e151c924579ea4b72cbf16ecbe4aa92f3a7afcbf8311277554a04288cf54c6a9`.
+`regress.py` deletes the cache, imports `main` (forces settle + back-solve), dumps `_collect_pin()`
+to `pin_out.json`, diffs against golden. Final gate run: **leaves: 25  keys: 15  diffs: 0**.
+
+### C2 — ejector design point RE-ANCHORED (the 98 320 kg/h datasheet is superseded)
+
+The published "Carb. Liq." HMB (suction 57 564 + motive 40 756 = discharge 98 320 kg/h, MW 20.01,
+109 °C) balances only around the **OLD** motive, which implied fresh molar N/C = 1.928 < 2.0 —
+sub-stoichiometric, a proven non-steady free-run. Path-B tear closure re-anchored the whole design
+point on the reconciled 322E003 overflow vector, which `main.py:158` declares the source of truth
+(`EJ_SUCTION = overflow × MW`). Hand-verified arithmetic:
+
+$$\Sigma_{suc} = 53\,368.2849\ \mathrm{kg/h},\qquad
+\dot m_{mot} = 42\,762.05427809782\ \mathrm{kg/h},\qquad
+\Sigma_{disch} = 96\,130.339\ \mathrm{kg/h}$$
+
+$$T_d = \frac{\dot m_{mot} c_{p,N} T_{mot} + \Sigma_{suc} c_{p,C} T_{suc}}{\Sigma_{disch}\, c_{p,D}}
+      = \frac{42\,762.05 \cdot 4.74 \cdot 29 + 53\,368.28 \cdot 3.10 \cdot 178.8}{96\,130.34 \cdot 3.50}
+      = 105.39\ ^\circ\mathrm{C}$$
+
+MW_disch = 19.705, MW_carb = 22.542, discharge NH₃ = 63 785.52 kg/h (66.353 mass %). Inerts read 0 in
+the suction because the reconciliation routes 100 % of N₂/O₂/CH₄/H₂ to the reactor off-gas — exactly
+as the 322R001 spec states, consistent with both shared HMBs.
+
+**Stale-comment note (not fixed — would rehash the pin key):** the `~94124` comment on `EJ_DES_TOTAL`
+(`main.py:162`) is arithmetic from the OLD motive (40 756 + 53 368 = 94 124). Live value computes to
+**96 130.34**. Comment only; no numeric effect.
+
+### The ejector suction-sign fix (`EJ_SPINDLE_R = 2.1517`)
+
+For a constant-ṁ PD-pump-fed jet, motive **momentum** — not free area — sets capacity, so **closing
+the spindle RAISES suction**. Negative equal-% law:
+
+$$\phi_{sp}(\theta) = R^{\left(\frac{\theta_{des} - \theta}{100}\right)},\qquad
+R = 2.1517,\qquad \theta_{des} = 74\ \%\ \Rightarrow\ \phi_{sp}(74) = R^0 = 1$$
+
+Design opening returns unity ⇒ pin bit-exact by construction. Stall guard
+`f_{stall} = \mathrm{clamp}\!\left(\frac{\phi_m - \Phi}{REC - \Phi},0,1\right)^{2}` with
+`EJ_STALL_PHI = 0.20`, `EJ_STALL_REC = 0.35`; `EJ_HYD_FRAC_MAX = 1.25` (throat-choke ceiling set > 1
+so it never engages at design).
+
+### Items 1–4 (indicator scope) — root causes and fixes
+
+1. **Dynamic indicator behavior.** Root cause `app.js:464` — `const v = o.bind ? gp(window.OTS_LAST||{}, o.bind) : null;`
+   with `app.js:59` `if(v==null||isNaN(v)) return '--';`. A `t:'ind'` entry **with no `bind`** renders
+   `--` forever; nothing is hardcoded or refresh-gated, so the defect set is exactly the unbound
+   entries. Census (`scratchpad/audit_indicators.py`): **327 tagged, 101 unbound**
+   (`ovrd` 6, `ind` 51, `pump` 8, `xv` 1, `strm` 16, `nav` 18, `?` 1). Binds added in `overlays.js`
+   (+69): FT-322403, PT-329206, PIC-329204, HIC-329601, PT-323201, PIC-323203 (both screens),
+   TT-323004, HIC/HV-323605, PV-323203, PIC-324202, TT-323005.
+2. **PT-323201 proportionality** — coupled to the 305 gas path:
+   $$P_{tgt} = P_{des} + K_P\frac{\dot m_{305} - \dot m_{305,des}}{\dot m_{305,des}},\qquad
+     \frac{dP}{dt} = \frac{P_{tgt} - P}{\tau_P}$$
+   `R323_C003_P_GAIN` $K_P = 1.20$, $\tau_P = 90$ s, $P_{des} = 4.1$ bar a, `R323_M305_DES` = 24 563.18 kg/h.
+3. **PIC-323203 visibility + proportionality** — added to UI; 323F004 node is a **pure accumulator**:
+   $$\frac{dP_{e011}}{dt} = K_P\frac{\dot m_{gen,v011} - \dot m_{v011}}{3600},\qquad
+     K_P = 0.05,\ \ \Phi_V = \tfrac{3100}{9400} = 0.329787$$
+   Chain: LV-323501 stroke → `m_314` → `m_701 = 0.041792 · m_314` → `in_e011` → `gen_v011 = Φ_V · in_e011`.
+   `m_701` is 4426.6 of `R3232_E011_IN_DES` = 9396.6 (≈47 %, dominant). 323F004 header uses the same
+   FOPTD form with `R323_F004_P_GAIN` = 0.45, $P_{des} = 1.13$ bar a.
+4. **Global pressure audit** — every PT/PIC/PIT swept via `audit_indicators.py --press`. Two
+   deliberate non-bindings recorded under *Failed / rejected* below.
+
+### CAS boot-mode test resolution (the only red suite this session)
+
+Three `backend/test_ctrl_routes.py` tests failed `assert 'CAS' == 'MAN'` / `409 != 200`. Proven
+**pre-existing** on clean HEAD in a throwaway worktree (identical `3 failed, 13 passed`), and
+`git log -S 'self.SIC_321951.set_mode("CAS")'` traced the CAS default to **`b96f9be` ("Bug-6 boot
+mode")** — deliberate: the running pump-B speed controller boots on CASCADE as slave to the N/C ratio
+master; `SIC_321950` stays MAN because pump A is an OFF standby (`pv = open_act = 0`, and CAS on a
+stopped pump would wind `mv` up toward `cas_sp`). **Verdict: tests stale, model correct.** Fixed the
+tests (assert CAS in the schema test; explicit `set_mode: MAN` in the two MAN-contract tests). Model
+untouched ⇒ pin unperturbed.
+
+### Verification (all green)
+
+- Full suite **98 passed, 2 warnings in 48.35 s** (was `3 failed, 95 passed`).
+- Boot-pin gate: **25 leaves / 15 keys / 0 diffs**.
+- C2 species trace (`test_composition_trace.py`): PASS — every HP-loop species within published
+  PFD/HMB precision; 328 lumped-mass abstraction asserted, not fabricated.
+- Items 2+3 (`test_gas_phase_prop.py`): PT-323201 dP/frac = 1.1988 / 1.2004 / 1.2001 / 1.2000
+  recovers $K_P = 1.20$; PIC-323203 MAN ramps +1.21828 / +3.04514 / +4.86923 bar/300 s at LV-323501
+  60/75/90 % vs analytic 1.2092 / 3.0368 / 4.8644; AUTO op 25.01 / 27.36 / 30.90 / 34.43 vs predicted
+  25.00 / 27.34 / 30.88 / 34.42.
+- C5 domino (`test_couplings.py`): LV-322501↑ ⇒ dPT-323201 **+1.0114**, dPT-323203 **+0.0241**;
+  LV-323501↑ ⇒ dF004_P **+0.3607**, dPT-323203 **+0.0531**. Both directions correct.
+
+### Staging (selective, by path — no `git add -A`)
+
+`7b384dc` = the 11 tracked modified files (`main.py` 143, `ui_guidelines.md` 99, `handoff.md` 80,
+`test_controllers.py` 72, `overlays.js` 69, `controllers.py` 42, `app.js` 33,
+`tests/audit_f001_ejector.py` 31, `index.html` 14, `test_ctrl_routes.py` 6, `CLAUDE.md` 2).
+`ff41027` = 8 audit artifacts. **22 untracked junk paths deliberately left untracked** (probe scripts
+`backend/_probe_c1*.py` / `_audit_closure.py` / `_creep_probe.py` / `_recon_scrub.py` / `_probe_h1.py`,
+`out_*.json`, `backend/pin_out.json`, the nested `Urea Simulation/` Obsidian vault, `graphify-out/`,
+`TECH_DEBT.md`, `Master_PID_Tuning_Constants.md`, `PROMPT_329-1_UI.md`,
+`simulation_audit_and_remediation_plan.md`, `resume_task_b_prompt.md`, `backend/tests/pillar4_audit.py`,
+`backend/tests/repro_bugs_1_4_co2.py`, `backend/tests/_spot_329_1.py`, `backend/test_foptd_fingerprint.py`).
+
 ## Files
 
 **Committed / active source:**
@@ -424,7 +539,20 @@ keys (verified against existing 323-1 rows) rather than shadow keys — no doubl
 - `backend/reports/dcs_anchor_dynamics_2025-06-28.md` — **28-06 anchor report (this session)**.
 - `launch.bat` (repo root) — the launcher the desktop shortcuts target. Fine, unchanged.
 
-**Analysis / verification (session scratchpad, not committed, temp-dir — recreate if needed):**
+**Verification instruments (session 7: now COMMITTED under `scratchpad/`, no longer temp-dir):**
+- `scratchpad/regress.py` + `scratchpad/golden_pin.json` — **the boot-pin gate**. Run before
+  confirming ANY backend edit. Golden is the anchor and IS versioned; the run output
+  (`pin_out.json`, `pin_after_coupling.json`, `pin_err.txt`) is `.gitignore`d — it regenerates every
+  run and would churn forever.
+- `scratchpad/test_composition_trace.py` — C2 species-level trace, HP loop vs extracted PFD/HMB.
+  Anchors quoted verbatim from `main.py:158-159`, **not imported**, to avoid circular self-comparison.
+- `scratchpad/test_gas_phase_prop.py` — items 2+3 (PT-323201 / PIC-323203 proportionality).
+- `scratchpad/test_couplings.py` — C5 hydraulic-domino direction test.
+- `scratchpad/audit_indicators.py` — indicator census; `--press` sweeps all pressure tags. Path is
+  now `__file__`-relative (the hardcoded `D:\` path was fixed before tracking).
+- `scratchpad/audit_report.html` — the six-pillar audit report (761 lines).
+
+**Analysis / verification (older session scratchpad, not committed, temp-dir — recreate if needed):**
 - `probe_pins_2806.py` — boot-pin + 600 s hold A/B probe (pre/post edit bit-exactness).
 - `explore_2806.py`, `knots_2806.py`, `anchors_2806.py`, `analysis_2806.py`,
   `anchors_2806.json`, `analysis_2806_results.json` — 28-06 anchor extraction + 10-target analysis.
@@ -474,6 +602,21 @@ keys (verified against existing 323-1 rows) rather than shadow keys — no doubl
 - **g_T (feed-load) term inside stripper `slip` — REJECTED (session 3, the S2 bug).** Routes
   unstripped volatiles overhead → positive loop-return gain → level RISES on vent open. Feed-load
   choke must CUT the split (`mod × min(g_T,1)`) so volatiles exit with bottoms via LV-322501.
+- **Binding PT-328401 to invent a 328 pressure — REJECTED (session 7).** The 328 recovery section
+  carries LUMPED MASS only (`m_735` / `m_738` / `m_755` / `m_775`, no species vector, no pressure
+  state) — an intentional abstraction, proven empirically by `test_composition_trace.py`
+  (`328 streams w/ species vec : none -- lumped mass only`). Binding it means fabricating physics the
+  model deliberately abstracts. Left unbound (`overlays.js:297`) on purpose.
+- **Throttling the 324E002 vent to make HIC-323605 "do something" — REJECTED (session 7).**
+  `m_324_vent = fa202_m + fa203_m` (`main.py:3665`) is a **boundary sink**, display-only via
+  `VAC.vent_kgh` (`main.py:4171`). Throttling it destroys mass at the boundary → violates the 100 %
+  conservation constraint.
+- **Anchoring the ejector to the 98 320 kg/h "Carb. Liq." datasheet — REJECTED (session 7).**
+  Superseded: it closes only around the OLD 40 756 kg/h motive, which implies fresh N/C = 1.928 < 2.0
+  (sub-stoichiometric ⇒ non-steady free-run). Reconciled Path-B point is
+  53 368.28 + 42 762.05 = **96 130.34 kg/h**; `main.py:158` (`EJ_SUCTION = overflow × MW`) is the
+  source of truth. Making the model agree with the old table would fabricate agreement with a
+  falsified datasheet.
 
 ## Next steps (if work resumes)
 
@@ -487,7 +630,17 @@ keys (verified against existing 323-1 rows) rather than shadow keys — no doubl
    startup commands the 0% clamp, not 102.8% → saturated-high MV is not the level PI (positioner on
    hand-jack/override/split-range). Real LV 0→30% motion already reproducible via existing MAN mode
    (main.py:2832). Bit-exact pin + conservation untouched. Closure written to report §2.
-4. **Merge** `fix/reactor-level-drain-and-vent-coupling` once §6.4 transient check passes.
+4. **Merge** `fix/reactor-level-drain-and-vent-coupling` once §6.4 transient check passes. Still the
+   live next step — the branch is pushed and level with origin at `ff41027`, suite green (98 passed),
+   pin gate 0 diffs.
+5. **UNRECONCILED (session 7, flagged not hidden):** the indicator census now reads
+   **327 tagged / 101 unbound / `ind` 51**, where the earlier summary recorded **103 / `ind` 53**.
+   The census got *tighter*, not looser, so nothing regressed — but the two entries accounting for the
+   difference were never identified. Neither commit message cites those figures. Re-run
+   `python scratchpad/audit_indicators.py` and diff against the earlier list if the exact delta matters.
+6. **Cosmetic, optional:** the `~94124` comment on `EJ_DES_TOTAL` (`main.py:162`) is stale (live value
+   96 130.34). Fixing it rehashes the pin key, so gate the edit through `regress.py` — the pin values
+   themselves will not move (comment-only change, but the SHA-256 is over source bytes).
 
 ## Environment
 
