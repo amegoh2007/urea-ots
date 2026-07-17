@@ -762,7 +762,18 @@ R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT) / (R328_C003_T - R328_C002_
 R328_E007_EPS  = 0.6667                                     # 328E007 feed/effluent interchanger
 R328_E007_LOSS = 18.3                                       # kW shell heat loss
 R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 boundary
-R328_D001_OFFGAS_H2O_DES = 100.0 * psat_water_bara(R328_E007_TC_OUT) / R328_D001_P_BARA   # ~62.9 mol% sat H2O in offgas -> 328E004 (TT-328008 114C, PIC-328202 2.6 bara)
+# --- TIC-328008 inferential: H2O mol% in 328C002 offgas (-> 328E004) ---
+# VLE node is the 328C002 OVHD (117 C / 3.5 bar a), NOT the 328D001 drum (2.6 bar a):
+# the drum sits 0.9 bar below the column top across 328E004, so the drum-node Raoult
+# (62.9 mol%) mis-anchored the split. Pure Raoult at the true node is 51.44 mol%,
+# still 5.2 pts over the datasheet, so a lumped H2O activity coeff PHI closes it to
+# the mandated PFD stream 737 (46.21 mol%). PHI back-solves as an identity, so DES
+# reproduces 46.21 bit-exact while the runtime form (main.py:~3757) stays live on drum P.
+R328_C002_P_TOP  = 3.5                                      # 328C002 OVHD press (bar a) at the VLE node
+R328_E004_DP     = R328_C002_P_TOP - R328_D001_P_BARA       # 0.9 bar drop 328C002 top -> 328D001 drum over 328E004
+R328_D001_OFFGAS_H2O_PFD = 46.21                            # mol% H2O in offgas, Combined_1750 PFD stream 737 @117 C / 3.5 bar a
+R328_D001_OFFGAS_PHI = (R328_D001_OFFGAS_H2O_PFD/100.0) * R328_C002_P_TOP / psat_water_bara(R328_C002_T_TOP)   # H2O activity coeff back-solved to PFD 737; psat(117)=1.8004 -> 0.898328
+R328_D001_OFFGAS_H2O_DES = 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_TOP) / R328_C002_P_TOP   # = 46.21 mol% -> 328E004 (identity anchor; supersedes 62.9 drum-node Raoult)
 
 
 # ==========================================================================
@@ -3754,7 +3765,7 @@ def step_sim(dt: float) -> dict:
 
     # ----- auxiliary faceplate trims (stepped for liveness; off the network)
     #   FIC-323405 / LIC-323503 dropped from here: both now step on the live 718A/718B/323D011 network.
-    _ctrl_ipd(s.TIC_328008, 100.0 * psat_water_bara(R328_E007_TC_OUT) / max(s.a328_d001_P, 0.1), dt)   # inferential offgas H2O mol% (TT-328008 114C, PIC-328202)
+    _ctrl_ipd(s.TIC_328008, 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_TOP) / max(s.a328_d001_P + R328_E004_DP, 0.1), dt)   # inferential offgas H2O mol% at 328C002 top (117C/3.5bara), PHI to PFD 737; live on drum PIC-328202 + 0.9 bar dP
     _ctrl_ipd(s.TIC_328012, s.a328_c003_T - R328_C003_T746, dt)              # differential PV: TT-328013 (bottom) - TT-328012 (3rd tray)
     _ctrl_ipd(s.SIC_323902, s.SIC_323902["op"], dt)
     _ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)
