@@ -265,9 +265,9 @@
       { k: 'lt502',  t: 'ind', x: 40,   y: 440, tag: 'LT-323502',  bind: 'LPCC_3232.E003.LI_323502',    u: '%',     dec: 1 },   // 323D001 level
       { k: 'sic901', t: 'ind', x: 40,   y: 552, tag: 'SIC-323901', bind: 'LPCC_3232.E003.SIC_323901.pv', mode: 'LPCC_3232.E003.SIC_323901.mode', u: 'RPM', dec: 0, note: '323P001A pump speed; MAN/AUTO/CAS' },
       { k: 'sic902', t: 'ind', x: 211,  y: 556, tag: 'SIC-323902', bind: 'LPCC_3232.E003.SIC_323902.pv', mode: 'LPCC_3232.E003.SIC_323902.mode', u: 'RPM', dec: 0, note: '323P001B pump speed; MAN/AUTO/CAS' },
-      { k: 'tic013', t: 'ind', x: 285,  y: 345, tag: 'TIC-323013', bind: 'LPCC_3232.E003.TIC_323013.pv', mode: 'LPCC_3232.E003.TIC_323013.mode', u: 'C', dec: 1, note: 'holds 323E003 outlet temp via TV-323013A/B steam split' },
-      { k: 'tv013a', t: 'avalve', x: 297, y: 197, tag: 'TV-323013A', bind: 'LPCC_3232.E003.TIC_323013.op', u: '%', dec: 1 },
-      { k: 'tv013b', t: 'avalve', x: 362, y: 268, tag: 'TV-323013B', bind: 'LPCC_3232.E003.TIC_323013.op', u: '%', dec: 1 },
+      { k: 'tic013', t: 'ind', x: 285,  y: 345, tag: 'TIC-323013', bind: 'LPCC_3232.E003.TIC_323013.pv', mode: 'LPCC_3232.E003.TIC_323013.mode', u: 'C', dec: 1, note: 'holds 323E003 tempered-water supply temp (55 C) via the TV-323013A/B split range' },
+      { k: 'tv013a', t: 'avalve', x: 297, y: 197, tag: 'TV-323013A', bind: 'LPCC_3232.E003.TV_323013A', u: '%', dec: 1 },   // cold make-up
+      { k: 'tv013b', t: 'avalve', x: 362, y: 268, tag: 'TV-323013B', bind: 'LPCC_3232.E003.TV_323013B', u: '%', dec: 1 },   // hot bypass (opposite)
       // ---- 323C005 rectifying column : C005 block ----
       { k: 'ttc005', t: 'ind', x: 1102, y: 108, tag: 'TT-323C005', bind: 'LPCC_3232.C005.TT_323C005',   u: 'C',   dec: 1 },   // 52.8 C overhead
       { k: 'lic503', t: 'ind', x: 1102, y: 525, tag: 'LIC-323503', bind: 'LPCC_3232.C005.LIC_323503.pv', mode: 'LPCC_3232.C005.LIC_323503.mode', u: '%', dec: 1, note: 'holds 323C005 bottoms level via LV-323503 drain' },
@@ -293,7 +293,7 @@
       { k: 'tt005w', t: 'ind', x: 43,   y: 244, tag: 'TT-323005', bind: 'RECIRC_323.F004.TT_323005', u: 'C', dec: 1 },   // 323F004 flash temp (hold 106 C)
       { k: 'lt506w', t: 'ind', x: 40,   y: 369, tag: 'LT-323506'  },   // 2nd level boundary
       { k: 'p003w',  t: 'ind', x: 373,  y: 72,  tag: '329P003'    },   // 329 pumps (other unit)
-      { k: 'tt015w', t: 'ind', x: 503,  y: 235, tag: 'TT-323015'  },   // boundary temp
+      { k: 'tt015',  t: 'ind', x: 503,  y: 235, tag: 'TT-323015', bind: 'LPCC_3232.E003.TT_323015', u: 'C', dec: 1 },   // 323E003 -> 323P003 TW return (1103, 65 C)
       { k: 'pt8401w',t: 'ind', x: 614,  y: 502, tag: 'PT-328401'  },   // 328P002 discharge (unmodelled)
       { k: 'p002w',  t: 'ind', x: 624,  y: 475, tag: '328P002'    },   // reflux pumps (unmodelled toggle)
       { k: 'e003w',  t: 'ind', x: 50,   y: 680, tag: '322E003'    },   // absorber recycle boundary

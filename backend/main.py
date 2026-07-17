@@ -686,6 +686,10 @@ R3232_E003_PHI744 = 31478.0 / A328_M756_DES                 # wash split on 756 
 R3232_E003_M744_DES = R3232_E003_PHI744 * A328_M756_DES      # 31478
 R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES - R3232_E003_M744_DES  # 38713.2
 R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
+# 323E003 tempered-water circuit: PFD stream 1102 supply 55 °C / 1103 return 65 °C.  R3232_TW_T is
+#   their mean (== 60) and stays the DESIGN datum for the UA back-solve below -- never a live value.
+R3232_TW_SUP_T = 55.0 ; R3232_TW_RET_T = 65.0               # TIC-323013 SP (1102) ; TT-323015 (1103)
+R3232_TV13_DES_PCT = 50.0 ; R3232_TW_TAU_S = 25.0           # TV-323013A design stroke ; supply-T lag (s)
 R3232_E003_T744 = R3232_E003_T - 30.0                       # 44 °C wash to Comp II
 R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.03
 R3232_E003_PV_OP_DES = 25.0                                 # PV-323202 vent stroke
@@ -2499,12 +2503,15 @@ class State:
                            "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
                            "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
-        # TIC-323013 323E003 tempered-water outlet temp -> TV-323013 (DIRECT cooling).
-        self.TIC_323013 = {"mode": "CAS", "op": 50.0,
-                           "sp": R3232_E003_T, "pv": R3232_E003_T,
-                           "pv1": R3232_E003_T, "pv2": R3232_E003_T,
+        # TIC-323013 323E003 tempered-water SUPPLY temp (stream 1102, 55 °C) -> split-range TV-323013A/B.
+        #   DIRECT: PV above SP -> op rises -> TV-A opens (cold make-up in) and TV-B closes (hot bypass
+        #   out); the two strokes are exact opposites.  sp span = the achievable supply band: 45 °C at
+        #   TV-A wide open, 65 °C (= return temp) at TV-A shut / full bypass.
+        self.TIC_323013 = {"mode": "CAS", "op": R3232_TV13_DES_PCT,
+                           "sp": R3232_TW_SUP_T, "pv": R3232_TW_SUP_T,
+                           "pv1": R3232_TW_SUP_T, "pv2": R3232_TW_SUP_T,
                            "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 60.0, "sp_hi": 90.0}
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 45.0, "sp_hi": R3232_TW_RET_T}
         # FIC-323401 328D003 Comp-I flush 401 -> FV-323401 (REVERSE flow).
         self.FIC_323401 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E011_M401_DES, "pv": R3232_E011_M401_DES,
@@ -3534,8 +3541,20 @@ def step_sim(dt: float) -> dict:
     rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
     sic_op   = _ctrl_ipd(s.SIC_323901, rpm_pv, dt, lic502_op)            # cascade slave (speed)
     m_308    = R3232_E003_M308_DES * (sic_op / R3232_P001_RPM_DES)        # condensate -> boundary
-    tic13_op = _ctrl_ipd(s.TIC_323013, Te003, dt)
-    Q_e003   = R3232_E003_UA_KW * (Te003 - R3232_TW_T) * (tic13_op / 50.0)
+    #   Tempered-water circuit (PFD 1102 supply / 1103 return).  TV-323013A admits cold make-up, TV-323013B
+    #   bypasses hot return -> split-range opposites off one op.  House normalized-stroke valve char: at
+    #   op == op_des the ratio is 1 -> T_ss == R3232_TW_SUP_T == sp -> PV stationary -> du == 0 (design exact).
+    #   Duty now rides the physical driving force (live TW mean vs shell) instead of a linear op fudge:
+    #   at design 1000*(74 - 60) == 14000 kW, identical to the retired (tic13_op/50) form.
+    tva_op   = s.TIC_323013["op"]                              # prior-step TV-323013A stroke
+    T_tw_ss  = clamp(R3232_TW_RET_T - (R3232_TW_RET_T - R3232_TW_SUP_T)
+                     * (tva_op / max(R3232_TV13_DES_PCT, 1e-6)), 20.0, R3232_TW_RET_T)
+    T_tw_sup = _lag1(s.tlag, "R3232_TW_SUP", T_tw_ss, R3232_TW_TAU_S, dt)   # stream 1102 (55 °C)
+    T_tw_ret = s.tlag.get("R3232_TW_RET", R3232_TW_RET_T)      # prior-step state; breaks the algebraic loop
+    tic13_op = _ctrl_ipd(s.TIC_323013, T_tw_sup, dt)           # PV = TW supply, NOT the shell temp
+    Q_e003   = R3232_E003_UA_KW * (Te003 - 0.5*(T_tw_sup + T_tw_ret))
+    T_tw_ret = T_tw_sup + (R3232_TW_RET_T - R3232_TW_SUP_T) * (Q_e003 / R3232_E003_Q_DES_KW)  # 1103 (65 °C)
+    s.tlag["R3232_TW_RET"] = T_tw_ret                          # TT-323015
     m_cond   = m_305 + R3232_M797_DES - m_321
     sens_e003= ((m_305*(R3232_E003_T305 - Te003)
                  + m718B_prev*(R3232_E011_T - Te003)
@@ -4000,6 +4019,9 @@ def step_sim(dt: float) -> dict:
                                "op": round(s.SIC_323902["op"], 1), "mode": s.SIC_323902["mode"]},
                 "TIC_323013": {"pv": round(s.TIC_323013["pv"], 1), "sp": round(s.TIC_323013["sp"], 1),
                                "op": round(s.TIC_323013["op"], 2), "mode": s.TIC_323013["mode"]},
+                "TV_323013A": round(tic13_op, 1),              # cold make-up : opens as PV rises above SP
+                "TV_323013B": round(100.0 - tic13_op, 1),      # hot bypass : exact opposite of TV-323013A
+                "TT_323015":  round(T_tw_ret, 1),              # TW return 323E003 -> 323P003 (1103, 65 °C)
                 "FIC_328402": {"pv": round(s.FIC_328402["pv"], 1), "sp": round(s.FIC_328402["sp"], 1),
                                "op": round(s.FIC_328402["op"], 1), "mode": s.FIC_328402["mode"]},
             },
