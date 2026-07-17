@@ -320,7 +320,7 @@
       { k: 'fic8401', t: 'ind', x: 1184, y: 296, tag: 'FIC-328401', bind: 'DESORB_328.C004.FIC_328401.pv', mode: 'DESORB_328.C004.FIC_328401.mode', u: 'T/H', dec: 2, cas: true, note: 'slave: CAS follows FFIC-328401 ratio; HS steam via FV-328401' },
       { k: 'fv8401', t: 'avalve', x: 1014, y: 324, tag: 'FV-328401', bind: 'DESORB_328.C004.FIC_328401.op', u: '%', dec: 1 },
       // ---- 328D001 reflux drum : D001 block, TIC-328008 / FIC-328404 / PIC-328202 ----
-      { k: 'tic8008', t: 'ind', x: 693, y: 50,  tag: 'TIC-328008', bind: 'DESORB_328.D001.TIC_328008.pv', mode: 'DESORB_328.D001.TIC_328008.mode', u: 'C', dec: 1, note: '328D001 vent temp / %H2O control' },
+      { k: 'tic8008', t: 'ind', x: 693, y: 50,  tag: 'TIC-328008', bind: 'DESORB_328.D001.TIC_328008.pv', mode: 'DESORB_328.D001.TIC_328008.mode', u: '%', dec: 1, note: '328C002 offgas H2O -> 328E004 (mol%, PFD 737 = 46.2)' },
       { k: 'fic8404', t: 'ind', x: 542, y: 76,  tag: 'FIC-328404', bind: 'DESORB_328.D001.FIC_328404.pv', mode: 'DESORB_328.D001.FIC_328404.mode', u: 'M3/H', dec: 2, note: '328D001 reflux flow via FV-328404' },
       { k: 'fv8404', t: 'avalve', x: 462, y: 112, tag: 'FV-328404', bind: 'DESORB_328.D001.FIC_328404.op', u: '%', dec: 1 },
       { k: 'pic82021',t: 'ind', x: 853, y: 136, tag: 'PIC-328202', bind: 'DESORB_328.D001.PIC_328202.pv', mode: 'DESORB_328.D001.PIC_328202.mode', u: 'BAR A', dec: 2, note: '328D001 pressure via PV-328202' },
