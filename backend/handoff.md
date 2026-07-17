@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-16 (session 9) · branch `master` · sprint items 1 + 2 of 25 closed_
+_Last updated: 2026-07-17 (session 10) · branch `master` · sprint items 1, 2, 3b, 3c, 3d, 5 closed + Tranche A2 (items 11/14/16, LIC-323503 cascade)_
 
 ## Goal
 
@@ -875,6 +875,119 @@ the duplicate-bind defects. Backend batch (rehash ⇒ gate before commit): 3a, 4
   53 368.28 + 42 762.05 = **96 130.34 kg/h**; `main.py:158` (`EJ_SUCTION = overflow × MW`) is the
   source of truth. Making the model agree with the old table would fabricate agreement with a
   falsified datasheet.
+
+## 2026-07-17 (session 10): Tranche A2 — LIC-323503 given real authority via a cascade onto the 718A leg
+
+Commit `7c2adf9` (**pushed**, `f66dac9..7c2adf9` on `master`). Closes sprint items **11, 14, 16** (kg/h
+tranche only; the m³/h faceplate migration is deferred to a separate commit — task #16). Two files by path:
+`backend/main.py` (+141/−24 incl. the two prior sprint commits already in HEAD) and the new acceptance test
+`scratchpad/dyn503.py`. Nothing mid-edit; all four gates green at commit time.
+
+**The Goal.** LIC-323503 was noded onto **323D003**, which `main.py:71` records as *unit 323-2 auxiliary
+drum (off-envelope, no HMB stream)* — the controller had no plant to act on. Re-node it onto **323D011**,
+the flash-tank-condenser level tank it is actually named for (`328E021 328E007 328P003 328P006.md:359`,
+"maintains the flash tank condenser level tank at 50% capacity"), and give it genuine steady-state
+authority over the 323P008 common-discharge header feeding the two lean-carbamate recycle legs (718A/718B).
+
+**The load-bearing law discovered: DOF accounting beats plausible topology.** LV-323503 sits on the common
+discharge header, physically upstream of both 718 legs, so the intuitive model is a *series* stroke derating
+both FVs. That puts **three integrators** (LIC-323503, FIC-323405, FIC-323418) on **two degrees of freedom**
+(tank inventory, A/B split). A FIC in AUTO holds its leg at SP by integral action and therefore *rejects*
+anything placed in series with it — so the level loop is left with no steady-state authority and winds up to
+`op_hi`. **Proven empirically, not argued:** a 12,000 s step test (drain 10 % of the tank) drove LIC-323503
+to op=100 with the level parked at **51.05 %**, never returning to SP. This is the same failure mode as the
+rejected `avail`/derate approach, and it is why that approach was abandoned (see Rejected register).
+
+**The fix — one integrator per DOF (a cascade, realizing the OEM "runs out on its curve" narrative,
+`323E011 323D011 323P008 Datasheets.md:54`):**
+- **LIC-323503 (master)** outputs a *total draw demand* for the header:
+  `m718_dmd = R3232_D011_M718_DES * (lic503_op / R3232_LV503_OP_DES)`.
+- **FIC-323418 stays independent AUTO** on the 718B slipstream — the OEM's "specific recycle flow rate"
+  (`328E021…:369`), with a real tuning row (`Master_PID_Tuning_Constants.md:14`, "ACA FROM 323P8A/B").
+- **FIC-323405 becomes the CAS slave**, `cas_sp = max(m718_dmd − m_718B, 0.0)`. 718A is the balance leg,
+  so the level loop's authority lands *on* it instead of being *rejected by* it. **FIC-323405 has zero hits
+  anywhere in `References/`** — no OEM row claims it as an independent controller — which is precisely why
+  it, and not FIC-323418, is the correct slave.
+
+Same step test on the cascade returns the level to SP with the op off the rail, and FIC-323418's op stays
+flat at **exactly 50.000** throughout — proof the split DOF is now decoupled from the inventory DOF.
+
+**The tick-1 design-anchor test (methodology, reusable).** Design bit-exactness was verified **at the raw
+float on tick 1, not at a settled value**: the boot seed *is* the design point, so if the network is exact
+the first tick must leave every state bitwise untouched. This sidesteps the loop-specific settle-time
+problem entirely — the D011 loop's natural period is ~1257 s, so the house 600 s settle reads a transient
+and an inexact result there proves *nothing*. All five states bit-exact at tick 1, including `cas_sp`
+landing on `R3232_M718A_DES` by the **exact-halving lemma** (`D − 0.5*D == 0.5*D` exactly for a binary
+float; `m_718B == 0.5*D` at design, so `cas_sp = D − 0.5*D = 0.5*D` bitwise). `sp_hi = 8000 > 3560.4` ⇒
+the CAS clamp is inert at design. ⚠ **Display-precision probes cannot prove bit-exactness** (telemetry does
+`round(x,1)`); `dyn503.py` gate 1 tests it at the raw float and ships with the code, so the commit message
+legitimately claims bit-exactness.
+
+**Tuning.** LIC-323503 keeps the OEM DCS pair **verbatim** (Kc 1.80 / Ti 120 s,
+`Master_PID_Tuning_Constants.md:26`) — legal here, and *not* for flow loops, because `_ctrl_ipd` works in
+engineering units and a level's EU already is %span. Process gain unchanged: `k = 7120.8/(3600·1186.8) =
+1.667e-3 %/s per %op`, `wn = 5.0e-3`, `zeta = 0.30`. FIC-323405/418 retuned **Kc 1.2 → 0.4** by the house
+criterion (`g = 3560.4/50 = 71.2`, `a = 0.0196`; Kc 1.2 → loop coef −0.674, alternating; Kc 0.4 → 0.442,
+bracketing FIC-323402's 0.43 and FIC-328404's 0.46 precedents).
+
+**Modelling-gap notes recorded in-code.** `m_makeup` was freed from FIC-323418 (a false binding — the OEM
+service for that tag is the 718B leg) to the plain constant `A323_C005_MAKEUP`, a back-solved closure
+artifact rather than a PFD stream, lawful under `ui_guidelines.md §4` with the missing-controller gap
+recorded in-code. Units unchanged (kg/h).
+
+**Current State.** Level with origin at `7c2adf9` on `master` (0/0). **Six of 25 sprint items closed**
+(1, 2, 3b, 3c, 3d, 5, plus Tranche A2's 11/14/16). Tracker rescoped this session: #6 marked completed
+(Tranche A2); three durable follow-on tasks created — **#16** (Tranche A3, m³/h migration), **#17**
+(Tranche B, item 3a), **#18** (Tranche C, items 10/13/17). Nothing mid-edit.
+
+**Active Files.**
+- `backend/main.py` — the cascade runtime block (~L3631), `R3232_D011_*` constants (~L613), the
+  `LIC_323503` init comment block (~L2517), `_fic_flow` (`avail` fully reverted; series-rejection warning
+  docstring retained), `FIC_323405` boots CAS.
+- `scratchpad/dyn503.py` — NEW, tracked as of this commit. The acceptance test carrying both gates
+  (tick-1 raw-float anchor + 12,000 s step test); the reproduction case for both the rejection and the
+  acceptance; cited from the 323D011 runtime block.
+- `scratchpad/regress.py` + `scratchpad/pindiff.py` + `scratchpad/golden_pin.json` — pin gate (unchanged).
+
+**Failed Attempts / lessons (this session + carried, still load-bearing).**
+- **Series level-valve modelled as an `avail`/derate multiplier on two AUTO FICs — REJECTED empirically**
+  (see Rejected register; step test: op→100, level parked 51.05 %). `avail` removed from `_fic_flow`
+  entirely. Do **not** reach for it for item 3a / 328D003 either.
+- **Reading tick N settle instead of tick 1 for a bit-exact claim** — a loop with a long natural period
+  (D011 ~1257 s) shows a transient at the house 600 s settle; an inexact read there proves nothing. Read
+  tick 1 against the boot seed instead.
+- **The `avail` half-landing lesson:** a design-neutral parameter (`avail` defaulted 1.0 = 1.0 at design)
+  hides its own bugs — a partial wiring left every static probe green while the bug was live off-design.
+  Only a dynamic *step* test catches it.
+- **Float residue is real but controller-arrested:** at 30,000 s `M_D011` sits rel −1.2e-11 off
+  `R3232_D011_M_DES`; LIC-323503 now holds it to 1e-11 of SP (pre-sprint that drift had no controller).
+- **IEEE-754 association is not algebra** — never re-associate an existing float expression (the
+  `s.r3232_e011_M` integrand line was left byte-identical; dead `liq_e011` deleted outright rather than
+  folded in).
+- **`awk` range-print terminates inside a Python docstring** — use `grep -n` then `sed -n 'START,ENDp'`.
+- **Error-C refined:** scratchpad helpers may not survive sessions — `ls` first (`pfd.py`/`pindiff.py`
+  survived; `dyn503.py` is now tracked, so it will).
+- Carried commit-mechanics traps still bite: `-F <file>` for multi-line messages (PowerShell here-strings
+  break the Bash tool); always `PYTHONIOENCODING=utf-8`; `regress.py` only *dumps* the pin (gate is two
+  steps); always `git fetch` before trusting `origin/*`; stage selectively by path, never `git add -A`
+  (26 untracked paths must stay untouched).
+
+**Next Steps (Tranche map, sequenced).** Frontend-only batch first (no pin rehash): item 12 overlay half +
+`overlays.js` duplicate-bind defects (task #15). Then the backend batch (rehashes the pin; require
+`leaves: 25  keys: 15  diffs: 0` at each checkpoint): 3a, 4, 7, 8, 9, 10, 13, 17, 18, 19, 20, 21, 22, 23,
+24(binding), 25, plus Tranche A3 (#16). Open research gap for #4: urea–water VLE/BPE correlation for
+PY-324201 (item 19) and AY-324701 (item 21) — search the 324 section of `main.py` for an existing BPE
+routine **first**. Item 3a (#17) is blocked: it needs a 328D003 level controller cascading into FIC-328402
+(the `avail` escape hatch is disproven), still open on what drives `m_744`.
+
+**Verification (all four gates green, re-run fresh this session before commit).**
+
+| gate | command | result |
+|---|---|---|
+| Design anchor (raw float, tick 1) | `python ../scratchpad/dyn503.py` (gate 1) | **5/5 `exact True`** |
+| Steady-state authority (12,000 s step) | `python ../scratchpad/dyn503.py` (gate 2) | **level → 50.0000 %, op → 50.000 off rail, FIC418 flat 50.000; FAILURES 0** |
+| House design probe (8 keys, rounded) | `python …/probe328.py` | **FAILURES 0** |
+| Golden pin | `regress.py <abs>` → `pindiff.py` | **leaves 25, keys 15, diffs 0** |
 
 ## Next steps (if work resumes)
 
