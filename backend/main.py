@@ -638,6 +638,7 @@ R328_D001_IN_DES    = R328_D001_M737_DES + R328_D001_M718A_DES
 R328_D001_M786_DES  = 276.0                                 # vent -> 323E011
 R328_D001_M775_DES  = R328_C002_M775_DES                    # 1675 reflux -> 328C002 (FIC-328404)
 R328_D001_M776_DES  = R328_D001_IN_DES - R328_D001_M786_DES - R328_D001_M775_DES  # 8274.4 -> 323E003
+R328_D001_M776_RHO  = 1095.0    # kg/m3, stream 776 eff. density @61 C (Combined_1750 tbl, col 776) -> FT-328401 m3/h (8274.4/1095=7.56 -> PFD 7.6)
 R328_D001_M774_DES  = R328_D001_M775_DES + R328_D001_M776_DES             # 9949 (PFD 774 ✓)
 R328_D001_T718A = 45.0
 R328_D001_M_FULL = 20900.0
@@ -4166,6 +4167,7 @@ def step_sim(dt: float) -> dict:
                 "vent786_th": round(m_786_d001 / 1000.0, 2),               # PIC-328202 vent -> 323E011 (t/h)
                 "reflux775_th":round(m_775 / 1000.0, 2),                   # FIC-328404 reflux -> 328C002 (t/h)
                 "draw776_th": round(m_776 / 1000.0, 2),                    # LV-328501 draw -> 323E003 (t/h)
+                "flow776_m3h": round(m_776 / R328_D001_M776_RHO, 2),        # FT-328401: LV-328501 draw in m3/h (stream 776, des 7.6)
                 "PIC_328202": {"pv": round(s.PIC_328202["pv"], 2), "sp": round(s.PIC_328202["sp"], 2),
                                "op": round(s.PIC_328202["op"], 1), "mode": s.PIC_328202["mode"]},
                 "LIC_328501": {"pv": round(s.LIC_328501["pv"], 1), "sp": round(s.LIC_328501["sp"], 1),
@@ -4201,8 +4203,6 @@ def step_sim(dt: float) -> dict:
                 "LI_328II":   round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1),
                 "form735_th": round(m_735 / 1000.0, 2),                    # Comp-I formation -> 328C002 (t/h)
                 "collect755_th": round(m_755 / 1000.0, 2),                 # 322P002 collector -> 322C001 (t/h)
-                "FIC_323401": {"pv": round(s.FIC_323401["pv"], 1), "sp": round(s.FIC_323401["sp"], 1),
-                               "op": round(s.FIC_323401["op"], 1), "mode": s.FIC_323401["mode"]},
                 "FIC_328406": {"pv": round(s.FIC_328406["pv"], 1), "sp": round(s.FIC_328406["sp"], 1),
                                "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"]},
                 "P002A":      {"on": s.aux_pumps["322P002A"]["on"], "mode": s.aux_pumps["322P002A"]["mode"]},
