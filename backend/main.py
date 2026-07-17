@@ -612,6 +612,11 @@ R3232_E011_P_BARA = 1.13 ; R3232_E011_P_KP = 0.05
 R3232_E011_PV_OP_DES = 25.0                                 # PIC-323203 vent stroke
 R3232_D011_M_TAU_S = 600.0
 R3232_D011_M_DES   = R3232_D011_M718_DES/3600.0 * R3232_D011_M_TAU_S      # 1186.8 kg
+R3232_D011_LVL_SP  = 50.0                        # LT-323503 design level (%): OEM "maintains the
+#   flash tank condenser level tank at 50% capacity" (328E021 328E007 328P003 328P006.md:359).
+R3232_LV503_OP_DES  = 50.0                       # LV-323503 stroke, 323P008 common discharge header
+R3232_FIC405_OP_DES = 50.0                       # FV-323405 stroke, 718A leg -> 328E004/328D001
+R3232_FIC418_OP_DES = 50.0                       # FV-323418 stroke, 718B leg -> 323E003
 R3232_E011_Q_DES_KW = 3440.0                                # datasheet condenser duty
 R3232_E011_UA_KW    = R3232_E011_Q_DES_KW / (R3232_E011_T - 35.0)         # kW/K vs 35°C CW
 # λ_v011 (vapour-generation latent) closes the drum energy balance at 45°C:
@@ -2044,6 +2049,11 @@ def _fic_flow(c: dict, design: float, op_des: float, store: dict, key: str,
     `c["op"]` from the previous tick sets this tick's pre-lag flow, `_ctrl_ipd` then advances
     the controller.  Bit-exact at design:  op==op_des  ->  pre==design  ->  pv==design==sp
     ->  du==0  ->  op stays op_des  ->  flow==design.  Mutates `c` (velocity form) in place.
+
+    A FIC in AUTO holds its leg at SP by integral action, so it REJECTS any upstream element
+    placed in series with it -- do not model a series level valve by derating `design` here.
+    An upstream level loop must instead cascade into this FIC via `cas_sp` (see LIC-323503 /
+    FIC-323405), or it has no steady-state authority and winds up.
     """
     pre = design * (c["op"] / op_des)
     pv  = _lag1(store, key, pre, tau_s, dt)
@@ -2504,10 +2514,24 @@ class State:
                            "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
                            "Kc": 1.0, "Ti": 20.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
-        # LIC-323503 tempered-water 323D003 seal level -> display trim (DIRECT).
-        self.LIC_323503 = {"mode": "AUTO", "op": 50.0,
-                           "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
-                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+        # LIC-323503 323D011 flash-tank-condenser level tank (LT-323503) -> LV-323503 on the 323P008
+        #   lean-carbamate pump discharge header.  DIRECT: level above SP -> op rises -> LV-503 opens ->
+        #   less discharge resistance -> the pump runs out on its curve -> tank drains faster
+        #   (323E011 323D011 323P008 Datasheets.md:54).  The tank is 323P008's NPSH buffer; OEM holds
+        #   it at 50 % capacity.  MASTER of a cascade: because both 718 legs terminate in AUTO flow
+        #   controllers, this op is realised as the TOTAL DRAW DEMAND for the header rather than as a
+        #   raw stroke -- FIC-323418 holds its slipstream and FIC-323405 takes the balance as a remote
+        #   setpoint.  See the 323D011 runtime block for why the series form cannot work.
+        #   Tuning is the OEM DCS pair verbatim (Master_PID_Tuning_Constants.md:26, "323D011,ACA").
+        #   Legal here (and NOT for the flow loops) because the PV is a level in percent, so the
+        #   controller's engineering unit IS %span and no gain rescale applies.  Integrating level,
+        #   k = 7120.8/(3600*1186.8) = 1.667e-3 %/s per %op (unchanged by the cascade: m718_dmd keeps
+        #   the same DES/op_des slope the header stroke had); PI closes s^2 + k*Kc*s + k*Kc/Ti, giving
+        #   wn = 5.0e-3 rad/s (period ~1257 s) and zeta = 0.30 -> stable, slow averaging control.
+        self.LIC_323503 = {"mode": "AUTO", "op": R3232_LV503_OP_DES,
+                           "sp": R3232_D011_LVL_SP, "pv": R3232_D011_LVL_SP,
+                           "pv1": R3232_D011_LVL_SP, "pv2": R3232_D011_LVL_SP,
+                           "Kc": 1.80, "Ti": 120.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # TIC-323013 323E003 tempered-water SUPPLY temp (stream 1102, 55 °C) -> split-range TV-323013A/B.
         #   DIRECT: PV above SP -> op rises -> TV-A opens (cold make-up in) and TV-B closes (hot bypass
@@ -2530,17 +2554,22 @@ class State:
                            "pv1": R3232_E011_M402_DES, "pv2": R3232_E011_M402_DES,
                            "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: g=2931/50=58.6, M=Kc*a*g/a units; loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=70 (damped-oscillatory band 51-102, rings on disturbance). Kc=0.5 -> M=29, coef 0.43 monotone.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 6000.0}
-        # FIC-323405 323E003 wash-water trim -> FV-323405 (REVERSE, display trim).
-        self.FIC_323405 = {"mode": "AUTO", "op": 50.0,
-                           "sp": 1000.0, "pv": 1000.0, "pv1": 1000.0, "pv2": 1000.0,
-                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 2000.0}
-        # FIC-323418 323C005 makeup water -> FV-323418 (REVERSE flow).
-        self.FIC_323418 = {"mode": "AUTO", "op": 50.0,
-                           "sp": A323_C005_MAKEUP, "pv": A323_C005_MAKEUP,
-                           "pv1": A323_C005_MAKEUP, "pv2": A323_C005_MAKEUP,
-                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 1000.0}
+        # FIC-323405 lean-carbamate 718A leg, 323D011/323P008 -> 328E004/328D001 -> FV-323405 (REVERSE).
+        #   CAS slave of LIC-323503: its remote SP is the level loop's total draw demand less the
+        #   FIC-323418 slipstream, so 718A balances the 323D011 inventory.  Dropping it to AUTO/MAN
+        #   is legal and simply leaves the tank on manual draw (LIC-323503's output then goes nowhere).
+        self.FIC_323405 = {"mode": "CAS", "op": R3232_FIC405_OP_DES,
+                           "sp": R3232_M718A_DES, "pv": R3232_M718A_DES,
+                           "pv1": R3232_M718A_DES, "pv2": R3232_M718A_DES,
+                           "Kc": 0.4, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.4: g=3560.4/50=71.2, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives coef -0.674 (alternating). Kc=0.4 -> M=28.5, coef 0.442 monotone; brackets FIC-323402 (g=58.6, Kc=0.5, coef 0.43) and FIC-328404 (g=55.5, Kc=0.5, coef 0.46).
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 8000.0}
+        # FIC-323418 lean-carbamate 718B leg, 323D011/323P008 -> 323E003 -> FV-323418 (REVERSE).
+        #   OEM service is "ACA FROM 323P8A/B" (Master_PID_Tuning_Constants.md:14), i.e. this leg.
+        self.FIC_323418 = {"mode": "AUTO", "op": R3232_FIC418_OP_DES,
+                           "sp": R3232_M718B_DES, "pv": R3232_M718B_DES,
+                           "pv1": R3232_M718B_DES, "pv2": R3232_M718B_DES,
+                           "Kc": 0.4, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # same g=71.2 retune as FIC-323405 (718A/718B legs are identical by design).
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 8000.0}
 
         # -- 328-1 controllers (desorption / hydrolysis train) -----------------
         # LIC-328501 328D001 reflux-drum level -> LV-328501 (DIRECT, 776 -> 323E003).
@@ -3411,7 +3440,10 @@ def step_sim(dt: float) -> dict:
 
     # ----- Stage 1 : 323C005 vent scrub -> 328V001 -> Comp-I feed ---------
     Tc005    = s.a323_c005_T
-    m_makeup = _fic_flow(s.FIC_323418, A323_C005_MAKEUP, 50.0, s.tlag, "F_323418", dt)
+    m_makeup = A323_C005_MAKEUP     # demin make-up from an unmodelled utility header: constant per
+    #   ui_guidelines.md §4.  FIC-323418 used to drive this, but its OEM service is "ACA FROM 323P8A/B"
+    #   (Master_PID_Tuning_Constants.md:14) -- the 718B leg -- so that binding was false and is gone.
+    #   Modelling gap: this leg has no flow controller of its own until the make-up header is built.
     in_c005  = mv011_prev + m_makeup
     bot_c005 = A323_C005_BOT_DES * (s.a323_c005_M / A323_C005_M_DES)      # -> V001 @ 55°C
     P_c005   = (mv011_prev/3600.0*R3232_CP*(R3232_E011_T       - Tc005)
@@ -3582,10 +3614,31 @@ def step_sim(dt: float) -> dict:
     pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
     m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
     gen_v011 = R3232_E011_PHIV * in_e011
-    liq_e011 = in_e011 - m_v011
-    m_718_tot= liq_e011 + m_401                                          # + FIC-323401 flush -> 323D011
-    m_718A   = 0.5 * m_718_tot                                           # -> 328D001
-    m_718B   = 0.5 * m_718_tot                                           # -> 323E003
+    # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 fall in; the
+    # 323P008 lean-carbamate pumps draw out through LV-323503 on the common discharge header, which then
+    # splits into the 718A and 718B legs, each with its own FV.  Each leg is therefore two valves in
+    # series -> stroke ratios multiply.  Total is DERIVED from the legs: the legs are authoritative, so
+    # an operator stroking them apart shows up as a real inventory error that LIC-323503 integrates out.
+    # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 fall in; the
+    # 323P008 lean-carbamate pumps draw out through LV-323503, and the discharge header splits into
+    # the 718A and 718B legs.  LIC-323503 -> LV-323503 sets the TOTAL draw; FIC-323418 holds the 718B
+    # slipstream ("regulates the SPECIFIC recycle flow rate of lean carbamate", 328E021 328E007
+    # 328P003 328P006.md:369) and FIC-323405 takes the remainder as a CASCADE setpoint, so the level
+    # loop's authority lands on 718A instead of being rejected by it.  One integrator per degree of
+    # freedom (inventory -> LIC-323503/FIC-323405 cascade; split -> FIC-323418).  Modelling a series
+    # LV-503 as a derate on both FVs instead was tried and REJECTED: two AUTO FICs reject the header
+    # stroke by integral action, so LIC-323503 wound up to op_hi and level parked off SP (see
+    # scratchpad/dyn503.py).  The cascade slave is ~250x faster than the level loop (5 s lag vs the
+    # 1257 s natural period), so the standard >=5x separation for cascade stability holds easily.
+    lvl_d011 = s.r3232_e011_M / R3232_D011_M_DES * R3232_D011_LVL_SP      # LT-323503 (%)
+    lic503_op= _ctrl_ipd(s.LIC_323503, lvl_d011, dt)                      # -> LV-323503 (total draw)
+    m718_dmd = R3232_D011_M718_DES * (lic503_op / R3232_LV503_OP_DES)     # total draw demand (kg/h)
+    m_718B   = _fic_flow(s.FIC_323418, R3232_M718B_DES, R3232_FIC418_OP_DES, s.tlag,
+                         "F_323418", dt)                                  # -> 323E003 (slipstream)
+    m_718A   = _fic_flow(s.FIC_323405, R3232_M718A_DES, R3232_FIC405_OP_DES, s.tlag,
+                         "F_323405", dt,
+                         cas_sp=max(m718_dmd - m_718B, 0.0))              # -> 328E004/328D001 (bal)
+    m_718_tot= m_718A + m_718B                                            # -> 323D011 draw (kg/h)
     Q_e011   = R3232_E011_UA_KW * (Te011 - 35.0)
     sens_e011= ((m_701*(R3232_E011_T701 - Te011)
                  + R3232_M702_DES*(R3232_M702_T   - Te011)
@@ -3698,8 +3751,7 @@ def step_sim(dt: float) -> dict:
     s.tlag["R324_recyc"] = m_recyc
 
     # ----- auxiliary faceplate trims (stepped for liveness; off the network)
-    _ctrl_ipd(s.FIC_323405, 1000.0, dt)
-    _ctrl_ipd(s.LIC_323503, 50.0, dt)
+    #   FIC-323405 / LIC-323503 dropped from here: both now step on the live 718A/718B/323D011 network.
     _ctrl_ipd(s.TIC_328008, 100.0 * psat_water_bara(R328_E007_TC_OUT) / max(s.a328_d001_P, 0.1), dt)   # inferential offgas H2O mol% (TT-328008 114C, PIC-328202)
     _ctrl_ipd(s.TIC_328012, s.a328_c003_T - R328_C003_T746, dt)              # differential PV: TT-328013 (bottom) - TT-328012 (3rd tray)
     _ctrl_ipd(s.SIC_323902, s.SIC_323902["op"], dt)
@@ -4038,7 +4090,7 @@ def step_sim(dt: float) -> dict:
             "E011": {                            # 323E011 LP carbamate condenser + 323D011 (45°C)
                 "TT_323011":  round(s.r3232_e011_T, 1),                    # shell liquid temp (C, hold 45)
                 "P_bara":     round(s.r3232_e011_P, 2),                    # 323D011 pressure (bar a)
-                "LI_323D011": round(s.r3232_e011_M / R3232_D011_M_DES * 50.0, 1),
+                "LI_323D011": round(s.r3232_e011_M / R3232_D011_M_DES * R3232_D011_LVL_SP, 1),
                 "in701_th":   round(m_701 / 1000.0, 2),                    # 323F004 flash vapour in (t/h)
                 "vap011_th":  round(m_v011 / 1000.0, 2),                   # PIC-323203 vapour -> 323C005 (t/h)
                 "carb718A_th":round(m_718A / 1000.0, 2),                   # -> 328D001 (t/h)
@@ -4430,7 +4482,7 @@ R323_CTRL_MODES = {
     "TIC_323013": ("MAN", "AUTO", "CAS"),
     "FIC_323401": ("MAN", "AUTO"),
     "FIC_323402": ("MAN", "AUTO"),
-    "FIC_323405": ("MAN", "AUTO"),
+    "FIC_323405": ("MAN", "AUTO", "CAS"),   # CAS: LIC-323503 total-draw slave
     "FIC_323418": ("MAN", "AUTO"),
     # -- 328-1 (desorption / hydrolysis) -----------------------------------
     "LIC_328501": ("MAN", "AUTO"),
