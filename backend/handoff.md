@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-15 (session 8) · branch `master` · pushed through `e300f17`_
+_Last updated: 2026-07-16 (session 9) · branch `master` · sprint items 1 + 2 of 25 closed_
 
 ## Goal
 
@@ -572,6 +572,145 @@ deliberately preserved and never staged.
 
 **Next Steps.** No open work item. On resume, re-read `CLAUDE.md` first — the operating directives changed
 materially this session (autonomous push is now ON; the HALT/await-confirmation protocol is GONE).
+
+## 2026-07-16 (session 9): 25-item PFD gap-closure sprint — items 1 + 2 closed (323E003 tempered water)
+
+**The Goal.** User order (verbatim framing): *"Role: Senior Process Control & Automation Engineer. Task:
+Execute a massive gap-closure and UI-wiring sprint across the simulation's backend physics, control logic,
+and frontend faceplates based on the master PFD design values."* Source material is **mandated**, not
+advisory: `D:\Work\Urea Simulation\References\` for all equipment description/datasheets, and — *"For all
+composition and properties of streams at 100% load, strictly refer to"* —
+`Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`. 25 items across four domains: control-loop logic
+& valve actions (1, 22, 23), UI overlays & missing indicators (2, 3c, 3d, 5, 12, 18, 20), stream properties
+& volumetric bindings (3a, 3b, 6, 10, 11, 13, 14, 15, 16, 17, 24, 25), and dynamic/inferential calculated
+variables (4, 7, 8, 9, 19, 21).
+
+**Current State.** **2 of 25 items closed** (1 and 2), code-complete, gate-green, behaviourally verified,
+documented in the as-built reference as **Rev 9 / Revision Delta #13**, and committed. Nothing is mid-edit.
+The other 23 items are researched to varying depth (see Next Steps) but **not started in code**.
+
+Items 1 + 2 were one physical defect cluster — four faults on the single TIC-323013 loop:
+1. **Wrong PV node.** `_ctrl_ipd(s.TIC_323013, Te003, dt)` fed the controller the 323E003 **shell**
+   temperature (74 °C). TIC-323013 is the tempered-water **supply** controller; its PFD anchor is
+   **stream 1102 = 55 °C**.
+2. **The SP span forbade the design SP.** `sp_lo = 60.0` made the mandated 55 °C unreachable from the
+   faceplate. Span re-cut to **45–65 °C** = the physically achievable supply band.
+3. **No split range existed at all.** `overlays.js` bound TV-323013A *and* TV-323013B to the same
+   `LPCC_3232.E003.TIC_323013.op`, so both valves read identically. Now true opposites off one `op`:
+   $\theta_A = \text{op}$, $\theta_B = 100 - \text{op}$ ⇒ $\theta_A + \theta_B \equiv 100$ **exactly**.
+4. **A linear duty fudge.** `Q = UA·(T_shell − R3232_TW_T)·(op/50)` — an `op`-proportional shortcut with no
+   driving force, which `CLAUDE.md` §1 (Rigorous Kinetics, "no linear or static shortcuts") forbids.
+   Replaced by the physical form $Q = UA\cdot\bigl(T_{shell} - \tfrac12(T_{sup}+T_{ret})\bigr)$, with
+   $T_{ret}$ read from the prior-step state to break the algebraic loop (same idiom as `recyc_prev`).
+
+Item 2 (`TT-323015`, stream 1103, 65 °C) falls out of the same block for free: it is the tempered-water
+return, $T_{ret} = T_{sup} + (T_{ret}^{des} - T_{sup}^{des})\cdot Q/Q_{des}$.
+
+**Design anchor — bit-exact, not merely close.** `R3232_E003_UA_KW = 14000.0/(74.0−60.0) = 1000.0` exactly.
+Old: `1000.0*(74.0−60.0)*(50.0/50.0) = 14000.0`. New: `55.0+65.0 = 120.0 → 0.5*120.0 = 60.0 →
+74.0−60.0 = 14.0 → 1000.0*14.0 = 14000.0`. **Bit-identical in IEEE-754**, every intermediate exact.
+Return closes on itself: `55.0 + 10.0*(14000.0/14000.0) = 65.0` ⇒ tick n+1 reads the same mean ⇒ fixed
+point preserved. Dropping `(op/50)` is therefore *simultaneously* IEEE-exact **and** a §1 compliance fix.
+
+The 45 °C band edge is **not fitted** — two independent derivations agree: the valve char at $\theta_A=100$
+gives $65 - 10\cdot2 = 45$ °C, and the mixing law $55 = \tfrac12 T_{cold} + \tfrac12\cdot 65$ back-solves
+$T_{cold} = 45$ °C.
+
+**Verification (all green).**
+- Pin gate, both steps: **`leaves: 25  keys: 15  diffs: 0`**.
+- Design probe (6000 ticks @ 0.1 s): `TIC_323013 {pv 55.0, sp 55.0, op 50.0, CAS}`, `TV_323013A 50.0`,
+  `TV_323013B 50.0`, `TT_323015 65.0`, `TT_323003 74.0` **unchanged** (shell untouched — Scope Lock).
+- Split-range acceptance (item 1's literal requirement): SP 55→**50** ⇒ TV-A 50.0→**68.8** (opens) /
+  TV-B 50.0→**31.2** (closes); SP→**60** ⇒ TV-A→**35.8** (closes) / TV-B→**64.2** (opens). `sum ≡ 100.0`
+  at every operating point ⇒ "opposite" is exact, not approximate.
+- Offset-free integral action (SP 50 step): err +4.40 → +3.80 → +2.80 → +1.50 → +0.40 → **0.00** at
+  t = 100/200/400/800/1600/3000 s, TV-A → **74.8** — matching the valve char's *independent* prediction
+  $T_{ss} = 65 - 10(75/50) = 50 \Rightarrow \theta_{A,\infty} = 75.0$. Closed-loop integral time
+  $T_i/(K_c|K_p|) = 250/(3\cdot 0.2) = 417$ s ⇒ $4\tau \approx 1670$ s, which is the observed trace.
+
+**Active Files.**
+- `backend/main.py` — 4 edits, all in the LPCC 323E003 block: constants (`R3232_TW_SUP_T`,
+  `R3232_TW_RET_T`, `R3232_TV13_DES_PCT`, `R3232_TW_TAU_S`); `State.TIC_323013` init (PV/SP → 55,
+  `sp_lo` 60→45, `sp_hi` 90→65); the runtime block (`T_tw_ss` / `T_tw_sup` / `T_tw_ret` / physical
+  `Q_e003`); `LPCC_3232.E003` telemetry (`TV_323013A`, `TV_323013B`, `TT_323015`).
+- `frontend/overlays.js` — screen-323-2: `tv013a`/`tv013b` split to distinct binds; `tt015w` → bound
+  `tt015`. (The `w` key suffix means "white frame / unbound"; drop it when a tag gets bound.)
+- `Urea OTS — As-Built Mathematical & System Architecture Reference.md` — **Rev 9** history row +
+  **Revision Delta #13**. Note this is the **first Unit-323 entry** in that document; its header is scoped
+  "Units 321 / 322 / 329" and Sections 1–6 remain HP-loop-only. Standing up a new §1.9/§3.x Unit-323
+  section would breach §3 Surgical Edits, so the Rev+Delta convention was used instead.
+- `scratchpad/pindiff.py` — **untracked, must stay untracked** (with `scratchpad/pin_now.json`).
+
+**Failed Attempts / rejected approaches (this session).**
+- **Mirroring the `TIC_329005` loop wholesale for item 1 — REJECTED (near-miss, caught before writing).**
+  **Two controller idioms coexist in `main.py` and must never be conflated:** (a) `_ctrl_ipd` dicts, full
+  14-key schema `{mode,op,sp,pv,pv1,pv2,Kc,Ti,Td,act,op_lo,op_hi,sp_lo,sp_hi}`, stepped by the shared
+  `_ctrl_ipd(c, pv, dt, cas_sp=None)` helper — used by LIC-322501 and **all of Unit 323 incl. TIC-323013**;
+  (b) hand-rolled inline velocity-PI dicts, minimal 5-key `{mode,op,sp,pv,pv_prev}`, stepped by bespoke
+  inline code in the 322E003 CCW block — used by `FIC_329409` / `TIC_329005`. Take the *physics* from a
+  neighbouring loop, never the controller plumbing.
+- **Adding `s.r3232_tw_sup_T` / `s.r3232_tw_ret_T` to `State.__init__` — REJECTED.** `_lag1` lazy-inits to
+  target and keeps state in `s.tlag` keyed by string ⇒ no new `__init__` attributes, no boot transient.
+- **Deleting `R3232_TW_T = 60.0` — REJECTED.** It is the design *mean* ½(55+65) that the `UA` back-solve
+  keys off. Retained with a comment; must never be replaced by a live value.
+- **Changing `R3232_E003_Q_DES_KW` (14 000) to reconcile PFD 1102/1103 — REJECTED (see the open gap below).**
+
+**Deliberately-unclosed findings (documented, NOT fixed — Scope Lock). Do not silently "fix" these.**
+1. **Item 1 — the 14 000 vs 12 703 kW cross-source gap.** PFD streams 1102/1103 give 1094 t/h over a 10 K
+   rise ⇒ $Q = 1094000\cdot4.18\cdot10/3600 = \mathbf{12\,703}$ kW, but the engine's LPCC-datasheet anchor
+   is $Q_{des} = \mathbf{14\,000}$ kW (reconciling would need 1206 t/h, 10 % off the PFD). Changing it
+   cascades `R3232_E003_LAMC` → the 323E003 energy balance → `m_744`/`m_756` → the **pinned** A328
+   back-solves. Both anchors are internally consistent; only their cross-source ratio is not. Also recorded
+   in Delta #13's ⚠ sub-paragraph.
+2. **Item 24 — the CPL/GCB anchor conflict; the item is SPLIT.** The *binding* half (point FT-322404 at the
+   live CPL feed) is lawful and lands with the normal batch. The *anchor* half cannot: moving
+   `A328_CPL_DES` 900 → 1750 breaks `A328_M756_DES = A328_M755_DES + A328_CPL_DES + A328_ABS_DES`
+   (34 208 ≠ 33 358) and forces `A328_ABS_DES` 980 → 130, moving **three golden-pin keys**. Worse, the 322
+   datasheet's vent is ~1578 kg/h while the column balance forces GCB − vent = 130 ⟹ GCB = 1708, against
+   pinned `A328_GCB_DES = 5901.35` — a **3.5× discrepancy**. **Regenerating `golden_pin.json` to absorb
+   this is REJECTED**: it would defeat the gate protecting the rest of the model.
+   Still open: whether `A328_CPL_DES` (900 kg/h @ 30 °C) *is* PFD stream 954 (1750 kg/h @ 46 °C). For:
+   the name, the 322C001 destination, the code's own balance comment. Against: both the temperature and
+   the flow. **Confirm before touching it.**
+3. **Item 23 — resolution R2 deviates from datasheet §5.2, on purpose.** The literal order ("LV-B is the
+   only valve controlling LIC-324501 until granulation is added") is a **numerical runaway** as written:
+   at design `R324_LIC501_OP_DES = 75` ⇒ `lva_stroke = 50 %` ⇒ `m_fwd = P2_DES`, `lvb_stroke = 0` — i.e.
+   the design case *is* granulation running with zero recycle and LV-B shut. Forcing "LV-B only" with the
+   existing recycle semantics gives `m_fwd = 0`, so urea enters at 74 199 kg/h and never exits.
+   **R1 REJECTED — do not re-attempt.** **R2 (chosen):** LV-B carries melt to the 335 boundary until
+   granulation exists; LIC-324501 direct-acting on LV-B; LV-A parked at 0 %; UF85 still dosed into the
+   335P001 suction (upstream of both valves). **Consequence to honour when implementing:** §5.2's "if
+   LV-324501A closes, drop the 335P002A/B stroke to zero" is currently implicit in
+   `m_uf = uf_ratio * m_fwd` — under R2 that coupling must be re-pointed at the **active** forward valve.
+   `PIC-335401`'s 3.8 barg override is **out of scope by the user's own conditional** ("*once granulation
+   is added*"); unit 335 is unbuilt under Scope Lock. It is **not** a hard blocker.
+
+**Operational lessons (cost real time this session — preserve).**
+- **`regress.py` does `os.chdir(BACKEND)`, so argv[1] MUST be absolute.** A relative path dies with
+  `FileNotFoundError: [Errno 2] No such file or directory: 'scratchpad/pin_now.json'` *after* the
+  import/settle already succeeded — only the write step fails. Use
+  `python scratchpad/regress.py "D:\Work\Urea Simulation\scratchpad\pin_now.json"`.
+- **The global State instance is `main.state`** (`main.py:2666  state = State()`), **not** `main.S`.
+- **`step_sim(dt)` RETURNS the telemetry dict** (`main.py:2673`) ⇒ a probe is
+  `t = main.step_sim(0.1); t['LPCC_3232']['E003']`.
+- **The pin gate is TWO steps and `pindiff.py` is untracked** — `regress.py` only *dumps* `_collect_pin()`;
+  it never diffs. Recreate `pindiff.py` if absent (it was, once). Its `leaves()` must be **list-aware**:
+  `REACT_MASS_DES` is a 3-element list, and the mandated count treats list elements as leaves —
+  13 scalars + 3 + 9 = **25**. A dict-only recursion reports 23 and reads like drift when nothing drifted.
+- **The pin key is SHA-256 over exactly `("main.py", "steam_system.py", "reactor.py", "controllers.py")`**
+  (`_PIN_SRC_FILES`). Editing any of those four rehashes the pin ⇒ re-gate. Editing docs/tests/frontend
+  does not.
+- **Summaries are not line-exact.** Re-read or grep the target region before every edit and match on exact
+  strings, never line numbers. The telemetry block landed at 4020 vs a summary's 4001 (shift ≈ +19).
+- **`Grep` prefixes hits with the primary cwd** (`C:\Program Files\Git\...`) because the working directory
+  is on `C:` and the repo is on `D:`. Cosmetic — **line numbers are still correct**.
+- **PFD composition units (proven, not assumed): gas streams are mol%, liquid streams are wt%.** Proven by
+  exact average-MW reconstruction: 737 → 0.1232·44.0098 + 0.4621·18.0152 + 0.4147·17.0304 = **20.81** =
+  listed; 776 → 100/(23.63/44.0098 + 47.1/18.0152 + 29.21/17.0304 + 0.06/60.056) = **20.54** = listed.
+  ⇒ the narrative doc `328E004 328D001 328P002 Datasheets.md:60` calling stream 786 "93.08 **weight**
+  percent" is **WRONG**.
+- **Overlay `--` root cause** (`app.js:464` + `app.js:59`): an `OV` entry with `t:'ind'` and **no `bind`**
+  renders `--` forever. The defect set is exactly the unbound entries — nothing is refresh-gated.
 
 ## Files
 
