@@ -712,6 +712,67 @@ $T_{cold} = 45$ °C.
 - **Overlay `--` root cause** (`app.js:464` + `app.js:59`): an `OV` entry with `t:'ind'` and **no `bind`**
   renders `--` forever. The defect set is exactly the unbound entries — nothing is refresh-gated.
 
+### Session 9 (cont.) — sprint items 3b / 3c / 3d / 5: the 328-1 temperature indicators
+
+**Goal.** Second batch of the 25-item gap-closure sprint. Four 328-1 TTs: TT-328009 (stream 746, 190 °C),
+TT-328005 (stream 739, 143 °C), TT-328004 (328C004 top tray), and TT-328007 (stream 743, 139 °C).
+
+**Current state — CODE-COMPLETE, ALL GATES GREEN, SHIPPED.** Delta #14 + Rev 10 in the as-built doc.
+
+- **Item 3c was NOT a display gap — it was a §1 physics defect.** The C003 runtime hard-coded
+  `m_746 = m_743  # via 328E021 (190 °C)` and the energy balance read `sens_c003` off the frozen
+  `R328_C003_T746 = 190.0`. Any TT-328009 bound there would read 190 forever. Now
+  `T_746 = s.a328_c002_T + R328_E021_EPS_T*(Tc003 - s.a328_c002_T)`.
+- **Use the design-implied ε, never the datasheet ε.** `R328_E021_EPS = 1913.6/(37.52*61.0)` =
+  0.836100527805935 → `139 + ε·61 = 190.00213219616205` ≠ 190.0 ⇒ **breaks the Design Anchor**. That is
+  *why* the original author froze the constant. `R328_E021_EPS_T = (190-139)/(200-139) = 51/61` is exact
+  **and reconstructs the datasheet's own provenance**: Q_cold = 33769/3600·4·51 = **1913.577** ≈ its
+  1913.6; closure 1968.027 − 1913.577 = **54.45** ≈ its `R328_E021_LOSS` = 54.4. No constant fabricated.
+- **`R328_E021_EPS` / `R328_E021_LOSS` / `R328_E007_EPS` / `R328_E007_LOSS` are DEAD** — grep proves
+  definition lines only, zero consumers. A design-basis reconciliation record never wired live.
+- **`sens_c003` had to move with the display** (conservation, not preference): `T_746` is the *same
+  physical node*. A live TT-328009 over a constant-fed energy balance = display/physics decoupling,
+  forbidden by §1. Substituting is **bit-identical at design** (`repr()`-equal, −375.2111111111111 kW).
+- **No clamp on `T_746`** — ε ∈ (0,1) ⇒ convex combination of the two live inlets ⇒ cannot cross either.
+  Proven empirically, reversed case included (`T_c003 100 → T_746 106.4`, still bracketed).
+- **Item 3b was a wrong-node bind** (Δ#13(i) class): `TT_328007` published `R328_E007_TH_OUT = 89.0`,
+  the 328E007 **hot outlet** to the 740 boundary. The tag is the C002 bottoms draw to 328P006 = 743 = 139.
+- **Item 5 used the house derived-offset idiom** (the `R328_C003_DT_DES` precedent, L564):
+  `R328_C004_DT_DES = R328_C004_T - R328_C002_T750` = 143 − 140 = 3 K, anchored on the PFD's own
+  stream 750 (the C004 overhead **is** the top-tray vapour) ⇒ TT-328004 tracks the live bottoms.
+
+**Verified.** Pin gate `leaves: 25  keys: 15  diffs: 0` (no `R328_*` key is pinned, but `main.py` ∈
+`_PIN_SRC_FILES` ⇒ re-gated). `probe328.py` (6000 ticks @ 0.1 s): all four TTs on their PFD anchors,
+**`TT_328C003` held at 200.0** (the live `sens_c003` does not move the C003 fixed point — the central risk),
+`bot747_th 34.06` t/h = design 34,062, `bot743_th 33.77` = 33,769, `LI_328505 50.00`.
+`dyn328.py` (the item's actual point — dynamism, which neither the pin nor the probe can prove):
+`T_c003 +10 K → T_746 +8.4` vs closed-form ε·10 = 8.361; `T_c002 +10 K → T_746 +1.6` vs (1−ε)·10 = 1.639.
+**The ~0.04 residual is the telemetry's `round(x,1)`, not physics** — hence the 0.06 tolerance.
+
+**Deliberately unclosed (Scope Lock — do NOT silently "fix" these).**
+- **The E021 HOT side is still static**: `m_749 = m_747  # via 328E021 (148 °C)` + `R328_C004_T749 = 148.0`
+  is the exact mirror of the defect fixed here, on stream 749. Item 3c is scoped to the cold outlet.
+  **This is the obvious next 328 item.**
+- **`TT_328012`/`TIC_328012` stay on the constant `R328_C003_T746`.** The C003 **3rd tray** is a *different
+  physical node* from the 746 feed; the model conflates them (its own comment: "3rd-tray / 746 absolute").
+  Making the tray track E021's ε would be **wrong physics dressed as a fix**. TIC-328012's `_ctrl_ipd`
+  return is discarded at L3694 (display-only) ⇒ pin-safe either way.
+- **`R328_E007_TH_OUT = 89.0` is now orphaned but RETAINED** — the `R3232_TW_T = 60.0` precedent
+  (deleting a boundary design datum is a rejected approach). Its L751 comment already documents it.
+- **`tt8011w` + `tt8012w` both bind `DESORB_328.C003.TT_328012`** — duplicate-bind, same class as the
+  TV-323013A/B defect fixed in `c538831` and the still-open LV-324501A/B one.
+
+**Overlay `w`-suffix convention** ("white frame / unbound"): dropped the `w` on `tt8004`/`tt8009`/`tt8005`
+when binding them, and retro-fixed `tt8007w`→`tt8007` (bound but still carrying the `w`, and its comment
+still claimed "328E007 process outlet 89C"). ⚠ Still inconsistent elsewhere: `tt8011w`/`tt8012w`/`tt8013w`
+are all **bound** yet retain the `w`.
+
+**Next steps.** Corrected sprint sequencing — **the earlier "3b/3c/3d/5 are frontend-only" claim was WRONG**
+(grep proved `TT_328009`/`TT_328005`/`TT_328004` did not exist in `main.py` ⇒ new telemetry keys ⇒ backend
+⇒ pin rehash). Frontend-only batch (no rehash): item 12, item 15, the m³/hr unit fixes on 10/11/16/17, and
+the duplicate-bind defects. Backend batch (rehash ⇒ gate before commit): 3a, 4, 6, 7, 8, 9, 13, 14, 17, 18,
+19, 20, 21, 22, 23, 24 (**binding half only**), 25.
+
 ## Files
 
 **Committed / active source:**

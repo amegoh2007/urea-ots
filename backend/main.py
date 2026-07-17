@@ -581,6 +581,7 @@ R328_C004_PHI750   = 6833.0 / 40557.0                       # OVHD split -> 328C
 R328_C004_M750_DES = R328_C004_PHI750 * R328_C004_IN_DES    # 6833
 R328_C004_M739_DES = R328_C004_IN_DES - R328_C004_M750_DES  # 33724 bottoms -> 328E007 -> boundary
 R328_C004_T = 143.0 ; R328_C004_T749 = 148.0
+R328_C004_DT_DES = R328_C004_T - R328_C002_T750             # 3 C bottom (143) - top tray (140 = OVHD 750), TT-328004
 R328_C004_M_TAU_S = 900.0
 R328_C004_M_DES   = R328_C004_M739_DES/3600.0 * R328_C004_M_TAU_S         # 8431 kg
 R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C004_T)
@@ -744,8 +745,13 @@ A328_D003_LAM_I = -A328_CP * (
 #  328E021 A/B  (hydrolyser feed/effluent interchanger, two shells in series)
 #  Heats C002 bottoms 139->190 (cold) with C003 bottoms 200->148 (hot).
 # ==========================================================================
-R328_E021_EPS  = 1913.6 / (37.52 * 61.0)                    # 0.836 effectiveness
+R328_E021_EPS  = 1913.6 / (37.52 * 61.0)                    # 0.836 effectiveness (datasheet, rounded)
 R328_E021_LOSS = 54.4                                       # kW shell heat loss (closes both anchors)
+# Live cold-outlet effectiveness (stream 746).  The rounded datasheet pair above back-solves to
+#   190.0021 C, so it cannot carry the design anchor; the design temperatures give the same
+#   effectiveness exactly and reconstruct the datasheet in the process -- Q_cold = 33769/3600*4.0*51
+#   = 1913.58 kW (~ its 1913.6) and the hot/cold closure 1968.03 - 1913.58 = 54.45 kW (~ its 54.4).
+R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT) / (R328_C003_T - R328_C002_T_BOT)   # 51/61 = 0.83607
 R328_E007_EPS  = 0.6667                                     # 328E007 feed/effluent interchanger
 R328_E007_LOSS = 18.3                                       # kW shell heat loss
 R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 boundary
@@ -3455,7 +3461,11 @@ def step_sim(dt: float) -> dict:
 
     # ----- Stage 4 : 328C003  Hydrolyser (200°C, MP-steam 911) -----------
     Tc003    = s.a328_c003_T
-    m_746    = m_743                                                     # via 328E021 (190°C)
+    m_746    = m_743                                                     # via 328E021
+    # 328E021 cold outlet (stream 746, TT-328009): C002 bottoms 139 heated by C003 bottoms 200.
+    #   eps in (0,1) => T_746 is a convex combination of the two live inlets and can never cross
+    #   either, so no clamp is needed.  At design 139 + (51/61)*(200-139) = 190.0 exactly.
+    T_746    = s.a328_c002_T + R328_E021_EPS_T * (Tc003 - s.a328_c002_T)
     m_911    = _fic_flow(s.FIC_326402, R328_C003_M911_DES, 50.0, s.tlag, "F_326402", dt)
     in_c003  = m_746 + m_911
     pic203b_op = _ctrl_ipd(s.PIC_328203, s.a328_c003_P, dt)
@@ -3464,7 +3474,7 @@ def step_sim(dt: float) -> dict:
     lvl_c003 = s.a328_c003_M / R328_C003_M_DES * 50.0
     lic505_op= _ctrl_ipd(s.LIC_328505, lvl_c003, dt)
     m_747    = R328_C003_M747_DES * (lic505_op / 50.0)                    # bottoms -> desorber-II
-    sens_c003= m_746/3600.0*R328_CP*(R328_C003_T746 - Tc003)
+    sens_c003= m_746/3600.0*R328_CP*(T_746 - Tc003)
     P_c003   = sens_c003 + m_911/3600.0*R328_C003_M911_DH - m_748/3600.0*R328_C003_LAM748
     s.a328_c003_P = max(s.a328_c003_P + R328_C003_P_KP*(gen748 - m_748)/3600.0*dt, 0.1)
     s.a328_c003_T = Tc003 + P_c003*dt/max(s.a328_c003_M*R328_CP, 1e-6)
@@ -4055,7 +4065,7 @@ def step_sim(dt: float) -> dict:
         "DESORB_328": {                          # Screen 328-1 : Desorption / Hydrolysis train
             "C002": {                            # 328C002 Desorber-I (bottoms 139°C)
                 "TT_328C002": round(s.a328_c002_T, 1),                     # bottom temp (C, hold 139)
-                "TT_328007":  round(R328_E007_TH_OUT, 1),                  # 328E007 process (hot) outlet -> 740 boundary (89C)
+                "TT_328007":  round(s.a328_c002_T, 1),                     # bottoms draw -> 328P006 (stream 743, 139C)
                 "LI_328503":  round(s.a328_c002_M / R328_C002_M_DES * 50.0, 1),
                 "feed738_th": round(m_738 / 1000.0, 2),                    # 328D003 feed via 328E007 (t/h)
                 "ovhd737_th": round(m_737 / 1000.0, 2),                    # top vapour -> 328D001 (t/h)
@@ -4066,6 +4076,7 @@ def step_sim(dt: float) -> dict:
             "C003": {                            # 328C003 Hydrolyser (200°C, MP steam)
                 "TT_328C003": round(s.a328_c003_T, 1),                     # temp (C, hold 200)
                 "TT_328012":  round(R328_C003_T746, 1),                    # 3rd-tray / 746 absolute (C, 190) - TT-328011/TT-328012 display
+                "TT_328009":  round(T_746, 1),                             # 328E021 cold out -> C003 feed (stream 746, 190C)
                 "P_bara":     round(s.a328_c003_P, 2),
                 "LI_328505":  round(s.a328_c003_M / R328_C003_M_DES * 50.0, 1),
                 "steam911_th":round(m_911 / 1000.0, 2),                    # FIC-326402 MP steam (t/h)
@@ -4082,6 +4093,8 @@ def step_sim(dt: float) -> dict:
             },
             "C004": {                            # 328C004 Desorber-II (143°C, LP steam, FFIC ratio)
                 "TT_328C004": round(s.a328_c004_T, 1),                     # temp (C, hold 143)
+                "TT_328005":  round(s.a328_c004_T, 1),                     # bottoms draw -> 328E007 (stream 739, 143C)
+                "TT_328004":  round(s.a328_c004_T - R328_C004_DT_DES, 1),  # top tray = OVHD 750 (140C), tracks live bottoms
                 "LI_328504":  round(s.a328_c004_M / R328_C004_M_DES * 50.0, 1),
                 "steam931_th":round(m_931 / 1000.0, 2),                    # FIC-328401 LP steam (t/h)
                 "ovhd750_th": round(m_750 / 1000.0, 2),                    # relief -> 328C002 (t/h)

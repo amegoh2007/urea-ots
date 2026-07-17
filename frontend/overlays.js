@@ -336,11 +336,11 @@
       { k: 'tt8011w', t: 'ind', x: 386,  y: 126, tag: 'TT-328011', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },   // hydrolyser top vapour ~190C (stream 746, absolute)
       { k: 'tt8010w', t: 'ind', x: 788,  y: 142, tag: 'TT-328010', bind: 'DESORB_328.D001.TT_328008', u: 'C', dec: 1 },   // Desorber-I feed 114C (E007 cold-out, absolute)
       { k: 'tt8012w', t: 'ind', x: 271,  y: 218, tag: 'TT-328012', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },   // hydrolyser 3rd-tray ~190C (absolute; TIC-328012 PV now differential)
-      { k: 'tt8004w', t: 'ind', x: 788,  y: 293, tag: 'TT-328004' },
+      { k: 'tt8004', t: 'ind', x: 788,  y: 293, tag: 'TT-328004', bind: 'DESORB_328.C004.TT_328004', u: 'C', dec: 1 },   // 328C004 top tray 140C (= OVHD stream 750)
       { k: 'tt8013w', t: 'ind', x: 271,  y: 380, tag: 'TT-328013', bind: 'DESORB_328.C003.TT_328C003', u: 'C', dec: 1 },   // hydrolyser bottom 200C
-      { k: 'tt8009w', t: 'ind', x: 186,  y: 512, tag: 'TT-328009' },
-      { k: 'tt8005w', t: 'ind', x: 597,  y: 517, tag: 'TT-328005' },
-      { k: 'tt8007w', t: 'ind', x: 492,  y: 587, tag: 'TT-328007', bind: 'DESORB_328.C002.TT_328007', u: 'C', dec: 1 },   // 328E007 process outlet 89C
+      { k: 'tt8009', t: 'ind', x: 186,  y: 512, tag: 'TT-328009', bind: 'DESORB_328.C003.TT_328009', u: 'C', dec: 1 },   // 328E021 cold outlet -> 328C003 feed 190C (stream 746)
+      { k: 'tt8005', t: 'ind', x: 597,  y: 517, tag: 'TT-328005', bind: 'DESORB_328.C004.TT_328005', u: 'C', dec: 1 },   // 328C004 bottoms -> 328E007 143C (stream 739)
+      { k: 'tt8007', t: 'ind', x: 492,  y: 587, tag: 'TT-328007', bind: 'DESORB_328.C002.TT_328007', u: 'C', dec: 1 },   // 328C002 bottoms -> 328P006 suction 139C (stream 743)
       { k: 'lt8507w', t: 'ind', x: 1294, y: 380, tag: 'LT-328507' },
       { k: 'ai8701w', t: 'ind', x: 838,  y: 632, tag: 'AI-328701' },   // conductivity analyzer
       { k: 'p006w',   t: 'ind', x: 421,  y: 632, tag: '328P006'   },
