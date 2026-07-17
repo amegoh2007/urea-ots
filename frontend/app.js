@@ -362,7 +362,8 @@ function render322(s){
               'HIC-322605':{t:'hic605_set',f:'op'},    'HV-322605':{t:'hic605_set',f:'op'},
               'HIC-322604':{t:'hic604_set',f:'op'},    'HV-322604':{t:'hic604_set',f:'op'},
               'HIC-329601':{t:'steam_hpvent_set',f:'op'}, 'HV-329601':{t:'steam_hpvent_set',f:'op'},
-              'HIC-329602':{t:'steam_963_set',   f:'op'}, 'HV-329602':{t:'steam_963_set',   f:'op'} };
+              'HIC-329602':{t:'steam_963_set',   f:'op'}, 'HV-329602':{t:'steam_963_set',   f:'op'},
+              'HIC-329605':{t:'hic9605_set',      f:'op'}, 'HV-329605':{t:'hic9605_set',      f:'op'} };
   const NOTE={ '322602':'↓ opening ⇒ ↑ 322E003 suction (↑ μ)' };
   let cur=null;   // overlay currently shown -> drives the SET command + live prefill
   const apply=()=>{ const v=parseFloat(inp.value); if(isNaN(v)) return;

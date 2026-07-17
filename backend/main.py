@@ -841,6 +841,17 @@ R324_E001_COND_M_DES  = R324_E001_COND_DES/3600.0 * R324_E001_COND_TAU_S    # kg
 R324_E001_COND_M_FULL = R324_E001_COND_M_DES / (R324_E001_COND_LVL_SP/100.0)   # kg at 100% level
 R324_LV9505_OP_DES    = 50.0                       # % LV-329505 design drain stroke
 R324_LV9505_SPAN      = R324_E001_COND_DES / (R324_LV9505_OP_DES/100.0)     # kg/h full-open drain capacity
+# --- 324F002 Stage-1 vacuum ejector : HIC-329605 motive LP steam hand controller
+#  324F002 is the steam-jet ejector that pulls the 324F001 vacuum; its saturated
+#  LP motive steam (650 kg/h, 4.1 bar a / 146 C through nozzle N2, 324-1 ED-2)
+#  drives the entrainment.  HIC-329605 is the operator hand valve on that motive
+#  line (published as HV-329605, tracks 1:1).  Entrainment ratio ~ constant, so the
+#  ejector pull scales linearly with motive; anchored so at the design stroke the
+#  live pull == R324_F001_EJPULL_DES bit-exact (ratio 1.0) -> vacuum ODE unchanged
+#  at steady state.  Steam-side hand valve -> off the urea/water conservation network.
+R324_F002_MOTIVE_DES  = 650.0                      # kg/h sat. LP motive steam @4.1 bar a / 146 C (324-1 ED-2)
+R324_HIC9605_DES_PCT  = 50.0                        # % HIC-329605 design motive-valve stroke (indicative)
+R324_HV9605_SPAN      = R324_F002_MOTIVE_DES / (R324_HIC9605_DES_PCT/100.0)   # kg/h full-open motive capacity
 
 # --- Stage 2 : Evaporator II 324E003 / 324F003  (0.131 bar a, hold 140 C) -----
 R324_F003_P_BARA = 0.131                           # bar a deep-vacuum boundary (HARD)
@@ -2460,6 +2471,8 @@ class State:
                            "pv1": R324_E001_COND_LVL_SP, "pv2": R324_E001_COND_LVL_SP,
                            "Kc": 2.50, "Ti": 60.0, "Td": 0.0, "Tf": 0.0, "Dz": 2.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # ---- HIC-329605 324F002 motive LP steam hand valve (published HIC+HV 1:1)
+        self.HIC_329605 = R324_HIC9605_DES_PCT       # % opening (operator hand valve, no controller mode)
         # ---- FFIC-335406 UF85 ratio station -> FIC-335405 flow slave -----------
         self.FFIC_335406 = {"mode": "AUTO", "op": R324_UF_RATIO,
                             "sp": R324_UF_RATIO, "pv": R324_UF_RATIO,
@@ -3731,8 +3744,10 @@ def step_sim(dt: float) -> dict:
     # vacuum: PIC-324202 false-air bleed balanced against 324F002 ejector pull
     fa202_m    = R324_F001_FA_DES * (s.PIC_324202["op"]/max(R324_PV202_OP_DES, 1e-6))
     _ctrl_ipd(s.PIC_324202, s.r324_f001_P, dt)                               # false-air stroke (%)
+    mot9605_m  = s.HIC_329605/100.0 * R324_HV9605_SPAN                        # 324F002 motive LP steam (kg/h)
+    ejpull_live = R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES)   # pull ~ motive; == EJPULL_DES at design
     s.r324_f001_P = clamp(s.r324_f001_P
-                          + R324_F001_P_KP*((v1_m + fa202_m) - R324_F001_EJPULL_DES)/3600.0*dt,
+                          + R324_F001_P_KP*((v1_m + fa202_m) - ejpull_live)/3600.0*dt,
                           0.05, 1.0)
     # ---- 324E001 steam-side condensate : LIC-329505 "active controlled steam trap"
     #  The chest condenses the LP steam it gives up as Q_e001 (cond_gen = Q/lambda);
@@ -4278,6 +4293,9 @@ def step_sim(dt: float) -> dict:
                 "cond_kgh":    round(cond_gen, 0),                            # 324E001 steam condensate generated (kg/h)
                 "LIC_329505":  {"pv": round(s.LIC_329505["pv"], 1), "sp": round(s.LIC_329505["sp"], 1),
                                 "op": round(s.LIC_329505["op"], 1), "mode": s.LIC_329505["mode"]},
+                "HIC_329605":  round(s.HIC_329605, 1),                        # 324F002 motive-steam hand valve (%)
+                "HV_329605":   round(s.HIC_329605, 1),                        # HV-329605 opening (tracks HIC 1:1)
+                "motive_kgh":  round(mot9605_m, 0),                           # 324F002 motive LP steam flow (kg/h)
             },
             "E003": {                            # Screen 324-1B : Evaporator II 324E003 / 324F003 (140 C, 0.131 bar a)
                 "TT_324002":   round(s.r324_e003_T, 1),                       # melt temp (C, hold 140)
@@ -4709,6 +4727,10 @@ def handle_cmd(cmd: dict):
     elif t == "hic604_set":                    # HIC-322604 -> HV-322604 scrubber off-gas valve
         if "op" in cmd:
             s.HIC_322604 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "hic9605_set":                   # HIC-329605 -> HV-329605 324F002 motive-steam hand valve
+        if "op" in cmd:
+            s.HIC_329605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
     elif t == "steam_supply_set":              # MP supply valve (utility import -> MP header)
         if "op" in cmd:
