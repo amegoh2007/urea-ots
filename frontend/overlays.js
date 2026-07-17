@@ -415,11 +415,11 @@
       { k: 'tic4002', t: 'ind', x: 375, y: 281, tag: 'TIC-324002', bind: 'EVAP_324.E003.TIC_324002.pv', mode: 'EVAP_324.E003.TIC_324002.mode', u: 'C', dec: 1, note: 'master: holds melt 140 C; cascades PIC-329212 chest steam-P' },
       { k: 'pic9212', t: 'ind', x: 136, y: 271, tag: 'PIC-329212', bind: 'EVAP_324.E003.PIC_329212.pv', mode: 'EVAP_324.E003.PIC_329212.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-324002; steam to 324E003 chest via PV-329212' },
       { k: 'pv9212',  t: 'avalve', x: 97,  y: 332, tag: 'PV-329212', bind: 'EVAP_324.E003.PIC_329212.op', u: '%', dec: 1 },
-      // ---- 324F003 product level : split-range LIC-324501 (LV-A forward / LV-B recycle) ----
-      { k: 'lic4501', t: 'ind', x: 507, y: 371, tag: 'LIC-324501', bind: 'EVAP_324.E003.LIC_324501.pv', mode: 'EVAP_324.E003.LIC_324501.mode', u: '%', dec: 1, note: 'split-range: LV-324501A forward to 335 / LV-324501B recycle to 324E001' },
+      // ---- 324F003 product level : LIC-324501 (R2: LV-B active drain / LV-A parked) ----
+      { k: 'lic4501', t: 'ind', x: 507, y: 371, tag: 'LIC-324501', bind: 'EVAP_324.E003.LIC_324501.pv', mode: 'EVAP_324.E003.LIC_324501.mode', u: '%', dec: 1, note: 'R2: LV-324501B drains melt to 335 boundary; LV-324501A (forward-to-granulation) parked, 335 unbuilt' },
       { k: 'li4f003', t: 'ind', x: 538, y: 410, tag: 'LI-324F003', bind: 'EVAP_324.E003.LI_324F003', u: '%', dec: 1 },
-      { k: 'lv4501a', t: 'avalve', x: 711, y: 347, tag: 'LV-324501A', bind: 'EVAP_324.E003.LIC_324501.op', u: '%', dec: 1 },
-      { k: 'lv4501b', t: 'avalve', x: 598, y: 622, tag: 'LV-324501B', bind: 'EVAP_324.E003.LIC_324501.op', u: '%', dec: 1 },
+      { k: 'lv4501a', t: 'avalve', x: 711, y: 347, tag: 'LV-324501A', bind: 'EVAP_324.E003.LV_324501A', u: '%', dec: 1, note: 'forward-to-granulation, parked 0 % (335 unbuilt)' },
+      { k: 'lv4501b', t: 'avalve', x: 598, y: 622, tag: 'LV-324501B', bind: 'EVAP_324.E003.LV_324501B', u: '%', dec: 1, note: 'active melt drain to 335 boundary' },
       // ---- 335 UF85 injection : FFIC-335406 ratio master -> FIC-335405 slave ----
       { k: 'ffic5406', t: 'ind', x: 1020, y: 573, tag: 'FFIC-335406', bind: 'EVAP_324.E003.FFIC_335406.pv', mode: 'EVAP_324.E003.FFIC_335406.mode', u: 'RATIO', dec: 4, note: 'UF85-to-product ratio; MV sets FIC-335405 SP' },
       { k: 'fic5405a', t: 'ind', x: 927, y: 509, tag: 'FIC-335405A', bind: 'EVAP_324.E003.FIC_335405.pv', mode: 'EVAP_324.E003.FIC_335405.mode', u: 'T/H', dec: 3, cas: true, note: 'slave: CAS follows FFIC-335406; UF85 inject to product' },

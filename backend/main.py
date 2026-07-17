@@ -872,12 +872,14 @@ R324_F003_FA_DES  = 120.0                            # kg/h design false-air (PV
 R324_PV203_OP_DES = 50.0
 R324_F003_EJPULL_DES = R324_V2_DES + R324_F003_FA_DES
 
-# --- LIC-324501 split-range melt drain : LV-A forward (335P001) / LV-B recycle -
-#     op 50->100 % strokes LV-A 0->100 % (forward) ; op 50->0 % strokes LV-B
-#     0->100 % (recycle back to Stage-1 feed).  op_des 75 % -> LV-A 50 %, LV-B 0.
+# --- LIC-324501 melt drain (R2 -- granulation unbuilt under Scope Lock) : LV-B is
+#     the sole ACTIVE drain, carrying the 324F003 melt out to the 335 boundary ;
+#     LV-A (forward-to-granulation) is PARKED at 0 %.  Direct-acting (act -1):
+#     level > SP -> op up -> LV-B opens.  op_des 75 % -> lvb_stroke 75 % -> m_fwd
+#     == P2_DES, so the design melt rate leaves the envelope (urea cannot
+#     accumulate; the R1 recycle-to-Stage-1 runaway is thereby avoided).
 R324_LIC501_OP_DES = 75.0
-R324_LVA_SPAN      = R324_P2_DES / 0.50             # kg/h at 100 % LV-A stroke
-R324_LVB_SPAN      = R324_P1_DES                    # kg/h at 100 % LV-B recycle stroke
+R324_LVB_SPAN      = R324_P2_DES / (R324_LIC501_OP_DES/100.0)   # kg/h at 100 % LV-B melt-drain stroke
 
 # --- FFIC-335406 UF85 ratio injection : m_uf85 = ratio * forward melt ----------
 R324_UF_RATIO      = 694.0 / R324_P2_DES            # UF85/melt: PFD stream 697 = 694 kg/h abs @design (0.5 m3/h, biuret guard); was 697.0, and 0.005 wt% before that
@@ -3774,14 +3776,14 @@ def step_sim(dt: float) -> dict:
                   + Q_e003_kw - v2_m/3600.0*R324_LAM_V2)                      # net kW on holdup
     M_f003_pre = s.r324_f003_M
     s.r324_e003_T = s.r324_e003_T + P_e003*dt/max(M_f003_pre*cp324, 1e-6)
-    # LIC-324501 split-range drain: LV-A forward (335P001) / LV-B recycle (Stage 1)
+    # LIC-324501 melt drain (R2): LV-B active -> 335 boundary; LV-A parked at 0 %.
     lvl_f003   = clamp(s.r324_f003_M / R324_F003_M_FULL * 100.0, 0.0, 100.0)
-    lic501_op  = _ctrl_ipd(s.LIC_324501, lvl_f003, dt)                       # split-range command (%)
-    lva_stroke = clamp((lic501_op - 50.0)*2.0, 0.0, 100.0)                    # LV-A forward stroke (%)
-    lvb_stroke = clamp((50.0 - lic501_op)*2.0, 0.0, 100.0)                    # LV-B recycle stroke (%)
-    m_fwd      = lva_stroke/100.0 * R324_LVA_SPAN                             # forward melt (kg/h)
-    m_recyc    = lvb_stroke/100.0 * R324_LVB_SPAN                             # recycle melt -> Stage 1 (kg/h)
-    s.r324_f003_M = max(M_f003_pre + (feed2_m - v2_m - m_fwd - m_recyc)/3600.0*dt, 1.0)
+    lic501_op  = _ctrl_ipd(s.LIC_324501, lvl_f003, dt)                       # LV-B drain command (%)
+    lva_stroke = 0.0                                                          # LV-324501A forward-to-granulation parked (335 unbuilt)
+    lvb_stroke = clamp(lic501_op, 0.0, 100.0)                                 # LV-324501B melt-drain stroke (%)
+    m_fwd      = lvb_stroke/100.0 * R324_LVB_SPAN                             # melt to 335 boundary (kg/h)
+    m_recyc    = 0.0                                                          # no recycle path under R2 (urea must exit, not accumulate)
+    s.r324_f003_M = max(M_f003_pre + (feed2_m - v2_m - m_fwd)/3600.0*dt, 1.0)
     # vacuum: PIC-324203 deep-vacuum false-air bleed vs 324F004 ejector pull
     fa203_m    = R324_F003_FA_DES * (s.PIC_324203["op"]/max(R324_PV203_OP_DES, 1e-6))
     _ctrl_ipd(s.PIC_324203, s.r324_f003_P, dt)
@@ -4303,8 +4305,10 @@ def step_sim(dt: float) -> dict:
                 "LI_324F003":  round(s.r324_f003_M / R324_F003_M_FULL * 100.0, 1),
                 "feed_th":     round(feed2_m / 1000.0, 2),                    # 95% melt from Stage 1 (t/h)
                 "vapour_th":   round(v2_m / 1000.0, 2),                       # water vapour -> 324E005 (t/h)
-                "melt_fwd_th": round(m_fwd / 1000.0, 2),                      # LV-A forward melt (t/h)
-                "recyc_th":    round(m_recyc / 1000.0, 2),                    # LV-B recycle -> Stage 1 (t/h)
+                "melt_fwd_th": round(m_fwd / 1000.0, 2),                      # LV-324501B melt to 335 boundary (t/h)
+                "recyc_th":    round(m_recyc / 1000.0, 2),                    # recycle (0 under R2; kept for faceplate continuity)
+                "LV_324501A":  round(lva_stroke, 1),                          # LV-324501A forward-to-granulation stroke (parked 0 %)
+                "LV_324501B":  round(lvb_stroke, 1),                          # LV-324501B active melt-drain stroke (%)
                 "urea_pct":    round(R324_W_EV2 * 100.0, 1),                  # product conc (97.71 %, HARD)
                 "product_th":  round(m_product / 1000.0, 2),                  # final melt + UF85 -> 335 (t/h)
                 "uf85_kgh":    round(m_uf, 1),                                # UF85 injection (kg/h)
