@@ -294,7 +294,7 @@
       { k: 'lt506w', t: 'ind', x: 40,   y: 369, tag: 'LT-323506'  },   // 2nd level boundary
       { k: 'p003w',  t: 'ind', x: 373,  y: 72,  tag: '329P003'    },   // 329 pumps (other unit)
       { k: 'tt015',  t: 'ind', x: 503,  y: 235, tag: 'TT-323015', bind: 'LPCC_3232.E003.TT_323015', u: 'C', dec: 1 },   // 323E003 -> 323P003 TW return (1103, 65 C)
-      { k: 'pt8401w',t: 'ind', x: 614,  y: 502, tag: 'PT-328401'  },   // 328P002 discharge (unmodelled)
+      { k: 'ft8401', t: 'ind', x: 614,  y: 502, tag: 'FT-328401', bind: 'DESORB_328.D001.flow776_m3h', u: 'M3/H', dec: 1, note: '328D001 bottoms draw (stream 776) via LV-328501, des 7.6 m3/h' },
       { k: 'p002w',  t: 'ind', x: 624,  y: 475, tag: '328P002'    },   // reflux pumps (unmodelled toggle)
       { k: 'e003w',  t: 'ind', x: 50,   y: 680, tag: '322E003'    },   // absorber recycle boundary
       { k: 'ovr001', t: 'ovrd', x: 269, y: 635, tag: 'EXT-OVR 323P001A/B' },   // external-override arm box
@@ -333,9 +333,9 @@
       { k: 'fv8402', t: 'avalve', x: 612, y: 632, tag: 'FV-328402', bind: 'LPCC_3232.E003.FIC_328402.op', u: '%', dec: 1 },
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
       { k: 'tt8008w', t: 'ind', x: 1009, y: 61,  tag: 'TT-328008', bind: 'DESORB_328.D001.TT_328008', u: 'C', dec: 1 },   // Desorber-I top / E007 cold-out (114C, absolute; TIC-328008 PV now H2O inferential)
-      { k: 'tt8011w', t: 'ind', x: 386,  y: 126, tag: 'TT-328011', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },   // hydrolyser top vapour ~190C (stream 746, absolute)
+      { k: 'tt8011', t: 'ind', x: 386,  y: 126, tag: 'TT-328011', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },   // hydrolyser top vapour ~190C: shares the 746-absolute value TT-328012 reads (single modelled temp, see main.py D001 note)
       { k: 'tt8010w', t: 'ind', x: 788,  y: 142, tag: 'TT-328010', bind: 'DESORB_328.D001.TT_328008', u: 'C', dec: 1 },   // Desorber-I feed 114C (E007 cold-out, absolute)
-      { k: 'tt8012w', t: 'ind', x: 271,  y: 218, tag: 'TT-328012', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },   // hydrolyser 3rd-tray ~190C (absolute; TIC-328012 PV now differential)
+      { k: 'tt8012', t: 'ind', x: 271,  y: 218, tag: 'TT-328012', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },   // hydrolyser 3rd-tray ~190C (absolute; TIC-328012 PV now differential)
       { k: 'tt8004', t: 'ind', x: 788,  y: 293, tag: 'TT-328004', bind: 'DESORB_328.C004.TT_328004', u: 'C', dec: 1 },   // 328C004 top tray 140C (= OVHD stream 750)
       { k: 'tt8013w', t: 'ind', x: 271,  y: 380, tag: 'TT-328013', bind: 'DESORB_328.C003.TT_328C003', u: 'C', dec: 1 },   // hydrolyser bottom 200C
       { k: 'tt8009', t: 'ind', x: 186,  y: 512, tag: 'TT-328009', bind: 'DESORB_328.C003.TT_328009', u: 'C', dec: 1 },   // 328E021 cold outlet -> 328C003 feed 190C (stream 746)
