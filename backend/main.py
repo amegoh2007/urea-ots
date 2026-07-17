@@ -880,8 +880,8 @@ R324_LVA_SPAN      = R324_P2_DES / 0.50             # kg/h at 100 % LV-A stroke
 R324_LVB_SPAN      = R324_P1_DES                    # kg/h at 100 % LV-B recycle stroke
 
 # --- FFIC-335406 UF85 ratio injection : m_uf85 = ratio * forward melt ----------
-R324_UF_RATIO      = 697.0 / R324_P2_DES            # UF85/melt: HMB stream 697 = 697 kg/h abs @design (biuret guard); was 0.005 (376.3 kg/h)
-R324_UF85_RHO      = 1320.0                          # kg/m3 UF85 (335D007)
+R324_UF_RATIO      = 694.0 / R324_P2_DES            # UF85/melt: PFD stream 697 = 694 kg/h abs @design (0.5 m3/h, biuret guard); was 697.0, and 0.005 wt% before that
+R324_UF85_RHO      = 1305.0                          # kg/m3 UF85 40 C (PFD stream 697; 1320 was the 335PD05 xmtr SG-cal, not the stream density)
 R324_M_UF_DES      = R324_UF_RATIO * R324_P2_DES     # design UF85 injection (kg/h)
 R324_FIC405_OP_DES = 50.0                            # % FIC-335405 slave design stroke
 
@@ -4308,6 +4308,7 @@ def step_sim(dt: float) -> dict:
                 "urea_pct":    round(R324_W_EV2 * 100.0, 1),                  # product conc (97.71 %, HARD)
                 "product_th":  round(m_product / 1000.0, 2),                  # final melt + UF85 -> 335 (t/h)
                 "uf85_kgh":    round(m_uf, 1),                                # UF85 injection (kg/h)
+                "uf85_m3h":    round(m_uf / R324_UF85_RHO, 2),                # UF85 injection (m3/h @1305 kg/m3)
                 "p_chest_bara":round(p_chest_e003, 2),                        # steam chest press. (bar a)
                 "Q_kW":        round(Q_e003_kw, 0),                           # Evap-II duty (kW)
                 "TIC_324002":  {"pv": round(s.TIC_324002["pv"], 1), "sp": round(s.TIC_324002["sp"], 1),
