@@ -393,8 +393,8 @@
       { k: 'lv9505',  t: 'avalve', x: 189,  y: 432, tag: 'LV-329505', bind: 'EVAP_324.E001.LIC_329505.op', u: '%', dec: 1 },
       { k: 'hic3605w', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
       { k: 'hv3605w',  t: 'ind', x: 642,  y: 201, tag: 'HV-323605',  bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent valve -> non-condensable vent flow
-      { k: 'hic9605w', t: 'ind', x: 921,  y: 134, tag: 'HIC-329605' },
-      { k: 'hv9605w',  t: 'ind', x: 926,  y: 191, tag: 'HV-329605'  },
+      { k: 'hic9605', t: 'ind', x: 921,  y: 134, tag: 'HIC-329605', bind: 'EVAP_324.E001.HIC_329605', u: '%', dec: 1, face: 'hic', note: '324F002 vacuum-ejector motive LP steam; operator hand valve (HV-329605 tracks 1:1)' },
+      { k: 'hv9605',  t: 'avalve', x: 926,  y: 191, tag: 'HV-329605', bind: 'EVAP_324.E001.HV_329605', u: '%', dec: 1, face: 'hic' },
       { k: 'pic3203w', t: 'ind', x: 1208, y: 469, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
         mode: 'LPCC_3232.E011.PIC_323203.mode', note: '323E011/D011 LP node P; flash vapour 701 (LV-323501 -> 323F004) accumulates it. AUTO holds SP via PV-323203; MAN lets P ramp' },
       { k: 'p3003aw',  t: 'ind', x: 235,  y: 610, tag: '323P003A'   },
