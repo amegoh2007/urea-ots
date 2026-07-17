@@ -661,6 +661,7 @@ R328_D001_LAM737 = ((R328_E004_Q_DES_KW - R328_D001_SENS)
 #  322C001  LP absorber (43 °C, 3.9 bar a); GCB off-gas boot-pinned at runtime
 # ==========================================================================
 A328_M755_DES = 31478.0                                     # Comp-II draw via 322P002
+A328_M755_RHO = 1005.0                                      # kg/m3, stream 755 eff. density @40 C (Combined_1750 tbl, col 755) -> FT-322402 m3/h (31478/1005=31.32 -> PFD 31.3)
 A328_ABS_DES  = 980.0                                       # NH3/CO2 absorbed into liquor
 A328_M756_DES = A328_M755_DES + A328_CPL_DES + A328_ABS_DES # 33358 -> 323E003 wash feed
 A328_C001_T = 43.0 ; A328_M755_T = 40.0
@@ -4203,6 +4204,7 @@ def step_sim(dt: float) -> dict:
                 "LI_328II":   round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1),
                 "form735_th": round(m_735 / 1000.0, 2),                    # Comp-I formation -> 328C002 (t/h)
                 "collect755_th": round(m_755 / 1000.0, 2),                 # 322P002 collector -> 322C001 (t/h)
+                "flow755_m3h": round(m_755 / A328_M755_RHO, 2),            # FT-322402: 755 draw in m3/h (des 31.3)
                 "FIC_328406": {"pv": round(s.FIC_328406["pv"], 1), "sp": round(s.FIC_328406["sp"], 1),
                                "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"]},
                 "P002A":      {"on": s.aux_pumps["322P002A"]["on"], "mode": s.aux_pumps["322P002A"]["mode"]},
