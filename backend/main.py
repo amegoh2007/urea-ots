@@ -827,6 +827,20 @@ R324_F001_P_KP    = 0.02                           # bar a per (kg/s) net vapour
 R324_F001_FA_DES  = 250.0                           # kg/h design false-air (PV-324202)
 R324_PV202_OP_DES = 50.0                            # % PV-324202 design stroke
 R324_F001_EJPULL_DES = R324_V1_DES + R324_F001_FA_DES   # ejector pull = gen + air at design
+# --- 324E001 steam-side condensate : LIC-329505 "active controlled steam trap" -
+#  The chest condenses the LP heating steam whose latent it surrenders as Q_e001,
+#  so the shell fills with condensate; LV-329505 drains it to hold the level and
+#  keep the tubes flooded to the design point.  Steam-side ONLY -> off the
+#  urea/water conservation network: at design condensate generated == LV-329505
+#  discharge, so the level parks at SP and neither drifts nor couples a pinned qty.
+R324_E001_LAM_STEAM   = 2133.0                     # kJ/kg LP steam latent @~3.96 bar a chest (sat. steam table)
+R324_E001_COND_DES    = R324_E001_Q_DES_KW / R324_E001_LAM_STEAM * 3600.0   # kg/h steam condensed at design
+R324_E001_COND_LVL_SP = 50.0                       # % LIC-329505 shell condensate setpoint (indicative)
+R324_E001_COND_TAU_S  = 90.0                       # s condensate residence -> shell holdup
+R324_E001_COND_M_DES  = R324_E001_COND_DES/3600.0 * R324_E001_COND_TAU_S    # kg holdup at SP
+R324_E001_COND_M_FULL = R324_E001_COND_M_DES / (R324_E001_COND_LVL_SP/100.0)   # kg at 100% level
+R324_LV9505_OP_DES    = 50.0                       # % LV-329505 design drain stroke
+R324_LV9505_SPAN      = R324_E001_COND_DES / (R324_LV9505_OP_DES/100.0)     # kg/h full-open drain capacity
 
 # --- Stage 2 : Evaporator II 324E003 / 324F003  (0.131 bar a, hold 140 C) -----
 R324_F003_P_BARA = 0.131                           # bar a deep-vacuum boundary (HARD)
@@ -2438,6 +2452,14 @@ class State:
                            "pv1": R324_F003_LVL_SP, "pv2": R324_F003_LVL_SP,
                            "Kc": 1.2, "Ti": 300.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+        # ---- LIC-329505 324E001 steam-side condensate ("active controlled steam
+        #      trap"): LV-329505 drains the shell.  DIRECT: level above SP -> drain
+        #      more (op up).  Tuning ex Master_PID_Tuning_Constants #9 (Dz=2% EU).
+        self.LIC_329505 = {"mode": "AUTO", "op": R324_LV9505_OP_DES,
+                           "sp": R324_E001_COND_LVL_SP, "pv": R324_E001_COND_LVL_SP,
+                           "pv1": R324_E001_COND_LVL_SP, "pv2": R324_E001_COND_LVL_SP,
+                           "Kc": 2.50, "Ti": 60.0, "Td": 0.0, "Tf": 0.0, "Dz": 2.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # ---- FFIC-335406 UF85 ratio station -> FIC-335405 flow slave -----------
         self.FFIC_335406 = {"mode": "AUTO", "op": R324_UF_RATIO,
                             "sp": R324_UF_RATIO, "pv": R324_UF_RATIO,
@@ -2453,6 +2475,7 @@ class State:
         self.r324_e001_T = R324_E001_T_SP_C          # C  324E001/F001 melt temp
         self.r324_f001_M = R324_F001_M_DES           # kg 324F001 melt holdup
         self.r324_f001_P = R324_F001_P_BARA          # bar a 324F001 vacuum
+        self.r324_e001_cond_M = R324_E001_COND_M_DES # kg 324E001 shell steam-condensate holdup (LIC-329505)
         self.r324_e003_T = R324_E003_T_SP_C          # C  324E003/F003 melt temp
         self.r324_f003_M = R324_F003_M_DES           # kg 324F003 melt holdup
         self.r324_f003_P = R324_F003_P_BARA          # bar a 324F003 vacuum
@@ -3711,6 +3734,16 @@ def step_sim(dt: float) -> dict:
     s.r324_f001_P = clamp(s.r324_f001_P
                           + R324_F001_P_KP*((v1_m + fa202_m) - R324_F001_EJPULL_DES)/3600.0*dt,
                           0.05, 1.0)
+    # ---- 324E001 steam-side condensate : LIC-329505 "active controlled steam trap"
+    #  The chest condenses the LP steam it gives up as Q_e001 (cond_gen = Q/lambda);
+    #  LV-329505 drains the shell to hold the level.  Steam-side only -> off the
+    #  urea/water process network, so this loop is conservation-neutral: at design
+    #  cond_gen == lv9505_m -> level parks at SP with zero drift.
+    cond_gen   = Q_e001_kw / R324_E001_LAM_STEAM * 3600.0                     # steam condensed on shell (kg/h)
+    lvl_e001c  = clamp(s.r324_e001_cond_M / R324_E001_COND_M_FULL * 100.0, 0.0, 100.0)
+    lic9505_op = _ctrl_ipd(s.LIC_329505, lvl_e001c, dt)                      # LV-329505 drain stroke (%)
+    lv9505_m   = lic9505_op/100.0 * R324_LV9505_SPAN                         # condensate discharge (kg/h)
+    s.r324_e001_cond_M = max(s.r324_e001_cond_M + (cond_gen - lv9505_m)/3600.0*dt, 0.01)
 
     # ---- Stage 2 : Evaporator II 324E003 + separator 324F003 (0.131 bar a, 140 C) -
     feed2_m    = m_p1                                                         # Stage-1 melt (95%) -> Stage 2
@@ -4241,6 +4274,10 @@ def step_sim(dt: float) -> dict:
                                 "op": round(s.PIC_324202["op"], 1), "mode": s.PIC_324202["mode"]},
                 "FIC_324401":  {"pv": round(s.FIC_324401["pv"], 2), "sp": round(s.FIC_324401["sp"], 2),
                                 "op": round(s.FIC_324401["op"], 1), "mode": s.FIC_324401["mode"]},
+                "LI_329505":   round(s.r324_e001_cond_M / R324_E001_COND_M_FULL * 100.0, 1),   # 324E001 shell condensate level (%)
+                "cond_kgh":    round(cond_gen, 0),                            # 324E001 steam condensate generated (kg/h)
+                "LIC_329505":  {"pv": round(s.LIC_329505["pv"], 1), "sp": round(s.LIC_329505["sp"], 1),
+                                "op": round(s.LIC_329505["op"], 1), "mode": s.LIC_329505["mode"]},
             },
             "E003": {                            # Screen 324-1B : Evaporator II 324E003 / 324F003 (140 C, 0.131 bar a)
                 "TT_324002":   round(s.r324_e003_T, 1),                       # melt temp (C, hold 140)

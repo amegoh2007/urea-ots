@@ -389,8 +389,8 @@
       { k: 'pv9208',  t: 'avalve', x: 845, y: 524, tag: 'PV-329208', bind: 'RECIRC_323.F010.PIC_329208.op', u: '%', dec: 1 },
       // ---- WHITE FRAMES : unmodelled analyzer / steam-condensate / hand valves / downstream ----
       { k: 'py4201w',  t: 'ind', x: 455,  y: 220, tag: 'PY-324201'  },
-      { k: 'lic9505w', t: 'ind', x: 211,  y: 376, tag: 'LIC-329505' },
-      { k: 'lv9505w',  t: 'ind', x: 189,  y: 432, tag: 'LV-329505'  },
+      { k: 'lic9505', t: 'ind', x: 211,  y: 376, tag: 'LIC-329505', bind: 'EVAP_324.E001.LIC_329505.pv', mode: 'EVAP_324.E001.LIC_329505.mode', u: '%', dec: 1, note: '324E001 steam-condensate level; LV-329505 drains shell (active steam trap)' },
+      { k: 'lv9505',  t: 'avalve', x: 189,  y: 432, tag: 'LV-329505', bind: 'EVAP_324.E001.LIC_329505.op', u: '%', dec: 1 },
       { k: 'hic3605w', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
       { k: 'hv3605w',  t: 'ind', x: 642,  y: 201, tag: 'HV-323605',  bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent valve -> non-condensable vent flow
       { k: 'hic9605w', t: 'ind', x: 921,  y: 134, tag: 'HIC-329605' },
