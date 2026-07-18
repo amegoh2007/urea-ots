@@ -772,6 +772,10 @@ R328_D001_M718A_DES = R3232_M718A_DES                       # 3560.4 recycle in
 R328_D001_IN_DES    = R328_D001_M737_DES + R328_D001_M718A_DES
 R328_D001_M786_DES  = 276.0                                 # vent -> 323E011
 R328_D001_M775_DES  = R328_C002_M775_DES                    # 1675 reflux -> 328C002 (FIC-328404)
+# PFD-22 stream 775 (328D001 carbamate-liquid reflux -> 328C002) design volumetric flow (m3/h).
+# Read-only UI anchor for FIC-328404: vol = 1.5 * (m_775 / M775_DES), bit-exact 1.5 at design
+# (PFD mass 1675 kg/h / rho 1095 = 1.53 -> tabulated 1.5).  Physics mass balance (m_775) UNTOUCHED.
+S775_VOL_DES = 1.5
 R328_D001_M776_DES  = R328_D001_IN_DES - R328_D001_M786_DES - R328_D001_M775_DES  # 8274.4 -> 323E003
 R328_D001_M776_RHO  = 1095.0    # kg/m3, stream 776 eff. density @61 C (Combined_1750 tbl, col 776) -> FT-328401 m3/h (8274.4/1095=7.56 -> PFD 7.6)
 R328_D001_M774_DES  = R328_D001_M775_DES + R328_D001_M776_DES             # 9949 (PFD 774 ✓)
@@ -4386,7 +4390,8 @@ def step_sim(dt: float) -> dict:
                 "LIC_328501": {"pv": round(s.LIC_328501["pv"], 1), "sp": round(s.LIC_328501["sp"], 1),
                                "op": round(s.LIC_328501["op"], 1), "mode": s.LIC_328501["mode"]},
                 "FIC_328404": {"pv": round(s.FIC_328404["pv"], 1), "sp": round(s.FIC_328404["sp"], 1),
-                               "op": round(s.FIC_328404["op"], 1), "mode": s.FIC_328404["mode"]},
+                               "op": round(s.FIC_328404["op"], 1), "mode": s.FIC_328404["mode"],
+                               "vol_m3h": round(m_775 / R328_D001_M775_DES * S775_VOL_DES, 2)},  # PFD stream 775
                 "TIC_328002": {"pv": round(s.TIC_328002["pv"], 1), "sp": round(s.TIC_328002["sp"], 1),
                                "op": round(s.TIC_328002["op"], 2), "mode": s.TIC_328002["mode"]},
                 "TIC_328008": {"pv": round(s.TIC_328008["pv"], 1), "sp": round(s.TIC_328008["sp"], 1),
@@ -4420,7 +4425,10 @@ def step_sim(dt: float) -> dict:
                 "collect755_th": round(m_755 / 1000.0, 2),                 # 322P002 collector -> 322C001 (t/h)
                 "flow755_m3h": round(m_755 / A328_M755_RHO, 2),            # FT-322402: 755 draw in m3/h (des 31.3)
                 "FIC_328406": {"pv": round(s.FIC_328406["pv"], 1), "sp": round(s.FIC_328406["sp"], 1),
-                               "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"]},
+                               "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"],
+                               # 328D003 standby transfer pump on the 755 collector line (MAN-0 spare).
+                               # vol = pv(kg/h) / rho_755 -> 0.00 while idle; true m3/h if commissioned.
+                               "vol_m3h": round(s.FIC_328406["pv"] / A328_M755_RHO, 2)},  # PFD stream 755
                 "P002A":      {"on": s.aux_pumps["322P002A"]["on"], "mode": s.aux_pumps["322P002A"]["mode"]},
                 "P002B":      {"on": s.aux_pumps["322P002B"]["on"], "mode": s.aux_pumps["322P002B"]["mode"]},
             },
