@@ -342,7 +342,7 @@
       { k: 'tt8005', t: 'ind', x: 597,  y: 517, tag: 'TT-328005', bind: 'DESORB_328.C004.TT_328005', u: 'C', dec: 1 },   // 328C004 bottoms -> 328E007 143C (stream 739)
       { k: 'tt8007', t: 'ind', x: 492,  y: 587, tag: 'TT-328007', bind: 'DESORB_328.C002.TT_328007', u: 'C', dec: 1 },   // 328C002 bottoms -> 328P006 suction 139C (stream 743)
       { k: 'lt8507w', t: 'ind', x: 1294, y: 380, tag: 'LT-328507' },
-      { k: 'ai8701w', t: 'ind', x: 838,  y: 632, tag: 'AI-328701' },   // conductivity analyzer
+      { k: 'ai8701w', t: 'ind', x: 838,  y: 632, tag: 'AI-328701', bind: 'DESORB_328.C004.AI_328701', u: 'uS/cm', dec: 2 },   // process-condensate conductivity soft sensor (stream 740, NH3/urea/CO2 trace -> Kohlrausch)
       { k: 'p006w',   t: 'ind', x: 421,  y: 632, tag: '328P006'   },
       { k: 'p007w',   t: 'ind', x: 959,  y: 596, tag: '328P007'   },
     ],
