@@ -543,7 +543,7 @@ A328_CP  = 4.0     # kJ/kg·K  LP absorber 322C001 aqueous liquor
 # ---- boundary (fixed) feed streams  (kg/h @ °C) ----
 R3232_M797_DES = 1758.0 ; R3232_M797_T = 46.0     # inert-laden recycle -> 323E003
 R3232_M702_DES = 440.0  ; R3232_M702_T = 45.0     # flash recycle       -> 323E011
-A328_CPL_DES   = 900.0  ; A328_CPL_T   = 30.0     # process condensate  -> 322C001
+A328_CPL_DES   = 1750.0 ; A328_CPL_T   = 46.0     # process condensate 954 -> 322C001 (PFD 1750 kg/h @46 C)
 A328_D003_M719 = 26768.0; A328_D003_M719_T = 45.0 # 719 -> 328D003 Comp I
 A328_D003_M720 = 2758.0 ; A328_D003_M720_T = 40.0 # 720 -> 328D003 Comp I
 A328_D003_M721 = 1763.0 ; A328_D003_M721_T = 41.0 # 721 -> 328D003 Comp I
@@ -694,8 +694,8 @@ R328_D001_LAM737 = ((R328_E004_Q_DES_KW - R328_D001_SENS)
 # ==========================================================================
 A328_M755_DES = 31478.0                                     # Comp-II draw via 322P002
 A328_M755_RHO = 1005.0                                      # kg/m3, stream 755 eff. density @40 C (Combined_1750 tbl, col 755) -> FT-322402 m3/h (31478/1005=31.32 -> PFD 31.3)
-A328_ABS_DES  = 980.0                                       # NH3/CO2 absorbed into liquor
-A328_M756_DES = A328_M755_DES + A328_CPL_DES + A328_ABS_DES # 33358 -> 323E003 wash feed
+A328_M756_DES = 33358.0                                     # 756 -> 323E003 wash feed (PFD anchor, stream 756)
+A328_ABS_DES  = A328_M756_DES - A328_M755_DES - A328_CPL_DES # 130 NH3/CO2 absorbed (mass-balance closure: 33358-31478-1750)
 A328_C001_T = 43.0 ; A328_M755_T = 40.0
 A328_C001_P_BARA = 3.9 ; A328_C001_P_KP = 0.02
 A328_PIC_OP_DES = 67.8                                      # PIC-322201 vent stroke
@@ -2559,6 +2559,7 @@ class State:
         self.a328_c001_M = A328_C001_M_DES
         self.a328_c001_T = A328_C001_T
         self.a328_c001_P = A328_C001_P_BARA
+        self.cpl_flow_kgh = A328_CPL_DES     # FT-322404 condensate (954) feed, operator-manipulable at runtime (kg/h)
         # ---- 323C005 vent scrub (55 C) / 328D003 carbamate collector (Comp I 56, II 44)
         self.a323_c005_M  = A323_C005_M_DES
         self.a323_c005_T  = A323_C005_T
@@ -3648,11 +3649,11 @@ def step_sim(dt: float) -> dict:
         s.a328_c001_P = max(s.a328_c001_P
                             + A328_C001_P_KP*((gcb_m - abs_c001) - vent_c001)/3600.0*dt, 0.1)
     if A328_LAMBDA_ABS is not None:
-        sens_c001 = ((m_755*(A328_M755_T - Tc001) + A328_CPL_DES*(A328_CPL_T - Tc001))/3600.0*A328_CP
+        sens_c001 = ((m_755*(A328_M755_T - Tc001) + s.cpl_flow_kgh*(A328_CPL_T - Tc001))/3600.0*A328_CP
                      + gcb_m*(gcb_T - Tc001)/3600.0*A328_CP)
         P_c001    = sens_c001 + abs_c001/3600.0*A328_LAMBDA_ABS + Q_flood
         s.a328_c001_T = Tc001 + P_c001*dt/max(s.a328_c001_M*A328_CP, 1e-6)
-    s.a328_c001_M = max(s.a328_c001_M + (m_755 + A328_CPL_DES + abs_c001 - m_756)/3600.0*dt, 1.0)
+    s.a328_c001_M = max(s.a328_c001_M + (m_755 + s.cpl_flow_kgh + abs_c001 - m_756)/3600.0*dt, 1.0)
 
     # ----- Stage 8 : 323E003 + 323D001  LPCC (74°C, tempered water) -------
     Te003    = s.r3232_e003_T
@@ -4284,6 +4285,8 @@ def step_sim(dt: float) -> dict:
                 "abs_th":     round(abs_c001 / 1000.0, 2),                 # NH3/CO2 absorbed (t/h)
                 "vent_th":    round(vent_c001 / 1000.0, 2),               # inert vent -> atm (t/h)
                 "liquor756_th": round(m_756 / 1000.0, 2),                 # LV-322502 draw -> 323E003 (t/h)
+                "cpl_kgh":    round(s.cpl_flow_kgh, 1),                    # FT-322404: condensate 954 in (kg/h, operator-set)
+                "make_conc_pct": round(abs_c001 / max(m_756, 1e-6) * 100.0, 2),  # absorbed NH3/CO2 fraction of 756 draw (dilutes as CPL rises)
                 "XV_322915":  bool(s.XV_322915),                          # steam-flood trip valve (22.1)
                 "PIC_322201": {"pv": round(s.PIC_322201["pv"], 2), "sp": round(s.PIC_322201["sp"], 2),
                                "op": round(s.PIC_322201["op"], 1), "mode": s.PIC_322201["mode"]},
@@ -4732,6 +4735,9 @@ def handle_cmd(cmd: dict):
 
     elif t == "co2_set":                       # raw CO2 from 320K002 compressor (t/h)
         s.F_CO2_raw_th = max(0.0, _finite(cmd["value"], "co2"))
+
+    elif t == "cpl_set":                       # FT-322404 condensate 954 -> 322C001, operator-manipulable (kg/h)
+        s.cpl_flow_kgh = clamp(_finite(cmd["value"], "cpl"), 0.0, 2.0 * A328_CPL_DES)
 
     elif t == "hic_set":                       # HIC-322602 -> HV-322602 ejector opening
         s.HIC_322602 = clamp(_finite(cmd["value"], "value"), 0.0, 100.0)

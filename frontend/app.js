@@ -363,8 +363,11 @@ function render322(s){
               'HIC-322604':{t:'hic604_set',f:'op'},    'HV-322604':{t:'hic604_set',f:'op'},
               'HIC-329601':{t:'steam_hpvent_set',f:'op'}, 'HV-329601':{t:'steam_hpvent_set',f:'op'},
               'HIC-329602':{t:'steam_963_set',   f:'op'}, 'HV-329602':{t:'steam_963_set',   f:'op'},
-              'HIC-329605':{t:'hic9605_set',      f:'op'}, 'HV-329605':{t:'hic9605_set',      f:'op'} };
-  const NOTE={ '322602':'↓ opening ⇒ ↑ 322E003 suction (↑ μ)' };
+              'HIC-329605':{t:'hic9605_set',      f:'op'}, 'HV-329605':{t:'hic9605_set',      f:'op'},
+              'FT-322404':{t:'cpl_set', f:'value'} };                          // 954 condensate feed -> 322C001 (kg/h, not a %-opening)
+  const NOTE={ '322602':'↓ opening ⇒ ↑ 322E003 suction (↑ μ)',
+               '322404':'operator sets 954 condensate feed (kg/h) ⇒ ↑322C001 sump ⇒ LIC-322502 opens ⇒ ↑756 draw ⇒ make dilutes' };
+  const TTL ={ '322404':'FT-322404  CONDENSATE 954 → 322C001 (MANUAL, kg/h)' };  // honest title: this is a flow inject, not a HV
   let cur=null;   // overlay currently shown -> drives the SET command + live prefill
   const apply=()=>{ const v=parseFloat(inp.value); if(isNaN(v)) return;
     const c=(cur&&CMD[cur.tag])||CMD['HV-322602'];          // default = HV-322602 (panel %-box / direct open)
@@ -373,7 +376,7 @@ function render322(s){
   inp.addEventListener('change',apply);
   const open=(o)=>{ cur=o||null;
     const num=((cur&&cur.tag.match(/\d+/))||[''])[0];
-    if(ttl)  ttl.textContent  = num ? ('HIC-'+num+' → HV-'+num+' (MANUAL)') : 'HV (MANUAL)';
+    if(ttl)  ttl.textContent  = TTL[num] || (num ? ('HIC-'+num+' → HV-'+num+' (MANUAL)') : 'HV (MANUAL)');
     if(note) note.textContent = NOTE[num] || 'Hand valve — operator sets opening directly (no controller mode).';
     const v=(cur&&cur.bind)? gp(window.OTS_LAST||{}, cur.bind) : null;   // prefill from THIS valve's live opening
     if(v!=null && document.activeElement!==inp) inp.value=fmt(v);
