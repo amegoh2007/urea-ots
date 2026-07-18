@@ -63,6 +63,38 @@ def psat_water_bara(T_C: float) -> float:
     return p_mmhg / 750.0616827
 
 
+def conc_infer_324(w_des: float, T_des: float, P_des: float,
+                   T_live: float, P_live: float) -> float:
+    """Urea-melt concentration soft sensor [wt %] (PY-324201 / AY-324701).
+
+    Isobaric VLE at the vacuum separator.  The evolved vapour is pure water --
+    urea is non-volatile, and as the urea fraction rises the mixture vapour
+    pressure falls (fundamentals.md L104) -- so the boiling equilibrium fixes the
+    water activity to  a_w = P / psat_water(T).  With a_w = x_w * gamma_w and the
+    design activity coefficient BACK-SOLVED from the plant's own HARD design state
+    (gamma_des = a_w_des / x_w_des; no fabricated constant), the frozen-gamma
+    inversion gives  x_w_live = x_w_des * (a_w_live / a_w_des).  Emitted in
+    anchored-correction form so the result is bit-exact w_des at the design point
+    (the correction term is 0.0 exactly when live == design).
+    """
+    MWu, MWw = MW_COMP["Urea"], MW_COMP["H2O"]
+
+    def _w_to_xw(w: float) -> float:                 # urea mass frac -> water mole frac
+        nu, nw = w / MWu, (1.0 - w) / MWw
+        return nw / (nw + nu)
+
+    def _xw_to_w(xw: float) -> float:                # water mole frac -> urea mass frac
+        r = (xw / (1.0 - xw)) * (MWw / MWu)          # mass_water / mass_urea
+        return 1.0 / (1.0 + r)
+
+    aw_des  = P_des  / psat_water_bara(T_des)
+    aw_live = P_live / psat_water_bara(T_live)
+    xw_des  = _w_to_xw(w_des)
+    xw_live = xw_des * (aw_live / aw_des)
+    xw_live = min(max(xw_live, 1e-9), 1.0 - 1e-9)    # keep physical off-design
+    return (w_des + (_xw_to_w(xw_live) - _xw_to_w(xw_des))) * 100.0
+
+
 # ----- Modelling scope boundary (§7.7 P6-B) -----
 # The following 6 P&ID tags are intentionally NOT modelled: they are out-of-envelope
 # auxiliaries with no mass/energy coupling to any modelled unit (no stream on the PFD/HMB
@@ -4281,6 +4313,8 @@ def step_sim(dt: float) -> dict:
                 "vapour_th":   round(v1_m / 1000.0, 2),                       # water vapour -> 324E002 (t/h)
                 "melt_th":     round(m_p1 / 1000.0, 2),                       # 95% melt -> Stage 2 (t/h)
                 "urea_pct":    round(R324_W_EV1 * 100.0, 1),                  # product conc (94.31 %, HARD)
+                "PY_324201":   round(conc_infer_324(R324_W_EV1, R324_E001_T_SP_C, R324_F001_P_BARA,
+                                                    s.r324_e001_T, s.r324_f001_P), 1),   # live conc soft-sensor (wt %)
                 "p_chest_bara":round(p_chest_e001, 2),                        # steam chest press. (bar a)
                 "Q_kW":        round(Q_e001_kw, 0),                           # Evap-I duty (kW)
                 "TIC_324001":  {"pv": round(s.TIC_324001["pv"], 1), "sp": round(s.TIC_324001["sp"], 1),
@@ -4310,6 +4344,8 @@ def step_sim(dt: float) -> dict:
                 "LV_324501A":  round(lva_stroke, 1),                          # LV-324501A forward-to-granulation stroke (parked 0 %)
                 "LV_324501B":  round(lvb_stroke, 1),                          # LV-324501B active melt-drain stroke (%)
                 "urea_pct":    round(R324_W_EV2 * 100.0, 1),                  # product conc (97.71 %, HARD)
+                "AY_324701":   round(conc_infer_324(R324_W_EV2, R324_E003_T_SP_C, R324_F003_P_BARA,
+                                                    s.r324_e003_T, s.r324_f003_P), 1),   # live conc soft-sensor (wt %)
                 "product_th":  round(m_product / 1000.0, 2),                  # final melt + UF85 -> 335 (t/h)
                 "uf85_kgh":    round(m_uf, 1),                                # UF85 injection (kg/h)
                 "uf85_m3h":    round(m_uf / R324_UF85_RHO, 2),                # UF85 injection (m3/h @1305 kg/m3)
