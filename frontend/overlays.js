@@ -388,7 +388,7 @@
       { k: 'pic9208', t: 'ind', x: 835, y: 437, tag: 'PIC-329208', bind: 'RECIRC_323.F010.PIC_329208.pv', mode: 'RECIRC_323.F010.PIC_329208.mode', u: 'BAR A', dec: 2, cas: true },
       { k: 'pv9208',  t: 'avalve', x: 845, y: 524, tag: 'PV-329208', bind: 'RECIRC_323.F010.PIC_329208.op', u: '%', dec: 1 },
       // ---- WHITE FRAMES : unmodelled analyzer / steam-condensate / hand valves / downstream ----
-      { k: 'py4201w',  t: 'ind', x: 455,  y: 220, tag: 'PY-324201'  },
+      { k: 'py4201w',  t: 'ind', x: 455,  y: 220, tag: 'PY-324201', bind: 'EVAP_324.E001.PY_324201', u: 'wt%', dec: 1, note: '324F001 melt concentration soft-sensor (VLE inversion of PT-324201 / TIC-324001)' },
       { k: 'lic9505', t: 'ind', x: 211,  y: 376, tag: 'LIC-329505', bind: 'EVAP_324.E001.LIC_329505.pv', mode: 'EVAP_324.E001.LIC_329505.mode', u: '%', dec: 1, note: '324E001 steam-condensate level; LV-329505 drains shell (active steam trap)' },
       { k: 'lv9505',  t: 'avalve', x: 189,  y: 432, tag: 'LV-329505', bind: 'EVAP_324.E001.LIC_329505.op', u: '%', dec: 1 },
       { k: 'hic3605w', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
@@ -429,7 +429,7 @@
       { k: 'ovr4501b', t: 'ovrd', x: 698, y: 667, tag: 'EXT-OVR LV-324501B' },
       { k: 'ovr5602',  t: 'ovrd', x: 940, y: 462, tag: 'EXT-OVR HV-335602' },
       // ---- WHITE FRAMES : downstream 335 finishing / analyzer / hand valves / pumps (unmodelled) ----
-      { k: 'ay4701w',  t: 'ind', x: 375,  y: 240, tag: 'AY-324701'   },
+      { k: 'ay4701w',  t: 'ind', x: 375,  y: 240, tag: 'AY-324701', bind: 'EVAP_324.E003.AY_324701', u: 'wt%', dec: 1, note: '324F003 product concentration soft-sensor (VLE inversion of PT-324203 / TIC-324002)' },
       { k: 'fic5401w', t: 'ind', x: 907,  y: 322, tag: 'FIC-335401'  },
       { k: 'hic5602w', t: 'ind', x: 980,  y: 369, tag: 'HIC-335602'  },
       { k: 'hv5602w',  t: 'ind', x: 975,  y: 436, tag: 'HV-335602'   },
