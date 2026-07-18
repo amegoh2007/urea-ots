@@ -729,6 +729,11 @@ R3232_E011_M701_DES = R323_M701_DES                         # 4426.6 flash vapou
 R3232_E011_M786_DES = 276.0                                 # vent from 328D001 (stream 786)
 R3232_E011_M321_DES = R3232_M797_DES*0.0 + 1323.0           # 323E003 vent (stream 321)
 R3232_E011_M402_DES = 2931.0                                # 328D003 Comp-I wash (FIC-323402)
+# PFD-22 stream 791 (328D003 Comp-I wash, Amm. Water 56 C / 4.1 bar) design volumetric
+# flow (m3/h).  Read-only UI anchor for FIC-323402: vol = 1.5 * (m_402 / M402_DES),
+# bit-exact 1.5 at design.  FLAG: leg design mass M402_DES=2931 kg/h is ~1.9x the PFD
+# stream-791 mass (1534 kg/h) -> design-constant reconciliation deferred (pin-breaking).
+S791_VOL_DES = 1.5
 R3232_E011_IN_DES   = (R3232_E011_M701_DES + R3232_M702_DES + R3232_E011_M786_DES
                        + R3232_E011_M321_DES + R3232_E011_M402_DES)       # 9396.6
 R3232_E011_PHIV     = 3100.0 / 9400.0                       # vapour split -> 323C005 (v011)
@@ -822,6 +827,11 @@ R3232_E003_PHI321 = 1323.0 / (R3232_E003_M305_DES + R3232_E003_M797_DES)  # vent
 R3232_E003_M321_DES = R3232_E003_PHI321 * (R3232_E003_M305_DES + R3232_E003_M797_DES)  # 1323
 R3232_E003_PHI744 = 31478.0 / A328_M756_DES                 # wash split on 756 -> Comp II
 R3232_E003_M744_DES = R3232_E003_PHI744 * A328_M756_DES      # 31478
+# PFD-22 stream 735 (328C002 -> 323E003 Comp-II wash, Amm. Water 56 C / 4.1 bar) design
+# volumetric flow (m3/h).  Read-only UI anchor: vol = 31.4 * (m_744 / M744_DES) is
+# bit-exact 31.4 at design and tracks FIC-328402 linearly.  Physics mass balance (m_744)
+# is UNTOUCHED -- inferential faceplate indicator only (Tracker-Override directive).
+S735_VOL_DES = 31.4
 R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES - R3232_E003_M744_DES  # 38713.2
 R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
 # 323E003 tempered-water circuit: PFD stream 1102 supply 55 °C / 1103 return 65 °C.  R3232_TW_T is
@@ -4283,7 +4293,8 @@ def step_sim(dt: float) -> dict:
                 "TV_323013B": round(100.0 - tic13_op, 1),      # hot bypass : exact opposite of TV-323013A
                 "TT_323015":  round(T_tw_ret, 1),              # TW return 323E003 -> 323P003 (1103, 65 °C)
                 "FIC_328402": {"pv": round(s.FIC_328402["pv"], 1), "sp": round(s.FIC_328402["sp"], 1),
-                               "op": round(s.FIC_328402["op"], 1), "mode": s.FIC_328402["mode"]},
+                               "op": round(s.FIC_328402["op"], 1), "mode": s.FIC_328402["mode"],
+                               "vol_m3h": round(m_744 / R3232_E003_M744_DES * S735_VOL_DES, 2)},  # PFD stream 735
             },
             "E011": {                            # 323E011 LP carbamate condenser + 323D011 (45°C)
                 "TT_323011":  round(s.r3232_e011_T, 1),                    # shell liquid temp (C, hold 45)
@@ -4298,7 +4309,8 @@ def step_sim(dt: float) -> dict:
                 "FIC_323401": {"pv": round(s.FIC_323401["pv"], 1), "sp": round(s.FIC_323401["sp"], 1),
                                "op": round(s.FIC_323401["op"], 1), "mode": s.FIC_323401["mode"]},
                 "FIC_323402": {"pv": round(s.FIC_323402["pv"], 1), "sp": round(s.FIC_323402["sp"], 1),
-                               "op": round(s.FIC_323402["op"], 1), "mode": s.FIC_323402["mode"]},
+                               "op": round(s.FIC_323402["op"], 1), "mode": s.FIC_323402["mode"],
+                               "vol_m3h": round(m_402 / R3232_E011_M402_DES * S791_VOL_DES, 2)},  # PFD stream 791
             },
             "C005": {                            # 323C005 off-gas scrubber -> 328V001
                 "TT_323C005": round(s.a323_c005_T, 1),                     # scrub liquid temp (C, hold 55)
@@ -4499,6 +4511,14 @@ def step_sim(dt: float) -> dict:
             },
         },
         "STEAM_SYSTEM": {                        # MP/LP steam headers (lumped-capacitance dynamic)
+            # --- steam-network flow transmitters (read-only algebraic telemetry, t/h) ---
+            # FT-329403: live sum of steam to 328C003(911) + 329D005(902) + 329D009(903) + 322D001A/B(963).
+            #   m_911 kg/h -> /1000 ; m_supply/m_903/m_963 kg/s -> *3.6.
+            "FT_329403_th": round(m_911 / 1000.0
+                                  + (s.steam.m_supply + s.steam.m_903 + s.steam.m_963) * 3.6, 2),
+            # FT-329407: live excess 4-bar steam through PV-329207B (turbine 320MT02 make-up leg).
+            #   m_turbine kg/s -> *3.6 ; = 0 at design (pv207b_pct=0).  getattr guards pre-first-step.
+            "FT_329407_th": round(getattr(s.steam, "m_turbine", 0.0) * 3.6, 2),
             "MP": {
                 "P_bara":      round(s.steam.P_MP, 2),       # MP header pressure (bar a)
                 "TI_sat":      round(tsat_steam(s.steam.P_MP), 1),  # MP sat temp (C)

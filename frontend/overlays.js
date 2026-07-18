@@ -142,7 +142,7 @@
       { k: 'tt012b', t: 'ind', x: 735,  y: 145, tag: 'TT-322012', bind: 'HPCC_322E002.TT_322012', u: 'C', dec: 1 },   // 322F001 ejector-disch liquid feed -> 322E002
       { k: 'tt013',  t: 'ind', x: 864,  y: 143, tag: 'TT-322013', bind: 'STRIP_322E001.TT_322013', u: 'C', dec: 1 },
       { k: 'tt006',  t: 'ind', x: 543,  y: 195, tag: 'TT-322006', bind: 'REACT_322R001.TT_322006', u: 'C', dec: 1 },
-      { k: 'ft9407', t: 'ind', x: 807,  y: 212, tag: 'FT-329407' },
+      { k: 'ft9407', t: 'ind', x: 807,  y: 212, tag: 'FT-329407', bind: 'STEAM_SYSTEM.FT_329407_th', u: 'T/H', dec: 2 },   // excess 4-bar steam via PV-329207B (320MT02)
       { k: 'tt007',  t: 'ind', x: 543,  y: 247, tag: 'TT-322007', bind: 'REACT_322R001.TT_322007', u: 'C', dec: 1 },
       { k: 'tt008',  t: 'ind', x: 543,  y: 297, tag: 'TT-322008', bind: 'REACT_322R001.TT_322008', u: 'C', dec: 1 },
       { k: 'tt010',  t: 'ind', x: 597,  y: 335, tag: 'TT-322010', bind: 'HPCC_322E002.TT_322010', u: 'C', dec: 1 },   // 322E002 liquid product temp -> 322R001
@@ -156,7 +156,7 @@
       { k: 'pic9204',t: 'ind', x: 1113, y: 380, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.PIC_329204.pv', u: 'BAR A', dec: 2,
         mode: 'STEAM_SYSTEM.PIC_329204.mode', note: 'AUTO holds 329D005 at SP via PV-329204; MAN sets PV-329204 opening directly' },   // 329D005 = 322E001 shell P
       { k: 'hic9601',t: 'ind', x: 1127, y: 489, tag: 'HIC-329601', bind: 'STEAM_SYSTEM.HP_VENT.pct', u: '%', dec: 1, face: 'hic' },
-      { k: 'ft9403', t: 'ind', x: 1127, y: 520, tag: 'FT-329403' },
+      { k: 'ft9403', t: 'ind', x: 1127, y: 520, tag: 'FT-329403', bind: 'STEAM_SYSTEM.FT_329403_th', u: 'T/H', dec: 2 },   // total steam supply: 911+902+903+963
       { k: 'lv501',  t: 'ind', x: 1110, y: 612, tag: 'LV-322501', bind: 'STRIP_322E001.LV_322501', u: '%', dec: 1 },
       { k: 'tt004',  t: 'ind', x: 1037, y: 619, tag: 'TT-322004', bind: 'STRIP_322E001.TT_322004', u: 'C', dec: 1 },
       { k: 'pt3201', t: 'ind', x: 1187, y: 617, tag: 'PT-323201', bind: 'RECIRC_323.C003.P_bara', u: 'BAR A', dec: 2,
@@ -167,7 +167,7 @@
       // ===== 25-bar BL supply header (stream 901 ex 320E006) =====
       { k: 'pt251',  t: 'ind', x: 136, y: 627, tag: 'PT-329251',  bind: 'STEAM_SYSTEM.SUPPLY_25BAR.P_bara', u: 'BAR A', dec: 2 },
       { k: 'tt101',  t: 'ind', x: 191, y: 651, tag: 'TT-329101',  bind: 'STEAM_SYSTEM.SUPPLY_25BAR.TI_sat', u: 'C',     dec: 1 },
-      { k: 'ft403',  t: 'ind', x: 52,  y: 640, tag: 'FT-329403' },                                       // supply flow — no dedicated packet stream, white frame
+      { k: 'ft403',  t: 'ind', x: 52,  y: 640, tag: 'FT-329403', bind: 'STEAM_SYSTEM.FT_329403_th', u: 'T/H', dec: 2 },   // total steam supply: 911+902+903+963
       // ===== 329D005 HP saturator (stream 902; PIC-329204 / PV-329204) + HP atm vent HIC/HV-329601 =====
       { k: 'pic204', t: 'ind',    x: 317, y: 634, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.PIC_329204.pv', u: 'BAR A', dec: 2,
         mode: 'STEAM_SYSTEM.PIC_329204.mode', note: 'AUTO holds 329D005 at SP via PV-329204; MAN sets PV-329204 opening directly' },   // 329D005 = 322E001 shell P
@@ -201,7 +201,7 @@
       { k: 'pv207c',  t: 'avalve', x: 301,  y: 383, tag: 'PV-329207C', bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1 },   // BL make-up valve (leg C, stream 963)
       { k: 'hic602',  t: 'ind',    x: 301,  y: 420, tag: 'HIC-329602', bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1, face: 'hic' },   // 963 make-up hand ctrl -> PV-329207C opening
       { k: 'hv602',   t: 'ind',    x: 291,  y: 475, tag: 'HV-329602',  bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1, face: 'hic' },   // 963 make-up isolation -> PV-329207C opening
-      { k: 'ft407',   t: 'ind',    x: 1081, y: 141, tag: 'FT-329407'  },   // 320MT02 turbine steam flow
+      { k: 'ft407',   t: 'ind',    x: 1081, y: 141, tag: 'FT-329407', bind: 'STEAM_SYSTEM.FT_329407_th', u: 'T/H', dec: 2 },   // 320MT02 turbine steam flow via PV-329207B
       // ===== 329D005 level (LIC/LV-329502) + O2-scavenger dosing pumps =====
       { k: 'lic502',  t: 'ind',    x: 744, y: 625, tag: 'LIC-329502', bind: 'STEAM_SYSTEM.LIC_329502.pv', u: '%', dec: 1,
         mode: 'STEAM_SYSTEM.LIC_329502.mode', note: 'AUTO holds 329D005 level via LV-329502 drain to 329D009; MAN sets LV-329502 opening directly' },
@@ -277,7 +277,7 @@
       { k: 'fic418', t: 'ind', x: 629,  y: 552, tag: 'FIC-323418', bind: 'LPCC_3232.C005.FIC_323418.pv', mode: 'LPCC_3232.C005.FIC_323418.mode', u: 'T/H', dec: 2, note: '64.2 t/h 323C005 bottoms to 323E003' },
       // ---- 323E011 / 323D011 pre-evaporator package : E011 block ----
       { k: 'tt011',  t: 'ind', x: 1027, y: 572, tag: 'TT-323011',  bind: 'LPCC_3232.E011.TT_323011',    u: 'C',   dec: 1 },
-      { k: 'fic402', t: 'ind', x: 1299, y: 296, tag: 'FIC-323402', bind: 'LPCC_3232.E011.FIC_323402.pv', mode: 'LPCC_3232.E011.FIC_323402.mode', u: 'T/H', dec: 2, note: '323E011 feed/steam flow via FV-323402' },
+      { k: 'fic402', t: 'ind', x: 1299, y: 296, tag: 'FIC-323402', bind: 'LPCC_3232.E011.FIC_323402.vol_m3h', mode: 'LPCC_3232.E011.FIC_323402.mode', u: 'M3/H', dec: 2, note: '328D003 Comp-I wash to 323E011, PFD stream 791, via FV-323402' },
       { k: 'fv402',  t: 'avalve', x: 1253, y: 244, tag: 'FV-323402', bind: 'LPCC_3232.E011.FIC_323402.op', u: '%', dec: 1 },
       { k: 'fic401', t: 'ind', x: 579,  y: 637, tag: 'FIC-323401', bind: 'LPCC_3232.E011.FIC_323401.pv', mode: 'LPCC_3232.E011.FIC_323401.mode', u: 'T/H', dec: 2, note: '323E011 draw flow via FV-323401' },
       { k: 'fv401',  t: 'avalve', x: 523, y: 682, tag: 'FV-323401', bind: 'LPCC_3232.E011.FIC_323401.op', u: '%', dec: 1 },
@@ -329,7 +329,7 @@
       { k: 'fic8406', t: 'ind', x: 1069, y: 425, tag: 'FIC-328406', bind: 'ABSORB_328.D003.FIC_328406.pv', mode: 'ABSORB_328.D003.FIC_328406.mode', u: 'M3/H', dec: 2, note: '328D003 collect draw via FV-328406' },
       { k: 'fv8406', t: 'avalve', x: 1069, y: 458, tag: 'FV-328406', bind: 'ABSORB_328.D003.FIC_328406.op', u: '%', dec: 1 },
       // ---- 323 recycle : LPCC_3232.E003.FIC_328402 cross-ref ----
-      { k: 'fic8402', t: 'ind', x: 672, y: 632, tag: 'FIC-328402', bind: 'LPCC_3232.E003.FIC_328402.pv', mode: 'LPCC_3232.E003.FIC_328402.mode', u: 'M3/H', dec: 2, note: '328 recycle to 323E003 via FV-328402' },
+      { k: 'fic8402', t: 'ind', x: 672, y: 632, tag: 'FIC-328402', bind: 'LPCC_3232.E003.FIC_328402.vol_m3h', mode: 'LPCC_3232.E003.FIC_328402.mode', u: 'M3/H', dec: 2, note: '328C002 Comp-II wash to 323E003, PFD stream 735, via FV-328402' },
       { k: 'fv8402', t: 'avalve', x: 612, y: 632, tag: 'FV-328402', bind: 'LPCC_3232.E003.FIC_328402.op', u: '%', dec: 1 },
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
       { k: 'tt8008w', t: 'ind', x: 1009, y: 61,  tag: 'TT-328008', bind: 'DESORB_328.D001.TT_328008', u: 'C', dec: 1 },   // Desorber-I top / E007 cold-out (114C, absolute; TIC-328008 PV now H2O inferential)
