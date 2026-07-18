@@ -95,6 +95,104 @@ def conc_infer_324(w_des: float, T_des: float, P_des: float,
     return (w_des + (_xw_to_w(xw_live) - _xw_to_w(xw_des))) * 100.0
 
 
+# ===================================================================
+#  AI-328701  process-condensate conductivity soft sensor  (stream 740)
+#  Node: 328E007 hot outlet (739) -> 740 boundary -> 328P007, 89 C.
+#  Live trace NH3 / urea ppm are DERIVED BOTTOM-UP (not back-solved from
+#  the 1 ppm guarantee): Desorber-II (328C004) tray efficiency comes from
+#  the datasheet geometry via O'Connell (1946) [E_o=0.635, 22 perf trays],
+#  the residual NH3 slip from Kremser (1930) stripping, and the urea slip
+#  from first-order Arrhenius hydrolysis in 328C003.  Both are emitted in
+#  ANCHORED-CORRECTION form (residual RATIO vs the plant's own design
+#  state) so each is bit-exact the PFD 1 ppm guarantee at the design point
+#  and only moves off-design.  Read-only readout: no state, no coupling to
+#  the pinned H&MB.  See scratchpad/derive_328_trace.py for the derivation.
+# -------------------------------------------------------------------
+R328_AI701_NH3_PPM_DES  = 1.0        # PFD stream 740 NH3 guarantee   (ppm mass)
+R328_AI701_UREA_PPM_DES = 1.0        # PFD stream 740 urea guarantee  (ppm mass)
+R328_AI701_KINF_C004    = 9.5        # derived dilute NH3-water stripping factor K_inf @143 C, Desorber-II
+R328_AI701_NTHEO_C004   = 13.98      # theoretical stages = E_o(0.635) x 22 actual (O'Connell + geom)
+R328_AI701_DHSTRIP      = 34200.0    # J/mol, NH3-water differential enthalpy of solution (Perry's) -> K(T)
+R328_AI701_EA_UREA      = 72000.0    # J/mol, thermal urea-hydrolysis activation energy (literature)
+R328_AI701_KEFF_UREA    = 2.8167e-3  # 1/s, effective 1st-order urea rate @ 200 C (anchored to 1 ppm)
+R328_AI701_TAU_S        = 3600.0     # s, 328C003 hydrolyser residence time (tau)
+R328_AI701_UREA_PHI     = 0.05       # urea-slip partial-hydrolysis fraction in the hot condensate line
+# Kohlrausch limiting molar ionic conductivities  Lambda_0  (S.cm2/mol, CRC 25 C):
+R328_AI701_KB_NH3       = 1.8e-5     # NH3 + H2O <-> NH4+ + OH- base dissociation constant (CRC)
+R328_AI701_L0_NH4       = 73.5
+R328_AI701_L0_OH        = 198.0
+R328_AI701_L0_HCO3      = 44.5
+_R328_MW_NH3, _R328_MW_UREA, _R328_MW_CO2 = 17.0304, 60.056, 44.01
+
+
+def _kremser_resid(S: float, N_theo: float) -> float:
+    """Kremser (1930) residual liquid fraction x_out/x_in for a stripping
+    section: r = (S-1)/(S^(N+1)-1), S = K*V/L. Continuous at S->1."""
+    if abs(S - 1.0) < 1e-9:
+        return 1.0 / (N_theo + 1.0)
+    return (S - 1.0) / (S ** (N_theo + 1.0) - 1.0)
+
+
+def ppm_infer_328701(T_c004: float, T_c003: float):
+    """Live trace (NH3 ppm, urea ppm) in stream 740, anchored-correction form.
+
+    NH3: the Desorber-II residual slip is Kremser r(S,N_theo) with the derived
+    E_o-based stage count and the dilute strip factor S = K(T)*(V/L).  The design
+    strip ratio V/L is the PFD 100%-load steam/bottoms split (R328_C004_M931_DES/
+    R328_C004_M739_DES); the LP-strip steam (FIC-328401) is pinned at that design
+    duty in the current H&MB, so the live OFF-DESIGN driver is the Desorber-II
+    operating temperature, which sets the NH3 relative volatility via a
+    Clausius-Clapeyron K(T) = K_inf*exp(-(dH/R)(1/T - 1/T_des)) [dH = NH3-water
+    enthalpy of solution].  The slip is the residual RATIO r(S_live)/r(S_des), so
+    it is bit-exact R328_AI701_NH3_PPM_DES (=1 ppm) at the 143 C design point and
+    rises as the column cools (K falls -> less stripping) -- physically correct.
+
+    Urea: first-order Arrhenius residual exp(-k(T)*tau) in 328C003, scaled by the
+    ratio vs the 200 C design residual, so it is bit-exact 1 ppm at design T and
+    rises as the hydrolyser cools (k falls -> more urea slip)."""
+    vol_des = R328_C004_M931_DES / R328_C004_M739_DES        # PFD design molar V/L (MW ~cancels)
+    N = R328_AI701_NTHEO_C004
+    Tc4_des_K, Tc4_live_K = R328_C004_T + 273.15, T_c004 + 273.15
+    K_live = R328_AI701_KINF_C004 * math.exp(
+        -(R328_AI701_DHSTRIP / 8.314) * (1.0 / Tc4_live_K - 1.0 / Tc4_des_K))
+    r_des = _kremser_resid(R328_AI701_KINF_C004 * vol_des, N)
+    r_live = _kremser_resid(K_live * vol_des, N)
+    nh3_ppm = R328_AI701_NH3_PPM_DES * (r_live / r_des if r_des > 0.0 else 1.0)
+
+    Tdes_K, Tlive_K = R328_C003_T + 273.15, T_c003 + 273.15
+    # k(T) = K_eff * exp(-(Ea/R)*(1/T - 1/Tdes)); k(Tdes) = K_eff by construction
+    k_live = R328_AI701_KEFF_UREA * math.exp(
+        -(R328_AI701_EA_UREA / 8.314) * (1.0 / Tlive_K - 1.0 / Tdes_K))
+    urea_ppm = R328_AI701_UREA_PPM_DES * math.exp(
+        -R328_AI701_TAU_S * (k_live - R328_AI701_KEFF_UREA))
+    return max(nh3_ppm, 0.0), max(urea_ppm, 0.0)
+
+
+def cond_infer_328701(nh3_ppm: float, urea_ppm: float, co2_ppm: float) -> float:
+    """Condensate conductivity kappa [uS/cm, temperature-compensated to 25 C]
+    from the live trace composition, via the Kohlrausch independent-ion matrix.
+
+    NH3 is a weak base: [OH-]^2/(C_NH3 - [OH-]) = Kb  ->  [NH4+]=[OH-].
+    Dissolved CO2 in the ammoniacal condensate carries as HCO3- (with a matching
+    NH4+ from neutralisation).  Urea is non-ionic, but the fraction that partially
+    hydrolyses in the hot condensate line (NH2CONH2 + H2O -> 2 NH3 + CO2) adds to
+    both the NH3 and CO2 ion pools -- so urea explicitly moves the reading.
+    kappa = sum_i c_i[mol/cm3] * Lambda0_i * 1e6."""
+    c_urea = max(urea_ppm, 0.0) * 1e-3 / _R328_MW_UREA         # mol/L
+    hyd = c_urea * R328_AI701_UREA_PHI                          # hydrolysed urea, mol/L
+    c_nh3 = max(nh3_ppm, 0.0) * 1e-3 / _R328_MW_NH3 + 2.0 * hyd  # total free NH3, mol/L
+    c_co2 = max(co2_ppm, 0.0) * 1e-3 / _R328_MW_CO2 + hyd       # total dissolved CO2, mol/L
+
+    Kb = R328_AI701_KB_NH3
+    oh = (-Kb + math.sqrt(Kb * Kb + 4.0 * Kb * c_nh3)) / 2.0    # weak-base quadratic
+    hco3 = c_co2                                                # CO2 -> HCO3- in ammoniacal medium
+    nh4 = oh + hco3                                             # charge balance NH4+ = OH- + HCO3-
+
+    kappa = (nh4 * R328_AI701_L0_NH4 + oh * R328_AI701_L0_OH
+             + hco3 * R328_AI701_L0_HCO3) / 1000.0 * 1e6         # mol/L -> mol/cm3 -> uS/cm
+    return kappa
+
+
 # ----- Modelling scope boundary (§7.7 P6-B) -----
 # The following 6 P&ID tags are intentionally NOT modelled: they are out-of-envelope
 # auxiliaries with no mass/energy coupling to any modelled unit (no stream on the PFD/HMB
@@ -4000,6 +4098,10 @@ def step_sim(dt: float) -> dict:
     s.flags["CARBAMATE_CRYST_WARN"]  = any(st in ("WARN", "ALARM") for st in _cryst_states)
     s.flags["CARBAMATE_CRYST_ALARM"] = any(st == "ALARM" for st in _cryst_states)
 
+    # AI-328701 process-condensate conductivity soft sensor (stream 740, read-only)
+    _nh3_740, _urea_740 = ppm_infer_328701(s.a328_c004_T, s.a328_c003_T)
+    _ai701_uS = cond_infer_328701(_nh3_740, _urea_740, 0.0)                  # CO2 fully co-stripped with NH3
+
     return {
         "t":           time.time(),
         "FI_321401":   round(F_pump_total_th, 2),   # FT-321401 live discharge flow
@@ -4247,6 +4349,10 @@ def step_sim(dt: float) -> dict:
                 "steam931_th":round(m_931 / 1000.0, 2),                    # FIC-328401 LP steam (t/h)
                 "ovhd750_th": round(m_750 / 1000.0, 2),                    # relief -> 328C002 (t/h)
                 "bot739_th":  round(m_739 / 1000.0, 2),                    # bottoms -> 328E007 boundary (t/h)
+                "TT_328006":   round(R328_E007_TH_OUT, 1),                 # stream 740 condensate temp (89C, 328E007 hot out)
+                "AI_328701":   round(_ai701_uS, 2),                        # process-condensate conductivity (uS/cm @25C)
+                "nh3_740_ppm": round(_nh3_740, 3),                        # derived trace NH3 slip (ppm mass)
+                "urea_740_ppm":round(_urea_740, 3),                       # derived trace urea slip (ppm mass)
                 "FFIC_328401":{"pv": round(s.FFIC_328401["pv"], 4), "sp": round(s.FFIC_328401["sp"], 4),
                                "op": round(s.FFIC_328401["op"], 1), "mode": s.FFIC_328401["mode"]},
                 "FIC_328401": {"pv": round(s.FIC_328401["pv"], 1), "sp": round(s.FIC_328401["sp"], 1),
