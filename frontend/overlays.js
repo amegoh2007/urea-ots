@@ -272,8 +272,8 @@
       { k: 'ttc005', t: 'ind', x: 1102, y: 108, tag: 'TT-323C005', bind: 'LPCC_3232.C005.TT_323C005',   u: 'C',   dec: 1 },   // 52.8 C overhead
       { k: 'lic503', t: 'ind', x: 1102, y: 525, tag: 'LIC-323503', bind: 'LPCC_3232.C005.LIC_323503.pv', mode: 'LPCC_3232.C005.LIC_323503.mode', u: '%', dec: 1, note: 'holds 323C005 bottoms level via LV-323503 drain' },
       { k: 'lv503',  t: 'avalve', x: 855, y: 506, tag: 'LV-323503', bind: 'LPCC_3232.C005.LIC_323503.op', u: '%', dec: 1 },
-      { k: 'fic405', t: 'ind', x: 886,  y: 313, tag: 'FIC-323405', bind: 'LPCC_3232.C005.FIC_323405.pv', mode: 'LPCC_3232.C005.FIC_323405.mode', u: 'T/H', dec: 2, note: '323C005 reflux/feed flow via FV-323405' },
-      { k: 'fv405',  t: 'avalve', x: 896, y: 399, tag: 'FV-323405', bind: 'LPCC_3232.C005.FIC_323405.op', u: '%', dec: 1 },
+      { k: 'fic405', t: 'ind', x: 886,  y: 313, tag: 'FIC-328405', bind: 'LPCC_3232.C005.FIC_328405.pv', mode: 'LPCC_3232.C005.FIC_328405.mode', u: 'T/H', dec: 2, note: '323C005 reflux/feed flow via FV-328405' },
+      { k: 'fv405',  t: 'avalve', x: 896, y: 399, tag: 'FV-328405', bind: 'LPCC_3232.C005.FIC_328405.op', u: '%', dec: 1 },
       { k: 'fic418', t: 'ind', x: 629,  y: 552, tag: 'FIC-323418', bind: 'LPCC_3232.C005.FIC_323418.pv', mode: 'LPCC_3232.C005.FIC_323418.mode', u: 'T/H', dec: 2, note: '64.2 t/h 323C005 bottoms to 323E003' },
       // ---- 323E011 / 323D011 pre-evaporator package : E011 block ----
       { k: 'tt011',  t: 'ind', x: 1027, y: 572, tag: 'TT-323011',  bind: 'LPCC_3232.E011.TT_323011',    u: 'C',   dec: 1 },
