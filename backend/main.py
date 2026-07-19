@@ -2932,7 +2932,7 @@ class State:
         # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
         self.FIC_328406 = {"mode": "MAN", "op": 0.0,
                            "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
-                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,     # PID unused: CAS is a DIRECT split-range (op tracks LIC-328505), MAN does not integrate.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0}
 
         # -- 328-2 controllers (LP absorber 322C001) ---------------------------
@@ -3784,7 +3784,18 @@ def step_sim(dt: float) -> dict:
     gen748   = R328_C003_PHI748 * in_c003
     lvl_c003 = s.a328_c003_M / R328_C003_M_DES * 50.0
     lic505_op= _ctrl_ipd(s.LIC_328505, lvl_c003, dt)
-    m_747    = R328_C003_M747_DES * (lic505_op / 50.0)                    # bottoms -> desorber-II
+    m_747    = R328_C003_M747_DES * (lic505_op / 50.0)                    # bottoms -> desorber-II (draw set by LIC-328505)
+    if s.FIC_328406["mode"] == "CAS":
+        # WS3 split-range handover: LV-328505 is forced shut and the 328D003 standby
+        #   transfer pump (FV-328406) carries the bottoms, positioned DIRECTLY by the
+        #   LIC-328505 output -- the same level control law as the LV path, so it is
+        #   inherently stable (no inner flow loop to wind up against the 34062 kg/h span).
+        #   The FIC-328406 faceplate mirrors the delivered draw for the operator.
+        s.FIC_328406["op"]  = clamp(lic505_op, 0.0, 100.0)               # FV-328406 tracks LIC-328505 (LV-328505 shut)
+        s.FIC_328406["pv"]  = s.FIC_328406["pv1"] = s.FIC_328406["pv2"] = m_747
+        s.FIC_328406["sp"]  = m_747
+    else:
+        _ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)                  # MAN liveness (spare pump idle, FV-328406 = 0 %); LV-328505 on normal LIC-328505 control
     sens_c003= m_746/3600.0*R328_CP*(T_746 - Tc003)
     P_c003   = sens_c003 + m_911/3600.0*R328_C003_M911_DH - m_748/3600.0*R328_C003_LAM748
     s.a328_c003_P = max(s.a328_c003_P + R328_C003_P_KP*(gen748 - m_748)/3600.0*dt, 0.1)
@@ -3813,7 +3824,8 @@ def step_sim(dt: float) -> dict:
     pic202b_op = _ctrl_ipd(s.PIC_328202, s.a328_d001_P, dt)
     m_786_d001 = R328_D001_M786_DES * (pic202b_op / R328_D001_PV_OP_DES)  # vent -> 323E011
     gen786   = R328_D001_M786_DES * (m_737 / R328_D001_M737_DES)
-    m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt)
+    m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt,
+                         cas_sp=s.TIC_328008["op"]/50.0 * R328_D001_M775_DES)   # WS3: TIC-328008 resets FV-328404 reflux in CAS; op=50 -> M775_DES so du=0 at design seed. Ignored unless FIC-328404 in CAS.
     lvl_d001_328 = s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP
     lic501_op= _ctrl_ipd(s.LIC_328501, lvl_d001_328, dt)
     m_776    = R328_D001_M776_DES * (lic501_op / R328_D001_LV_OP_DES)     # draw -> 323E003
@@ -4077,7 +4089,7 @@ def step_sim(dt: float) -> dict:
     _ctrl_ipd(s.TIC_328008, 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_TOP) / max(s.a328_d001_P + R328_E004_DP, 0.1), dt)   # inferential offgas H2O mol% at 328C002 top (117C/3.5bara), PHI to PFD 737; live on drum PIC-328202 + 0.9 bar dP
     _ctrl_ipd(s.TIC_328012, s.a328_c003_T - R328_C003_T746, dt)              # differential PV: TT-328013 (bottom) - TT-328012 (3rd tray)
     _ctrl_ipd(s.SIC_323902, s.SIC_323902["op"], dt)
-    _ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)
+    #   FIC-328406 now stepped in the 328C003 stage (MAN liveness / CAS split-range) -- see m_747.
 
     # ----- Trips (P1-2 stateful interlocks) -----
     # Live initiator conditions (instantaneous). 21_2 = Urea-Synthesis main trip; its initiators
@@ -4875,7 +4887,7 @@ R323_CTRL_MODES = {
     "LIC_328504": ("MAN", "AUTO"),
     "LIC_328505": ("MAN", "AUTO"),
     "FIC_328402": ("MAN", "AUTO"),
-    "FIC_328406": ("MAN",),                 # standby transfer pump, MAN-0 spare
+    "FIC_328406": ("MAN", "CAS"),           # MAN-0 spare; CAS = LIC-328505 split-range (holds 328C003 level, LV-328505 shut)
     # -- 328-2 (LP absorber) -----------------------------------------------
     "PIC_322201": ("MAN", "AUTO"),
     "LIC_322502": ("MAN", "AUTO"),
@@ -5208,6 +5220,10 @@ def handle_cmd(cmd: dict):
                 if m in R323_CTRL_MODES[cid]:
                     if m == "AUTO" and c["mode"] != "AUTO":      # bumpless SP<-PV on AUTO entry
                         c["sp"] = clamp(c["pv"], c["sp_lo"], c["sp_hi"])
+                    if cid == "FIC_328406" and m == "MAN" and c["mode"] == "CAS":
+                        c["op"] = 0.0                            # WS3: split-range handback -> park the 328D003 standby pump
+                        c["pv"] = c["pv1"] = c["pv2"] = 0.0      #   (LV-328505 resumes normal LIC-328505 control); faceplate returns to idle
+                        c["sp"] = 0.0
                     c["mode"] = m
             if "sp" in cmd and c["mode"] == "AUTO":
                 c["sp"] = clamp(_finite(cmd["sp"], "sp"), c["sp_lo"], c["sp_hi"])
