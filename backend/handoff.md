@@ -1,6 +1,39 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-19 (session 12) · branch `master` · HEAD `f59c313` (pushed) · session 11 items + volumetric migration FIC-323401/405/418 + steam FT-329403/407 telemetry (session 12, logged below)_
+_Last updated: 2026-07-19 (session 13) · branch `master` · HEAD `62decc6` (pushed) · WS1 UI/telemetry pass on 324/328 (this session) + bang-bang fix `f48dd27` + session 12 volumetric migration (logged below)_
+
+## Session 13 (2026-07-19) — Engineering Directive WS1 UI/telemetry · HEAD `62decc6` (pushed)
+
+3-workstream Engineering Directive. **WS1 DONE+PUSHED (`62decc6`). WS2/WS3 pending (below).**
+
+**WS1 — 324/328 frontend telemetry + operator overrides (committed+pushed `62decc6`):**
+- **HIC-323605 / HV-323605 → Valve Opening %.** Both faces (screen-323-1, screen-324-1)
+  previously mirrored 324E002 non-condensable vent **mass flow (kg/h)**; now publish operator
+  hand-valve **opening (%)**. New state `s.HIC_323605` (design 50 %, `R324_HIC3605_DES_PCT`),
+  emitted `EVAP_324.VAC.HIC_323605 / .HV_323605` (HV tracks HIC 1:1), handler `hic3605_set`.
+  Overlays rebound to `%` + `face:'hic'`; HV rows switched `ind`→`avalve`.
+- **HIC-329606 / HV-329606 → added to screen-324-1b.** New indicative hand valve, 324E003b
+  stage-2 vacuum-ejector motive LP steam. State `s.HIC_329606` (50 %, `R324_HIC9606_DES_PCT`),
+  emitted `EVAP_324.E003.HIC_329606 / .HV_329606`, handler `hic9606_set`. Two overlay records added.
+- **TT-328006 → added to screen-328-1.** Process-condensate temp 328E007 hot-out → 328P007
+  (PFD **stream 740**, 100 % load anchor **89 °C**). Value already emitted
+  `DESORB_328.C004.TT_328006 = R328_E007_TH_OUT`; overlay record added. Display-only.
+- **FT-322402 → operator-overridable** (matches FT-322404). New state `s.flow755_override_m3h`
+  (`None` ⇒ MII-scaled process value preserved); when set `m_755 = override_m3h · A328_M755_RHO`
+  (still gated on 322P002 running). Handler `flow755_set` (m³/h; `<0` releases override). Overlay
+  `ft2402` gains `face:'hic'`; app.js CMD/NOTE/TTL added (honest override title, not %-HV).
+- **Pin 15/25/0** (new module constants/state not collected by `_collect_pin`; override default
+  `None` keeps design fixed point bit-exact). `node --check` clean on both JS files.
+
+**WS2 — PENDING (backend dynamic tuning):** HV-329605 impact on PIC-324202 over-aggressive;
+retune hydraulic coupling / valve Kv for smoother transient pressure. Do NOT destabilize; pin 15/25/0.
+
+**WS3 — PENDING (unit 328 control overhaul):**
+1. FIC-328404/TIC-328008 cascade — in CAS, FV-328404 driven by TIC-328008 (wire TIC-328008 op → FIC-328404 cas_sp).
+2. FIC-328406/LIC-328505 split-range cascade — add CAS to FIC-328406; in CAS FV-328406 holds
+   LIC-328505 level, LV-328505 forced CLOSED; default MAN FV-328406=0 %, LV-328505 normal LIC-328505 control.
+3. FT-328404 design values — VERIFIED vs 100 % load PFD (`R328_D001_M775_DES=1675` == stream 775,
+   1.5 m³/h, ρ1095, 61 °C). **No discrepancy — document only, no code change.**
 
 ## Session 12 (2026-07-19) — volumetric migration + steam FT telemetry · HEAD `f59c313` (pushed)
 
