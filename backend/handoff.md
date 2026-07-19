@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-17 (session 10) · branch `master` · sprint items 1, 2, 3b, 3c, 3d, 5 closed + Tranche A2 (items 11/14/16, LIC-323503 cascade)_
+_Last updated: 2026-07-19 (session 11) · branch `master` · HEAD `cddb77d` · sprint items 1, 2, 3b, 3c, 3d, 5 closed + Tranche A2 (items 11/14/16, LIC-323503 cascade) + items 4(partial)/10/13/20 (sessions between 10 and 11, reconciled below) + task #15 (frontend faceplate hygiene)_
 
 ## Goal
 
@@ -972,13 +972,18 @@ recorded in-code. Units unchanged (kg/h).
   steps); always `git fetch` before trusting `origin/*`; stage selectively by path, never `git add -A`
   (26 untracked paths must stay untouched).
 
-**Next Steps (Tranche map, sequenced).** Frontend-only batch first (no pin rehash): item 12 overlay half +
-`overlays.js` duplicate-bind defects (task #15). Then the backend batch (rehashes the pin; require
-`leaves: 25  keys: 15  diffs: 0` at each checkpoint): 3a, 4, 7, 8, 9, 10, 13, 17, 18, 19, 20, 21, 22, 23,
-24(binding), 25, plus Tranche A3 (#16). Open research gap for #4: urea–water VLE/BPE correlation for
-PY-324201 (item 19) and AY-324701 (item 21) — search the 324 section of `main.py` for an existing BPE
-routine **first**. Item 3a (#17) is blocked: it needs a 328D003 level controller cascading into FIC-328402
-(the `avail` escape hatch is disproven), still open on what drives `m_744`.
+**Next Steps (Tranche map, sequenced).** ~~Frontend-only batch first (no pin rehash): item 12 overlay half +
+`overlays.js` duplicate-bind defects (task #15).~~ **DONE session 11** (see session-11 block). Remaining
+backend batch (rehashes the pin; require `leaves: 25  keys: 15  diffs: 0` at each checkpoint): 3a, 7, 8, 9,
+17, 18, 22, 23, 24(binding), 25, plus Tranche A3 (#16). **Reconciled done between sessions 10 and 11:**
+items 4 (partial, m³/h flow indicators 328404/328406/328402/323402), 10, 13, 20 (AI-328701 conductivity
+soft-sensor). **Likely also landed (verify before re-doing):** items 19/21 — `overlays.js` now binds
+`EVAP_324.E001.PY_324201` (PY-324201) and `EVAP_324.E003.AY_324701` (AY-324701) as live VLE-inversion
+soft-sensors; grep `main.py` 324 section for `PY_324201`/`AY_324701` to confirm the BPE routine exists
+before treating 19/21 as open. Item 3a (#17) is blocked: it needs a 328D003 level controller cascading into
+FIC-328402 (the `avail` escape hatch is disproven), still open on what drives `m_744`. **FLAG carried from
+`1eb48ca`:** FIC-323402 leg `R3232_E011_M402_DES = 2931 kg/h` is ~1.9× the PFD stream-791 1534 kg/h;
+reconciliation deferred (pin-breaking).
 
 **Verification (all four gates green, re-run fresh this session before commit).**
 
@@ -988,6 +993,47 @@ routine **first**. Item 3a (#17) is blocked: it needs a 328D003 level controller
 | Steady-state authority (12,000 s step) | `python ../scratchpad/dyn503.py` (gate 2) | **level → 50.0000 %, op → 50.000 off rail, FIC418 flat 50.000; FAILURES 0** |
 | House design probe (8 keys, rounded) | `python …/probe328.py` | **FAILURES 0** |
 | Golden pin | `regress.py <abs>` → `pindiff.py` | **leaves 25, keys 15, diffs 0** |
+
+## 2026-07-19 (session 11): stale-handoff reconciliation + task #15 frontend faceplate hygiene
+
+**Reconciliation — the session-10 handoff was 3 commits stale.** Session 10 recorded HEAD `7c2adf9`, but
+local `master` (level with `origin/master`, tree clean apart from the ~40 known untracked paths) was already
+at `cddb77d`. The three intervening commits, reverse-engineered from their messages and diffs and now
+folded into the sprint ledger:
+
+| Commit | Sprint item(s) | What |
+|--------|----------------|------|
+| `84315f3` | 20 | AI-328701 process-condensate conductivity soft-sensor. Inferential κ₂₅ via O'Connell / Kremser / Clausius-Clapeyron / Arrhenius / Kohlrausch; design κ₂₅ = 6.96 µS/cm. Pin `25/15/0`. |
+| `1eb48ca` | 10, 13 | FIC-328402 / FIC-323402 volumetric `vol_m3h` streams + FT-329403 / FT-329407 wiring. **FLAG:** FIC-323402 leg `R3232_E011_M402_DES = 2931 kg/h` ≈ 1.9× PFD stream-791 (1534 kg/h); reconciliation deferred (pin-breaking). |
+| `cddb77d` | 4 (partial) | FIC-328404 / FIC-328406 m³/h flow indicators; `vol = 1.5·(m_775 / M775_DES)`. Directive item-4 flow-to-stream verification. Pin `25/15/0`. |
+
+The session-10 "frontend-first" sequencing was overtaken — the operator did backend items 4/10/13/20 instead.
+
+**Task #15 (frontend-only, no pin rehash — `overlays.js` only, none of the 4 `_PIN_SRC_FILES` touched).**
+
+- **w-suffix hygiene (the tracked "bound yet retain `w`" defect).** The `w` key-suffix convention means
+  "white frame / unbound"; app.js has **no** `w`-suffix render logic (grep-confirmed) so it is a pure
+  documentary label. 14 elements had been bound over sessions 3b–5 + the reconciled commits yet kept the
+  stale `w`. Dropped it on all 14: `tt8008 tt8010 tt8013 ai8701 ft2404 tt3010 tt3009 tt8015 py4201 hic3605
+  hv3605 pic3203 ay4701`, and `tt005w → tt3005` (de-`w`'d form `tt005` collides with the TT-322005 key on
+  screen-322-1; renamed to match the TT-323005 tag + `tt3xxx` 323 convention). Each key had exactly one ref
+  (its own def); collision-checked; `del:` is runtime localStorage, not static source.
+- **Duplicate-bind audit (per-screen scan, `scratchpad/dupbind.js`).** 11 groups, all resolved or
+  intentional — **no open defect**: the genuine two-distinct-valves class (TV-323013A/B) was already fixed
+  in `c538831`; LV-324501A/B now bind distinct `.LV_324501A` / `.LV_324501B` (R2 rework); the rest are
+  deliberate — explicit `// dup readout` / `// dup valve symbol` (LIC/LV-323501 recycle-line pair),
+  HIC+HV faceplate pairs on one modelled handswitch value (322602, 329601/602, 323605), or documented
+  single-modelled-node conflations (tt8011/tt8012 → `TT_328012`; tt8008/tt8010 → `TT_328008`; tt001/tt004
+  → `C003.feed_T`). Those conflations stay under Scope-Lock (splitting them = inventing physics).
+
+**Verification.** `node --check overlays.js` OK; re-scan → **0** bound-`w` keys remain; no new duplicate
+`k` within any screen. Pin gate **not** re-run and **not required** — `overlays.js ∉ _PIN_SRC_FILES`, so
+the boot-pin hash is unchanged (no backend edit this session).
+
+**Next.** Backend batch per the reconciled Tranche map above. Before item 19/21, first grep `main.py` 324
+section for `PY_324201`/`AY_324701` — the frontend already binds them as live VLE-inversion soft-sensors, so
+the BPE routine may already exist. Confirm the sequence with the user given the session-10 order was
+overtaken by the reconciled commits.
 
 ## Next steps (if work resumes)
 
