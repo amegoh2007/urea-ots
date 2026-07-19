@@ -996,6 +996,16 @@ R324_LV9505_SPAN      = R324_E001_COND_DES / (R324_LV9505_OP_DES/100.0)     # kg
 R324_F002_MOTIVE_DES  = 650.0                      # kg/h sat. LP motive steam @4.1 bar a / 146 C (324-1 ED-2)
 R324_HIC9605_DES_PCT  = 50.0                        # % HIC-329605 design motive-valve stroke (indicative)
 R324_HV9605_SPAN      = R324_F002_MOTIVE_DES / (R324_HIC9605_DES_PCT/100.0)   # kg/h full-open motive capacity
+#  Ejector pull-establishment lag: a steam-jet ejector's entrainment (vacuum pull)
+#  does NOT step instantly when the HV-329605 motive valve strokes -- the nozzle
+#  pressure field and the 324F001 gas volume must re-equilibrate.  Model the live
+#  pull as a first-order lag of the motive-scaled command.  DC gain = 1, so at the
+#  design stroke pull == R324_F001_EJPULL_DES bit-exact (du=0 -> vacuum fixed point
+#  and design pin untouched); on a motive step the pull ramps in over ~tau instead
+#  of stepping, so the disturbance PIC-324202 sees is spread out and its false-air
+#  correction is no longer over-aggressive.  Hydraulic-coupling retune only -- the
+#  PIC-324202 Kc/Ti are left byte-identical.
+R324_F002_PULL_TAU_S  = 60.0                        # s ejector-pull establishment lag (motive -> effective vacuum pull)
 R324_HIC3605_DES_PCT  = 50.0                        # % HIC-323605 design 324E002 non-condensable vent-valve stroke (indicative hand valve)
 R324_HIC9606_DES_PCT  = 50.0                        # % HIC-329606 design 324E003b (stage-2) vac-ejector motive-valve stroke (indicative hand valve)
 
@@ -2696,6 +2706,7 @@ class State:
         self.r324_e001_T = R324_E001_T_SP_C          # C  324E001/F001 melt temp
         self.r324_f001_M = R324_F001_M_DES           # kg 324F001 melt holdup
         self.r324_f001_P = R324_F001_P_BARA          # bar a 324F001 vacuum
+        self.r324_f002_pull = R324_F001_EJPULL_DES   # kg/h lagged 324F002 ejector pull (HV-329605 establishment lag)
         self.r324_e001_cond_M = R324_E001_COND_M_DES # kg 324E001 shell steam-condensate holdup (LIC-329505)
         self.r324_e003_T = R324_E003_T_SP_C          # C  324E003/F003 melt temp
         self.r324_f003_M = R324_F003_M_DES           # kg 324F003 melt holdup
@@ -3992,7 +4003,10 @@ def step_sim(dt: float) -> dict:
     fa202_m    = R324_F001_FA_DES * (s.PIC_324202["op"]/max(R324_PV202_OP_DES, 1e-6))
     _ctrl_ipd(s.PIC_324202, s.r324_f001_P, dt)                               # false-air stroke (%)
     mot9605_m  = s.HIC_329605/100.0 * R324_HV9605_SPAN                        # 324F002 motive LP steam (kg/h)
-    ejpull_live = R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES)   # pull ~ motive; == EJPULL_DES at design
+    ejpull_cmd = R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES)    # commanded pull ~ motive; == EJPULL_DES at design
+    a_pull     = dt / (R324_F002_PULL_TAU_S + dt)                             # first-order establishment weight (DC gain 1)
+    s.r324_f002_pull += a_pull * (ejpull_cmd - s.r324_f002_pull)             # lag motive step into the vacuum -> smooth PIC-324202
+    ejpull_live = s.r324_f002_pull                                            # effective vacuum pull into the ODE (== EJPULL_DES at design)
     s.r324_f001_P = clamp(s.r324_f001_P
                           + R324_F001_P_KP*((v1_m + fa202_m) - ejpull_live)/3600.0*dt,
                           0.05, 1.0)
