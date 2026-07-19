@@ -996,6 +996,18 @@ R324_LV9505_SPAN      = R324_E001_COND_DES / (R324_LV9505_OP_DES/100.0)     # kg
 R324_F002_MOTIVE_DES  = 650.0                      # kg/h sat. LP motive steam @4.1 bar a / 146 C (324-1 ED-2)
 R324_HIC9605_DES_PCT  = 50.0                        # % HIC-329605 design motive-valve stroke (indicative)
 R324_HV9605_SPAN      = R324_F002_MOTIVE_DES / (R324_HIC9605_DES_PCT/100.0)   # kg/h full-open motive capacity
+#  Ejector pull-establishment lag: a steam-jet ejector's entrainment (vacuum pull)
+#  does NOT step instantly when the HV-329605 motive valve strokes -- the nozzle
+#  pressure field and the 324F001 gas volume must re-equilibrate.  Model the live
+#  pull as a first-order lag of the motive-scaled command.  DC gain = 1, so at the
+#  design stroke pull == R324_F001_EJPULL_DES bit-exact (du=0 -> vacuum fixed point
+#  and design pin untouched); on a motive step the pull ramps in over ~tau instead
+#  of stepping, so the disturbance PIC-324202 sees is spread out and its false-air
+#  correction is no longer over-aggressive.  Hydraulic-coupling retune only -- the
+#  PIC-324202 Kc/Ti are left byte-identical.
+R324_F002_PULL_TAU_S  = 60.0                        # s ejector-pull establishment lag (motive -> effective vacuum pull)
+R324_HIC3605_DES_PCT  = 50.0                        # % HIC-323605 design 324E002 non-condensable vent-valve stroke (indicative hand valve)
+R324_HIC9606_DES_PCT  = 50.0                        # % HIC-329606 design 324E003b (stage-2) vac-ejector motive-valve stroke (indicative hand valve)
 
 # --- Stage 2 : Evaporator II 324E003 / 324F003  (0.131 bar a, hold 140 C) -----
 R324_F003_P_BARA = 0.131                           # bar a deep-vacuum boundary (HARD)
@@ -2673,6 +2685,12 @@ class State:
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # ---- HIC-329605 324F002 motive LP steam hand valve (published HIC+HV 1:1)
         self.HIC_329605 = R324_HIC9605_DES_PCT       # % opening (operator hand valve, no controller mode)
+        # ---- HIC-323605 324E002 non-condensable vent hand valve (published HIC+HV 1:1)
+        self.HIC_323605 = R324_HIC3605_DES_PCT       # % opening (operator hand valve, no controller mode)
+        # ---- HIC-329606 324E003b stage-2 vac-ejector motive hand valve (published HIC+HV 1:1)
+        self.HIC_329606 = R324_HIC9606_DES_PCT       # % opening (operator hand valve, no controller mode)
+        # ---- FT-322402 stream-755 flow operator override (None => process-derived)
+        self.flow755_override_m3h = None             # m3/h user setpoint; None keeps MII-scaled process value
         # ---- FFIC-335406 UF85 ratio station -> FIC-335405 flow slave -----------
         self.FFIC_335406 = {"mode": "AUTO", "op": R324_UF_RATIO,
                             "sp": R324_UF_RATIO, "pv": R324_UF_RATIO,
@@ -2688,6 +2706,7 @@ class State:
         self.r324_e001_T = R324_E001_T_SP_C          # C  324E001/F001 melt temp
         self.r324_f001_M = R324_F001_M_DES           # kg 324F001 melt holdup
         self.r324_f001_P = R324_F001_P_BARA          # bar a 324F001 vacuum
+        self.r324_f002_pull = R324_F001_EJPULL_DES   # kg/h lagged 324F002 ejector pull (HV-329605 establishment lag)
         self.r324_e001_cond_M = R324_E001_COND_M_DES # kg 324E001 shell steam-condensate holdup (LIC-329505)
         self.r324_e003_T = R324_E003_T_SP_C          # C  324E003/F003 melt temp
         self.r324_f003_M = R324_F003_M_DES           # kg 324F003 melt holdup
@@ -2913,7 +2932,7 @@ class State:
         # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
         self.FIC_328406 = {"mode": "MAN", "op": 0.0,
                            "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
-                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,     # PID unused: CAS is a DIRECT split-range (op tracks LIC-328505), MAN does not integrate.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0}
 
         # -- 328-2 controllers (LP absorber 322C001) ---------------------------
@@ -3727,6 +3746,8 @@ def step_sim(dt: float) -> dict:
     TII      = s.a328_d003_TII
     run_p002 = s.aux_pumps["322P002A"]["on"] or s.aux_pumps["322P002B"]["on"]
     m_755    = A328_M755_DES * (s.a328_d003_MII / A328_D003_MII_DES) * (1.0 if run_p002 else 0.0)
+    if s.flow755_override_m3h is not None:                                # FT-322402 operator override (m3/h -> kg/h)
+        m_755 = s.flow755_override_m3h * A328_M755_RHO * (1.0 if run_p002 else 0.0)
     P_compII = m744_prev/3600.0*A328_CP*(R3232_E003_T744 - TII)          # 744 in @ 44 = TII
     s.a328_d003_TII = TII + P_compII*dt/max(s.a328_d003_MII*A328_CP, 1e-6)
     s.a328_d003_MII = max(s.a328_d003_MII + (m744_prev - m_755)/3600.0*dt, 1.0)
@@ -3763,7 +3784,18 @@ def step_sim(dt: float) -> dict:
     gen748   = R328_C003_PHI748 * in_c003
     lvl_c003 = s.a328_c003_M / R328_C003_M_DES * 50.0
     lic505_op= _ctrl_ipd(s.LIC_328505, lvl_c003, dt)
-    m_747    = R328_C003_M747_DES * (lic505_op / 50.0)                    # bottoms -> desorber-II
+    m_747    = R328_C003_M747_DES * (lic505_op / 50.0)                    # bottoms -> desorber-II (draw set by LIC-328505)
+    if s.FIC_328406["mode"] == "CAS":
+        # WS3 split-range handover: LV-328505 is forced shut and the 328D003 standby
+        #   transfer pump (FV-328406) carries the bottoms, positioned DIRECTLY by the
+        #   LIC-328505 output -- the same level control law as the LV path, so it is
+        #   inherently stable (no inner flow loop to wind up against the 34062 kg/h span).
+        #   The FIC-328406 faceplate mirrors the delivered draw for the operator.
+        s.FIC_328406["op"]  = clamp(lic505_op, 0.0, 100.0)               # FV-328406 tracks LIC-328505 (LV-328505 shut)
+        s.FIC_328406["pv"]  = s.FIC_328406["pv1"] = s.FIC_328406["pv2"] = m_747
+        s.FIC_328406["sp"]  = m_747
+    else:
+        _ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)                  # MAN liveness (spare pump idle, FV-328406 = 0 %); LV-328505 on normal LIC-328505 control
     sens_c003= m_746/3600.0*R328_CP*(T_746 - Tc003)
     P_c003   = sens_c003 + m_911/3600.0*R328_C003_M911_DH - m_748/3600.0*R328_C003_LAM748
     s.a328_c003_P = max(s.a328_c003_P + R328_C003_P_KP*(gen748 - m_748)/3600.0*dt, 0.1)
@@ -3792,7 +3824,8 @@ def step_sim(dt: float) -> dict:
     pic202b_op = _ctrl_ipd(s.PIC_328202, s.a328_d001_P, dt)
     m_786_d001 = R328_D001_M786_DES * (pic202b_op / R328_D001_PV_OP_DES)  # vent -> 323E011
     gen786   = R328_D001_M786_DES * (m_737 / R328_D001_M737_DES)
-    m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt)
+    m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt,
+                         cas_sp=s.TIC_328008["op"]/50.0 * R328_D001_M775_DES)   # WS3: TIC-328008 resets FV-328404 reflux in CAS; op=50 -> M775_DES so du=0 at design seed. Ignored unless FIC-328404 in CAS.
     lvl_d001_328 = s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP
     lic501_op= _ctrl_ipd(s.LIC_328501, lvl_d001_328, dt)
     m_776    = R328_D001_M776_DES * (lic501_op / R328_D001_LV_OP_DES)     # draw -> 323E003
@@ -3982,7 +4015,10 @@ def step_sim(dt: float) -> dict:
     fa202_m    = R324_F001_FA_DES * (s.PIC_324202["op"]/max(R324_PV202_OP_DES, 1e-6))
     _ctrl_ipd(s.PIC_324202, s.r324_f001_P, dt)                               # false-air stroke (%)
     mot9605_m  = s.HIC_329605/100.0 * R324_HV9605_SPAN                        # 324F002 motive LP steam (kg/h)
-    ejpull_live = R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES)   # pull ~ motive; == EJPULL_DES at design
+    ejpull_cmd = R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES)    # commanded pull ~ motive; == EJPULL_DES at design
+    a_pull     = dt / (R324_F002_PULL_TAU_S + dt)                             # first-order establishment weight (DC gain 1)
+    s.r324_f002_pull += a_pull * (ejpull_cmd - s.r324_f002_pull)             # lag motive step into the vacuum -> smooth PIC-324202
+    ejpull_live = s.r324_f002_pull                                            # effective vacuum pull into the ODE (== EJPULL_DES at design)
     s.r324_f001_P = clamp(s.r324_f001_P
                           + R324_F001_P_KP*((v1_m + fa202_m) - ejpull_live)/3600.0*dt,
                           0.05, 1.0)
@@ -4053,7 +4089,7 @@ def step_sim(dt: float) -> dict:
     _ctrl_ipd(s.TIC_328008, 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_TOP) / max(s.a328_d001_P + R328_E004_DP, 0.1), dt)   # inferential offgas H2O mol% at 328C002 top (117C/3.5bara), PHI to PFD 737; live on drum PIC-328202 + 0.9 bar dP
     _ctrl_ipd(s.TIC_328012, s.a328_c003_T - R328_C003_T746, dt)              # differential PV: TT-328013 (bottom) - TT-328012 (3rd tray)
     _ctrl_ipd(s.SIC_323902, s.SIC_323902["op"], dt)
-    _ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)
+    #   FIC-328406 now stepped in the 328C003 stage (MAN liveness / CAS split-range) -- see m_747.
 
     # ----- Trips (P1-2 stateful interlocks) -----
     # Live initiator conditions (instantaneous). 21_2 = Urea-Synthesis main trip; its initiators
@@ -4588,10 +4624,14 @@ def step_sim(dt: float) -> dict:
                                 "op": round(s.FFIC_335406["op"], 4), "mode": s.FFIC_335406["mode"]},
                 "FIC_335405":  {"pv": round(s.FIC_335405["pv"], 3), "sp": round(s.FIC_335405["sp"], 3),
                                 "op": round(s.FIC_335405["op"], 1), "mode": s.FIC_335405["mode"]},
+                "HIC_329606":  round(s.HIC_329606, 1),                        # 324E003b stage-2 ejector motive hand valve (%)
+                "HV_329606":   round(s.HIC_329606, 1),                        # HV-329606 opening (tracks HIC 1:1)
             },
             "VAC": {                             # vacuum condensation train (324E002/E005/E006/E007 + ejectors)
                 "condensate_th": round(m_324_cond / 1000.0, 2),              # V1+V2 -> 328D003 (t/h)
                 "vent_kgh":      round(m_324_vent, 1),                        # non-condensable vent -> atm (kg/h)
+                "HIC_323605":  round(s.HIC_323605, 1),                        # 324E002 non-condensable vent hand valve (%)
+                "HV_323605":   round(s.HIC_323605, 1),                        # HV-323605 opening (tracks HIC 1:1)
             },
         },
         "HPCC_322E002": {                        # HP Carbamate Condenser 322E002 -> 322R001
@@ -4847,7 +4887,7 @@ R323_CTRL_MODES = {
     "LIC_328504": ("MAN", "AUTO"),
     "LIC_328505": ("MAN", "AUTO"),
     "FIC_328402": ("MAN", "AUTO"),
-    "FIC_328406": ("MAN",),                 # standby transfer pump, MAN-0 spare
+    "FIC_328406": ("MAN", "CAS"),           # MAN-0 spare; CAS = LIC-328505 split-range (holds 328C003 level, LV-328505 shut)
     # -- 328-2 (LP absorber) -----------------------------------------------
     "PIC_322201": ("MAN", "AUTO"),
     "LIC_322502": ("MAN", "AUTO"),
@@ -5015,6 +5055,18 @@ def handle_cmd(cmd: dict):
         if "op" in cmd:
             s.HIC_329605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
+    elif t == "hic3605_set":                   # HIC-323605 -> HV-323605 324E002 non-condensable vent hand valve
+        if "op" in cmd:
+            s.HIC_323605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "hic9606_set":                   # HIC-329606 -> HV-329606 324E003b stage-2 ejector motive hand valve
+        if "op" in cmd:
+            s.HIC_329606 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "flow755_set":                   # FT-322402 stream-755 operator override (m3/h; <0 clears -> process-derived)
+        v = _finite(cmd["value"], "flow755")
+        s.flow755_override_m3h = None if v < 0.0 else clamp(v, 0.0, 2.0 * (A328_M755_DES / A328_M755_RHO))
+
     elif t == "steam_supply_set":              # MP supply valve (utility import -> MP header)
         if "op" in cmd:
             s.steam.valve_supply_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
@@ -5168,6 +5220,10 @@ def handle_cmd(cmd: dict):
                 if m in R323_CTRL_MODES[cid]:
                     if m == "AUTO" and c["mode"] != "AUTO":      # bumpless SP<-PV on AUTO entry
                         c["sp"] = clamp(c["pv"], c["sp_lo"], c["sp_hi"])
+                    if cid == "FIC_328406" and m == "MAN" and c["mode"] == "CAS":
+                        c["op"] = 0.0                            # WS3: split-range handback -> park the 328D003 standby pump
+                        c["pv"] = c["pv1"] = c["pv2"] = 0.0      #   (LV-328505 resumes normal LIC-328505 control); faceplate returns to idle
+                        c["sp"] = 0.0
                     c["mode"] = m
             if "sp" in cmd and c["mode"] == "AUTO":
                 c["sp"] = clamp(_finite(cmd["sp"], "sp"), c["sp_lo"], c["sp_hi"])

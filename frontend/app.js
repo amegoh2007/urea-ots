@@ -364,10 +364,17 @@ function render322(s){
               'HIC-329601':{t:'steam_hpvent_set',f:'op'}, 'HV-329601':{t:'steam_hpvent_set',f:'op'},
               'HIC-329602':{t:'steam_963_set',   f:'op'}, 'HV-329602':{t:'steam_963_set',   f:'op'},
               'HIC-329605':{t:'hic9605_set',      f:'op'}, 'HV-329605':{t:'hic9605_set',      f:'op'},
+              'HIC-323605':{t:'hic3605_set',      f:'op'}, 'HV-323605':{t:'hic3605_set',      f:'op'},
+              'HIC-329606':{t:'hic9606_set',      f:'op'}, 'HV-329606':{t:'hic9606_set',      f:'op'},
+              'FT-322402':{t:'flow755_set', f:'value'},                        // stream-755 draw override -> 322C001 (m3/h; <0 clears to process value)
               'FT-322404':{t:'cpl_set', f:'value'} };                          // 954 condensate feed -> 322C001 (kg/h, not a %-opening)
   const NOTE={ '322602':'↓ opening ⇒ ↑ 322E003 suction (↑ μ)',
+               '323605':'324E002 non-condensable vent hand valve — operator sets opening % (HV-323605 tracks 1:1)',
+               '329606':'324E003b stage-2 vacuum-ejector motive-steam hand valve — operator sets opening % (HV-329606 tracks 1:1)',
+               '322402':'operator overrides stream-755 collector draw (m3/h) ⇒ 322C001 feed; enter <0 to release back to process value',
                '322404':'operator sets 954 condensate feed (kg/h) ⇒ ↑322C001 sump ⇒ LIC-322502 opens ⇒ ↑756 draw ⇒ make dilutes' };
-  const TTL ={ '322404':'FT-322404  CONDENSATE 954 → 322C001 (MANUAL, kg/h)' };  // honest title: this is a flow inject, not a HV
+  const TTL ={ '322402':'FT-322402  STREAM 755 → 322C001 (OVERRIDE, m3/h)',   // honest title: flow override, not a %-opening HV
+               '322404':'FT-322404  CONDENSATE 954 → 322C001 (MANUAL, kg/h)' };  // honest title: this is a flow inject, not a HV
   let cur=null;   // overlay currently shown -> drives the SET command + live prefill
   const apply=()=>{ const v=parseFloat(inp.value); if(isNaN(v)) return;
     const c=(cur&&CMD[cur.tag])||CMD['HV-322602'];          // default = HV-322602 (panel %-box / direct open)

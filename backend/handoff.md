@@ -1,6 +1,61 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-19 (session 12) · branch `master` · HEAD `f59c313` (pushed) · session 11 items + volumetric migration FIC-323401/405/418 + steam FT-329403/407 telemetry (session 12, logged below)_
+_Last updated: 2026-07-19 (session 13) · branch `master` · HEAD `42bd1c6` · WS1 UI/telemetry (`62decc6`) + WS2 vacuum-coupling damp (`127a86f`) + WS3 unit-328 cascades (`42bd1c6`) + session 12 volumetric migration (logged below)_
+
+## Session 13 (2026-07-19) — Engineering Directive WS1/WS2/WS3 · HEAD `42bd1c6`
+
+3-workstream Engineering Directive — **ALL THREE DONE.** WS1 `62decc6`, WS2 `127a86f`, WS3 `42bd1c6`.
+
+**WS1 — 324/328 frontend telemetry + operator overrides (committed+pushed `62decc6`):**
+- **HIC-323605 / HV-323605 → Valve Opening %.** Both faces (screen-323-1, screen-324-1)
+  previously mirrored 324E002 non-condensable vent **mass flow (kg/h)**; now publish operator
+  hand-valve **opening (%)**. New state `s.HIC_323605` (design 50 %, `R324_HIC3605_DES_PCT`),
+  emitted `EVAP_324.VAC.HIC_323605 / .HV_323605` (HV tracks HIC 1:1), handler `hic3605_set`.
+  Overlays rebound to `%` + `face:'hic'`; HV rows switched `ind`→`avalve`.
+- **HIC-329606 / HV-329606 → added to screen-324-1b.** New indicative hand valve, 324E003b
+  stage-2 vacuum-ejector motive LP steam. State `s.HIC_329606` (50 %, `R324_HIC9606_DES_PCT`),
+  emitted `EVAP_324.E003.HIC_329606 / .HV_329606`, handler `hic9606_set`. Two overlay records added.
+- **TT-328006 → added to screen-328-1.** Process-condensate temp 328E007 hot-out → 328P007
+  (PFD **stream 740**, 100 % load anchor **89 °C**). Value already emitted
+  `DESORB_328.C004.TT_328006 = R328_E007_TH_OUT`; overlay record added. Display-only.
+- **FT-322402 → operator-overridable** (matches FT-322404). New state `s.flow755_override_m3h`
+  (`None` ⇒ MII-scaled process value preserved); when set `m_755 = override_m3h · A328_M755_RHO`
+  (still gated on 322P002 running). Handler `flow755_set` (m³/h; `<0` releases override). Overlay
+  `ft2402` gains `face:'hic'`; app.js CMD/NOTE/TTL added (honest override title, not %-HV).
+- **Pin 15/25/0** (new module constants/state not collected by `_collect_pin`; override default
+  `None` keeps design fixed point bit-exact). `node --check` clean on both JS files.
+
+**WS2 — DONE+PUSHED (`127a86f`) — HV-329605 → PIC-324202 vacuum-coupling damp.** Stepping the
+HV-329605 motive hand valve drove PIC-324202 (324F001 false-air) over-aggressively: the motive
+stroke `mot9605_m → ejpull_live` was instantaneous, injecting a step straight into the r324_f001_P
+vacuum integrator. Fix is on the **hydraulic coupling, not the PID** (PIC-324202 Kc/Ti byte-identical
+— bang-bang precedent). A steam-jet ejector's entrainment does not establish instantly; the live
+pull is now a first-order lag of the motive-scaled command, `tau = R324_F002_PULL_TAU_S = 60 s`,
+DC gain 1 (`ejpull_cmd = EJPULL_DES·mot9605_m/MOTIVE_DES`; state `s.r324_f002_pull`). At the design
+stroke (HIC-329605 = 50 %) cmd == EJPULL_DES == lag state → du=0, vacuum fixed point + pin bit-exact.
+Verified (scratchpad/ws2_pull.py): peak false-air slew cut ~45 % on a +20 % motive step, steady state
+identical; **pin 15/25/0**.
+
+**WS3 — DONE+PUSHED (`42bd1c6`) — unit-328 control overhaul (backend/main.py only):**
+1. **FIC-328404 / TIC-328008 reflux cascade.** In CAS the 328D001 reflux valve FV-328404 is reset by
+   the off-gas scrubber top-temp controller TIC-328008 (`cas_sp = TIC_328008.op/50 · R328_D001_M775_DES`).
+   At design TIC-328008 op=50.0 → cas_sp=1675 → du=0 (m_775 + D001 ODEs bit-exact). Stability-open:
+   TIC-328008 pv depends only on PIC-328202-held D001 pressure, never on m_775; master stepped after
+   slave (one-tick lag). Ignored unless FIC-328404 in CAS.
+2. **FIC-328406 / LIC-328505 DIRECT split-range** (328C003 hydrolyser bottoms). CAS added to FIC-328406
+   for the 328D003 standby transfer pump: LV-328505 taken shut, FV-328406 carries the bottoms positioned
+   **directly** by the LIC-328505 output (same level law as the LV path). `m_747 = M747_DES·lic505_op/50`
+   in BOTH branches → 328C003 level ODE byte-identical to pre-WS3; CAS only mirrors the draw onto the
+   faceplate (`op=clamp(lic505_op,0,100)`, `pv/sp=m_747`). NOT an inner flow loop: a flow-PID cascade
+   against the 34062 kg/h span (g≈681) limit-cycles op 0↔100 every tick under proportional-on-PV, and
+   no legal Kc removes it → coupling made direct, not retuned (**bang-bang precedent**). Default MAN
+   (spare parked, FV-328406=0 %, LV normal). CAS→MAN handback in `r323_ctrl_set` parks the faceplate
+   (op/pv/sp→0). FIC-328406 whitelist gains CAS. Verified (scratchpad/ws3_cmp.py, +10 % 328C003 hold-up
+   excursion): MAN vs CAS level trajectory byte-identical (lvl_end 51.4342, LIC505_op 62.5136);
+   post-entry hard swings (>50 %/tick) = 0; CAS op tracks LIC exactly (max slew 0.031 %/tick).
+3. **FT-328404 anchor** — VERIFIED vs 100 % load PFD (`R328_D001_M775_DES=1675` == stream 775, 1.5 m³/h,
+   ρ1095, 61 °C). No discrepancy — documentation only, no code change.
+- **Pin 15 keys / 0 diffs** vs golden (both cascades du=0 at the design seed).
 
 ## Session 12 (2026-07-19) — volumetric migration + steam FT telemetry · HEAD `f59c313` (pushed)
 
