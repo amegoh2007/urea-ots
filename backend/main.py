@@ -996,6 +996,8 @@ R324_LV9505_SPAN      = R324_E001_COND_DES / (R324_LV9505_OP_DES/100.0)     # kg
 R324_F002_MOTIVE_DES  = 650.0                      # kg/h sat. LP motive steam @4.1 bar a / 146 C (324-1 ED-2)
 R324_HIC9605_DES_PCT  = 50.0                        # % HIC-329605 design motive-valve stroke (indicative)
 R324_HV9605_SPAN      = R324_F002_MOTIVE_DES / (R324_HIC9605_DES_PCT/100.0)   # kg/h full-open motive capacity
+R324_HIC3605_DES_PCT  = 50.0                        # % HIC-323605 design 324E002 non-condensable vent-valve stroke (indicative hand valve)
+R324_HIC9606_DES_PCT  = 50.0                        # % HIC-329606 design 324E003b (stage-2) vac-ejector motive-valve stroke (indicative hand valve)
 
 # --- Stage 2 : Evaporator II 324E003 / 324F003  (0.131 bar a, hold 140 C) -----
 R324_F003_P_BARA = 0.131                           # bar a deep-vacuum boundary (HARD)
@@ -2673,6 +2675,12 @@ class State:
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # ---- HIC-329605 324F002 motive LP steam hand valve (published HIC+HV 1:1)
         self.HIC_329605 = R324_HIC9605_DES_PCT       # % opening (operator hand valve, no controller mode)
+        # ---- HIC-323605 324E002 non-condensable vent hand valve (published HIC+HV 1:1)
+        self.HIC_323605 = R324_HIC3605_DES_PCT       # % opening (operator hand valve, no controller mode)
+        # ---- HIC-329606 324E003b stage-2 vac-ejector motive hand valve (published HIC+HV 1:1)
+        self.HIC_329606 = R324_HIC9606_DES_PCT       # % opening (operator hand valve, no controller mode)
+        # ---- FT-322402 stream-755 flow operator override (None => process-derived)
+        self.flow755_override_m3h = None             # m3/h user setpoint; None keeps MII-scaled process value
         # ---- FFIC-335406 UF85 ratio station -> FIC-335405 flow slave -----------
         self.FFIC_335406 = {"mode": "AUTO", "op": R324_UF_RATIO,
                             "sp": R324_UF_RATIO, "pv": R324_UF_RATIO,
@@ -3727,6 +3735,8 @@ def step_sim(dt: float) -> dict:
     TII      = s.a328_d003_TII
     run_p002 = s.aux_pumps["322P002A"]["on"] or s.aux_pumps["322P002B"]["on"]
     m_755    = A328_M755_DES * (s.a328_d003_MII / A328_D003_MII_DES) * (1.0 if run_p002 else 0.0)
+    if s.flow755_override_m3h is not None:                                # FT-322402 operator override (m3/h -> kg/h)
+        m_755 = s.flow755_override_m3h * A328_M755_RHO * (1.0 if run_p002 else 0.0)
     P_compII = m744_prev/3600.0*A328_CP*(R3232_E003_T744 - TII)          # 744 in @ 44 = TII
     s.a328_d003_TII = TII + P_compII*dt/max(s.a328_d003_MII*A328_CP, 1e-6)
     s.a328_d003_MII = max(s.a328_d003_MII + (m744_prev - m_755)/3600.0*dt, 1.0)
@@ -4588,10 +4598,14 @@ def step_sim(dt: float) -> dict:
                                 "op": round(s.FFIC_335406["op"], 4), "mode": s.FFIC_335406["mode"]},
                 "FIC_335405":  {"pv": round(s.FIC_335405["pv"], 3), "sp": round(s.FIC_335405["sp"], 3),
                                 "op": round(s.FIC_335405["op"], 1), "mode": s.FIC_335405["mode"]},
+                "HIC_329606":  round(s.HIC_329606, 1),                        # 324E003b stage-2 ejector motive hand valve (%)
+                "HV_329606":   round(s.HIC_329606, 1),                        # HV-329606 opening (tracks HIC 1:1)
             },
             "VAC": {                             # vacuum condensation train (324E002/E005/E006/E007 + ejectors)
                 "condensate_th": round(m_324_cond / 1000.0, 2),              # V1+V2 -> 328D003 (t/h)
                 "vent_kgh":      round(m_324_vent, 1),                        # non-condensable vent -> atm (kg/h)
+                "HIC_323605":  round(s.HIC_323605, 1),                        # 324E002 non-condensable vent hand valve (%)
+                "HV_323605":   round(s.HIC_323605, 1),                        # HV-323605 opening (tracks HIC 1:1)
             },
         },
         "HPCC_322E002": {                        # HP Carbamate Condenser 322E002 -> 322R001
@@ -5014,6 +5028,18 @@ def handle_cmd(cmd: dict):
     elif t == "hic9605_set":                   # HIC-329605 -> HV-329605 324F002 motive-steam hand valve
         if "op" in cmd:
             s.HIC_329605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "hic3605_set":                   # HIC-323605 -> HV-323605 324E002 non-condensable vent hand valve
+        if "op" in cmd:
+            s.HIC_323605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "hic9606_set":                   # HIC-329606 -> HV-329606 324E003b stage-2 ejector motive hand valve
+        if "op" in cmd:
+            s.HIC_329606 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "flow755_set":                   # FT-322402 stream-755 operator override (m3/h; <0 clears -> process-derived)
+        v = _finite(cmd["value"], "flow755")
+        s.flow755_override_m3h = None if v < 0.0 else clamp(v, 0.0, 2.0 * (A328_M755_DES / A328_M755_RHO))
 
     elif t == "steam_supply_set":              # MP supply valve (utility import -> MP header)
         if "op" in cmd:
