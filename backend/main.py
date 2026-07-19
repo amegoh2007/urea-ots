@@ -3892,10 +3892,37 @@ def step_sim(dt: float) -> dict:
     lic503_op= _ctrl_ipd(s.LIC_323503, lvl_d011, dt)                      # -> LV-323503 (total draw)
     m718_dmd = R3232_D011_M718_DES * (lic503_op / R3232_LV503_OP_DES)     # total draw demand (kg/h)
     m_718B   = _fic_flow(s.FIC_323418, R3232_M718B_DES, R3232_FIC418_OP_DES, s.tlag,
-                         "F_323418", dt, rho=RHO_718_KGM3)                # -> 323E003 (slipstream)
+                         "F_323418", dt, tau_s=45.0, rho=RHO_718_KGM3)    # -> 323E003 (slipstream)
+    # 718A/718B demand-split COORDINATOR (setpoint feed-forward decoupling).
+    #   Old cas_sp = m718_dmd - m_718B (live PV) coupled the two loops through 718B's lagged flow:
+    #   718A chased 718B's measured PV while both drew on the shared m718_dmd, giving a 2-tick
+    #   bang-bang limit cycle (3.18<->3.50 m3/h).  Break the feedback -- derive 718A's remainder
+    #   from 718B's DEMAND (its SP in AUTO/CAS), not its noisy measured flow.  Steady state is
+    #   unchanged (718B AUTO settles to its SP), so the 323D011 718-split conservation still holds
+    #   (m_718A + m_718B -> m718_dmd); only the oscillating transient is removed.  In MAN the op is
+    #   operator-fixed so 718B is already non-oscillating and the live flow is a safe fallback.
+    if s.FIC_323418["mode"] in ("AUTO", "CAS"):
+        m718B_ff = s.FIC_323418["sp"] * RHO_718_KGM3     # feed-forward from setpoint (kg/h)
+    else:
+        m718B_ff = m_718B                                # MAN: op-fixed, live flow non-oscillating
+    cas718A_raw = max(m718_dmd - m718B_ff, 0.0)          # remainder demand for 718A (kg/h)
+    #   The residual 2-tick cycle is a SINGLE-LOOP marginal instability of each FIC_328405/FIC_323418
+    #   velocity-form I-PD, not inter-loop coupling: it rings around a CONSTANT setpoint (proven in
+    #   scratchpad/ff718_kc.py -- 718A oscillates +/-0.30 m3/h even with cas_sp held flat).  The 2-tick
+    #   growth factor is the product Kc*a*g, where a = dt/(tau_s+dt) is the flow-transmitter filter
+    #   weight and g = (design/op_des)/rho = 71.208/1065 = 0.0669 the volumetric plant gain.  At the
+    #   design tune Kc*a*g = 426*(1/6)*0.0669 = 4.75 >> 1 (the old tau_s=5 s filter passed the actuation
+    #   step straight into the velocity P term -Kc*(pv-pv1), which then overshot every tick).  Cure it
+    #   WITHOUT touching Kc or Ti by slowing the measurement filter tau_s 5 -> 45 s (a: 0.167 -> 0.0217),
+    #   giving Kc*a*g = 0.62 < 1 -> flat (Kc sweep in ff718_kc.py crosses 1.0 exactly at the amp=0
+    #   boundary).  The filter DC gain is 1, so the steady-state 718 split is byte-identical
+    #   (conservation + boot-pin preserved), and at the design seed pv==sp==pv1 -> du==0 regardless of
+    #   tau_s (fixed point intact).  45 s is still 28x faster than the 1257 s level loop -> cascade
+    #   separation holds.  Once 718A stops ringing, the inventory -> LIC-323503 -> m718_dmd ring it drove
+    #   also dies, so no reference filter on cas718A is needed -- 718A tracks the true level demand.
     m_718A   = _fic_flow(s.FIC_328405, R3232_M718A_DES, R3232_FIC405_OP_DES, s.tlag,
-                         "F_328405", dt,
-                         cas_sp=max(m718_dmd - m_718B, 0.0),
+                         "F_328405", dt, tau_s=45.0,
+                         cas_sp=cas718A_raw,
                          rho=RHO_718_KGM3)                                # -> 328E004/328D001 (bal)
     m_718_tot= m_718A + m_718B                                            # -> 323D011 draw (kg/h)
     Q_e011   = R3232_E011_UA_KW * (Te011 - 35.0)
