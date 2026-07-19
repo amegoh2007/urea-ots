@@ -246,9 +246,9 @@
       { k: 'pic203',  t: 'ind', x: 609,  y: 122, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
         mode: 'LPCC_3232.E011.PIC_323203.mode', note: '323E011/D011 LP node P; flash vapour 701 (LV-323501 -> 323F004) accumulates it. AUTO holds SP via PV-323203; MAN lets P ramp' },
       { k: 'tt004',   t: 'ind', x: 439,  y: 124, tag: 'TT-323004', bind: 'RECIRC_323.C003.feed_T', u: 'C', dec: 1 },   // rect col top vapour 119C (flash feed T)
-      { k: 'hic605',  t: 'ind', x: 992,  y: 142, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
+      { k: 'hic605',  t: 'ind', x: 992,  y: 142, tag: 'HIC-323605', bind: 'EVAP_324.VAC.HIC_323605', u: '%', dec: 1, face: 'hic', note: '324E002 non-condensable vent; operator hand valve (HV-323605 tracks 1:1)' },   // valve opening %
       { k: 'pv203',   t: 'ind', x: 1220, y: 142, tag: 'PV-323203', bind: 'LPCC_3232.E011.PIC_323203.op', u: '%', dec: 1 },   // GCB off-gas valve stroke -> vapour 011 to 323C005
-      { k: 'hv605',   t: 'ind', x: 1058, y: 199, tag: 'HV-323605',  bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent valve -> non-condensable vent flow
+      { k: 'hv605',   t: 'avalve', x: 1058, y: 199, tag: 'HV-323605',  bind: 'EVAP_324.VAC.HV_323605', u: '%', dec: 1, face: 'hic' },   // 324E002 vent valve opening %
       { k: 'pic4202', t: 'ind', x: 1277, y: 209, tag: 'PIC-324202', bind: 'EVAP_324.E001.PIC_324202.pv', u: 'BAR A', dec: 3,
         mode: 'EVAP_324.E001.PIC_324202.mode' },   // 324E002 pressure
       // ---- WHITE FRAMES : unmodelled boundary / downstream (tag only; bind when upstream modelled) ----
@@ -345,6 +345,7 @@
       { k: 'ai8701', t: 'ind', x: 838,  y: 632, tag: 'AI-328701', bind: 'DESORB_328.C004.AI_328701', u: 'uS/cm', dec: 2 },   // process-condensate conductivity soft sensor (stream 740, NH3/urea/CO2 trace -> Kohlrausch)
       { k: 'p006w',   t: 'ind', x: 421,  y: 632, tag: '328P006'   },
       { k: 'p007w',   t: 'ind', x: 959,  y: 596, tag: '328P007'   },
+      { k: 'tt8006',  t: 'ind', x: 1050, y: 596, tag: 'TT-328006', bind: 'DESORB_328.C004.TT_328006', u: 'C', dec: 1 },   // 328E007 hot-out process condensate -> 328P007 (stream 740, 89C)
     ],
     // ============================ 328-2  ABSORPTION (322C001 absorber + 328D003 collection) ============================
     // coords = STAGE 1366x720 (native 1357x639 scaled x1.006632 / y1.126761).  root ABSORB_328 (C001 absorber / D003 collection tank).
@@ -361,7 +362,7 @@
       { k: 'lt8507', t: 'ind', x: 886, y: 513, tag: 'LT-328507',  bind: 'ABSORB_328.D003.LI_328I',      u: '%',   dec: 1 },   // compartment I
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
       { k: 'ft2404', t: 'ind', x: 156, y: 161, tag: 'FT-322404', bind: 'ABSORB_328.C001.cpl_kgh', u: 'KG/H', dec: 0, face: 'hic', note: 'FT-322404 condensate 954 -> 322C001; operator-set inlet flow (kg/h), des 1750' },
-      { k: 'ft2402', t: 'ind', x: 106, y: 257, tag: 'FT-322402', bind: 'ABSORB_328.D003.flow755_m3h', u: 'M3/H', dec: 1, note: '322P002 collector draw (stream 755, Amm. Water) -> 322C001, des 31.3 m3/h' },
+      { k: 'ft2402', t: 'ind', x: 106, y: 257, tag: 'FT-322402', bind: 'ABSORB_328.D003.flow755_m3h', u: 'M3/H', dec: 1, face: 'hic', note: '322P002 collector draw (stream 755, Amm. Water) -> 322C001; operator-overridable flow (m3/h), des 31.3' },
       { k: 'tt3010', t: 'ind', x: 508, y: 358, tag: 'TT-323010', bind: 'RECIRC_323.F010.TT_323010', u: 'C', dec: 1 },   // pre-evaporator 99C
       { k: 'tt3009', t: 'ind', x: 624, y: 295, tag: 'TT-323009', bind: 'LPCC_3232.C005.TT_323C005', u: 'C', dec: 1 },   // atm absorber scrub liquid 55C
       { k: 'tt8015', t: 'ind', x: 654, y: 420, tag: 'TT-328015', bind: 'ABSORB_328.D003.TT_328II', u: 'C', dec: 1 },   // NH3 recovery tank Comp-II 44C
@@ -391,8 +392,8 @@
       { k: 'py4201',  t: 'ind', x: 455,  y: 220, tag: 'PY-324201', bind: 'EVAP_324.E001.PY_324201', u: 'wt%', dec: 1, note: '324F001 melt concentration soft-sensor (VLE inversion of PT-324201 / TIC-324001)' },
       { k: 'lic9505', t: 'ind', x: 211,  y: 376, tag: 'LIC-329505', bind: 'EVAP_324.E001.LIC_329505.pv', mode: 'EVAP_324.E001.LIC_329505.mode', u: '%', dec: 1, note: '324E001 steam-condensate level; LV-329505 drains shell (active steam trap)' },
       { k: 'lv9505',  t: 'avalve', x: 189,  y: 432, tag: 'LV-329505', bind: 'EVAP_324.E001.LIC_329505.op', u: '%', dec: 1 },
-      { k: 'hic3605', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
-      { k: 'hv3605',  t: 'ind', x: 642,  y: 201, tag: 'HV-323605',  bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent valve -> non-condensable vent flow
+      { k: 'hic3605', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605', bind: 'EVAP_324.VAC.HIC_323605', u: '%', dec: 1, face: 'hic', note: '324E002 non-condensable vent; operator hand valve (HV-323605 tracks 1:1)' },   // valve opening %
+      { k: 'hv3605',  t: 'avalve', x: 642,  y: 201, tag: 'HV-323605',  bind: 'EVAP_324.VAC.HV_323605', u: '%', dec: 1, face: 'hic' },   // 324E002 vent valve opening %
       { k: 'hic9605', t: 'ind', x: 921,  y: 134, tag: 'HIC-329605', bind: 'EVAP_324.E001.HIC_329605', u: '%', dec: 1, face: 'hic', note: '324F002 vacuum-ejector motive LP steam; operator hand valve (HV-329605 tracks 1:1)' },
       { k: 'hv9605',  t: 'avalve', x: 926,  y: 191, tag: 'HV-329605', bind: 'EVAP_324.E001.HV_329605', u: '%', dec: 1, face: 'hic' },
       { k: 'pic3203', t: 'ind', x: 1208, y: 469, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
@@ -411,6 +412,8 @@
       // ---- 324E003 / 324F003 deep-vacuum evaporator : E003 block ----
       { k: 'pic4203', t: 'ind', x: 362, y: 72,  tag: 'PIC-324203', bind: 'EVAP_324.E003.PIC_324203.pv', mode: 'EVAP_324.E003.PIC_324203.mode', u: 'BAR A', dec: 3, note: 'holds 324F003 deep vacuum 0.131 bar a via false-air PV-324203' },
       { k: 'pv4203',  t: 'avalve', x: 106, y: 120, tag: 'PV-324203', bind: 'EVAP_324.E003.PIC_324203.op', u: '%', dec: 1 },
+      { k: 'hic9606', t: 'ind', x: 238, y: 72,  tag: 'HIC-329606', bind: 'EVAP_324.E003.HIC_329606', u: '%', dec: 1, face: 'hic', note: '324E003b stage-2 vacuum-ejector motive LP steam; operator hand valve (HV-329606 tracks 1:1)' },
+      { k: 'hv9606',  t: 'avalve', x: 238, y: 125, tag: 'HV-329606', bind: 'EVAP_324.E003.HV_329606', u: '%', dec: 1, face: 'hic' },
       { k: 'pt4204',  t: 'ind', x: 384, y: 193, tag: 'PT-324204', bind: 'EVAP_324.E003.PT_324203', u: 'BAR A', dec: 3, note: '324F003 separator pressure' },
       { k: 'tic4002', t: 'ind', x: 375, y: 281, tag: 'TIC-324002', bind: 'EVAP_324.E003.TIC_324002.pv', mode: 'EVAP_324.E003.TIC_324002.mode', u: 'C', dec: 1, note: 'master: holds melt 140 C; cascades PIC-329212 chest steam-P' },
       { k: 'pic9212', t: 'ind', x: 136, y: 271, tag: 'PIC-329212', bind: 'EVAP_324.E003.PIC_329212.pv', mode: 'EVAP_324.E003.PIC_329212.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-324002; steam to 324E003 chest via PV-329212' },
