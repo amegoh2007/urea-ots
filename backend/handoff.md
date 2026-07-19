@@ -1,6 +1,25 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-19 (session 11) · branch `master` · HEAD `cddb77d` · sprint items 1, 2, 3b, 3c, 3d, 5 closed + Tranche A2 (items 11/14/16, LIC-323503 cascade) + items 4(partial)/10/13/20 (sessions between 10 and 11, reconciled below) + task #15 (frontend faceplate hygiene)_
+_Last updated: 2026-07-19 (session 12) · branch `master` · HEAD `f59c313` (pushed) · session 11 items + volumetric migration FIC-323401/405/418 + steam FT-329403/407 telemetry (session 12, logged below)_
+
+## Session 12 (2026-07-19) — volumetric migration + steam FT telemetry · HEAD `f59c313` (pushed)
+
+**Done, verified, committed+pushed (`f59c313`):**
+- Structural volumetric migration of all three liquid loops (FIC-323401 / -323405 / -323418).
+  `_fic_flow` gains `rho=` param; inside `_fic_flow`, BEFORE `_ctrl_ipd`: `pv/=rho`, `cas_sp/=rho`,
+  control on m³/h, **return stays kg/h** → steady-state mass balance byte-identical.
+  Retune `Kc_vol=Kc_mass·ρ`, `Ti` unchanged, `sp_hi/=ρ` (closed-loop coeff `1−Kc·a·g` invariant).
+  ρ: 401=992.4, 718A/718B=1065. Export adds `vol_m3h`+`m_kgh`, pv/sp→2dp.
+- Steam FT dynamic telemetry (OEM 1750 MTPD 100% load, PFD-anchored):
+  `FT-329403 → 60.85 t/h`, `FT-329407 → 16.71 t/h`. Bound in `frontend/overlays.js` (already published).
+- **Pin gate: keys 15 / leaves 25 / diffs 0** — core HMB untouched.
+- Settle verified: 323401 0.83 m³/h/823 kg/h · 323418 3.34 m³/h/3560.4 kg/h · FT 60.85 / 16.71 t/h.
+
+**KNOWN / OUT-OF-SCOPE (Scope-Lock — NOT silently fixed):** FIC-323405 CAS loop 2-tick bang-bang
+limit cycle. Proven **pre-existing at HEAD**: HEAD mass loop cycles pv 3390.82↔3729.90 kg/h;
+migrated cycles 3.1839↔3.5023 m³/h (== HEAD/ρ exactly) → migration is a faithful rescale, did not
+introduce it. Root cause: 718A/718B shared-demand split `cas_sp=max(m718_dmd−m_718B,0)` fighting the
+718B loop — control-architecture defect independent of this task. Needs separate retune/re-architecture.
 
 ## Goal
 
