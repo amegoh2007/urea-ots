@@ -15,11 +15,20 @@ _Last updated: 2026-07-19 (session 12) · branch `master` · HEAD `f59c313` (pus
 - **Pin gate: keys 15 / leaves 25 / diffs 0** — core HMB untouched.
 - Settle verified: 323401 0.83 m³/h/823 kg/h · 323418 3.34 m³/h/3560.4 kg/h · FT 60.85 / 16.71 t/h.
 
-**KNOWN / OUT-OF-SCOPE (Scope-Lock — NOT silently fixed):** FIC-323405 CAS loop 2-tick bang-bang
-limit cycle. Proven **pre-existing at HEAD**: HEAD mass loop cycles pv 3390.82↔3729.90 kg/h;
-migrated cycles 3.1839↔3.5023 m³/h (== HEAD/ρ exactly) → migration is a faithful rescale, did not
-introduce it. Root cause: 718A/718B shared-demand split `cas_sp=max(m718_dmd−m_718B,0)` fighting the
-718B loop — control-architecture defect independent of this task. Needs separate retune/re-architecture.
+**KNOWN / OUT-OF-SCOPE (Scope-Lock — NOT silently fixed):** FIC-328405 (was FIC-323405, renamed —
+see below) CAS loop 2-tick bang-bang limit cycle. Proven **pre-existing at HEAD**: HEAD mass loop
+cycles pv 3390.82↔3729.90 kg/h; migrated cycles 3.1839↔3.5023 m³/h (== HEAD/ρ exactly) → migration is
+a faithful rescale, did not introduce it. Root cause: 718A/718B shared-demand split
+`cas_sp=max(m718_dmd−m_718B,0)` fighting the 718B loop — control-architecture defect independent of
+this task. Needs separate retune/re-architecture.
+
+**Tag correction (`3df375e`, pushed):** loop **FIC-323405 → FIC-328405** (also FV-323405 → FV-328405).
+The leg terminates in unit 328 (328E004/328D001) so the 328- prefix is the correct OEM unit. Pure
+identifier/tag renumber across `backend/main.py` (dict, exports, mode table, tlag key F_323405→F_328405)
+and `frontend/overlays.js` (tags + `LPCC_3232.C005.FIC_328405` bind paths). Pin 15/25/0, physics
+untouched. **OPEN:** OEM stream 793 for this tag is "Amm. Water" (ρ 992.4, mass 0 @100% load), which
+conflicts with the loop's carbamate-718A physics (ρ 1065, 3560.4 kg/h). Density/service re-anchor
+deferred pending explicit direction (would disturb the 323D011 mass balance).
 
 ## Goal
 
