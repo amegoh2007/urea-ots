@@ -3,6 +3,13 @@
 **Project:** High-fidelity Stamicarbon CO2-stripping Urea Operator Training Simulator (OTS).
 **Stack:** Python (FastAPI/WebSockets) backend, HTML/CSS/JS frontend.
 
+## 0. Core Reference Documents (STRICT)
+* **Primary HMB / stream authority:** `D:\Work\Urea Simulation\References\Combined_1750_MTPD_100% load_PFD TablesProcess_Data`
+  (on disk as `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`).
+  This document is the ruling source for **every mass-balance and stream-discrepancy resolution from now on**.
+  When a coded constant disagrees with it, the PFD value wins and the surrounding network is re-derived to
+  close around the PFD value — the coded value is never preserved for pin convenience.
+
 ## 1. Core Physics & Dynamic Modeling Laws (STRICT)
 * **The Domino Effect (Transient Propagation):** The simulation MUST run as a fully dynamic, coupled state-space system. Any local process perturbation (e.g., valve movement, pump trip, composition shift) must recursively calculate and propagate downstream (D/S) in real time. Downstream streams and equipment must experience continuous, cascading updates to both their physical properties and multi-component compositions.
 * **100% Conservation Accuracy:** Every module must strictly resolve simultaneous differential equations for mass, component, and energy balances. 

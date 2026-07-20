@@ -1,6 +1,112 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-20 (session 13) · branch `master` · HEAD `0d3289f` (pushed, level with `origin/master`) · 718A/718B bang-bang limit cycle CLOSED + repo recovery + 328E021 hot side made live + sprint items 16/23/24 CLOSED and 27 dead faceplates rewired (session 13, logged below)_
+_Last updated: 2026-07-20 (session 14) · branch `master` · PFD-ruled re-derivation of the 323-2 / 328-1 recirculation network: FIC-328405 rebound to stream 793, FIC-323402 pinned to PFD 791 = 1534 kg/h, 718 anchored on PFD 7123 (session 14, logged below)_
+
+## Session 14 (2026-07-20) — user ruling: strict PFD stream values for FIC-328405 / FIC-323402
+
+**The Goal.** Close the two open stream contradictions the user ruled on, using
+`References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md` as the sole authority, and re-derive
+the Comp-I / 323E011 / 323C005 network so the whole thing still closes on the PFD numbers.
+
+**Ruling 1 — `CLAUDE.md` §0 "Core Reference Documents (STRICT)" added (L6–11).** That PFD table is now the
+ruling source for every mass-balance / stream-discrepancy resolution: when a coded constant disagrees, the
+PFD value wins and the surrounding network is re-derived around it — the coded value is never preserved
+for pin convenience.
+
+**Ruling 2 — FIC-328405 rebound from the 718A carbamate leg to PFD stream 793.** Stream 793 (Amm. Water,
+56 °C, ρ 992.4) is a **normally-closed spare** off the same 328D003 Comp-I discharge header that feeds
+735 / 791 / 734; PFD design flow is **0 kg/h, 0 m³/h**, so the loop sits at 0 % stroke at design and full
+stroke is one branch capacity, `S793_CAP_KGH = 1534.0`. It enters `out_compI` as a real export at bulk
+temperature (no enthalpy term). `_fic_flow` divides by `op_des`, so the loop is called on a
+**branch-capacity basis** (`design=S793_CAP_KGH, op_des=100.0`) with the dict seeded at `op = 0.0` —
+calling it with `op_des = 0` would be a ZeroDivisionError.
+
+**718A is now the UNMETERED REMAINDER, not a controlled leg.** It is the LIC-323503 total draw minus the
+FIC-323418 718B demand, put through a pure transport lag:
+`m_718A = _lag1(s.tlag, "F_718A", m718A_dmd, R3232_M718A_TAU_S=45.0, dt)`. `_lag1` has DC gain 1 and
+lazy-inits to its target, so the design seed stays bit-exact. This restores **one integrator per degree of
+freedom** (inventory → LIC-323503, split → FIC-323418) and structurally removes the second flow integrator
+that caused the old ringing.
+
+**Ruling 3 — `R3232_E011_M402_DES` 2931 → 1534 (PFD stream 791), and the network re-derived around it.**
+Both Comp-I liquid legs are PFD twins: 791 = 734 = 1534 kg/h @ 1.5 m³/h, ρ 992.4, 56 °C. The 718 anchor is
+the PFD `718 Carb. Liq.` column, **7123 kg/h @ 6.7 m³/h, ρ 1065, 45 °C**. The vapour split is BACK-SOLVED
+off that anchor, never fabricated:
+$$\varphi_v=\frac{\dot m_{in,E011}+\dot m_{401}-\dot m_{718}}{\dot m_{in,E011}}
+=\frac{7999.607+1534-7123}{7999.607}=0.30134072165128767$$
+**Definition ORDER matters and is load-bearing:** `PHIV` is defined first and `MV_DES = PHIV*IN_DES`
+second (not `MV_DES` by subtraction and `PHIV` by division). The live generation is
+`gen_v011 = PHIV*in_e011`; only with this order is it bit-identical to `MV_DES` at the design seed, giving
+the PIC-323203 pressure ODE an exact fixed point. The first layout had it the other way round and the
+round-off cost a steady-state drift on `r3232_e011_P`.
+
+Resulting design network, every figure landing on a PFD anchor:
+
+| quantity | value (kg/h) | PFD check |
+|---|---|---|
+| `R3232_E011_IN_DES` (701+702+786+321+402) | 7999.607 | — |
+| `R3232_E011_MV_DES` (vapour → 323C005) | 2410.607 | — |
+| `R3232_E011_M401_DES` | 1534.0 | stream 734 ✓ |
+| `R3232_E011_M402_DES` | 1534.0 | stream 791 ✓ |
+| `R3232_D011_M718_DES` | 7123.0 | stream 718 ✓ |
+| `R3232_M718A_DES` / `R3232_M718B_DES` | 3561.5 / 3561.5 | 718A/718B 3562 ✓ |
+| `A323_C005_MAKEUP` / `_BOT_DES` | 482.39 / 2893.0 | — |
+| `A328_D003_M343_DES` | 34182.0 | stream 343/733 34180 ✓ |
+| `R328_D001_M776_DES` / `M774_DES` | 8275.5 / 9950.5 | 776 8275 ✓ / 774 9950 ✓ |
+| `S793_CAP_KGH` / `S793_M_DES` | 1534.0 / **0.0** | stream 793 spare ✓ |
+
+**Current State — all gates green.**
+- **Pin gate (two-step, mandatory): `leaves: 25  keys: 15  diffs: 0`.** The user authorised a
+  "pin-breaking" manoeuvre and told us to regenerate the pin. **It was not needed and `golden_pin.json`
+  is untouched** — the pin's 15 keys are HP-synthesis + 328-absorber only (`HPCC_UA`, `REACT_*`,
+  `EJ_MOTIVE_DES_LIVE`, `M_USERS_LP`, `A328_GCB_*`, `A328_PHI_ABS`, `A328_VENT_DES`, `A328_LAMBDA_ABS`)
+  and cover **none** of the 323-2 / 328-1 recirculation constants that moved. Reported as fact, not as a
+  re-baseline.
+- **`scratchpad/dyn718r.py` (new) — FAILURES 0.** Replaces `ff718_perturb.py`, which kicked FIC-328405 as
+  if it were still the 718A leg. Horizons are derived, not guessed: LIC-323503 is PI on an integrating
+  level with $\omega_n=5.0\times10^{-3}$ rad/s, $\zeta=0.30$, so the envelope is $e^{-\zeta\omega_n t}$,
+  $\tau=1/(\zeta\omega_n)=667$ s and settling needs $\approx 2700$ s. Gate 1 holds design 3600 s; gate 2
+  kicks the D011 inventory +5 % and runs 6000 s (level back to SP, **718A residual cycle 0.0020 kg/h** vs
+  the old 3.18↔3.50 m³/h bang-bang); gate 3 opens 793 to MAN 50 % and checks Comp I against the
+  closed form
+  $$MI(t)=MI_{des}-\Delta MI_{ss}\left(1-e^{-t/\tau_I}\right),\quad
+  \Delta MI_{ss}=\frac{MI_{des}\dot m_{793}}{\dot m_{735}}=3429.7\ \text{kg},\quad
+  \tau_I=\frac{3600\,MI_{des}}{\dot m_{735}}=16\,098\ \text{s}$$
+  matching to **<0.2 kg at 3600 s**. Comp I has no level controller (item 3a deferred) but IS
+  self-regulating, because $\dot m_{735}\propto MI$.
+- **`scratchpad/dyn749.py` FAILURES 0** (328 column train untouched by the change).
+- **`scratchpad/fpwire.py` FAILURES 0** (36/36 routed, 36/36 live, MAN-only spares still reject AUTO).
+- **Conservation proven exactly, not asserted.** `scratchpad/probe_d011_bal.py` (new) measures the net
+  imbalance as the *derivative of the holdup*, $\dot m_{net}=3600\,dM/dt$, because the telemetry `m_kgh`
+  fields round to 1 dp — 40× coarser than the drift being judged. Over 18 000 s the 323D011 holdup moves
+  $-2.85\times10^{-8}$ kg total and $dM/dt\to 0$ with alternating sign decaying $\approx\!\times0.4$ per
+  600 s, exactly the $\zeta=0.30$, period-1257 s envelope. **No leak.**
+
+**Active files (session 14):** `CLAUDE.md`, `backend/main.py`, `frontend/overlays.js:275`,
+`backend/handoff.md`. New scratchpad: `dyn718r.py` (tracked acceptance test), `probe_d011_bal.py` (probe).
+
+**Failed attempts (session 14) — do not repeat:**
+1. **`MV_DES` by subtraction, `PHIV` by division.** Breaks the PIC-323203 fixed point by round-off. Define
+   `PHIV` first. (See the LaTeX above.)
+2. **Judging the D011 balance from telemetry `m_kgh`.** Those round to 1 dp, which manufactured a phantom
+   "+0.05 kg/h steady residual" that does not exist. Use $dM/dt$.
+3. **First cut of `dyn718r.py` used 600 s / 1200 s / 1800 s horizons and demanded Comp I "settle".** Three
+   false failures: 600 s is <1 τ of LIC-323503, and Comp I's own $\tau_I$ is 16 098 s — it *cannot* settle
+   inside a test run, so gate it against the closed form instead.
+4. `ff718_perturb.py` is now **obsolete** — it kicks `s.FIC_328405["op"]` expecting the 718A leg. Kept for
+   history only; `dyn718r.py` supersedes it.
+5. Baseline extraction via `git archive HEAD backend` crashes on `app.mount(... _FRONTEND ...)`
+   (`main.py:5350`) — `mkdir -p <sp>/base/frontend`, an empty stub satisfies `StaticFiles`.
+
+**Next steps (session 14):**
+- Sprint items **8 and 9 are CLOSED** (steam indicators `FT-329403` / `FT-329407`) per the user. Items
+  **7, 22, 25 are pending the user's definitions** — they said they will supply the text in a later prompt.
+  Do NOT re-grep the repo for them; session 13c already proved only the old unit-321 numbering survives.
+- Item **3a (#17) still BLOCKED** — needs a 328D003 level controller cascading into FIC-328402. Now that
+  stream 793 is a live export off that same vessel, this gap is *more* visible: opening 793 walks Comp I
+  down 3430 kg with nothing to arrest it but the self-regulating 735 draw. The `avail`/derate escape hatch
+  is empirically disproven; do not re-attempt it.
+- Items 16, 19, 21, 23, 24 CLOSED. Remaining openable-with-text: 1, 2, 3b–3d, 5, 6, 10–15, 17, 18, 20.
 
 ## Session 13c (2026-07-20) — HMI tranche: sprint items 16 / 23 / 24 closed · HEAD `0d3289f` (pushed)
 

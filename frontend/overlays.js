@@ -272,7 +272,7 @@
       { k: 'ttc005', t: 'ind', x: 1102, y: 108, tag: 'TT-323C005', bind: 'LPCC_3232.C005.TT_323C005',   u: 'C',   dec: 1 },   // 52.8 C overhead
       { k: 'lic503', t: 'ind', x: 1102, y: 525, tag: 'LIC-323503', bind: 'LPCC_3232.C005.LIC_323503.pv', mode: 'LPCC_3232.C005.LIC_323503.mode', u: '%', dec: 1, note: 'holds 323C005 bottoms level via LV-323503 drain' },
       { k: 'lv503',  t: 'avalve', x: 855, y: 506, tag: 'LV-323503', bind: 'LPCC_3232.C005.LIC_323503.op', u: '%', dec: 1 },
-      { k: 'fic405', t: 'ind', x: 886,  y: 313, tag: 'FIC-328405', bind: 'LPCC_3232.C005.FIC_328405.pv', mode: 'LPCC_3232.C005.FIC_328405.mode', u: 'M3/H', dec: 2, note: '718A carbamate balance -> 328E004/328D001 via FV-328405; loop PV/SP are VOLUMETRIC (des 3.34 m3/h = 3560.4 kg/h at rho 1065)' },
+      { k: 'fic405', t: 'ind', x: 886,  y: 313, tag: 'FIC-328405', bind: 'LPCC_3232.C005.FIC_328405.pv', mode: 'LPCC_3232.C005.FIC_328405.mode', u: 'M3/H', dec: 2, note: 'Ammonia-water stream 793, normally-closed spare off the 328D003 Comp-I discharge header, via FV-328405; loop PV/SP are VOLUMETRIC (PFD des 0 m3/h = 0 kg/h; full stroke 1.55 m3/h = 1534 kg/h at rho 992.4)' },
       { k: 'fv405',  t: 'avalve', x: 896, y: 399, tag: 'FV-328405', bind: 'LPCC_3232.C005.FIC_328405.op', u: '%', dec: 1 },
       { k: 'fic418', t: 'ind', x: 629,  y: 552, tag: 'FIC-323418', bind: 'LPCC_3232.C005.FIC_323418.pv', mode: 'LPCC_3232.C005.FIC_323418.mode', u: 'M3/H', dec: 2, note: '718B carbamate slipstream, 323C005 bottoms to 323E003; loop PV/SP are VOLUMETRIC (des 3.34 m3/h = 3560.4 kg/h at rho 1065)' },
       // ---- 323E011 / 323D011 pre-evaporator package : E011 block ----

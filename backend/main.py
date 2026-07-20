@@ -623,16 +623,19 @@ R323_D002_M_I_DES   = R323_D002_M_I_FULL  * (R323_D002_LVL_SP/100.0)
 #  These screens only READ Unit-323 outputs (feed-forward) -> the 135/106/99°C
 #  boundaries stay isolated by construction.
 #
-#  Whole-network mass closure (design, kg/h) — verified to close exactly:
-#    328D003 Comp I : in 719+720+721+V001(3579) = 34868 = out 735+402+401
+#  Whole-network mass closure (design, kg/h) — verified to close exactly, on the
+#  PFD-20/21/22 stream table (CLAUDE.md §0), which rules every discrepancy:
+#    328D003 Comp I : in 719+720+721(31289)+V001(2893) = 34182 (PFD 343/733 34180)
+#                     = out 735(31114)+791/402(1534)+734/401(1534)+793(0, spare)
 #    Comp II        : in 744(31478)             = out 755(31478)
 #    322C001        : in 755+GCB+CPL(900)       = vent + 756(33358); abs 980
 #    323E003        : in 305+718B+776+797+756   = 321(1323)+744(31478)+308
-#    323E011        : in 701+702+786+321+402    = v011(3099)+718 liq;  +401 -> D011
+#    323E011        : in 701+702+786+321+402    = 7999.6 = v011(2410.6)+liq(5589.0);
+#                     liq +401(1534) -> D011 -> 718(7123) = 718A(3561.5)+718B(3561.5)
 #    328C002        : in 738+748+750+775(40434) = 737(6665)+743(33769)
 #    328C003        : in 746+911(34874)         = 748(812)+747(34062)
 #    328C004        : in 749+931(40557)         = 750(6833)+739(33724)
-#    328D001        : in 737(6665)+718A         = 786(276)+775(1675)+776(8274)
+#    328D001        : in 737(6665)+718A(3561.5) = 786(276)+775(1675)+776(8275.5)
 # ==========================================================================
 R3232_CP = 3.0     # kJ/kg·K  LP-carbamate / condensate train (323E003, 323E011)
 R328_CP  = 4.0     # kJ/kg·K  desorber / hydrolyser aqueous train (328C002/003/004)
@@ -722,36 +725,52 @@ R328_FFIC_RATIO_DES = R328_C004_M931_DES / R328_C002_M738_DES             # 0.20
 
 # ==========================================================================
 #  323E011 + 323D011  (LP carbamate condenser + drum, 45 °C, 1.13 bar a)
-#  Combined 9400 kg/h datasheet closes the E011 inlet exactly.  Vapour v011
-#  (3100/9400) -> 323C005; liquid + FIC-323401 flush 401 -> 323D011 -> 718.
+#  Inlets are PFD-21/22 streams 701+702+786+321+791; the 328D003 Comp-I branch
+#  734 falls straight into the drum.  Vapour v011 -> 323C005; liquid + 734 ->
+#  323D011 -> 718.  The vapour split is BACK-SOLVED off the PFD 718 anchor
+#  (7123 kg/h) — the old 3100/9400 condenser-datasheet split is superseded per
+#  CLAUDE.md §0 (the PFD rules every mass-balance / stream discrepancy).
 # ==========================================================================
-R3232_E011_M701_DES = R323_M701_DES                         # 4426.6 flash vapour ex 323F004
+R3232_E011_M701_DES = R323_M701_DES                         # 4426.6 flash vapour ex 323F004 (PFD 701 4430)
 R3232_E011_M786_DES = 276.0                                 # vent from 328D001 (stream 786)
 R3232_E011_M321_DES = R3232_M797_DES*0.0 + 1323.0           # 323E003 vent (stream 321)
-R3232_E011_M402_DES = 2931.0                                # 328D003 Comp-I wash (FIC-323402)
-# PFD-22 stream 791 (328D003 Comp-I wash, Amm. Water 56 C / 4.1 bar) design volumetric
-# flow (m3/h).  Read-only UI anchor for FIC-323402: vol = 1.5 * (m_402 / M402_DES),
-# bit-exact 1.5 at design.  FLAG: leg design mass M402_DES=2931 kg/h is ~1.9x the PFD
-# stream-791 mass (1534 kg/h) -> design-constant reconciliation deferred (pin-breaking).
+R3232_E011_M402_DES = 1534.0                                # PFD-21/22 stream 791 Amm. Water 56 C / 4.1 bar,
+#   328D003 Comp-I wash (FIC-323402).  Was 2931 (an unsourced coded constant back-fitted to the
+#   3100/9400 condenser datasheet); PFD-ruled to 1534 kg/h.
+# PFD-21/22 stream 791 design volumetric flow (m3/h) = 1534/992.4 = 1.546 -> tabulated 1.5.
+# Read-only UI anchor for FIC-323402: vol = 1.5 * (m_402 / M402_DES), bit-exact 1.5 at design.
 S791_VOL_DES = 1.5
 R3232_E011_IN_DES   = (R3232_E011_M701_DES + R3232_M702_DES + R3232_E011_M786_DES
-                       + R3232_E011_M321_DES + R3232_E011_M402_DES)       # 9396.6
-R3232_E011_PHIV     = 3100.0 / 9400.0                       # vapour split -> 323C005 (v011)
-R3232_E011_MV_DES   = R3232_E011_PHIV * R3232_E011_IN_DES   # 3098.8
-R3232_E011_M401_DES = 823.0                                 # 328D003 Comp-I flush (FIC-323401)
-R3232_D011_M718_DES = (R3232_E011_IN_DES - R3232_E011_MV_DES) + R3232_E011_M401_DES  # 7120.8
-R3232_M718A_DES = 0.5 * R3232_D011_M718_DES                 # 3560.4 -> 328D001
-R3232_M718B_DES = 0.5 * R3232_D011_M718_DES                 # 3560.4 -> 323E003
+                       + R3232_E011_M321_DES + R3232_E011_M402_DES)       # 7999.6
+R3232_E011_M401_DES = 1534.0                                # PFD-21/22 stream 734 Amm. Water 56 C / 4.1 bar,
+#   328D003 Comp-I flush (FIC-323401) -> 323D011.  Was 823 (back-fitted residual); the PFD splits the
+#   Comp-I discharge header 343/733 (34180) into exactly 735(31114) + 791(1534) + 734(1534), so 734 is
+#   this leg and 343 now closes on the PFD (34182 vs tabulated 34180 = table rounding; molar 1850.65
+#   vs 1850.64 closes exactly).
+R3232_D011_M718_DES = 7123.0                                # PFD-21/22 stream 718 Carb. Liq. 45 C, 6.7 m3/h
+# Vapour split BACK-SOLVED off that 718 anchor:  m_v011 = in_e011 + 401 - 718.  PHIV is defined
+# first and MV_DES = PHIV*IN_DES second (not the reverse) so that the live gen_v011 = PHIV*in_e011
+# is bit-identical to MV_DES at the design seed -> the PIC-323203 pressure ODE has an exact fixed
+# point.  The reciprocal residual on the liquid side is O(1e-13) kg/h, far below any state weight.
+R3232_E011_PHIV     = ((R3232_E011_IN_DES + R3232_E011_M401_DES - R3232_D011_M718_DES)
+                       / R3232_E011_IN_DES)                 # 0.30134 vapour split -> 323C005 (v011)
+R3232_E011_MV_DES   = R3232_E011_PHIV * R3232_E011_IN_DES   # 2410.6 vapour -> 323C005
+R3232_M718A_DES = 0.5 * R3232_D011_M718_DES                 # 3561.5 -> 328D001 (PFD 718A 3562 ✓)
+R3232_M718B_DES = 0.5 * R3232_D011_M718_DES                 # 3561.5 -> 323E003 (PFD 718B 3562 ✓)
 R3232_E011_T = 45.0 ; R3232_E011_T701 = 106.0 ; R3232_E011_T786 = 61.0
 R3232_E011_P_BARA = 1.13 ; R3232_E011_P_KP = 0.05
 R3232_E011_PV_OP_DES = 25.0                                 # PIC-323203 vent stroke
 R3232_D011_M_TAU_S = 600.0
-R3232_D011_M_DES   = R3232_D011_M718_DES/3600.0 * R3232_D011_M_TAU_S      # 1186.8 kg
+R3232_D011_M_DES   = R3232_D011_M718_DES/3600.0 * R3232_D011_M_TAU_S      # 1187.2 kg
 R3232_D011_LVL_SP  = 50.0                        # LT-323503 design level (%): OEM "maintains the
 #   flash tank condenser level tank at 50% capacity" (328E021 328E007 328P003 328P006.md:359).
 R3232_LV503_OP_DES  = 50.0                       # LV-323503 stroke, 323P008 common discharge header
-R3232_FIC405_OP_DES = 50.0                       # FV-328405 stroke, 718A leg -> 328E004/328D001
+R3232_FIC405_OP_DES = 0.0                        # FV-328405 stroke — the loop is stream 793, a
+#   normally-closed Comp-I header spare (PFD 0 kg/h), so it sits shut at design.  It is NOT the
+#   718A leg: 718A is the LIC-323503 total draw minus the FIC-323418 718B leg, an unmetered
+#   remainder, and driving it from a second integrator made the D011 level loop ring.
 R3232_FIC418_OP_DES = 50.0                       # FV-323418 stroke, 718B leg -> 323E003
+R3232_M718A_TAU_S   = 45.0                       # 718A leg transport lag (was the FIC-328405 lag)
 R3232_E011_Q_DES_KW = 3440.0                                # datasheet condenser duty
 R3232_E011_UA_KW    = R3232_E011_Q_DES_KW / (R3232_E011_T - 35.0)         # kW/K vs 35°C CW
 # λ_v011 (vapour-generation latent) closes the drum energy balance at 45°C:
@@ -768,7 +787,7 @@ R3232_E011_LAMV = ((R3232_E011_SENS - R3232_E011_Q_DES_KW)
 #  328D001  Desorber-I reflux drum (61 °C, 2.6 bar a); 328E004 condenses 737
 # ==========================================================================
 R328_D001_M737_DES  = R328_C002_M737_DES                    # 6665 OVHD vapour in
-R328_D001_M718A_DES = R3232_M718A_DES                       # 3560.4 recycle in
+R328_D001_M718A_DES = R3232_M718A_DES                       # 3561.5 recycle in (PFD 718A 3562 ✓)
 R328_D001_IN_DES    = R328_D001_M737_DES + R328_D001_M718A_DES
 R328_D001_M786_DES  = 276.0                                 # vent -> 323E011
 R328_D001_M775_DES  = R328_C002_M775_DES                    # 1675 reflux -> 328C002 (FIC-328404)
@@ -776,9 +795,9 @@ R328_D001_M775_DES  = R328_C002_M775_DES                    # 1675 reflux -> 328
 # Read-only UI anchor for FIC-328404: vol = 1.5 * (m_775 / M775_DES), bit-exact 1.5 at design
 # (PFD mass 1675 kg/h / rho 1095 = 1.53 -> tabulated 1.5).  Physics mass balance (m_775) UNTOUCHED.
 S775_VOL_DES = 1.5
-R328_D001_M776_DES  = R328_D001_IN_DES - R328_D001_M786_DES - R328_D001_M775_DES  # 8274.4 -> 323E003
-R328_D001_M776_RHO  = 1095.0    # kg/m3, stream 776 eff. density @61 C (Combined_1750 tbl, col 776) -> FT-328401 m3/h (8274.4/1095=7.56 -> PFD 7.6)
-R328_D001_M774_DES  = R328_D001_M775_DES + R328_D001_M776_DES             # 9949 (PFD 774 ✓)
+R328_D001_M776_DES  = R328_D001_IN_DES - R328_D001_M786_DES - R328_D001_M775_DES  # 8275.5 -> 323E003 (PFD 776 8275 ✓)
+R328_D001_M776_RHO  = 1095.0    # kg/m3, stream 776 eff. density @61 C (Combined_1750 tbl, col 776) -> FT-328401 m3/h (8275.5/1095=7.56 -> PFD 7.6)
+R328_D001_M774_DES  = R328_D001_M775_DES + R328_D001_M776_DES             # 9950.5 (PFD 774 9950 ✓)
 R328_D001_T718A = 45.0
 R328_D001_M_FULL = 20900.0
 R328_D001_LVL_SP = 50.5
@@ -865,12 +884,13 @@ R3232_P001_RPM_DES = R3232_E003_M308_DES / (1218.0 * 0.5046)              # 62.9
 # ==========================================================================
 #  323C005 + 328V001 + 328D003  (LP absorber vent scrub + carbamate collector)
 # ==========================================================================
-A323_C005_MV_DES   = R3232_E011_MV_DES                      # 3098.8 vapour in ex 323E011
+A323_C005_MV_DES   = R3232_E011_MV_DES                      # 2410.6 vapour in ex 323E011
 A323_C005_MAKEUP   = ((R328_C002_M738_DES + R3232_E011_M401_DES + R3232_E011_M402_DES
                        - A328_D003_M719 - A328_D003_M720 - A328_D003_M721)
-                      - A323_C005_MV_DES)                   # 480.2: makeup water back-solved
+                      - A323_C005_MV_DES)                   # 482.4: makeup water back-solved
 #   so bot_c005 (=MV_DES+MAKEUP) exactly closes 328D003 Comp-I: in_compI == out_compI at design.
-A323_C005_BOT_DES  = A323_C005_MV_DES + A323_C005_MAKEUP    # 3579 -> 328V001 -> Comp I
+#   Stream 793 is a normally-closed spare off the same header (PFD 0 kg/h) and so does not enter here.
+A323_C005_BOT_DES  = A323_C005_MV_DES + A323_C005_MAKEUP    # 2893.0 -> 328V001 -> Comp I
 A323_C005_T = 55.0 ; A323_C005_MAKEUP_T = 30.0
 A323_C005_M_TAU_S = 300.0
 A323_C005_M_DES = A323_C005_BOT_DES/3600.0 * A323_C005_M_TAU_S            # 298.2 kg
@@ -881,7 +901,13 @@ A328_D003_MI_FULL = 280.50 * 992.0                          # Comp I  (V·ρ)  2
 A328_D003_MII_FULL = 168.30 * 992.0                         # Comp II       166954 kg
 A328_D003_MI_DES  = A328_D003_MI_FULL * 0.50               # 139128 kg
 A328_D003_MII_DES = A328_D003_MII_FULL * 0.50              # 83477 kg
-A328_D003_M343_DES = R328_C002_M738_DES + R3232_E011_M402_DES + R3232_E011_M401_DES  # 34868 out
+A328_D003_M343_DES = R328_C002_M738_DES + R3232_E011_M402_DES + R3232_E011_M401_DES  # 34182 out (PFD 343/733 34180 ✓)
+# PFD-22 stream 793 (Amm. Water 56 C, rho 992.4) — a normally-closed SPARE branch off the same
+# 343/733 Comp-I discharge header that feeds 735 / 791 / 734.  PFD design flow is 0 kg/h and
+# 0 m3/h, so FIC-328405 sits at 0 % stroke at design; full stroke is one branch capacity, i.e.
+# the twin of the 791/734 legs (1534 kg/h).
+S793_CAP_KGH = R3232_E011_M402_DES                          # 1534.0 kg/h at 100 % stroke
+S793_M_DES   = 0.0                                          # PFD design flow (normally closed)
 A328_D003_TI = 56.0 ; A328_D003_TII = 44.0
 A328_D003_V001_T = A323_C005_T                             # 55 °C V001 pass-through
 # Comp I carbamate-formation exotherm 2NH3+CO2<=>NH2COONH4 (λ_I on total inflow):
@@ -2776,16 +2802,19 @@ class State:
         #   lean-carbamate pump discharge header.  DIRECT: level above SP -> op rises -> LV-503 opens ->
         #   less discharge resistance -> the pump runs out on its curve -> tank drains faster
         #   (323E011 323D011 323P008 Datasheets.md:54).  The tank is 323P008's NPSH buffer; OEM holds
-        #   it at 50 % capacity.  MASTER of a cascade: because both 718 legs terminate in AUTO flow
-        #   controllers, this op is realised as the TOTAL DRAW DEMAND for the header rather than as a
-        #   raw stroke -- FIC-323418 holds its slipstream and FIC-328405 takes the balance as a remote
-        #   setpoint.  See the 323D011 runtime block for why the series form cannot work.
+        #   it at 50 % capacity.  This op is realised as the TOTAL DRAW DEMAND for the header rather
+        #   than as a raw stroke: FIC-323418 holds the metered 718B slipstream and 718A is the
+        #   UNMETERED REMAINDER (a transport lag, no controller of its own -- FIC-328405 belongs to
+        #   PFD stream 793 off the 328D003 Comp-I header, not to this leg).  See the 323D011 runtime
+        #   block for why the series form cannot work.
         #   Tuning is the OEM DCS pair verbatim (Master_PID_Tuning_Constants.md:26, "323D011,ACA").
         #   Legal here (and NOT for the flow loops) because the PV is a level in percent, so the
         #   controller's engineering unit IS %span and no gain rescale applies.  Integrating level,
-        #   k = 7120.8/(3600*1186.8) = 1.667e-3 %/s per %op (unchanged by the cascade: m718_dmd keeps
-        #   the same DES/op_des slope the header stroke had); PI closes s^2 + k*Kc*s + k*Kc/Ti, giving
+        #   k = 7123/(3600*1187.2) = 1.667e-3 %/s per %op (the demand form keeps the same DES/op_des
+        #   slope the header stroke had); PI closes s^2 + k*Kc*s + k*Kc/Ti, giving
         #   wn = 5.0e-3 rad/s (period ~1257 s) and zeta = 0.30 -> stable, slow averaging control.
+        #   Settling envelope is exp(-zeta*wn*t), i.e. tau = 667 s -> ~2700 s to settle; any dynamic
+        #   acceptance test on this loop must run at least that long (scratchpad/dyn718r.py).
         self.LIC_323503 = {"mode": "AUTO", "op": R3232_LV503_OP_DES,
                            "sp": R3232_D011_LVL_SP, "pv": R3232_D011_LVL_SP,
                            "pv1": R3232_D011_LVL_SP, "pv2": R3232_D011_LVL_SP,
@@ -2801,8 +2830,9 @@ class State:
                            "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 45.0, "sp_hi": R3232_TW_RET_T}
         # FIC-323401 328D003 Comp-I flush 401 -> FV-323401 (REVERSE flow).  VOLUMETRIC loop (m3/h):
-        #   seeds = M401_DES/RHO_401 (823/992.4 = 0.829 m3/h), sp_hi 2000/RHO_401, Kc 1.2*RHO_401
-        #   (=1190.9) so Kc*g invariant vs the mass loop; _fic_flow(rho=RHO_401_KGM3) returns kg/h.
+        #   seeds = M401_DES/RHO_401 (PFD stream 734: 1534/992.4 = 1.546 m3/h -> PFD 1.5), sp_hi
+        #   2000/RHO_401, Kc 1.2*RHO_401 (=1190.9) so Kc*g invariant vs the mass loop;
+        #   _fic_flow(rho=RHO_401_KGM3) returns kg/h.
         self.FIC_323401 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E011_M401_DES / RHO_401_KGM3, "pv": R3232_E011_M401_DES / RHO_401_KGM3,
                            "pv1": R3232_E011_M401_DES / RHO_401_KGM3, "pv2": R3232_E011_M401_DES / RHO_401_KGM3,
@@ -2812,28 +2842,31 @@ class State:
         self.FIC_323402 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E011_M402_DES, "pv": R3232_E011_M402_DES,
                            "pv1": R3232_E011_M402_DES, "pv2": R3232_E011_M402_DES,
-                           "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: g=2931/50=58.6, M=Kc*a*g/a units; loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=70 (damped-oscillatory band 51-102, rings on disturbance). Kc=0.5 -> M=29, coef 0.43 monotone.
+                           "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: loop coef 1-Kc*a*g, a=0.0196. On the PFD-791 design (M402_DES=1534) g=1534/50=30.68, so Kc=0.5 -> coef 0.699, monotone with margin (the old 2931 basis gave g=58.6, coef 0.43; Kc=1.2 there gave coef -0.38 and rang).
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 6000.0}
-        # FIC-328405 lean-carbamate 718A leg, 323D011/323P008 -> 328E004/328D001 -> FV-328405 (REVERSE).
-        #   CAS slave of LIC-323503: its remote SP is the level loop's total draw demand less the
-        #   FIC-323418 slipstream, so 718A balances the 323D011 inventory.  Dropping it to AUTO/MAN
-        #   is legal and simply leaves the tank on manual draw (LIC-323503's output then goes nowhere).
-        #   VOLUMETRIC loop (m3/h): seeds = M718A_DES/RHO_718 (3560.4/1065 = 3.343 m3/h), sp_hi
-        #   8000/RHO_718, Kc 0.4*RHO_718 (=426) so Kc*g invariant; the cascade cas_sp (mass) is
-        #   converted /RHO_718 inside _fic_flow(rho=RHO_718_KGM3); return stays kg/h.
-        self.FIC_328405 = {"mode": "CAS", "op": R3232_FIC405_OP_DES,
-                           "sp": R3232_M718A_DES / RHO_718_KGM3, "pv": R3232_M718A_DES / RHO_718_KGM3,
-                           "pv1": R3232_M718A_DES / RHO_718_KGM3, "pv2": R3232_M718A_DES / RHO_718_KGM3,
-                           "Kc": 0.4 * RHO_718_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.4 (mass basis): g=3560.4/50=71.2, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives coef -0.674 (alternating). Kc=0.4 -> M=28.5, coef 0.442 monotone; brackets FIC-323402 (g=58.6, Kc=0.5, coef 0.43) and FIC-328404 (g=55.5, Kc=0.5, coef 0.46). Kc*RHO_718 holds the vol-loop coef equal.
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 8000.0 / RHO_718_KGM3}
+        # FIC-328405 ammonia-water stream 793, a normally-closed SPARE branch off the 328D003 Comp-I
+        #   discharge header 343/733 (the same header that feeds 735 / 791 / 734) -> FV-328405.
+        #   PFD-22 col 793: 0 kg/h, 0 m3/h, rho 992.4, 56 C -> the valve is SHUT at design, so the
+        #   loop seeds at op 0 / sp 0 / pv 0.  It is NOT the 718A carbamate leg (that physics is
+        #   stripped: 718A is now the LIC-323503 remainder, see stage 9), hence no CAS mode.
+        #   VOLUMETRIC loop (m3/h) on the branch capacity, which is the twin of the 791/734 legs:
+        #   design = S793_CAP_KGH at 100 % stroke, sp_hi = S793_CAP_KGH/RHO_401 (1.546 m3/h),
+        #   Kc 1.2*RHO_401 as on FIC-323401 (same fluid, same rho) -> g = 1534/100 = 15.34 kg/h/%,
+        #   loop coef 1-Kc*a*g = 0.639 with a = 0.0196: monotone.
+        self.FIC_328405 = {"mode": "AUTO", "op": R3232_FIC405_OP_DES,
+                           "sp": S793_M_DES / RHO_401_KGM3, "pv": S793_M_DES / RHO_401_KGM3,
+                           "pv1": S793_M_DES / RHO_401_KGM3, "pv2": S793_M_DES / RHO_401_KGM3,
+                           "Kc": 1.2 * RHO_401_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": S793_CAP_KGH / RHO_401_KGM3}
         # FIC-323418 lean-carbamate 718B leg, 323D011/323P008 -> 323E003 -> FV-323418 (REVERSE).
         #   OEM service is "ACA FROM 323P8A/B" (Master_PID_Tuning_Constants.md:14), i.e. this leg.
-        #   VOLUMETRIC loop (m3/h): identical basis to FIC-328405 -- seeds M718B_DES/RHO_718, sp_hi
-        #   8000/RHO_718, Kc 0.4*RHO_718; _fic_flow(rho=RHO_718_KGM3) returns kg/h.
+        #   The ONLY metered 718 leg; 718A is the unmetered remainder of the LIC-323503 draw.
+        #   VOLUMETRIC loop (m3/h): seeds M718B_DES/RHO_718 (3561.5/1065 = 3.344 m3/h -> PFD 718B
+        #   3.3), sp_hi 8000/RHO_718, Kc 0.4*RHO_718; _fic_flow(rho=RHO_718_KGM3) returns kg/h.
         self.FIC_323418 = {"mode": "AUTO", "op": R3232_FIC418_OP_DES,
                            "sp": R3232_M718B_DES / RHO_718_KGM3, "pv": R3232_M718B_DES / RHO_718_KGM3,
                            "pv1": R3232_M718B_DES / RHO_718_KGM3, "pv2": R3232_M718B_DES / RHO_718_KGM3,
-                           "Kc": 0.4 * RHO_718_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # same g=71.2 retune as FIC-328405 (718A/718B legs identical by design); Kc*RHO_718 holds the vol-loop coef equal.
+                           "Kc": 0.4 * RHO_718_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # mass basis g=M718B_DES/50=71.2, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives coef -0.674 (alternating). Kc=0.4 -> coef 0.442 monotone; brackets FIC-323402 (coef 0.70) and FIC-328404 (g=55.5, Kc=0.5, coef 0.46). Kc*RHO_718 holds the vol-loop coef equal.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 8000.0 / RHO_718_KGM3}
 
         # -- 328-1 controllers (desorption / hydrolysis train) -----------------
@@ -3722,9 +3755,15 @@ def step_sim(dt: float) -> dict:
     m_401    = _fic_flow(s.FIC_323401, R3232_E011_M401_DES, 50.0, s.tlag, "F_323401", dt,
                          rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
     m_402    = _fic_flow(s.FIC_323402, R3232_E011_M402_DES, 50.0, s.tlag, "F_323402", dt)
+    # Stream 793: normally-closed spare off the same Comp-I discharge header as 735/791/734.
+    # Design stroke 0 % -> 0 kg/h (PFD-22 col 793), full stroke = one branch capacity.  Opening it
+    # draws real liquid out of Comp I, so it enters the holdup ODE as an export at TI (no enthalpy
+    # term: an outflow at the bulk temperature contributes nothing to P_compI).
+    m_793    = _fic_flow(s.FIC_328405, S793_CAP_KGH, 100.0, s.tlag, "F_328405", dt,
+                         rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
     m_735    = R328_C002_M738_DES * (s.a328_d003_MI / A328_D003_MI_DES)   # -> 738 via 328E007
     in_compI = A328_D003_M719 + A328_D003_M720 + A328_D003_M721 + bot_c005
-    out_compI= m_735 + m_401 + m_402
+    out_compI= m_735 + m_401 + m_402 + m_793
     P_compI  = ((A328_D003_M719*(A328_D003_M719_T - TI)
                  + A328_D003_M720*(A328_D003_M720_T - TI)
                  + A328_D003_M721*(A328_D003_M721_T - TI)
@@ -3891,22 +3930,19 @@ def step_sim(dt: float) -> dict:
     pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
     m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
     gen_v011 = R3232_E011_PHIV * in_e011
-    # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 fall in; the
-    # 323P008 lean-carbamate pumps draw out through LV-323503 on the common discharge header, which then
-    # splits into the 718A and 718B legs, each with its own FV.  Each leg is therefore two valves in
-    # series -> stroke ratios multiply.  Total is DERIVED from the legs: the legs are authoritative, so
-    # an operator stroking them apart shows up as a real inventory error that LIC-323503 integrates out.
-    # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 fall in; the
-    # 323P008 lean-carbamate pumps draw out through LV-323503, and the discharge header splits into
-    # the 718A and 718B legs.  LIC-323503 -> LV-323503 sets the TOTAL draw; FIC-323418 holds the 718B
-    # slipstream ("regulates the SPECIFIC recycle flow rate of lean carbamate", 328E021 328E007
-    # 328P003 328P006.md:369) and FIC-328405 takes the remainder as a CASCADE setpoint, so the level
-    # loop's authority lands on 718A instead of being rejected by it.  One integrator per degree of
-    # freedom (inventory -> LIC-323503/FIC-328405 cascade; split -> FIC-323418).  Modelling a series
-    # LV-503 as a derate on both FVs instead was tried and REJECTED: two AUTO FICs reject the header
-    # stroke by integral action, so LIC-323503 wound up to op_hi and level parked off SP (see
-    # scratchpad/dyn503.py).  The cascade slave is ~250x faster than the level loop (5 s lag vs the
-    # 1257 s natural period), so the standard >=5x separation for cascade stability holds easily.
+    # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 (PFD stream
+    # 734) fall in; the 323P008 lean-carbamate pumps draw out through LV-323503 on the common
+    # discharge header, which then splits into the 718A and 718B legs (PFD 3562 / 3562 off 718 7123).
+    # LIC-323503 -> LV-323503 sets the TOTAL draw; FIC-323418 holds the 718B slipstream ("regulates
+    # the SPECIFIC recycle flow rate of lean carbamate", 328E021 328E007 328P003 328P006.md:369) and
+    # 718A is the UNMETERED REMAINDER -- a transport lag on (total draw - 718B demand), no controller
+    # of its own.  FIC-328405 used to be cascaded onto 718A; that binding is stripped, because the PFD
+    # puts FIC-328405 on ammonia-water stream 793 off the 328D003 Comp-I header (see stage 2), not on
+    # this carbamate leg.  The remainder form keeps one integrator per degree of freedom (inventory ->
+    # LIC-323503; split -> FIC-323418) and removes a second flow integrator that was marginally stable
+    # here.  Modelling a series LV-503 as a derate on both FVs instead was tried and REJECTED: two
+    # AUTO FICs reject the header stroke by integral action, so LIC-323503 wound up to op_hi and level
+    # parked off SP (see scratchpad/dyn503.py).
     lvl_d011 = s.r3232_e011_M / R3232_D011_M_DES * R3232_D011_LVL_SP      # LT-323503 (%)
     lic503_op= _ctrl_ipd(s.LIC_323503, lvl_d011, dt)                      # -> LV-323503 (total draw)
     m718_dmd = R3232_D011_M718_DES * (lic503_op / R3232_LV503_OP_DES)     # total draw demand (kg/h)
@@ -3924,25 +3960,13 @@ def step_sim(dt: float) -> dict:
         m718B_ff = s.FIC_323418["sp"] * RHO_718_KGM3     # feed-forward from setpoint (kg/h)
     else:
         m718B_ff = m_718B                                # MAN: op-fixed, live flow non-oscillating
-    cas718A_raw = max(m718_dmd - m718B_ff, 0.0)          # remainder demand for 718A (kg/h)
-    #   The residual 2-tick cycle is a SINGLE-LOOP marginal instability of each FIC_328405/FIC_323418
-    #   velocity-form I-PD, not inter-loop coupling: it rings around a CONSTANT setpoint (proven in
-    #   scratchpad/ff718_kc.py -- 718A oscillates +/-0.30 m3/h even with cas_sp held flat).  The 2-tick
-    #   growth factor is the product Kc*a*g, where a = dt/(tau_s+dt) is the flow-transmitter filter
-    #   weight and g = (design/op_des)/rho = 71.208/1065 = 0.0669 the volumetric plant gain.  At the
-    #   design tune Kc*a*g = 426*(1/6)*0.0669 = 4.75 >> 1 (the old tau_s=5 s filter passed the actuation
-    #   step straight into the velocity P term -Kc*(pv-pv1), which then overshot every tick).  Cure it
-    #   WITHOUT touching Kc or Ti by slowing the measurement filter tau_s 5 -> 45 s (a: 0.167 -> 0.0217),
-    #   giving Kc*a*g = 0.62 < 1 -> flat (Kc sweep in ff718_kc.py crosses 1.0 exactly at the amp=0
-    #   boundary).  The filter DC gain is 1, so the steady-state 718 split is byte-identical
-    #   (conservation + boot-pin preserved), and at the design seed pv==sp==pv1 -> du==0 regardless of
-    #   tau_s (fixed point intact).  45 s is still 28x faster than the 1257 s level loop -> cascade
-    #   separation holds.  Once 718A stops ringing, the inventory -> LIC-323503 -> m718_dmd ring it drove
-    #   also dies, so no reference filter on cas718A is needed -- 718A tracks the true level demand.
-    m_718A   = _fic_flow(s.FIC_328405, R3232_M718A_DES, R3232_FIC405_OP_DES, s.tlag,
-                         "F_328405", dt, tau_s=45.0,
-                         cas_sp=cas718A_raw,
-                         rho=RHO_718_KGM3)                                # -> 328E004/328D001 (bal)
+    m718A_dmd = max(m718_dmd - m718B_ff, 0.0)            # remainder demand for 718A (kg/h)
+    #   718A is the unmetered remainder, so it is a pure transport lag on that demand -- the 45 s
+    #   time constant is the one the old FIC-328405 measurement filter carried (the leg's physical
+    #   piping/inertia lag; the controller it belonged to is gone, the lag is not).  _lag1 has DC
+    #   gain 1 and lazy-inits to its target, so the design seed is bit-exact and the steady-state
+    #   718 split is unchanged: m_718A + m_718B -> m718_dmd.
+    m_718A   = _lag1(s.tlag, "F_718A", m718A_dmd, R3232_M718A_TAU_S, dt)  # -> 328E004/328D001 (bal)
     m_718_tot= m_718A + m_718B                                            # -> 323D011 draw (kg/h)
     Q_e011   = R3232_E011_UA_KW * (Te011 - 35.0)
     sens_e011= ((m_701*(R3232_E011_T701 - Te011)
@@ -4437,8 +4461,8 @@ def step_sim(dt: float) -> dict:
                                "m_kgh": round(m_718B, 1)},                  # 718B slipstream -> 323E003 (kg/h)
                 "FIC_328405": {"pv": round(s.FIC_328405["pv"], 2), "sp": round(s.FIC_328405["sp"], 2),
                                "op": round(s.FIC_328405["op"], 1), "mode": s.FIC_328405["mode"],
-                               "vol_m3h": round(m_718A / RHO_718_KGM3, 2),  # volumetric loop PV (m3/h), PFD 718A
-                               "m_kgh": round(m_718A, 1)},                  # 718A balance -> 328E004/328D001 (kg/h)
+                               "vol_m3h": round(m_793 / RHO_401_KGM3, 2),   # volumetric loop PV (m3/h), PFD 793
+                               "m_kgh": round(m_793, 1)},                   # 793 spare draw off 328D003 Comp-I (kg/h)
                 "LIC_323503": {"pv": round(s.LIC_323503["pv"], 1), "sp": round(s.LIC_323503["sp"], 1),
                                "op": round(s.LIC_323503["op"], 1), "mode": s.LIC_323503["mode"]},
             },
@@ -4849,7 +4873,7 @@ R323_CTRL_MODES = {
     "TIC_323013": ("MAN", "AUTO", "CAS"),
     "FIC_323401": ("MAN", "AUTO"),
     "FIC_323402": ("MAN", "AUTO"),
-    "FIC_328405": ("MAN", "AUTO", "CAS"),   # CAS: LIC-323503 total-draw slave
+    "FIC_328405": ("MAN", "AUTO"),          # stream 793 spare; the LIC-323503 cascade is gone
     "FIC_323418": ("MAN", "AUTO"),
     # -- 328-1 (desorption / hydrolysis) -----------------------------------
     "LIC_328501": ("MAN", "AUTO"),
