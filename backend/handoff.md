@@ -1,6 +1,6 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-20 (session 13) · branch `master` · HEAD `f48dd27` (pushed, level with `origin/master`) · 718A/718B bang-bang limit cycle CLOSED + repo recovery (session 13, logged below)_
+_Last updated: 2026-07-20 (session 13) · branch `master` · HEAD `e6ff4c9` (pushed, level with `origin/master`) · 718A/718B bang-bang limit cycle CLOSED + repo recovery + 328E021 hot side made live (session 13, logged below)_
 
 ## Session 13 (2026-07-20) — limit-cycle closure reconciled + repo recovery · HEAD `f48dd27` (pushed)
 
@@ -80,8 +80,12 @@ Re-run, not modified: `scratchpad/regress.py`, `scratchpad/pindiff.py`, `scratch
 - Backend tranche batch, each rehashing the pin ⇒ re-gate to `25/15/0` before commit:
   items **3a, 7, 8, 9, 17, 18, 22, 23, 24 (binding half only), 25**. Item 16 (Tranche A3, m³/h
   migration) done in session 12.
-- Before items 19/21: grep the `main.py` 324 section for `PY_324201` / `AY_324701` — the frontend
-  already binds them as VLE-inversion soft-sensors, so the BPE routine may already exist.
+- ~~Before items 19/21: grep the `main.py` 324 section for `PY_324201` / `AY_324701`.~~ **DONE
+  (session 13) — items 19/21 are ALREADY LANDED, do not re-do.** `conc_infer_324()` exists at
+  `main.py:66` (isobaric VLE at the vacuum separator, water activity $a_w = P/p^{sat}_w(T)$, design
+  $\gamma$ back-solved from the plant's own hard design state, frozen-$\gamma$ inversion
+  $x_w^{live} = x_w^{des}\,(a_w^{live}/a_w^{des})$, emitted in anchored-correction form) and both
+  readouts are wired: `PY_324201` (`main.py:4541`), `AY_324701` (`main.py:4572`).
 - Item 3a (#17) **blocked**: needs a 328D003 level controller cascading into FIC-328402. The
   `avail`/derate escape hatch is empirically disproven — do not re-attempt.
 - **OPEN:** OEM stream 793 for FIC-328405 is "Amm. Water" (ρ 992.4, mass 0 @100 % load), conflicting
