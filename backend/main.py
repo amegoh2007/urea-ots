@@ -139,7 +139,7 @@ def ppm_infer_328701(T_c004: float, T_c003: float):
     NH3: the Desorber-II residual slip is Kremser r(S,N_theo) with the derived
     E_o-based stage count and the dilute strip factor S = K(T)*(V/L).  The design
     strip ratio V/L is the PFD 100%-load steam/bottoms split (R328_C004_M931_DES/
-    R328_C004_M739_DES); the LP-strip steam (FIC-328401) is pinned at that design
+    R328_C004_M739_DES); the LP-strip steam (FIC-329401) is pinned at that design
     duty in the current H&MB, so the live OFF-DESIGN driver is the Desorber-II
     operating temperature, which sets the NH3 relative volatility via a
     Clausius-Clapeyron K(T) = K_inf*exp(-(dH/R)(1/T - 1/T_des)) [dH = NH3-water
@@ -687,7 +687,7 @@ R328_C002_LAM737 = ((R328_C002_SENS
 #  and is back-solved so M·cp·dT/dt = 0 at design.
 # ==========================================================================
 R328_C003_M746_DES = R328_C002_M743_DES                     # 33769 feed via 328E021 (cold)
-R328_C003_M911_DES = 1105.0                                 # MP-steam strip (FIC-326402)
+R328_C003_M911_DES = 1105.0                                 # MP-steam strip (FIC-329402)
 R328_C003_M911_DH  = 2235.0                                 # kJ/kg MP-steam enthalpy drop
 R328_C003_IN_DES   = R328_C003_M746_DES + R328_C003_M911_DES              # 34874
 R328_C003_PHI748   = 812.0 / 34874.0                        # OVHD split -> 328C002 (748)
@@ -707,7 +707,7 @@ R328_C003_LAM748 = ((R328_C003_M746_DES/3600.0*R328_CP*(R328_C003_T746 - R328_C0
 #  328C004  Desorber-II  (143 °C, LP-steam 931, 900 s residence)
 # ==========================================================================
 R328_C004_M749_DES = R328_C003_M747_DES                     # 34062 feed via 328E021 (hot)
-R328_C004_M931_DES = 6495.0                                 # LP-steam strip (FIC-328401)
+R328_C004_M931_DES = 6495.0                                 # LP-steam strip (FIC-329401)
 R328_C004_M931_DH  = 2136.0                                 # kJ/kg LP-steam enthalpy drop
 R328_C004_IN_DES   = R328_C004_M749_DES + R328_C004_M931_DES             # 40557
 R328_C004_PHI750   = 6833.0 / 40557.0                       # OVHD split -> 328C002 (750)
@@ -720,8 +720,9 @@ R328_C004_M_DES   = R328_C004_M739_DES/3600.0 * R328_C004_M_TAU_S         # 8431
 R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C004_T)
                      + R328_C004_M931_DES/3600.0*R328_C004_M931_DH)
                     / (R328_C004_M750_DES/3600.0))                        # kJ/kg (~2130)
-# FFIC-328401 master ratio  m931/m735  (steam-to-feed, held on desorber-II load)
-R328_FFIC_RATIO_DES = R328_C004_M931_DES / R328_C002_M738_DES             # 0.20876
+# FFIC-329401 master ratio is defined further down, after R3232_E003_M744_DES: its feed
+# measurement is the FIC-328402 wash leg (PFD stream 735 into 323E003), not a 328C002 term,
+# so the denominator must exist first.  See the RHO_735_KGM3 block.
 
 # ==========================================================================
 #  323E011 + 323D011  (LP carbamate condenser + drum, 45 °C, 1.13 bar a)
@@ -851,10 +852,17 @@ R3232_E003_M321_DES = R3232_E003_PHI321 * (R3232_E003_M305_DES + R3232_E003_M797
 R3232_E003_PHI744 = 31478.0 / A328_M756_DES                 # wash split on 756 -> Comp II
 R3232_E003_M744_DES = R3232_E003_PHI744 * A328_M756_DES      # 31478
 # PFD-22 stream 735 (328C002 -> 323E003 Comp-II wash, Amm. Water 56 C / 4.1 bar) design
-# volumetric flow (m3/h).  Read-only UI anchor: vol = 31.4 * (m_744 / M744_DES) is
-# bit-exact 31.4 at design and tracks FIC-328402 linearly.  Physics mass balance (m_744)
-# is UNTOUCHED -- inferential faceplate indicator only (Tracker-Override directive).
+# volumetric flow (m3/h).  FIC-328402 is a VOLUMETRIC loop: the operator enters SP in m3/h,
+# so the density is BACK-SOLVED from the plant's own design state (31478 kg/h at 31.4 m3/h)
+# rather than lifted from any outside table -- no fabricated constant.  The physics mass
+# balance (m_744) is UNTOUCHED: _fic_flow(rho=RHO_735_KGM3) still returns kg/h.
 S735_VOL_DES = 31.4
+RHO_735_KGM3 = R3232_E003_M744_DES / S735_VOL_DES            # 1002.48 kg/m3, PFD-735 back-solve
+# FFIC-329401 328C004 desorber-II steam/feed RATIO master:  m931 / m744.  The feed measurement
+# is the FIC-328402 wash leg, so the ratio is anchored on that stream's design flow.  At design
+# 6495/31478 = 0.20634 -> ffic_pv == sp -> du == 0 -> the LP-steam demand holds 6495 kg/h
+# exactly, so the boot pin cannot move.
+R328_FFIC_RATIO_DES = R328_C004_M931_DES / R3232_E003_M744_DES            # 0.20634
 R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES - R3232_E003_M744_DES  # 38713.2
 R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
 # 323E003 tempered-water circuit: PFD stream 1102 supply 55 °C / 1103 return 65 °C.  R3232_TW_T is
@@ -2894,8 +2902,8 @@ class State:
                            "pv1": R328_D001_M775_DES, "pv2": R328_D001_M775_DES,
                            "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: g=1675/30.2=55.5, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=67 (damped-oscillatory 51-102). Kc=0.5 -> M=27.7, coef 0.46 monotone.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 4000.0}
-        # FIC-326402 328C003 hydrolyser MP-steam 911 -> FV-326402 (REVERSE flow, CAS).
-        self.FIC_326402 = {"mode": "CAS", "op": 50.0,
+        # FIC-329402 328C003 hydrolyser MP-steam 911 -> FV-326402 (REVERSE flow, CAS).
+        self.FIC_329402 = {"mode": "CAS", "op": 50.0,
                            "sp": R328_C003_M911_DES, "pv": R328_C003_M911_DES,
                            "pv1": R328_C003_M911_DES, "pv2": R328_C003_M911_DES,
                            "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
@@ -2906,14 +2914,14 @@ class State:
                            "pv1": R328_C003_P_BARA, "pv2": R328_C003_P_BARA,
                            "Kc": 4.0, "Ti": 60.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 12.0, "sp_hi": 20.0}
-        # FFIC-328401 328C004 desorber-II steam/feed RATIO master (m931/m738).
-        self.FFIC_328401 = {"mode": "AUTO", "op": R328_C004_M931_DES,
+        # FFIC-329401 328C004 desorber-II steam/feed RATIO master (m931/m744, FIC-328402 leg).
+        self.FFIC_329401 = {"mode": "AUTO", "op": R328_C004_M931_DES,
                             "sp": R328_FFIC_RATIO_DES, "pv": R328_FFIC_RATIO_DES,
                             "pv1": R328_FFIC_RATIO_DES, "pv2": R328_FFIC_RATIO_DES,
                             "Kc": 0.8, "Ti": 40.0, "Td": 0.0, "act": +1.0,
                             "op_lo": 0.0, "op_hi": 12000.0, "sp_lo": 0.0, "sp_hi": 0.5}
-        # FIC-328401 328C004 LP-steam 931 slave (REVERSE flow) <- FFIC-328401 demand.
-        self.FIC_328401 = {"mode": "CAS", "op": 50.0,
+        # FIC-329401 328C004 LP-steam 931 slave (REVERSE flow) <- FFIC-329401 demand.
+        self.FIC_329401 = {"mode": "CAS", "op": 50.0,
                            "sp": R328_C004_M931_DES, "pv": R328_C004_M931_DES,
                            "pv1": R328_C004_M931_DES, "pv2": R328_C004_M931_DES,
                            "Kc": 0.30, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.30: PV in kg/h, process gain g=6495/50=129.9; loop coef 1-Kc*a*g, a=dt/(tau+dt)=0.0196; Kc=1.2 gives coef -2.06 (unstable 0<->100 limit cycle). Kc<0.39 monotonic; 0.30 -> coef 0.24, 2.6x margin.
@@ -2946,11 +2954,16 @@ class State:
                            "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # FIC-328402 328D003 Comp-I -> Comp-II transfer 744 wash -> FV-328402 (REVERSE flow).
+        #   VOLUMETRIC loop (m3/h): the operator enters SP in m3/h, so the seeds are
+        #   M744_DES/RHO_735 (31478/1002.48 = 31.4 m3/h, PFD stream 735), sp_hi is the old
+        #   60000 kg/h span divided by rho, and Kc is scaled by rho so the loop coefficient
+        #   1-Kc*a*g is IDENTICAL to the mass-basis tune noted below.  _fic_flow(rho=RHO_735_KGM3)
+        #   still returns kg/h, so the 323E003 / Comp-II mass balance is untouched.
         self.FIC_328402 = {"mode": "AUTO", "op": 50.0,
-                           "sp": R3232_E003_M744_DES, "pv": R3232_E003_M744_DES,
-                           "pv1": R3232_E003_M744_DES, "pv2": R3232_E003_M744_DES,
-                           "Kc": 0.06, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0}
+                           "sp": R3232_E003_M744_DES / RHO_735_KGM3, "pv": R3232_E003_M744_DES / RHO_735_KGM3,
+                           "pv1": R3232_E003_M744_DES / RHO_735_KGM3, "pv2": R3232_E003_M744_DES / RHO_735_KGM3,
+                           "Kc": 0.06 * RHO_735_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.  Kc*RHO_735 holds the vol-loop coef equal.
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0 / RHO_735_KGM3}
         # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
         self.FIC_328406 = {"mode": "MAN", "op": 0.0,
                            "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
@@ -3803,7 +3816,7 @@ def step_sim(dt: float) -> dict:
     #   eps in (0,1) => T_746 is a convex combination of the two live inlets and can never cross
     #   either, so no clamp is needed.  At design 139 + (51/61)*(200-139) = 190.0 exactly.
     T_746    = s.a328_c002_T + R328_E021_EPS_T * (Tc003 - s.a328_c002_T)
-    m_911    = _fic_flow(s.FIC_326402, R328_C003_M911_DES, 50.0, s.tlag, "F_326402", dt)
+    m_911    = _fic_flow(s.FIC_329402, R328_C003_M911_DES, 50.0, s.tlag, "F_329402", dt)
     in_c003  = m_746 + m_911
     pic203b_op = _ctrl_ipd(s.PIC_328203, s.a328_c003_P, dt)
     m_748    = R328_C003_M748_DES * (pic203b_op / R328_C003_PV_OP_DES)    # OVHD relief -> 328C002
@@ -3831,9 +3844,13 @@ def step_sim(dt: float) -> dict:
     #   counter-current interchanger cannot cool the hot stream past the cold-side inlet (pinch).
     T749_raw = Tc003 - (m_746*(T_746 - s.a328_c002_T) + R328_E021_LOSS_DT) / max(m_749, 1e-6)
     T_749    = min(max(T749_raw, min(s.a328_c002_T, Tc003)), max(s.a328_c002_T, Tc003))
-    ffic_pv  = _lag1(s.tlag, "FF_ratio", m931_prev/max(m_738, 1e-6), 5.0, dt)
-    ffic_op  = _ctrl_ipd(s.FFIC_328401, ffic_pv, dt)                     # 931-flow demand (kg/h)
-    m_931    = _fic_flow(s.FIC_328401, R328_C004_M931_DES, 50.0, s.tlag, "F_328401", dt, cas_sp=ffic_op)
+    # FFIC-329401 ratio master.  The feed measurement is the FIC-328402 wash leg (PFD stream 735,
+    # m_744 into 323E003), NOT the 328C002 m_738 term, so the CAS demand handed down to the
+    # FIC-329401 slave rides on m744_prev.  At design 6495/31478 == R328_FFIC_RATIO_DES, so
+    # ffic_pv == sp -> du == 0 and the LP-steam draw holds 6495 kg/h bit-exactly.
+    ffic_pv  = _lag1(s.tlag, "FF_ratio", m931_prev/max(m744_prev, 1e-6), 5.0, dt)
+    ffic_op  = _ctrl_ipd(s.FFIC_329401, ffic_pv, dt)                     # 931-flow demand (kg/h)
+    m_931    = _fic_flow(s.FIC_329401, R328_C004_M931_DES, 50.0, s.tlag, "F_329401", dt, cas_sp=ffic_op)
     in_c004  = m_749 + m_931
     m_750    = R328_C004_PHI750 * in_c004                                # OVHD split -> 328C002
     lvl_c004 = s.a328_c004_M / R328_C004_M_DES * 50.0
@@ -3893,7 +3910,8 @@ def step_sim(dt: float) -> dict:
     pic202_op= _ctrl_ipd(s.PIC_323202, s.r3232_d001_P, dt)
     m_321    = R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)   # vent -> 323E011
     gen321   = R3232_E003_PHI321 * (m_305 + R3232_M797_DES)
-    m_744    = _fic_flow(s.FIC_328402, R3232_E003_M744_DES, 50.0, s.tlag, "F_328402", dt)  # wash -> Comp-II
+    m_744    = _fic_flow(s.FIC_328402, R3232_E003_M744_DES, 50.0, s.tlag, "F_328402", dt,
+                         rho=RHO_735_KGM3)          # wash -> Comp-II (SP in m3/h, returns kg/h)
     lvl_d001_323 = s.r3232_d001_M / R3232_D001_M_DES * R3232_D001_LVL_SP
     lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master
     rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
@@ -4429,9 +4447,11 @@ def step_sim(dt: float) -> dict:
                 "TV_323013A": round(tic13_op, 1),              # cold make-up : opens as PV rises above SP
                 "TV_323013B": round(100.0 - tic13_op, 1),      # hot bypass : exact opposite of TV-323013A
                 "TT_323015":  round(T_tw_ret, 1),              # TW return 323E003 -> 323P003 (1103, 65 °C)
-                "FIC_328402": {"pv": round(s.FIC_328402["pv"], 1), "sp": round(s.FIC_328402["sp"], 1),
+                # FIC-328402 is a VOLUMETRIC loop: pv/sp are m3/h (the operator enters SP in m3/h).
+                "FIC_328402": {"pv": round(s.FIC_328402["pv"], 2), "sp": round(s.FIC_328402["sp"], 2),
                                "op": round(s.FIC_328402["op"], 1), "mode": s.FIC_328402["mode"],
-                               "vol_m3h": round(m_744 / R3232_E003_M744_DES * S735_VOL_DES, 2)},  # PFD stream 735
+                               "vol_m3h": round(m_744 / RHO_735_KGM3, 2),   # PFD stream 735 (raw, unlagged)
+                               "kgh": round(m_744, 1)},
             },
             "E011": {                            # 323E011 LP carbamate condenser + 323D011 (45°C)
                 "TT_323011":  round(s.r3232_e011_T, 1),                    # shell liquid temp (C, hold 45)
@@ -4484,15 +4504,15 @@ def step_sim(dt: float) -> dict:
                 "TT_328009":  round(T_746, 1),                             # 328E021 cold out -> C003 feed (stream 746, 190C)
                 "P_bara":     round(s.a328_c003_P, 2),
                 "LI_328505":  round(s.a328_c003_M / R328_C003_M_DES * 50.0, 1),
-                "steam911_th":round(m_911 / 1000.0, 2),                    # FIC-326402 MP steam (t/h)
+                "steam911_th":round(m_911 / 1000.0, 2),                    # FIC-329402 MP steam (t/h)
                 "ovhd748_th": round(m_748 / 1000.0, 2),                    # relief -> 328C002 (t/h)
                 "bot747_th":  round(m_747 / 1000.0, 2),                    # bottoms -> 328C004 (t/h)
                 "PIC_328203": {"pv": round(s.PIC_328203["pv"], 2), "sp": round(s.PIC_328203["sp"], 2),
                                "op": round(s.PIC_328203["op"], 1), "mode": s.PIC_328203["mode"]},
                 "LIC_328505": {"pv": round(s.LIC_328505["pv"], 1), "sp": round(s.LIC_328505["sp"], 1),
                                "op": round(s.LIC_328505["op"], 1), "mode": s.LIC_328505["mode"]},
-                "FIC_326402": {"pv": round(s.FIC_326402["pv"], 1), "sp": round(s.FIC_326402["sp"], 1),
-                               "op": round(s.FIC_326402["op"], 1), "mode": s.FIC_326402["mode"]},
+                "FIC_329402": {"pv": round(s.FIC_329402["pv"], 1), "sp": round(s.FIC_329402["sp"], 1),
+                               "op": round(s.FIC_329402["op"], 1), "mode": s.FIC_329402["mode"]},
                 "TIC_328012": {"pv": round(s.TIC_328012["pv"], 1), "sp": round(s.TIC_328012["sp"], 1),
                                "op": round(s.TIC_328012["op"], 2), "mode": s.TIC_328012["mode"]},
             },
@@ -4501,17 +4521,17 @@ def step_sim(dt: float) -> dict:
                 "TT_328005":  round(s.a328_c004_T, 1),                     # bottoms draw -> 328E007 (stream 739, 143C)
                 "TT_328004":  round(s.a328_c004_T - R328_C004_DT_DES, 1),  # top tray = OVHD 750 (140C), tracks live bottoms
                 "LI_328504":  round(s.a328_c004_M / R328_C004_M_DES * 50.0, 1),
-                "steam931_th":round(m_931 / 1000.0, 2),                    # FIC-328401 LP steam (t/h)
+                "steam931_th":round(m_931 / 1000.0, 2),                    # FIC-329401 LP steam (t/h)
                 "ovhd750_th": round(m_750 / 1000.0, 2),                    # relief -> 328C002 (t/h)
                 "bot739_th":  round(m_739 / 1000.0, 2),                    # bottoms -> 328E007 boundary (t/h)
                 "TT_328006":   round(R328_E007_TH_OUT, 1),                 # stream 740 condensate temp (89C, 328E007 hot out)
                 "AI_328701":   round(_ai701_uS, 2),                        # process-condensate conductivity (uS/cm @25C)
                 "nh3_740_ppm": round(_nh3_740, 3),                        # derived trace NH3 slip (ppm mass)
                 "urea_740_ppm":round(_urea_740, 3),                       # derived trace urea slip (ppm mass)
-                "FFIC_328401":{"pv": round(s.FFIC_328401["pv"], 4), "sp": round(s.FFIC_328401["sp"], 4),
-                               "op": round(s.FFIC_328401["op"], 1), "mode": s.FFIC_328401["mode"]},
-                "FIC_328401": {"pv": round(s.FIC_328401["pv"], 1), "sp": round(s.FIC_328401["sp"], 1),
-                               "op": round(s.FIC_328401["op"], 1), "mode": s.FIC_328401["mode"]},
+                "FFIC_329401":{"pv": round(s.FFIC_329401["pv"], 4), "sp": round(s.FFIC_329401["sp"], 4),
+                               "op": round(s.FFIC_329401["op"], 1), "mode": s.FFIC_329401["mode"]},
+                "FIC_329401": {"pv": round(s.FIC_329401["pv"], 1), "sp": round(s.FIC_329401["sp"], 1),
+                               "op": round(s.FIC_329401["op"], 1), "mode": s.FIC_329401["mode"]},
                 "LIC_328504": {"pv": round(s.LIC_328504["pv"], 1), "sp": round(s.LIC_328504["sp"], 1),
                                "op": round(s.LIC_328504["op"], 1), "mode": s.LIC_328504["mode"]},
             },
@@ -4661,7 +4681,7 @@ def step_sim(dt: float) -> dict:
             # --- steam-network flow transmitters (PFD-anchored dynamic telemetry, t/h; see FT403/407
             #     anchor block above -- OEM 1750 MTPD 100% load, streams 901/902/903/911/963/932) ---
             # FT-329403 (stream 901 supply main): live BL steam to 328C003(911) + 329D005(902) +
-            #   329D009(903) + 322D001A/B(963).  m_911 (kg/h, FIC-326402) + (902+903 PFD)*live strip
+            #   329D009(903) + 322D001A/B(963).  m_911 (kg/h, FIC-329402) + (902+903 PFD)*live strip
             #   ratio + 963(static 0) ; -> 60.85 t/h @design, scales with live strip-steam load.
             "FT_329403_th": round((m_911
                                    + (FT403_S902_DES + FT403_S903_DES)
@@ -4880,10 +4900,10 @@ R323_CTRL_MODES = {
     "PIC_328202": ("MAN", "AUTO"),
     "TIC_328002": ("MAN", "AUTO"),
     "FIC_328404": ("MAN", "AUTO", "CAS"),
-    "FIC_326402": ("MAN", "AUTO", "CAS"),
+    "FIC_329402": ("MAN", "AUTO", "CAS"),
     "PIC_328203": ("MAN", "AUTO"),
-    "FFIC_328401": ("MAN", "AUTO"),         # steam/feed ratio master
-    "FIC_328401": ("MAN", "AUTO", "CAS"),   # LP-steam slave
+    "FFIC_329401": ("MAN", "AUTO"),         # steam/feed ratio master (m931 / m744, FIC-328402 leg)
+    "FIC_329401": ("MAN", "AUTO", "CAS"),   # LP-steam slave
     "TIC_328008": ("MAN", "AUTO"),
     "TIC_328012": ("MAN", "AUTO"),
     "LIC_328503": ("MAN", "AUTO"),

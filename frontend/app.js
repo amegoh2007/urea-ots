@@ -498,7 +498,7 @@ function render322(s){
     // whitelist (and the per-loop legal mode tuple), so an extra tag here is inert, not unsafe.
     const R323=new Set(['TIC-323007','PIC-329202','LIC-323501','LIC-323505','TIC-323012','PIC-329208','LIC-323507','FIC-324401','TIC-323013',
                         'PIC-323202','PIC-323203','LIC-323502','SIC-323901','SIC-323902','LIC-323503','FIC-323401','FIC-323402','FIC-328405','FIC-323418',
-                        'LIC-328501','PIC-328202','TIC-328002','FIC-328404','FIC-326402','PIC-328203','FFIC-328401','FIC-328401','TIC-328008','TIC-328012',
+                        'LIC-328501','PIC-328202','TIC-328002','FIC-328404','FIC-329402','PIC-328203','FFIC-329401','FIC-329401','TIC-328008','TIC-328012',
                         'LIC-328503','LIC-328504','LIC-328505','FIC-328402','FIC-328406','PIC-322201','LIC-322502']);
     const msg={type:T[cur.tag] || (R323.has(cur.tag) ? 'r323_ctrl_set' : 'controller_set'), id:cur.tag, mode};
     if(mode==='MAN'  && !isNaN(o)) msg.op=o;
