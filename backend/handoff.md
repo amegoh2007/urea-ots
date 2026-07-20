@@ -35,9 +35,43 @@ from scratch with the known-good `[core]/[user]/[remote "origin"]/[branch "maste
 level with `origin/master`, working tree clean apart from the ~40 known untracked paths (must stay
 untracked — **stage selectively by path, never `git add -A`**).
 
-**Active files (session 13):** `backend/handoff.md` (this block), `.git/config` (repaired).
-`backend/main.py` untouched. Acceptance tests re-run, not modified:
-`scratchpad/regress.py`, `scratchpad/pindiff.py`, `scratchpad/golden_pin.json`, `scratchpad/ff718.py`.
+**Item — 328E021 HOT side made live (the session-8 "obvious next 328 item", now CLOSED).**
+The mirror of item 3c, on stream 749: `m_749 = m_747  # via 328E021 (148 °C)` fed `sens_c004` off the
+frozen `R328_C004_T749 = 148.0`, so the 328C004 energy balance could not see the hydrolyser at all.
+
+- **Conservation form, NOT a second effectiveness.** A hot-side ε would let 328E021 create/destroy
+  energy off-design (the two ε's only close at the design flows). The duty the hot stream gives up is
+  the duty the cold side took plus the shell loss:
+  $$ m_{749}\,c_p\,(T_{c003}-T_{749}) \;=\; m_{746}\,c_p\,(T_{746}-T_{c002}) \;+\; Q_{loss} $$
+  $$ T_{749} \;=\; T_{c003} \;-\; \frac{m_{746}\,(T_{746}-T_{c002}) \;+\; \Delta T_{loss}}{m_{749}},
+     \qquad \Delta T_{loss} \equiv \frac{3600\,Q_{loss}}{c_p} $$
+- **`R328_E021_LOSS_DT` back-solved from the plant's own design state, no fabricated constant:**
+  $$ \Delta T_{loss} = 34062\cdot(200-148) \;-\; 33769\cdot(190-139) = 1771224 - 1722219 = 49005\ \mathrm{kg\,K/h} $$
+  $$ Q_{loss} = \frac{49005}{3600}\cdot 4.0 = 54.45\ \mathrm{kW} \;\approx\; \texttt{R328\_E021\_LOSS} = 54.4\ \mathrm{kW} $$
+  — it reconstructs the datasheet loss, exactly as `R328_E021_EPS_T` reconstructed the datasheet ε.
+- **Bit-exact at design by construction.** Every term is an integer-valued float, so
+  $200-(33769\cdot 51+49005)/34062 = 200-52 = 148.0$ **exactly** (`scratchpad/e021h.py`: `exact: True`
+  for `T_746`, `T_749`, and the composed pair) ⇒ swapping `sens_c004` onto the live value cannot move
+  the pin. Gate re-run: **`leaves: 25  keys: 15  diffs: 0`**.
+- **Pinch clamp, unlike 3c.** 3c needed none (convex combination); here the raw balance diverges as
+  `m_749 → 0`, so `T_749` is bounded by the two live inlet temps — a counter-current interchanger
+  cannot cool the hot stream past the cold-side inlet. Inactive at design (139 < 148 < 200) ⇒ exactness
+  preserved.
+- **`R328_C004_T749 = 148.0` RETAINED** — still the design datum behind `R328_C004_LAM750` and the loss
+  anchor. No live path reads it (grep-confirmed: L713 def, L717 LAM750, L912 loss anchor, comment).
+- **No display bind:** screen 328-1 has no TT element on stream 749 (grep `TT-328` in `overlays.js`),
+  so no telemetry key was invented. This is a §1 physics fix, not a display gap.
+- **Acceptance — `scratchpad/dyn749.py`, FAILURES 0:**
+  gate 1 design hold (6000 s) TT-328C003 200.0 / TT-328009 190.0 / TT-328005 143.0 / TT-328004 140.0 /
+  TT-328007 139.0; gate 2 dynamism, hydrolyser clamped 200 → 210 °C ⇒ `dT_c004 = 1.7092` vs closed form
+  $1-m_{746}\varepsilon_T/m_{749} = 0.17113$ ⇒ 1.7113 (the frozen constant gave **0**); gate 3 pinch
+  guard, LIC-328505 driven shut ⇒ C004 stays finite (346.8 °C, 8527 kg — steam-on/draw-off runaway, the
+  pre-existing behaviour, no NaN/inf from the divergent balance).
+
+**Active files (session 13):** `backend/main.py` (328E021 hot side), `backend/handoff.md` (this block),
+`.git/config` (repaired). New tracked acceptance tests: `scratchpad/e021h.py`, `scratchpad/dyn749.py`.
+Re-run, not modified: `scratchpad/regress.py`, `scratchpad/pindiff.py`, `scratchpad/golden_pin.json`,
+`scratchpad/ff718.py`.
 
 **Failed attempts (session 13):** repairing `.git/config` by filtering blank lines
 (`[l for l in lines if l.strip()]`) — no-op, because `\x00` is not whitespace. Full rewrite required.

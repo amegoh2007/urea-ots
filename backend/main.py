@@ -903,6 +903,14 @@ R328_E021_LOSS = 54.4                                       # kW shell heat loss
 #   effectiveness exactly and reconstruct the datasheet in the process -- Q_cold = 33769/3600*4.0*51
 #   = 1913.58 kW (~ its 1913.6) and the hot/cold closure 1968.03 - 1913.58 = 54.45 kW (~ its 54.4).
 R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT) / (R328_C003_T - R328_C002_T_BOT)   # 51/61 = 0.83607
+# Hot-side (stream 749) shell loss in flow-temperature units [kg.K/h], back-solved from the plant's
+# own design state -- the hot duty the cold side does NOT receive:
+#   34062*(200-148) - 33769*(190-139) = 1771224 - 1722219 = 49005 kg.K/h = 49005/3600*4.0 = 54.45 kW,
+# i.e. it reconstructs the datasheet's own R328_E021_LOSS = 54.4 kW (same provenance argument as
+# R328_E021_EPS_T above).  Used as an ENERGY-BALANCE closure, not as a second effectiveness, so
+# 328E021 can neither create nor destroy energy off-design.
+R328_E021_LOSS_DT = (R328_C004_M749_DES * (R328_C003_T    - R328_C004_T749)
+                     - R328_C003_M746_DES * (R328_C003_T746 - R328_C002_T_BOT))   # 49005 kg.K/h
 R328_E007_EPS  = 0.6667                                     # 328E007 feed/effluent interchanger
 R328_E007_LOSS = 18.3                                       # kW shell heat loss
 R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 boundary
@@ -3772,7 +3780,18 @@ def step_sim(dt: float) -> dict:
 
     # ----- Stage 5 : 328C004  Desorber-II (143°C, LP-steam 931, FFIC) -----
     Tc004    = s.a328_c004_T
-    m_749    = m_747                                                     # via 328E021 (148°C)
+    m_749    = m_747                                                     # via 328E021 (hot side)
+    # 328E021 hot outlet (stream 749): C003 bottoms 200 giving up heat to the C002-bottoms cold side.
+    #   CONSERVATION form, not a second independent effectiveness -- the duty the hot stream loses is
+    #   exactly the duty the cold side took, m_746*(T_746 - T_c002), plus the design shell loss
+    #   R328_E021_LOSS_DT, so the interchanger cannot create or destroy energy off-design.
+    #   At design: 200 - (33769*51 + 49005)/34062 = 200 - 52 = 148.0 EXACTLY (every term is an
+    #   integer-valued float), so switching sens_c004 off the frozen R328_C004_T749 is bit-identical
+    #   at the design point and the boot pin cannot move.
+    #   Bounded by the two live inlet temps: the raw balance diverges as m_749 -> 0, but a
+    #   counter-current interchanger cannot cool the hot stream past the cold-side inlet (pinch).
+    T749_raw = Tc003 - (m_746*(T_746 - s.a328_c002_T) + R328_E021_LOSS_DT) / max(m_749, 1e-6)
+    T_749    = min(max(T749_raw, min(s.a328_c002_T, Tc003)), max(s.a328_c002_T, Tc003))
     ffic_pv  = _lag1(s.tlag, "FF_ratio", m931_prev/max(m_738, 1e-6), 5.0, dt)
     ffic_op  = _ctrl_ipd(s.FFIC_328401, ffic_pv, dt)                     # 931-flow demand (kg/h)
     m_931    = _fic_flow(s.FIC_328401, R328_C004_M931_DES, 50.0, s.tlag, "F_328401", dt, cas_sp=ffic_op)
@@ -3781,7 +3800,7 @@ def step_sim(dt: float) -> dict:
     lvl_c004 = s.a328_c004_M / R328_C004_M_DES * 50.0
     lic504_op= _ctrl_ipd(s.LIC_328504, lvl_c004, dt)
     m_739    = R328_C004_M739_DES * (lic504_op / 50.0)                    # bottoms -> 328E007 boundary
-    sens_c004= m_749/3600.0*R328_CP*(R328_C004_T749 - Tc004)
+    sens_c004= m_749/3600.0*R328_CP*(T_749 - Tc004)
     P_c004   = sens_c004 + m_931/3600.0*R328_C004_M931_DH - m_750/3600.0*R328_C004_LAM750
     s.a328_c004_T = Tc004 + P_c004*dt/max(s.a328_c004_M*R328_CP, 1e-6)
     s.a328_c004_M = max(s.a328_c004_M + (in_c004 - m_750 - m_739)/3600.0*dt, 1.0)
