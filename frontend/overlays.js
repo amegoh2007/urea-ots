@@ -309,14 +309,14 @@
       { k: 'pic8203', t: 'ind', x: 176, y: 158, tag: 'PIC-328203', bind: 'DESORB_328.C003.PIC_328203.pv', mode: 'DESORB_328.C003.PIC_328203.mode', u: 'BAR A', dec: 2, note: '328C003 overhead pressure via PV-328203' },
       { k: 'pv8203', t: 'avalve', x: 442, y: 173, tag: 'PV-328203', bind: 'DESORB_328.C003.PIC_328203.op', u: '%', dec: 1 },
       { k: 'tic8012', t: 'ind', x: 231, y: 268, tag: 'TIC-328012', bind: 'DESORB_328.C003.TIC_328012.pv', mode: 'DESORB_328.C003.TIC_328012.mode', u: 'C', dec: 1, note: '328C003 bottom temp cascades FIC-329402 MP steam' },
-      { k: 'fic6402', t: 'ind', x: 63,  y: 296, tag: 'FIC-329402', bind: 'DESORB_328.C003.FIC_329402.pv', mode: 'DESORB_328.C003.FIC_329402.mode', u: 'KG/H', dec: 0, cas: true, note: 'slave: MP steam (911) injected direct into 328C003 via FV-326402' },
-      { k: 'fv6402', t: 'avalve', x: 120, y: 335, tag: 'FV-326402', bind: 'DESORB_328.C003.FIC_329402.op', u: '%', dec: 1 },
+      { k: 'fic6402', t: 'ind', x: 63,  y: 296, tag: 'FIC-329402', bind: 'DESORB_328.C003.FIC_329402.pv', mode: 'DESORB_328.C003.FIC_329402.mode', u: 'KG/H', dec: 0, cas: true, note: 'slave: MP steam (911) injected direct into 328C003 via FV-329402' },
+      { k: 'fv6402', t: 'avalve', x: 120, y: 335, tag: 'FV-329402', bind: 'DESORB_328.C003.FIC_329402.op', u: '%', dec: 1 },
       { k: 'lic8505', t: 'ind', x: 789, y: 423, tag: 'LIC-328505', bind: 'DESORB_328.C003.LIC_328505.pv', mode: 'DESORB_328.C003.LIC_328505.mode', u: '%', dec: 1, note: 'holds 328C003 bottom level via LV-328505' },
       { k: 'lv8505', t: 'avalve', x: 1144, y: 665, tag: 'LV-328505', bind: 'DESORB_328.C003.LIC_328505.op', u: '%', dec: 1 },
       // ---- 328C004 second desorber / hydrolyser : C004 block, FFIC-329401 ratio + FIC-329401 LP steam ----
       { k: 'lic8504', t: 'ind', x: 437, y: 234, tag: 'LIC-328504', bind: 'DESORB_328.C004.LIC_328504.pv', mode: 'DESORB_328.C004.LIC_328504.mode', u: '%', dec: 1, note: 'holds 328C004 level via LV-328504' },
       { k: 'lv8504', t: 'avalve', x: 542, y: 356, tag: 'LV-328504', bind: 'DESORB_328.C004.LIC_328504.op', u: '%', dec: 1 },
-      { k: 'ffic401', t: 'ind', x: 964, y: 218, tag: 'FFIC-329401', bind: 'DESORB_328.C004.FFIC_329401.pv', mode: 'DESORB_328.C004.FFIC_329401.mode', u: 'KG/KG', dec: 4, note: 'LP steam-to-feed ratio m931/m744; feed leg is FIC-328402 (PFD 735). MV sets FIC-329401 CAS SP' },
+      { k: 'ffic401', t: 'ind', x: 964, y: 218, tag: 'FFIC-329401', bind: 'DESORB_328.C004.FFIC_329401.pv', mode: 'DESORB_328.C004.FFIC_329401.mode', u: 'T/M3', dec: 3, note: 'LP steam-to-feed ratio, t/h per m3/h; feed leg is the volumetric FIC-328402. On CAS: FIC-329401 SP = FIC-328402 * ratio, FV-329401 strokes to hold it' },
       { k: 'fic8401', t: 'ind', x: 1184, y: 296, tag: 'FIC-329401', bind: 'DESORB_328.C004.FIC_329401.pv', mode: 'DESORB_328.C004.FIC_329401.mode', u: 'KG/H', dec: 1, cas: true, note: 'slave: CAS follows FFIC-329401 ratio on the FIC-328402 feed; LP steam via FV-328401' },
       { k: 'fv8401', t: 'avalve', x: 1014, y: 324, tag: 'FV-328401', bind: 'DESORB_328.C004.FIC_329401.op', u: '%', dec: 1 },
       // ---- 328D001 reflux drum : D001 block, TIC-328008 / FIC-328404 / PIC-328202 ----

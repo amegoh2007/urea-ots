@@ -858,11 +858,16 @@ R3232_E003_M744_DES = R3232_E003_PHI744 * A328_M756_DES      # 31478
 # balance (m_744) is UNTOUCHED: _fic_flow(rho=RHO_735_KGM3) still returns kg/h.
 S735_VOL_DES = 31.4
 RHO_735_KGM3 = R3232_E003_M744_DES / S735_VOL_DES            # 1002.48 kg/m3, PFD-735 back-solve
-# FFIC-329401 328C004 desorber-II steam/feed RATIO master:  m931 / m744.  The feed measurement
-# is the FIC-328402 wash leg, so the ratio is anchored on that stream's design flow.  At design
-# 6495/31478 = 0.20634 -> ffic_pv == sp -> du == 0 -> the LP-steam demand holds 6495 kg/h
-# exactly, so the boot pin cannot move.
-R328_FFIC_RATIO_DES = R328_C004_M931_DES / R3232_E003_M744_DES            # 0.20634
+# FFIC-329401 328C004 desorber-II steam/feed RATIO master, in T/M3 -- the DCS basis (the baked
+# 328-1 ratio panel reads "SP 0.169 T/M3 / MV 0.168 T/M3").  On CAS the FIC-329401 slave SP is
+# FIC-328402 * this ratio, and FV-329401 strokes to hold it.  The feed measurement is therefore
+# the FIC-328402 wash leg, which is a VOLUMETRIC loop, so the ratio is LP steam in t/h per m3/h
+# of that feed -- NOT a dimensionless kg/kg.
+# Written with the SAME float operation order as the live ffic_pv in step_sim so the design
+# point is bit-exact: pv == sp -> du == 0 -> the LP-steam demand holds 6495 kg/h and the boot
+# pin cannot move.  At design 6.495 t/h / 31.4 m3/h = 0.20685 T/M3.
+R328_FFIC_RATIO_DES = ((R328_C004_M931_DES / 1000.0)
+                       / (R3232_E003_M744_DES / RHO_735_KGM3))           # 0.20685 T/M3
 R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES - R3232_E003_M744_DES  # 38713.2
 R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
 # 323E003 tempered-water circuit: PFD stream 1102 supply 55 °C / 1103 return 65 °C.  R3232_TW_T is
@@ -2902,7 +2907,7 @@ class State:
                            "pv1": R328_D001_M775_DES, "pv2": R328_D001_M775_DES,
                            "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: g=1675/30.2=55.5, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=67 (damped-oscillatory 51-102). Kc=0.5 -> M=27.7, coef 0.46 monotone.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 4000.0}
-        # FIC-329402 328C003 hydrolyser MP-steam 911 -> FV-326402 (REVERSE flow, CAS).
+        # FIC-329402 328C003 hydrolyser MP-steam 911 -> FV-329402 (REVERSE flow, CAS).
         self.FIC_329402 = {"mode": "CAS", "op": 50.0,
                            "sp": R328_C003_M911_DES, "pv": R328_C003_M911_DES,
                            "pv1": R328_C003_M911_DES, "pv2": R328_C003_M911_DES,
@@ -3844,11 +3849,13 @@ def step_sim(dt: float) -> dict:
     #   counter-current interchanger cannot cool the hot stream past the cold-side inlet (pinch).
     T749_raw = Tc003 - (m_746*(T_746 - s.a328_c002_T) + R328_E021_LOSS_DT) / max(m_749, 1e-6)
     T_749    = min(max(T749_raw, min(s.a328_c002_T, Tc003)), max(s.a328_c002_T, Tc003))
-    # FFIC-329401 ratio master.  The feed measurement is the FIC-328402 wash leg (PFD stream 735,
-    # m_744 into 323E003), NOT the 328C002 m_738 term, so the CAS demand handed down to the
-    # FIC-329401 slave rides on m744_prev.  At design 6495/31478 == R328_FFIC_RATIO_DES, so
-    # ffic_pv == sp -> du == 0 and the LP-steam draw holds 6495 kg/h bit-exactly.
-    ffic_pv  = _lag1(s.tlag, "FF_ratio", m931_prev/max(m744_prev, 1e-6), 5.0, dt)
+    # FFIC-329401 ratio master, T/M3 (the DCS basis).  The feed measurement is the FIC-328402
+    # wash leg (m_744 into 323E003), NOT the 328C002 m_738 term, and it is read VOLUMETRICALLY
+    # because that loop is now m3/h -- so on CAS the FIC-329401 slave SP is FIC-328402 * ratio
+    # and FV-329401 strokes to hold it.  Same float operation order as R328_FFIC_RATIO_DES, so
+    # at design ffic_pv == sp -> du == 0 and the LP-steam draw holds 6495 kg/h bit-exactly.
+    ffic_pv  = _lag1(s.tlag, "FF_ratio",
+                     (m931_prev / 1000.0) / max(m744_prev / RHO_735_KGM3, 1e-6), 5.0, dt)
     ffic_op  = _ctrl_ipd(s.FFIC_329401, ffic_pv, dt)                     # 931-flow demand (kg/h)
     m_931    = _fic_flow(s.FIC_329401, R328_C004_M931_DES, 50.0, s.tlag, "F_329401", dt, cas_sp=ffic_op)
     in_c004  = m_749 + m_931
