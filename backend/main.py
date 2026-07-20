@@ -721,8 +721,8 @@ R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C0
                      + R328_C004_M931_DES/3600.0*R328_C004_M931_DH)
                     / (R328_C004_M750_DES/3600.0))                        # kJ/kg (~2130)
 # FFIC-329401 master ratio is defined further down, after R3232_E003_M744_DES: its feed
-# measurement is the FIC-328402 wash leg (PFD stream 735 into 323E003), not a 328C002 term,
-# so the denominator must exist first.  See the RHO_735_KGM3 block.
+# measurement is the FIC-328402 wash leg (PFD stream 744 into 323E003), not a 328C002 term,
+# so the denominator must exist first.  See the RHO_744_KGM3 block.
 
 # ==========================================================================
 #  323E011 + 323D011  (LP carbamate condenser + drum, 45 °C, 1.13 bar a)
@@ -851,13 +851,16 @@ R3232_E003_PHI321 = 1323.0 / (R3232_E003_M305_DES + R3232_E003_M797_DES)  # vent
 R3232_E003_M321_DES = R3232_E003_PHI321 * (R3232_E003_M305_DES + R3232_E003_M797_DES)  # 1323
 R3232_E003_PHI744 = 31478.0 / A328_M756_DES                 # wash split on 756 -> Comp II
 R3232_E003_M744_DES = R3232_E003_PHI744 * A328_M756_DES      # 31478
-# PFD-22 stream 735 (328C002 -> 323E003 Comp-II wash, Amm. Water 56 C / 4.1 bar) design
-# volumetric flow (m3/h).  FIC-328402 is a VOLUMETRIC loop: the operator enters SP in m3/h,
-# so the density is BACK-SOLVED from the plant's own design state (31478 kg/h at 31.4 m3/h)
-# rather than lifted from any outside table -- no fabricated constant.  The physics mass
-# balance (m_744) is UNTOUCHED: _fic_flow(rho=RHO_735_KGM3) still returns kg/h.
-S735_VOL_DES = 31.4
-RHO_735_KGM3 = R3232_E003_M744_DES / S735_VOL_DES            # 1002.48 kg/m3, PFD-735 back-solve
+# PFD-22 stream 744 (328C002 -> 323E003 Comp-II wash, Amm. Water) design volumetric flow
+# (m3/h).  The FIC-328402 leg carries 31478 kg/h, which is stream 744, NOT 735 -- the two are
+# easy to confuse because the PFD gives BOTH a volume flow of 31.4 m3/h, but they are distinct
+# streams (735: 31114 kg/h, 56 C, 4.1 bar, rho 992.4  |  744: 31478 kg/h, 44 C, 1 bar, rho 1002).
+# FIC-328402 is a VOLUMETRIC loop: the operator enters SP in m3/h, so the density is BACK-SOLVED
+# from the plant's own design state (31478 kg/h at 31.4 m3/h) rather than lifted from a table --
+# no fabricated constant, and it lands on the PFD's own stream-744 density (1002) to 0.05 %.
+# The physics mass balance (m_744) is UNTOUCHED: _fic_flow(rho=RHO_744_KGM3) still returns kg/h.
+S744_VOL_DES = 31.4
+RHO_744_KGM3 = R3232_E003_M744_DES / S744_VOL_DES            # 1002.48 kg/m3, PFD-744 back-solve
 # FFIC-329401 328C004 desorber-II steam/feed RATIO master, in T/M3 -- the DCS basis (the baked
 # 328-1 ratio panel reads "SP 0.169 T/M3 / MV 0.168 T/M3").  On CAS the FIC-329401 slave SP is
 # FIC-328402 * this ratio, and FV-329401 strokes to hold it.  The feed measurement is therefore
@@ -867,7 +870,7 @@ RHO_735_KGM3 = R3232_E003_M744_DES / S735_VOL_DES            # 1002.48 kg/m3, PF
 # point is bit-exact: pv == sp -> du == 0 -> the LP-steam demand holds 6495 kg/h and the boot
 # pin cannot move.  At design 6.495 t/h / 31.4 m3/h = 0.20685 T/M3.
 R328_FFIC_RATIO_DES = ((R328_C004_M931_DES / 1000.0)
-                       / (R3232_E003_M744_DES / RHO_735_KGM3))           # 0.20685 T/M3
+                       / (R3232_E003_M744_DES / RHO_744_KGM3))           # 0.20685 T/M3
 R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES - R3232_E003_M744_DES  # 38713.2
 R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
 # 323E003 tempered-water circuit: PFD stream 1102 supply 55 °C / 1103 return 65 °C.  R3232_TW_T is
@@ -2960,15 +2963,15 @@ class State:
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # FIC-328402 328D003 Comp-I -> Comp-II transfer 744 wash -> FV-328402 (REVERSE flow).
         #   VOLUMETRIC loop (m3/h): the operator enters SP in m3/h, so the seeds are
-        #   M744_DES/RHO_735 (31478/1002.48 = 31.4 m3/h, PFD stream 735), sp_hi is the old
+        #   M744_DES/RHO_744 (31478/1002.48 = 31.4 m3/h, PFD stream 744), sp_hi is the old
         #   60000 kg/h span divided by rho, and Kc is scaled by rho so the loop coefficient
-        #   1-Kc*a*g is IDENTICAL to the mass-basis tune noted below.  _fic_flow(rho=RHO_735_KGM3)
+        #   1-Kc*a*g is IDENTICAL to the mass-basis tune noted below.  _fic_flow(rho=RHO_744_KGM3)
         #   still returns kg/h, so the 323E003 / Comp-II mass balance is untouched.
         self.FIC_328402 = {"mode": "AUTO", "op": 50.0,
-                           "sp": R3232_E003_M744_DES / RHO_735_KGM3, "pv": R3232_E003_M744_DES / RHO_735_KGM3,
-                           "pv1": R3232_E003_M744_DES / RHO_735_KGM3, "pv2": R3232_E003_M744_DES / RHO_735_KGM3,
-                           "Kc": 0.06 * RHO_735_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.  Kc*RHO_735 holds the vol-loop coef equal.
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0 / RHO_735_KGM3}
+                           "sp": R3232_E003_M744_DES / RHO_744_KGM3, "pv": R3232_E003_M744_DES / RHO_744_KGM3,
+                           "pv1": R3232_E003_M744_DES / RHO_744_KGM3, "pv2": R3232_E003_M744_DES / RHO_744_KGM3,
+                           "Kc": 0.06 * RHO_744_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.  Kc*RHO_744 holds the vol-loop coef equal.
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0 / RHO_744_KGM3}
         # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
         self.FIC_328406 = {"mode": "MAN", "op": 0.0,
                            "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
@@ -3855,7 +3858,7 @@ def step_sim(dt: float) -> dict:
     # and FV-329401 strokes to hold it.  Same float operation order as R328_FFIC_RATIO_DES, so
     # at design ffic_pv == sp -> du == 0 and the LP-steam draw holds 6495 kg/h bit-exactly.
     ffic_pv  = _lag1(s.tlag, "FF_ratio",
-                     (m931_prev / 1000.0) / max(m744_prev / RHO_735_KGM3, 1e-6), 5.0, dt)
+                     (m931_prev / 1000.0) / max(m744_prev / RHO_744_KGM3, 1e-6), 5.0, dt)
     ffic_op  = _ctrl_ipd(s.FFIC_329401, ffic_pv, dt)                     # 931-flow demand (kg/h)
     m_931    = _fic_flow(s.FIC_329401, R328_C004_M931_DES, 50.0, s.tlag, "F_329401", dt, cas_sp=ffic_op)
     in_c004  = m_749 + m_931
@@ -3918,7 +3921,7 @@ def step_sim(dt: float) -> dict:
     m_321    = R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)   # vent -> 323E011
     gen321   = R3232_E003_PHI321 * (m_305 + R3232_M797_DES)
     m_744    = _fic_flow(s.FIC_328402, R3232_E003_M744_DES, 50.0, s.tlag, "F_328402", dt,
-                         rho=RHO_735_KGM3)          # wash -> Comp-II (SP in m3/h, returns kg/h)
+                         rho=RHO_744_KGM3)          # wash -> Comp-II (SP in m3/h, returns kg/h)
     lvl_d001_323 = s.r3232_d001_M / R3232_D001_M_DES * R3232_D001_LVL_SP
     lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master
     rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
@@ -4457,7 +4460,7 @@ def step_sim(dt: float) -> dict:
                 # FIC-328402 is a VOLUMETRIC loop: pv/sp are m3/h (the operator enters SP in m3/h).
                 "FIC_328402": {"pv": round(s.FIC_328402["pv"], 2), "sp": round(s.FIC_328402["sp"], 2),
                                "op": round(s.FIC_328402["op"], 1), "mode": s.FIC_328402["mode"],
-                               "vol_m3h": round(m_744 / RHO_735_KGM3, 2),   # PFD stream 735 (raw, unlagged)
+                               "vol_m3h": round(m_744 / RHO_744_KGM3, 2),   # PFD stream 744 (raw, unlagged)
                                "kgh": round(m_744, 1)},
             },
             "E011": {                            # 323E011 LP carbamate condenser + 323D011 (45°C)

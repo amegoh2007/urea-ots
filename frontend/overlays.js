@@ -25,23 +25,23 @@
   const OV = {
     'screen-321-1': [
       // ---- indicators (all bound: active unit) ----
-      { k: 'tt1',  t: 'ind', x: 396,  y: 178, tag: 'TT-321001', bind: 'TI_top1',     u: 'C',     dec: 1 },
-      { k: 'tt2',  t: 'ind', x: 624,  y: 175, tag: 'TT-321002', bind: 'TI_top2',     u: 'C',     dec: 1 },
-      { k: 'py2',  t: 'ind', x: 797,  y: 119, tag: 'PY-321202', bind: 'PY_321202',   u: 'BAR G', dec: 1 },
-      { k: 'ipy',  t: 'ind', x: 797,  y: 175, tag: 'IPY-321201',bind: 'PY_321201',   u: 'BAR G', dec: 1 },
-      { k: 'pd3',  t: 'ind', x: 878,  y: 223, tag: 'PDY-321203',bind: 'PDY_321203',  u: 'BAR G', dec: 1 },
-      { k: 'pd4',  t: 'ind', x: 1054, y: 176, tag: 'PDY-321204',bind: 'PDY_321204',  u: 'BAR G', dec: 1 },
-      { k: 't20',  t: 'ind', x: 1119, y: 246, tag: 'TT-321020', bind: 'TI_321020',   u: 'C',     dec: 1 },
-      { k: 'ft',   t: 'ind', x: 296,  y: 235, tag: 'FT-321401', bind: 'FI_321401',   u: 'T/H',   dec: 2 },
-      { k: 'fqi',  t: 'ind', x: 292,  y: 280, tag: 'FQI-321401',bind: 'totalizer',   u: 'T',     dec: 2 },
-      { k: 'pt1',  t: 'ind', x: 749,  y: 317, tag: 'PT-321201', bind: 'PI_321201',   u: 'BAR G', dec: 1 },
-      { k: 'pt2',  t: 'ind', x: 949,  y: 317, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
-      { k: 'i61',  t: 'ind', x: 894,  y: 469, tag: 'IT-321961', bind: 'pumpA.current',u: 'A',    dec: 1 },
-      { k: 'i62',  t: 'ind', x: 1119, y: 469, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
-      { k: 's50',  t: 'ind', x: 862,  y: 528, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
-      { k: 's51',  t: 'ind', x: 1104, y: 528, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
-      { k: 'nca',  t: 'ind', x: 296,  y: 522, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
-      { k: 'ncb',  t: 'ind', x: 300,  y: 587, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
+      { k: 'tt1',  t: 'ind', x: 397,  y: 181, tag: 'TT-321001', bind: 'TI_top1',     u: 'C',     dec: 1 },
+      { k: 'tt2',  t: 'ind', x: 637,  y: 181, tag: 'TT-321002', bind: 'TI_top2',     u: 'C',     dec: 1 },
+      { k: 'py2',  t: 'ind', x: 807,  y: 122, tag: 'PY-321202', bind: 'PY_321202',   u: 'BAR G', dec: 1 },
+      { k: 'ipy',  t: 'ind', x: 807,  y: 181, tag: 'IPY-321201',bind: 'PY_321201',   u: 'BAR G', dec: 1 },
+      { k: 'pd3',  t: 'ind', x: 880,  y: 228, tag: 'PDY-321203',bind: 'PDY_321203',  u: 'BAR G', dec: 1 },
+      { k: 'pd4',  t: 'ind', x: 1050, y: 183, tag: 'PDY-321204',bind: 'PDY_321204',  u: 'BAR G', dec: 1 },
+      { k: 't20',  t: 'ind', x: 1129, y: 254, tag: 'TT-321020', bind: 'TI_321020',   u: 'C',     dec: 1 },
+      { k: 'ft',   t: 'ind', x: 288,  y: 244, tag: 'FT-321401', bind: 'FI_321401',   u: 'T/H',   dec: 2 },
+      { k: 'fqi',  t: 'ind', x: 286,  y: 289, tag: 'FQI-321401',bind: 'totalizer',   u: 'T',     dec: 2 },
+      { k: 'pt1',  t: 'ind', x: 732,  y: 328, tag: 'PT-321201', bind: 'PI_321201',   u: 'BAR G', dec: 1 },
+      { k: 'pt2',  t: 'ind', x: 951,  y: 328, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
+      { k: 'i61',  t: 'ind', x: 897,  y: 486, tag: 'IT-321961', bind: 'pumpA.current',u: 'A',    dec: 1 },
+      { k: 'i62',  t: 'ind', x: 1108, y: 486, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
+      { k: 's50',  t: 'ind', x: 876,  y: 544, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
+      { k: 's51',  t: 'ind', x: 1088, y: 544, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
+      { k: 'nca',  t: 'ind', x: 288,  y: 538, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
+      { k: 'ncb',  t: 'ind', x: 288,  y: 606, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
       { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LI_321501',  u: '%',     dec: 1 },
       { k: 'ft3',  t: 'ind', x: 93,   y: 452, tag: 'FT-322403', bind: 'CO2_FEED.FT_322403', u: 'NM3/H', dec: 0 },   // CO2 feed 320K002 -> XV-322902 -> 322E001
       // ---- pumps ----
@@ -219,41 +219,41 @@
     // unbound `ind` = WHITE FRAME (unmodelled boundary/downstream, tag text only).  3 cascade slaves flagged cas:true.
     'screen-323-1': [
       // ---- 323C003 rectifying column / 323E002 heater : isenthalpic letdown -> 4.1 bar, hold 135 C ----
-      { k: 'tt001', t: 'ind', x: 255, y: 133, tag: 'TT-323001', bind: 'RECIRC_323.C003.feed_T',   u: 'C',     dec: 1 },   // feed ex 322E001
-      { k: 'tt002', t: 'ind', x: 388, y: 496, tag: 'TT-323002', bind: 'RECIRC_323.C003.TT_323002', u: 'C',     dec: 1 },   // column bottoms 135 C
-      { k: 'pt201', t: 'ind', x: 482, y: 232, tag: 'PT-323201', bind: 'RECIRC_323.C003.P_bara',    u: 'BAR A', dec: 2 },
-      { k: 'tic07', t: 'ind', x: 448, y: 441, tag: 'TIC-323007', bind: 'RECIRC_323.C003.TIC_323007.pv', mode: 'RECIRC_323.C003.TIC_323007.mode', u: 'C',     dec: 1, note: 'master: cascades PIC-329202 steam-P to 323E002 to hold 135 C' },
-      { k: 'pic02', t: 'ind', x: 137, y: 244, tag: 'PIC-329202', bind: 'RECIRC_323.C003.PIC_329202.pv', mode: 'RECIRC_323.C003.PIC_329202.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-323007; drives PV-329202 steam to 323E002' },
-      { k: 'pv02',  t: 'avalve', x: 108, y: 333, tag: 'PV-329202', bind: 'RECIRC_323.C003.PIC_329202.op', u: '%', dec: 1 },
-      { k: 'lic01', t: 'ind', x: 482, y: 289, tag: 'LIC-323501', bind: 'RECIRC_323.C003.LIC_323501.pv', mode: 'RECIRC_323.C003.LIC_323501.mode', u: '%', dec: 1, note: 'holds 323C003 level via LV-323501 bottoms drain to 323F004' },
-      { k: 'lv01',  t: 'avalve', x: 469, y: 381, tag: 'LV-323501', bind: 'RECIRC_323.C003.LIC_323501.op', u: '%', dec: 1 },
-      { k: 'lic01b',t: 'ind', x: 177, y: 555, tag: 'LIC-323501', bind: 'RECIRC_323.C003.LIC_323501.pv', mode: 'RECIRC_323.C003.LIC_323501.mode', u: '%', dec: 1 },   // dup readout, recycle line
-      { k: 'lv01b', t: 'avalve', x: 162, y: 625, tag: 'LV-323501', bind: 'RECIRC_323.C003.LIC_323501.op', u: '%', dec: 1 },   // dup valve symbol
+      { k: 'tt001', t: 'ind', x: 255, y: 109, tag: 'TT-323001', bind: 'RECIRC_323.C003.feed_T',   u: 'C',     dec: 1 },   // feed ex 322E001
+      { k: 'tt002', t: 'ind', x: 385, y: 478, tag: 'TT-323002', bind: 'RECIRC_323.C003.TT_323002', u: 'C',     dec: 1 },   // column bottoms 135 C
+      { k: 'pt201', t: 'ind', x: 481, y: 207, tag: 'PT-323201', bind: 'RECIRC_323.C003.P_bara',    u: 'BAR A', dec: 2 },
+      { k: 'tic07', t: 'ind', x: 447, y: 420, tag: 'TIC-323007', bind: 'RECIRC_323.C003.TIC_323007.pv', mode: 'RECIRC_323.C003.TIC_323007.mode', u: 'C',     dec: 1, note: 'master: cascades PIC-329202 steam-P to 323E002 to hold 135 C' },
+      { k: 'pic02', t: 'ind', x: 138, y: 222, tag: 'PIC-329202', bind: 'RECIRC_323.C003.PIC_329202.pv', mode: 'RECIRC_323.C003.PIC_329202.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-323007; drives PV-329202 steam to 323E002' },
+      { k: 'pv02',  t: 'avalve', x: 107, y: 311, tag: 'PV-329202', bind: 'RECIRC_323.C003.PIC_329202.op', u: '%', dec: 1 },
+      { k: 'lic01', t: 'ind', x: 481, y: 265, tag: 'LIC-323501', bind: 'RECIRC_323.C003.LIC_323501.pv', mode: 'RECIRC_323.C003.LIC_323501.mode', u: '%', dec: 1, note: 'holds 323C003 level via LV-323501 bottoms drain to 323F004' },
+      { k: 'lv01',  t: 'avalve', x: 467, y: 358, tag: 'LV-323501', bind: 'RECIRC_323.C003.LIC_323501.op', u: '%', dec: 1 },
+      { k: 'lic01b',t: 'ind', x: 173, y: 535, tag: 'LIC-323501', bind: 'RECIRC_323.C003.LIC_323501.pv', mode: 'RECIRC_323.C003.LIC_323501.mode', u: '%', dec: 1 },   // dup readout, recycle line
+      { k: 'lv01b', t: 'avalve', x: 157, y: 614, tag: 'LV-323501', bind: 'RECIRC_323.C003.LIC_323501.op', u: '%', dec: 1 },   // dup valve symbol
       // ---- 323F004 flash tank : adiabatic flash -> 1.13 bar, ~106 C ----
-      { k: 'tt14',  t: 'ind', x: 695, y: 361, tag: 'TT-323014', bind: 'RECIRC_323.F004.TT_323005', u: 'C', dec: 1 },
-      { k: 'lic05', t: 'ind', x: 761, y: 279, tag: 'LIC-323505', bind: 'RECIRC_323.F004.LIC_323505.pv', mode: 'RECIRC_323.F004.LIC_323505.mode', u: '%', dec: 1, note: 'holds 323F004 level via LV-323505 drain to 323F010 pre-evaporator' },
-      { k: 'lv05',  t: 'avalve', x: 751, y: 527, tag: 'LV-323505', bind: 'RECIRC_323.F004.LIC_323505.op', u: '%', dec: 1 },
+      { k: 'tt14',  t: 'ind', x: 700, y: 342, tag: 'TT-323014', bind: 'RECIRC_323.F004.TT_323005', u: 'C', dec: 1 },
+      { k: 'lic05', t: 'ind', x: 761, y: 254, tag: 'LIC-323505', bind: 'RECIRC_323.F004.LIC_323505.pv', mode: 'RECIRC_323.F004.LIC_323505.mode', u: '%', dec: 1, note: 'holds 323F004 level via LV-323505 drain to 323F010 pre-evaporator' },
+      { k: 'lv05',  t: 'avalve', x: 748, y: 505, tag: 'LV-323505', bind: 'RECIRC_323.F004.LIC_323505.op', u: '%', dec: 1 },
       // ---- 323F010 / 323E010 pre-evaporator : vacuum 0.46 bar, hold 99 C ----
-      { k: 'pt204', t: 'ind', x: 996, y: 244, tag: 'PT-323204', bind: 'RECIRC_323.F010.P_bara', u: 'BAR A', dec: 2 },
-      { k: 'tic12', t: 'ind', x: 1040, y: 418, tag: 'TIC-323012', bind: 'RECIRC_323.F010.TIC_323012.pv', mode: 'RECIRC_323.F010.TIC_323012.mode', u: 'C', dec: 1, note: 'master: cascades PIC-329208 steam-P to 323E010 to hold 99 C' },
-      { k: 'pic08', t: 'ind', x: 1153, y: 309, tag: 'PIC-329208', bind: 'RECIRC_323.F010.PIC_329208.pv', mode: 'RECIRC_323.F010.PIC_329208.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-323012; drives PV-329208 steam to 323E010' },
-      { k: 'pv08',  t: 'avalve', x: 1140, y: 391, tag: 'PV-329208', bind: 'RECIRC_323.F010.PIC_329208.op', u: '%', dec: 1 },
+      { k: 'pt204', t: 'ind', x: 995, y: 221, tag: 'PT-323204', bind: 'RECIRC_323.F010.P_bara', u: 'BAR A', dec: 2 },
+      { k: 'tic12', t: 'ind', x: 1041, y: 390, tag: 'TIC-323012', bind: 'RECIRC_323.F010.TIC_323012.pv', mode: 'RECIRC_323.F010.TIC_323012.mode', u: 'C', dec: 1, note: 'master: cascades PIC-329208 steam-P to 323E010 to hold 99 C' },
+      { k: 'pic08', t: 'ind', x: 1158, y: 286, tag: 'PIC-329208', bind: 'RECIRC_323.F010.PIC_329208.pv', mode: 'RECIRC_323.F010.PIC_329208.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-323012; drives PV-329208 steam to 323E010' },
+      { k: 'pv08',  t: 'avalve', x: 1143, y: 364, tag: 'PV-329208', bind: 'RECIRC_323.F010.PIC_329208.op', u: '%', dec: 1 },
       // ---- 323D002 urea solution tank : atmospheric, two-compartment (I active 80 m3 / II passive 300 m3) ----
-      { k: 'tt103', t: 'ind', x: 761, y: 707, tag: 'TT-323103', bind: 'RECIRC_323.D002.T_C',      u: 'C', dec: 1 },
-      { k: 'lt504', t: 'ind', x: 817, y: 665, tag: 'LT-323504', bind: 'RECIRC_323.D002.LI_comp2', u: '%', dec: 1 },   // passive compartment II
-      { k: 'lic07', t: 'ind', x: 1087, y: 665, tag: 'LIC-323507', bind: 'RECIRC_323.D002.LIC_323507.pv', mode: 'RECIRC_323.D002.LIC_323507.mode', u: '%', dec: 1, note: 'master: active compartment I level cascades FIC-324401 product flow' },
-      { k: 'fic01', t: 'ind', x: 1270, y: 674, tag: 'FIC-324401', bind: 'RECIRC_323.D002.FIC_324401.pv', mode: 'RECIRC_323.D002.FIC_324401.mode', u: 'T/H', dec: 2, cas: true, note: 'slave: CAS follows LIC-323507; product to 324 evap via 323P003 A/B' },
-      { k: 'pic203',  t: 'ind', x: 609,  y: 122, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
+      { k: 'tt103', t: 'ind', x: 768, y: 684, tag: 'TT-323103', bind: 'RECIRC_323.D002.T_C',      u: 'C', dec: 1 },
+      { k: 'lt504', t: 'ind', x: 822, y: 650, tag: 'LT-323504', bind: 'RECIRC_323.D002.LI_comp2', u: '%', dec: 1 },   // passive compartment II
+      { k: 'lic07', t: 'ind', x: 1090, y: 644, tag: 'LIC-323507', bind: 'RECIRC_323.D002.LIC_323507.pv', mode: 'RECIRC_323.D002.LIC_323507.mode', u: '%', dec: 1, note: 'master: active compartment I level cascades FIC-324401 product flow' },
+      { k: 'fic01', t: 'ind', x: 1274, y: 658, tag: 'FIC-324401', bind: 'RECIRC_323.D002.FIC_324401.pv', mode: 'RECIRC_323.D002.FIC_324401.mode', u: 'T/H', dec: 2, cas: true, note: 'slave: CAS follows LIC-323507; product to 324 evap via 323P003 A/B' },
+      { k: 'pic203',  t: 'ind', x: 604,  y: 101, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
         mode: 'LPCC_3232.E011.PIC_323203.mode', note: '323E011/D011 LP node P; flash vapour 701 (LV-323501 -> 323F004) accumulates it. AUTO holds SP via PV-323203; MAN lets P ramp' },
-      { k: 'tt004',   t: 'ind', x: 439,  y: 124, tag: 'TT-323004', bind: 'RECIRC_323.C003.feed_T', u: 'C', dec: 1 },   // rect col top vapour 119C (flash feed T)
-      { k: 'hic605',  t: 'ind', x: 992,  y: 142, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
-      { k: 'pv203',   t: 'ind', x: 1220, y: 142, tag: 'PV-323203', bind: 'LPCC_3232.E011.PIC_323203.op', u: '%', dec: 1 },   // GCB off-gas valve stroke -> vapour 011 to 323C005
-      { k: 'hv605',   t: 'ind', x: 1058, y: 199, tag: 'HV-323605',  bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent valve -> non-condensable vent flow
-      { k: 'pic4202', t: 'ind', x: 1277, y: 209, tag: 'PIC-324202', bind: 'EVAP_324.E001.PIC_324202.pv', u: 'BAR A', dec: 3,
+      { k: 'tt004',   t: 'ind', x: 440,  y: 98 , tag: 'TT-323004', bind: 'RECIRC_323.C003.feed_T', u: 'C', dec: 1 },   // rect col top vapour 119C (flash feed T)
+      { k: 'hic605',  t: 'ind', x: 993,  y: 122, tag: 'HIC-323605', bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent hand ctrl -> non-condensable vent flow
+      { k: 'pv203',   t: 'ind', x: 1219, y: 115, tag: 'PV-323203', bind: 'LPCC_3232.E011.PIC_323203.op', u: '%', dec: 1 },   // GCB off-gas valve stroke -> vapour 011 to 323C005
+      { k: 'hv605',   t: 'ind', x: 1055, y: 171, tag: 'HV-323605',  bind: 'EVAP_324.VAC.vent_kgh', u: 'kg/h', dec: 1 },   // 324E002 vent valve -> non-condensable vent flow
+      { k: 'pic4202', t: 'ind', x: 1280, y: 188, tag: 'PIC-324202', bind: 'EVAP_324.E001.PIC_324202.pv', u: 'BAR A', dec: 3,
         mode: 'EVAP_324.E001.PIC_324202.mode' },   // 324E002 pressure
       // ---- WHITE FRAMES : unmodelled boundary / downstream (tag only; bind when upstream modelled) ----
-      { k: 'fic5407', t: 'ind', x: 1214, y: 468, tag: 'FIC-335407' },   // 335 pump flow (downstream unit)
-      { k: 'fv5407',  t: 'ind', x: 1116, y: 549, tag: 'FV-335407'  },   // 335 valve (downstream unit)
+      { k: 'fic5407', t: 'ind', x: 1219, y: 447, tag: 'FIC-335407' },   // 335 pump flow (downstream unit)
+      { k: 'fv5407',  t: 'ind', x: 1112, y: 530, tag: 'FV-335407'  },   // 335 valve (downstream unit)
     ],
     // ============================ 323-2  LP RECIRCULATION 2 (323D001 / 323E003 / 323E011 / 323C005) ============================
     // coords = STAGE 1366x720 (native 1357x644 scaled x1.006632 / y1.118012).  root LPCC_3232 (+ DESORB_328.D001 / ABSORB_328 cross-refs drawn on this screen).
@@ -317,8 +317,8 @@
       { k: 'lic8504', t: 'ind', x: 437, y: 234, tag: 'LIC-328504', bind: 'DESORB_328.C004.LIC_328504.pv', mode: 'DESORB_328.C004.LIC_328504.mode', u: '%', dec: 1, note: 'holds 328C004 level via LV-328504' },
       { k: 'lv8504', t: 'avalve', x: 542, y: 356, tag: 'LV-328504', bind: 'DESORB_328.C004.LIC_328504.op', u: '%', dec: 1 },
       { k: 'ffic401', t: 'ind', x: 964, y: 218, tag: 'FFIC-329401', bind: 'DESORB_328.C004.FFIC_329401.pv', mode: 'DESORB_328.C004.FFIC_329401.mode', u: 'T/M3', dec: 3, note: 'LP steam-to-feed ratio, t/h per m3/h; feed leg is the volumetric FIC-328402. On CAS: FIC-329401 SP = FIC-328402 * ratio, FV-329401 strokes to hold it' },
-      { k: 'fic8401', t: 'ind', x: 1184, y: 296, tag: 'FIC-329401', bind: 'DESORB_328.C004.FIC_329401.pv', mode: 'DESORB_328.C004.FIC_329401.mode', u: 'KG/H', dec: 1, cas: true, note: 'slave: CAS follows FFIC-329401 ratio on the FIC-328402 feed; LP steam via FV-328401' },
-      { k: 'fv8401', t: 'avalve', x: 1014, y: 324, tag: 'FV-328401', bind: 'DESORB_328.C004.FIC_329401.op', u: '%', dec: 1 },
+      { k: 'fic8401', t: 'ind', x: 1184, y: 296, tag: 'FIC-329401', bind: 'DESORB_328.C004.FIC_329401.pv', mode: 'DESORB_328.C004.FIC_329401.mode', u: 'KG/H', dec: 1, cas: true, note: 'slave: CAS follows FFIC-329401 ratio on the FIC-328402 feed; LP steam via FV-329401' },
+      { k: 'fv8401', t: 'avalve', x: 1014, y: 324, tag: 'FV-329401', bind: 'DESORB_328.C004.FIC_329401.op', u: '%', dec: 1 },
       // ---- 328D001 reflux drum : D001 block, TIC-328008 / FIC-328404 / PIC-328202 ----
       { k: 'tic8008', t: 'ind', x: 693, y: 50,  tag: 'TIC-328008', bind: 'DESORB_328.D001.TIC_328008.pv', mode: 'DESORB_328.D001.TIC_328008.mode', u: '%', dec: 1, note: '328C002 offgas H2O -> 328E004 (mol%, PFD 737 = 46.2)' },
       { k: 'fic8404', t: 'ind', x: 570, y: 78,  tag: 'FIC-328404', bind: 'DESORB_328.D001.FIC_328404.vol_m3h', mode: 'DESORB_328.D001.FIC_328404.mode', u: 'M3/H', dec: 2, note: '328D001 carbamate reflux to 328C002, PFD stream 775, via FV-328404' },
@@ -331,7 +331,7 @@
       // ---- 323 recycle : LPCC_3232.E003.FIC_328402 cross-ref ----
       // FIC-328402 binds .pv (NOT .vol_m3h): the loop is now volumetric, so pv/sp are already
       // m3/h and the faceplate must be backend-authoritative for the operator to enter SP in m3/h.
-      { k: 'fic8402', t: 'ind', x: 727, y: 627, tag: 'FIC-328402', bind: 'LPCC_3232.E003.FIC_328402.pv', mode: 'LPCC_3232.E003.FIC_328402.mode', u: 'M3/H', dec: 2, note: '328C002 Comp-II wash to 323E003, PFD stream 735 (31.4 m3/h des), via FV-328402' },
+      { k: 'fic8402', t: 'ind', x: 727, y: 627, tag: 'FIC-328402', bind: 'LPCC_3232.E003.FIC_328402.pv', mode: 'LPCC_3232.E003.FIC_328402.mode', u: 'M3/H', dec: 2, note: '328C002 Comp-II wash to 323E003, PFD stream 744 (31478 kg/h = 31.4 m3/h des), via FV-328402' },
       { k: 'fv8402', t: 'avalve', x: 612, y: 632, tag: 'FV-328402', bind: 'LPCC_3232.E003.FIC_328402.op', u: '%', dec: 1 },
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
       { k: 'tt8008', t: 'ind', x: 1009, y: 61,  tag: 'TT-328008', bind: 'DESORB_328.D001.TT_328008', u: 'C', dec: 1 },   // Desorber-I top / E007 cold-out (114C, absolute; TIC-328008 PV now H2O inferential)
