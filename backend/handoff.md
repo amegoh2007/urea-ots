@@ -1,6 +1,62 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-20 (session 14) · branch `master` · PFD-ruled re-derivation of the 323-2 / 328-1 recirculation network: FIC-328405 rebound to stream 793, FIC-323402 pinned to PFD 791 = 1534 kg/h, 718 anchored on PFD 7123 (session 14, logged below)_
+_Last updated: 2026-07-20 (session 14b) · branch `master` · overlay-only tranche: TT-328006 placed live on 328-1, HIC/HV-329606 placed as white frames on 324-1B (session 14b, logged below)_
+
+## Session 14b (2026-07-20) — missing-tag placement: TT-328006 (328-1) · HIC/HV-329606 (324-1B)
+
+**The Goal.** Two tags the user found absent from the HMI, placed from tagged screenshots.
+Frontend-only tranche — `frontend/overlays.js` is **not** in `_PIN_SRC_FILES`, so no backend
+constant moved and no pin re-gate was required or run.
+
+**TT-328006 — 328-1, live.** Process-condensate discharge of 328E007 / 328P007, PFD stream 740.
+The telemetry already existed and was simply not surfaced: `main.py:4507` publishes
+`DESORB_328.C004.TT_328006 = round(R328_E007_TH_OUT, 1)` = 89 °C (328E007 hot-side outlet).
+Added to the `screen-328-1` block as a live-bound indicator at stage (821, 565) — same stream
+740 as `ai8701` (AI-328701 conductivity) directly below it, and between the 328E007 outlet and
+the `p007w` 328P007 frame at (959, 596). Bind is live; nothing new was modelled.
+
+**HIC-329606 / HV-329606 — 324-1B, white frames (UNMODELLED — flagged, not silently faked).**
+Hand station on the 4 bar LP-steam tap off the STLS header that drives the vacuum-train ejectors.
+Per the PFD the line downstream of HV-329606 splits into
+
+| stream | kg/h | m³/h | °C | bar a | ρ (kg/m³) | kmol/h | to |
+|---|---|---|---|---|---|---|---|
+| 927 | 1220 | 553.3 | 146 | 4.1 | 2.2 | 67.72 | 324F004 |
+| 929 |  180 |  81.6 | 146 | 4.1 | 2.2 |  9.99 | 324F005 |
+| **total** | **1400** | 634.9 | 146 | 4.1 | 2.2 | 77.71 | — |
+
+Deliberately left unbound, for two independent reasons:
+
+1. **No motive-steam physics exists.** `main.py:4083-4090` models 324F002/F004 and vent 324F005
+   as pure boundary sinks — `m_324_cond = v1_m + v2_m`, `m_324_vent = fa202_m + fa203_m` — and the
+   ejector pull is the constant `R324_F003_EJPULL_DES = R324_V2_DES + R324_F003_FA_DES`
+   (`main.py:1051`). There is nothing for a stroke to act on. A grep for `329606` across the
+   backend `*.py` returns **zero** hits.
+2. **A live draw would double-count a pin key.** The 1400 kg/h is already inside the lumped
+   4 bar user load `M_USERS_LP = M_HPCC_DES = 29.774299169939894 kg/s` (`main.py:5513`), which
+   feeds `dP_LP = (m_hpcc_gen + m_ld9 + m_water + m_963 + m_turbine - M_USERS_LP - m_vent)/C_LP`
+   (`steam_system.py:370`) **and is a golden-pin key**. Adding an explicit 1400 kg/h sink without
+   removing it from the lump would both break the LP header balance and break bit-exactness.
+
+So they follow the existing no-bind convention on that very page (`hic5602w` / `hv5602w`,
+HIC/HV-335602), placed at stage (686, 126) and (692, 172) on the STLS→ejector steam line.
+
+**To make them live later** (out of scope here, Scope Lock): subtract 1400 kg/h from the
+`M_USERS_LP` lump, add `m_927 = 1220·op/100` and `m_929 = 180·op/100` as explicit LP sinks, and
+scale the ejector pull `R324_F003_EJPULL_DES · op/100` so a throttled stroke degrades the 324F003
+vacuum through the existing `s.r324_f003_P` integrator. Design stroke = 100 % keeps the pin
+bit-exact. That touches `main.py` + `steam_system.py`, i.e. two pin source files, and mandates a
+full re-gate and a `golden_pin.json` regeneration decision.
+
+**Gates.** `node --check frontend/overlays.js` → clean. No pin gate run — no pin source file
+touched (`_PIN_SRC_FILES = ("main.py", "steam_system.py", "reactor.py", "controllers.py")`).
+
+**Active files.** `frontend/overlays.js` (only file changed), `backend/handoff.md`.
+
+**Next steps.** Verify the three frames land correctly against the screenshots on the running HMI
+and drag-nudge if needed (positions persist per `sid|k`); decide whether to build the ejector
+motive-steam model above; sprint items 7 / 22 / 25 still await user definitions; item 3a (#17)
+still blocked on a 328D003 level controller.
 
 ## Session 14 (2026-07-20) — user ruling: strict PFD stream values for FIC-328405 / FIC-323402
 

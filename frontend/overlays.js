@@ -342,6 +342,7 @@
       { k: 'tt8005', t: 'ind', x: 597,  y: 517, tag: 'TT-328005', bind: 'DESORB_328.C004.TT_328005', u: 'C', dec: 1 },   // 328C004 bottoms -> 328E007 143C (stream 739)
       { k: 'tt8007', t: 'ind', x: 492,  y: 587, tag: 'TT-328007', bind: 'DESORB_328.C002.TT_328007', u: 'C', dec: 1 },   // 328C002 bottoms -> 328P006 suction 139C (stream 743)
       { k: 'lt8507w', t: 'ind', x: 1294, y: 380, tag: 'LT-328507' },
+      { k: 'tt8006', t: 'ind', x: 821,  y: 565, tag: 'TT-328006', bind: 'DESORB_328.C004.TT_328006', u: 'C', dec: 1 },   // 328E007 cold-out / 328P007 discharge process condensate 89C (stream 740)
       { k: 'ai8701', t: 'ind', x: 838,  y: 632, tag: 'AI-328701', bind: 'DESORB_328.C004.AI_328701', u: 'uS/cm', dec: 2 },   // process-condensate conductivity soft sensor (stream 740, NH3/urea/CO2 trace -> Kohlrausch)
       { k: 'p006w',   t: 'ind', x: 421,  y: 632, tag: '328P006'   },
       { k: 'p007w',   t: 'ind', x: 959,  y: 596, tag: '328P007'   },
@@ -430,6 +431,15 @@
       { k: 'ovr5602',  t: 'ovrd', x: 940, y: 462, tag: 'EXT-OVR HV-335602' },
       // ---- WHITE FRAMES : downstream 335 finishing / analyzer / hand valves / pumps (unmodelled) ----
       { k: 'ay4701',  t: 'ind', x: 375,  y: 240, tag: 'AY-324701', bind: 'EVAP_324.E003.AY_324701', u: 'wt%', dec: 1, note: '324F003 product concentration soft-sensor (VLE inversion of PT-324203 / TIC-324002)' },
+      // HIC/HV-329606 : hand station on the 4 bar LP-steam tap off the STLS header that
+      // feeds the vacuum-train ejectors.  Downstream of HV-329606 the line splits into
+      // PFD stream 927 (1220 kg/h -> 324F004) and stream 929 (180 kg/h -> 324F005),
+      // both 146 C / 4.1 bar a / rho 2.2 -- 1400 kg/h total.  UNMODELLED: 324F002/F004/F005
+      // are boundary sinks in main.py (no motive-steam physics), and the 1400 kg/h draw is
+      // already inside the lumped LP user load M_USERS_LP, so a live bind would double-count
+      // a golden-pin key.  White frames until the ejector motive model is built.
+      { k: 'hic9606w', t: 'ind', x: 686,  y: 126, tag: 'HIC-329606' },
+      { k: 'hv9606w',  t: 'ind', x: 692,  y: 172, tag: 'HV-329606'  },
       { k: 'fic5401w', t: 'ind', x: 907,  y: 322, tag: 'FIC-335401'  },
       { k: 'hic5602w', t: 'ind', x: 980,  y: 369, tag: 'HIC-335602'  },
       { k: 'hv5602w',  t: 'ind', x: 975,  y: 436, tag: 'HV-335602'   },
