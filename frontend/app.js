@@ -490,8 +490,17 @@ function render322(s){
     const st=load(), o=parseFloat(op.value), p=parseFloat(sp.value);
     st[cur.tag]={ mode, op:isNaN(o)?null:o, sp:isNaN(p)?null:p };
     save(st);
-    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set', 'PIC-329204':'pic329204_set', 'PIC-329205':'pic329205_set', 'PIC-329207':'pic329207_set', 'HIC-329601':'steam_hpvent_set', 'LIC-329502':'lic329502_set', 'LIC-329503':'lic329503_set', 'LIC-329504':'lic329504_set', 'TIC-323007':'r323_ctrl_set', 'PIC-329202':'r323_ctrl_set', 'LIC-323501':'r323_ctrl_set', 'LIC-323505':'r323_ctrl_set', 'TIC-323012':'r323_ctrl_set', 'PIC-329208':'r323_ctrl_set', 'LIC-323507':'r323_ctrl_set', 'FIC-324401':'r323_ctrl_set', 'TIC-323013':'r323_ctrl_set' };     // modelled loops -> real backend handler; unmodelled tags stay controller_set (no-op until modelled)
-    const msg={type:T[cur.tag]||'controller_set', id:cur.tag, mode};
+    const T={ 'LIC-322501':'lic_set', 'HIC-322605':'hic605_set', 'HIC-322604':'hic604_set', 'FIC-329409':'fic_set', 'TIC-329005':'tic_set', 'PIC-329204':'pic329204_set', 'PIC-329205':'pic329205_set', 'PIC-329207':'pic329207_set', 'HIC-329601':'steam_hpvent_set', 'LIC-329502':'lic329502_set', 'LIC-329503':'lic329503_set', 'LIC-329504':'lic329504_set' };     // loops with a bespoke backend handler
+    // Inline I-PD faceplates served by the generic `r323_ctrl_set` handler.  MUST mirror
+    // main.py's R323_CTRL_MODES whitelist: a tag missing here falls through to
+    // `controller_set`, whose getattr(state, 'FIC-323401') misses and SILENTLY no-ops, so the
+    // faceplate looks alive but every mode/SP/OP write is discarded.  The backend re-checks the
+    // whitelist (and the per-loop legal mode tuple), so an extra tag here is inert, not unsafe.
+    const R323=new Set(['TIC-323007','PIC-329202','LIC-323501','LIC-323505','TIC-323012','PIC-329208','LIC-323507','FIC-324401','TIC-323013',
+                        'PIC-323202','PIC-323203','LIC-323502','SIC-323901','SIC-323902','LIC-323503','FIC-323401','FIC-323402','FIC-328405','FIC-323418',
+                        'LIC-328501','PIC-328202','TIC-328002','FIC-328404','FIC-326402','PIC-328203','FFIC-328401','FIC-328401','TIC-328008','TIC-328012',
+                        'LIC-328503','LIC-328504','LIC-328505','FIC-328402','FIC-328406','PIC-322201','LIC-322502']);
+    const msg={type:T[cur.tag] || (R323.has(cur.tag) ? 'r323_ctrl_set' : 'controller_set'), id:cur.tag, mode};
     if(mode==='MAN'  && !isNaN(o)) msg.op=o;
     if(mode==='AUTO' && !isNaN(p)) msg.sp=p;
     send(msg);
