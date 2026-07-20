@@ -1,6 +1,75 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-20 (session 13) · branch `master` · HEAD `e6ff4c9` (pushed, level with `origin/master`) · 718A/718B bang-bang limit cycle CLOSED + repo recovery + 328E021 hot side made live (session 13, logged below)_
+_Last updated: 2026-07-20 (session 13) · branch `master` · HEAD `0d3289f` (pushed, level with `origin/master`) · 718A/718B bang-bang limit cycle CLOSED + repo recovery + 328E021 hot side made live + sprint items 16/23/24 CLOSED and 27 dead faceplates rewired (session 13, logged below)_
+
+## Session 13c (2026-07-20) — HMI tranche: sprint items 16 / 23 / 24 closed · HEAD `0d3289f` (pushed)
+
+**No engine edit.** Both commits touch `frontend/` only, so `_PIN_SRC_FILES` did not rehash — the gate was
+still re-run after each: **`leaves: 25  keys: 15  diffs: 0`**.
+
+**Where the sprint list actually lives.** The 25-item PFD gap list is *inside this file* (session-9 block,
+L697+), not a separate doc. Domain split at L704–707. Items **1, 23, 24** carry full surviving text at
+L779–807; tranche map at L1096–1107.
+
+**Item 24 — VERIFIED ALREADY LANDED (`af5fd2c`), not re-done.** Both halves present in `main.py`:
+binding half `s.cpl_flow_kgh` (init L2736) → telemetry `cpl_kgh` (L4526) → handler `cpl_set` (L4994,
+clamped `0 … 2·A328_CPL_DES`); anchor half `A328_CPL_DES = 1750.0`, `A328_CPL_T = 46.0` (L644) with the
+900 kg/h conflict resolved in favour of 1750. Corroborated by the pin itself:
+$$ A328\_ABS\_DES = A328\_M756\_DES - A328\_M755\_DES - A328\_CPL\_DES = 130 $$
+matching the pinned `A328_GCB_DES − A328_VENT_DES = 130`.
+
+**Item 23 — VERIFIED ALREADY LANDED (resolution R2), not re-done.** `main.py:4033–4054`: LV-324501**A**
+is the dead leg (`lva_stroke = 0.0`), LV-324501**B** carries the melt
+(`lvb_stroke = clamp(lic501_op, 0, 100)`, `m_fwd = lvb_stroke/100 · R324_LVB_SPAN`), and the underflow is
+re-pointed onto the *active* valve (`m_uf = uf_ratio · m_fwd`). Telemetry `LV_324501A` / `LV_324501B` /
+`melt_fwd_th` all emitted.
+
+**Item 16 (Tranche A3) — CLOSED. `5b77e91`, `frontend/overlays.js`, +3/−3.** The session-12 volumetric
+migration left three loops rendering m³/h under a `T/H` label. Proof (`scratchpad/volfp.py`, 20 000-tick
+settle): `FIC_323401 pv 0.83 == vol_m3h 0.83` (`m_kgh 823.0`), `FIC_323418 pv 3.34 == vol_m3h 3.34`
+(`m_kgh 3560.4`), `FIC_328405 pv 3.34 == vol_m3h 3.34` (`m_kgh 3560.3`). Fix = `u: 'T/H' → 'M3/H'` plus
+corrected notes (FIC-323418's stale "64.2 t/h" text killed).
+**Deliberate: the `bind` stayed on `.pv`, NOT re-pointed to `.vol_m3h`.** `app.js:472` derives a loop's
+authoritative `{pv,sp,op,mode}` block *only* when the bind ends in `.pv`
+(`gp(window.OTS_LAST||{}, o.bind.slice(0,-3))`); re-pointing would have silently demoted those three
+faceplates to the localStorage fallback store. Change the label, never the bind.
+
+**Systemic HMI defect found in passing — FIXED. `0d3289f`, `frontend/app.js` + new tracked test, +81/−2.**
+27 of the 36 loops in `main.py`'s `R323_CTRL_MODES` whitelist (L4842–4873) were **unreachable from the
+faceplate**: `app.js` only routed 9 bespoke tags via its `T` map and dumped everything else on
+`controller_set` (`main.py:4967`), whose `getattr(s, "FIC-323401")` misses on the dash tag and **silently
+discards every mode/SP/OP write** — faceplate looked alive, plant never moved. Fix makes the frontend a
+router mirroring the backend whitelist (`const R323 = new Set([...36 tags...])` → `r323_ctrl_set`); the
+backend stays sole authority (it re-checks the whitelist *and* the per-loop legal mode tuple), so an
+over-broad frontend set is inert, never unsafe.
+
+**Acceptance — `scratchpad/fpwire.py` (new, tracked), FAILURES 0.** Parses the `T` map and `R323` set
+straight out of `app.js` and drives `main.handle_cmd()` as the websocket would:
+```
+gate 1 - routing   : 36 whitelisted, 36 routed, 0 unreachable  OK
+gate 2 - liveness  : 36/36 loops take a MAN op write via r323_ctrl_set  OK
+           control : the OLD controller_set path is a no-op for these tags (op stayed 50.0)  OK
+gate 3 - guard     : MAN-only spares ['SIC-323902', 'FIC-328406'] reject AUTO  OK
+
+FAILURES 0
+```
+
+**Failed attempts (session 13c):** `fpwire.py` gate 2 first reported `34/36 FAIL ['TIC-323007',
+'TIC-323012']` — probe bug, not engine bug: both loops command a chest **pressure**
+(`op_hi = R323_P_STEAM_SUP` < 12), so the hard-coded op target 12.0 clamped. Fixed by aiming
+`lo + 0.25·(hi − lo)` inside each loop's own span. Also searched `docs/urea-project-conversation.md` for
+sprint items 7/8/9/22/25 — only the OLD unit-321 numbering is there (item 7 = pump discharge ΔT, item 8 =
+AUTO SP as RPM, item 9 = 321D003 mass balance), a different scheme. Do not re-grep.
+
+**Active files (session 13c):** `frontend/overlays.js`, `frontend/app.js`, `backend/handoff.md` (this
+block). New tracked test `scratchpad/fpwire.py`; new untracked probe `scratchpad/volfp.py`.
+
+**Next steps (session 13c) — the backend batch is now out of actionable items:**
+- Items **7, 8, 9, 22, 25 BLOCKED — no surviving definition** anywhere in the repo, and the harness task
+  list is empty. The user must supply the item text (or point at the source doc) before any of them opens.
+- Item **3a (#17) still BLOCKED** — needs a 328D003 level controller cascading into FIC-328402; the
+  `avail`/derate escape hatch is empirically disproven, do not re-attempt.
+- Items **16, 19, 21, 23, 24 CLOSED.** Remaining openable-with-text: 1, 2, 3b–3d, 5, 6, 10–15, 17, 18, 20.
 
 ## Session 13 (2026-07-20) — limit-cycle closure reconciled + repo recovery · HEAD `f48dd27` (pushed)
 
