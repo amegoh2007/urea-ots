@@ -1,6 +1,60 @@
 # Handoff — Urea OTS synthesis-loop calibration
 
-_Last updated: 2026-07-19 (session 12) · branch `master` · HEAD `f59c313` (pushed) · session 11 items + volumetric migration FIC-323401/405/418 + steam FT-329403/407 telemetry (session 12, logged below)_
+_Last updated: 2026-07-20 (session 13) · branch `master` · HEAD `f48dd27` (pushed, level with `origin/master`) · 718A/718B bang-bang limit cycle CLOSED + repo recovery (session 13, logged below)_
+
+## Session 13 (2026-07-20) — limit-cycle closure reconciled + repo recovery · HEAD `f48dd27` (pushed)
+
+**No engine edit this session.** Session 12's handoff was stale by one substantive commit; this block
+reconciles it and re-verifies HEAD from a clean boot.
+
+**Reconciliation — `f48dd27` closes the session-12 Scope-Lock item:**
+`fix(R3232): kill FIC-328405/FIC-323418 718A/718B bang-bang limit cycle` (`backend/main.py`, +30/−3).
+Two changes, both inside the 718 demand split:
+1. **Feed-forward from DEMAND, not live PV.** In AUTO/CAS the coordinator now takes
+   `m718B_ff = s.FIC_323418["sp"] * RHO_718_KGM3` (MAN falls back to live `m_718B`, which is op-fixed
+   and non-oscillating), so `cas718A_raw = max(m718_dmd − m718B_ff, 0)` no longer closes a loop through
+   718B's own lagged measurement.
+2. **Measurement filter `tau_s` 5 → 45 s on both legs** (`F_323418`, `F_328405`). `Kc`/`Ti` byte-identical.
+   Stability law: 2-tick growth factor is `Kc·a·g`, `a = dt/(tau_s+dt)`, `g = (design/op_des)/ρ = 0.0669`.
+   Design tune at `tau_s=5 s`: `426·(1/6)·0.0669 = 4.75 ≫ 1` → bang-bang. At `tau_s=45 s`,
+   `a: 0.167 → 0.0217` → `Kc·a·g = 0.62 < 1` → flat. Filter DC gain is 1, so the steady-state 718 split
+   is invariant in `tau_s` — fixed point (and therefore the pin) untouched. 45 s is still 28× faster than
+   the 1257 s level loop, so the cascade reference needs no extra filter — 718A tracks true level demand.
+
+**Fresh verification at HEAD `f48dd27` (clean boot, both green):**
+- Pin gate (two-step `regress.py` → `pindiff.py`): **`leaves: 25  keys: 15  diffs: 0`**.
+- `scratchpad/ff718.py`: ticks 50–59 all `718A_pv 3.3431 / 718B_pv 3.3431 m³/h` = `3560.36 kg/h` each,
+  sum `7120.73 kg/h` (design 718 split, conservation intact).
+  `max |dPV_718A| over ticks 41-59 (limit-cycle amplitude): 0.000000 m3/h` → **BANG-BANG DEAD**.
+
+**Operational lesson — `.git/config` NUL-byte corruption.** Every git command failed with
+`fatal: bad config line 18 in file .git/config`; line 18 held ~430 `\x00` bytes (filesystem/crash
+corruption, NOT whitespace — a `l.strip()==''` filter does not remove it). Fix: rewrite `.git/config`
+from scratch with the known-good `[core]/[user]/[remote "origin"]/[branch "master"]` content, then
+`git fetch` to confirm. `config.bak` was equally corrupt and was deleted. Repo healthy after: `master`
+level with `origin/master`, working tree clean apart from the ~40 known untracked paths (must stay
+untracked — **stage selectively by path, never `git add -A`**).
+
+**Active files (session 13):** `backend/handoff.md` (this block), `.git/config` (repaired).
+`backend/main.py` untouched. Acceptance tests re-run, not modified:
+`scratchpad/regress.py`, `scratchpad/pindiff.py`, `scratchpad/golden_pin.json`, `scratchpad/ff718.py`.
+
+**Failed attempts (session 13):** repairing `.git/config` by filtering blank lines
+(`[l for l in lines if l.strip()]`) — no-op, because `\x00` is not whitespace. Full rewrite required.
+
+**Next steps (unchanged from session 12 except the closure above):**
+- Backend tranche batch, each rehashing the pin ⇒ re-gate to `25/15/0` before commit:
+  items **3a, 7, 8, 9, 17, 18, 22, 23, 24 (binding half only), 25**. Item 16 (Tranche A3, m³/h
+  migration) done in session 12.
+- Before items 19/21: grep the `main.py` 324 section for `PY_324201` / `AY_324701` — the frontend
+  already binds them as VLE-inversion soft-sensors, so the BPE routine may already exist.
+- Item 3a (#17) **blocked**: needs a 328D003 level controller cascading into FIC-328402. The
+  `avail`/derate escape hatch is empirically disproven — do not re-attempt.
+- **OPEN:** OEM stream 793 for FIC-328405 is "Amm. Water" (ρ 992.4, mass 0 @100 % load), conflicting
+  with the loop's carbamate-718A physics (ρ 1065, 3560.4 kg/h). Re-anchor deferred pending explicit
+  direction (would disturb the 323D011 mass balance).
+- **FLAG (`1eb48ca`):** FIC-323402 leg `R3232_E011_M402_DES = 2931 kg/h` ≈ 1.9× PFD stream-791
+  (1534 kg/h). Reconciliation deferred — pin-breaking.
 
 ## Session 12 (2026-07-19) — volumetric migration + steam FT telemetry · HEAD `f59c313` (pushed)
 
@@ -15,7 +69,8 @@ _Last updated: 2026-07-19 (session 12) · branch `master` · HEAD `f59c313` (pus
 - **Pin gate: keys 15 / leaves 25 / diffs 0** — core HMB untouched.
 - Settle verified: 323401 0.83 m³/h/823 kg/h · 323418 3.34 m³/h/3560.4 kg/h · FT 60.85 / 16.71 t/h.
 
-**KNOWN / OUT-OF-SCOPE (Scope-Lock — NOT silently fixed):** FIC-328405 (was FIC-323405, renamed —
+**KNOWN / OUT-OF-SCOPE at the time (Scope-Lock — NOT silently fixed) — since CLOSED by `f48dd27`,
+see session 13 above:** FIC-328405 (was FIC-323405, renamed —
 see below) CAS loop 2-tick bang-bang limit cycle. Proven **pre-existing at HEAD**: HEAD mass loop
 cycles pv 3390.82↔3729.90 kg/h; migrated cycles 3.1839↔3.5023 m³/h (== HEAD/ρ exactly) → migration is
 a faithful rescale, did not introduce it. Root cause: 718A/718B shared-demand split
