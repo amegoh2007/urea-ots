@@ -721,7 +721,8 @@ R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C0
                      + R328_C004_M931_DES/3600.0*R328_C004_M931_DH)
                     / (R328_C004_M750_DES/3600.0))                        # kJ/kg (~2130)
 # FFIC-329401 master ratio is defined further down, after R3232_E003_M744_DES: its feed
-# measurement is the FIC-328402 wash leg (PFD stream 744 into 323E003), not a 328C002 term,
+# measurement is the FIC-328402 wash leg (PFD stream 744, 323E003 -> 328D003 Comp-II), not a
+# 328C002 term,
 # so the denominator must exist first.  See the RHO_744_KGM3 block.
 
 # ==========================================================================
@@ -2922,7 +2923,8 @@ class State:
                            "pv1": R328_C003_P_BARA, "pv2": R328_C003_P_BARA,
                            "Kc": 4.0, "Ti": 60.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 12.0, "sp_hi": 20.0}
-        # FFIC-329401 328C004 desorber-II steam/feed RATIO master (m931/m744, FIC-328402 leg).
+        # FFIC-329401 328C004 desorber-II steam/feed RATIO master, T/M3: m931 in t/h over the
+        # FIC-328402 leg (m744) in m3/h.  On CAS the FIC-329401 SP is FIC-328402 * this ratio.
         self.FFIC_329401 = {"mode": "AUTO", "op": R328_C004_M931_DES,
                             "sp": R328_FFIC_RATIO_DES, "pv": R328_FFIC_RATIO_DES,
                             "pv1": R328_FFIC_RATIO_DES, "pv2": R328_FFIC_RATIO_DES,

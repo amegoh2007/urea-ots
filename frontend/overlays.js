@@ -331,7 +331,7 @@
       // ---- 323 recycle : LPCC_3232.E003.FIC_328402 cross-ref ----
       // FIC-328402 binds .pv (NOT .vol_m3h): the loop is now volumetric, so pv/sp are already
       // m3/h and the faceplate must be backend-authoritative for the operator to enter SP in m3/h.
-      { k: 'fic8402', t: 'ind', x: 727, y: 627, tag: 'FIC-328402', bind: 'LPCC_3232.E003.FIC_328402.pv', mode: 'LPCC_3232.E003.FIC_328402.mode', u: 'M3/H', dec: 2, note: '328C002 Comp-II wash to 323E003, PFD stream 744 (31478 kg/h = 31.4 m3/h des), via FV-328402' },
+      { k: 'fic8402', t: 'ind', x: 727, y: 627, tag: 'FIC-328402', bind: 'LPCC_3232.E003.FIC_328402.pv', mode: 'LPCC_3232.E003.FIC_328402.mode', u: 'M3/H', dec: 2, note: 'Comp-II wash draw off 323E003 to 328D003 compartment II, PFD stream 744 (31478 kg/h = 31.4 m3/h des), via FV-328402' },
       { k: 'fv8402', t: 'avalve', x: 612, y: 632, tag: 'FV-328402', bind: 'LPCC_3232.E003.FIC_328402.op', u: '%', dec: 1 },
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
       { k: 'tt8008', t: 'ind', x: 1009, y: 61,  tag: 'TT-328008', bind: 'DESORB_328.D001.TT_328008', u: 'C', dec: 1 },   // Desorber-I top / E007 cold-out (114C, absolute; TIC-328008 PV now H2O inferential)

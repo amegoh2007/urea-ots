@@ -2,113 +2,129 @@
 
 ## The goal we're working toward
 Calibrate the `backend/main.py` state-space process engine against real DCS startup trend data
-without violating mass/energy conservation. Immediate front: close the FFIC-329401 desorber-II
-steam/feed ratio basis, and finish registering HMI overlay frames onto their baked DCS boxes.
+without violating mass/energy conservation, and keep the HMI overlay registered on the baked DCS
+screenshots. The 328/329 loop-tag rename and the FFIC-329401 ratio basis are now closed; the open
+front is the un-run pin gate and three faceplates with a unit defect (TD-002).
 
 ## Current state of the code
-* HEAD is `37504eb` on `master`. **Not pushed** — origin still at `b881480`.
-* `37504eb` carries: 12 overlay frame nudges on 328-1 / 324-1b, the pending 329xxx rename
-  (FIC-326402 -> FIC-329402, FFIC/FIC-328401 -> FFIC/FIC-329401), the FFIC ratio rebase onto
-  stream 744, the FIC-328402 volumetric (m3/h) conversion, the CLAUDE.md rewrite, and the
-  handoff.md move from `backend/` to the repo root.
-* Rename verified coherent: overlay binds, telemetry keys, State attrs and `R323_CTRL_MODES`
-  all carry the new names, zero stale references in `backend/main.py` or `frontend/`.
-* **The pin gate has NOT been run against `37504eb`.** See blocker below.
-* `launch.bat` has an unrelated uncommitted change (adds `pip install -r requirements.txt`).
-  Left unstaged. `backend/requirements.txt` exists and the path resolves.
+* HEAD `76b97b7` on `master`, **pushed** — `origin/master` is level at `76b97b7`.
+* Commits this session, oldest first:
+  * `37504eb` — 12 overlay frames registered on 328-1 / 324-1b; carried the pending 329xxx rename,
+    the FIC-328402 volumetric conversion, the CLAUDE.md rewrite and the handoff.md move to root.
+  * `fc82a78` — handoff notes.
+  * `26d35de` — FFIC-329401 ratio put on its T/M3 basis; `FV-326402` -> `FV-329402`.
+  * `76b97b7` — screens 321-1 and 323-1 registered (46 overlays); `RHO_735_KGM3` -> `RHO_744_KGM3`,
+    `S735_VOL_DES` -> `S744_VOL_DES`; `FV-328401` -> `FV-329401`.
+* `launch.bat` carries an unrelated uncommitted change (adds `pip install -r requirements.txt`).
+  Left unstaged deliberately. `backend/requirements.txt` exists and the path resolves.
 
 ## HARD BLOCKER — no interpreter on this machine
-There is no Python and no Node installed. `backend/main.py`, the pytest suite, and
-`scratchpad/regress.py` + `scratchpad/pindiff.py` **cannot be run here**. Every backend
-conclusion below is static analysis only. `scratchpad/pin_now.json` matches `golden_pin.json`
-exactly but predates the current `main.py` (pin 19:26, main.py 20:38), so it proves nothing
-about `37504eb`. Re-gate on a machine with Python before trusting the commit.
+No Python and no Node. `backend/main.py`, pytest, and `scratchpad/regress.py` +
+`scratchpad/pindiff.py` **cannot be run here**. Every backend conclusion this session is static
+analysis only. `scratchpad/pin_now.json` matches `golden_pin.json` but predates all of these
+commits, so it proves nothing about them.
 
-## Open decision — FFIC-329401 ratio basis (needs your ruling)
-The rebase moved the denominator from stream 738 to stream 744. PFD says **744 is not the
-desorber-II feed**: it is the 44 C / 1 bar Comp-II wash. The C004 feed is **stream 749**
-(34062 kg/h, 148 C, 16.6 bar) — `main.py`'s own comment says so at `R328_C004_M749_DES`.
+**Four commits are on origin and none of the `main.py` changes in them was ever executed.**
+`26d35de` and `76b97b7` both touch `main.py`. Re-gate before trusting any of it — this is the
+single most important next action.
 
-PFD 1750 MTPD, streams as read:
+## CLOSED this session
+* **FFIC-329401 ratio basis.** Ruled by the plant control narrative: on CAS, FIC-329401's SP is
+  `FIC-328402 * ratio` and FV-329401 strokes to hold it. The denominator is therefore the
+  FIC-328402 wash leg (stream 744) — the earlier rebase off stream 738 was correct. Because
+  FIC-328402 is a VOLUMETRIC (m3/h) loop, the ratio must be **T/M3**, which is exactly what the
+  baked 328-1 panel reads (`SP 0.169 T/M3 / MV 0.168 T/M3`). It had been coded as dimensionless
+  kg/kg. Now `R328_FFIC_RATIO_DES = (M931_DES/1000)/(M744_DES/RHO_744_KGM3) = 6.495/31.4 =
+  0.20685 T/M3`, with `ffic_pv` written in the SAME float operation order so the design point stays
+  bit-exact (`m744_prev`/`m931_prev` both default to design on tick 0 -> `pv == sp` -> `du == 0`).
+  * An earlier analysis in this file argued for stream 749. **That was wrong and has been removed.**
+    749 is the C004 feed, but the DCS ratio station measures the FIC-328402 leg, not the feed.
+* **CAS chain verified** by reading it end to end: `ffic_op` -> `_fic_flow(FIC_329401, cas_sp=ffic_op)`
+  -> `_ctrl_ipd` sets `c["sp"] = cas_sp` when `mode == "CAS"` -> `c["op"]`, which the FV-329401
+  avalve overlay binds. `FIC_328402`'s own `_fic_flow` call passes no `cas_sp`, so FFIC-329401 has
+  no authority over it.
+* **Constant naming.** `RHO_744_KGM3` / `S744_VOL_DES`. The FIC-328402 leg carries 31478 kg/h =
+  stream 744 (44 C, 1 bar, rho 1002), not 735 (31114 kg/h, 56 C, 4.1 bar, rho 992.4); both have a
+  PFD volume flow of 31.4 m3/h, which is what hid it. The back-solved 1002.48 matches the PFD's own
+  744 density to 0.05 %, so it was the right number under the wrong name. Genuine stream-735
+  references elsewhere (`m_735`, `R328_C002_M738_DES`, `RHO_401_KGM3 = 992.4`) are correct, untouched.
+* **Tag typos:** `FV-326402` -> `FV-329402`, `FV-328401` -> `FV-329401`. Zero `326402` or `FV-328401`
+  references remain in `backend/main.py` or `frontend/`.
+* **Overlay registration.** 58 overlays moved in total across four screens, all now within ~1 px of
+  their baked value-bar centre:
+  * 328-1 / 324-1b (12): `TT-328006` was on bare pipe with no box at all; `FIC-328402` was parked on
+    the FV-328402 valve symbol instead of its own flow box; a `dX ~ -25` cluster of eight was real
+    drift, not convention.
+  * 323-1 (29): uniform `dY ~ +21 px` on EVERY overlay — a whole-screen vertical registration error.
+  * 321-1 (17): progressive `dY`, -2.6 px at y=178 growing to -19.5 px at y=587 — a y-SCALE error of
+    about 4 %. Its header comment claims native 1287x612 while the PNG is 1355x644.
+  * Every match was eyeballed on a contact sheet before rewriting; each box's baked unit label agrees
+    with the overlay's declared unit. `LSL-321501` (a lamp) and `FT-322403` (a label) have no value
+    box and were correctly skipped.
 
-| stream | desc | kg/h | m3/h | rho | T | P |
-|---|---|---|---|---|---|---|
-| 735 | Amm. Water | 31114 | 31.4 | 992.4 | 56 | 4.1 |
-| 738 | Amm. Water | 31114 | 32.4 | 959.7 | 114 | 3.5 |
-| 744 | Amm. Water | 31478 | 31.4 | 1002 | 44 | 1 |
-| 749 | Amm. Water | 34062 | 36.9 | 924.1 | 148 | 16.6 |
-| 931 | LP Steam | 6495 | 3097.2 | 2.1 | 145 | 3.9 |
-
-The baked DCS panel on screen 328-1 reads `SP 0.169 T/M3 / MV 0.168 T/M3`. Candidate bases,
-as 931 in t/h over feed in m3/h:
-
-* **749 -> 6.495/36.9 = 0.176 T/M3** — 4 % off the baked snapshot (which is off-design)
-* 744 -> 0.2069 — 22 % off
-* 738 -> 0.2004 — 19 % off
-
-So the physical basis is almost certainly **931(t/h) / 749(m3/h), in T/M3**. The commit also
-regressed the overlay unit from `T/M3` to `KG/KG`, which now contradicts the baked `T/M3` text
-sitting uncovered beside the box.
-
-Fix is mechanically easy — `m_749` is already computed upstream of the ratio line (it feeds
-`T749_raw`) and does not depend on `m_931`, so there is no algebraic loop and no `_prev` lag is
-needed. It was NOT applied because it changes physics constants and cannot be pin-gated here.
-
-## Naming defect (physics is fine)
-`RHO_735_KGM3 = 31478 / 31.4 = 1002.48` reproduces the PFD **stream-744** density (1002) to
-0.05 %. It is not a fabricated constant. But it is 744's density, not 735's (992.4), and
-FIC-328402 carries 31478 kg/h — i.e. stream 744. Streams 735 and 744 both happen to be
-31.4 m3/h, which is what hid the mislabel. Rename to `RHO_744_KGM3` and fix the surrounding
-comments and the overlay note when the ratio work is done (same pin-gate cycle).
+## OPEN — logged in TECH_DEBT.md
+* **TD-002 (blocker-grade, pre-existing):** `FIC-323402`, `FIC-328404`, `FIC-328406` bind `.vol_m3h`.
+  `app.js:471` only takes the backend-authoritative branch when a bind ends in `.pv`, so these three
+  fall back to localStorage for SP/OP/mode. The faceplate shows m3/h but writes the typed number
+  straight into a kg/h controller, the "bumpless" MAN->AUTO handler injects the same unit error on a
+  plain mode click, and the displayed mode is fabricated (`FIC_328404` is seeded CAS and gets kicked
+  to AUTO; `FIC_328406` is pinned MAN and displays AUTO). `FIC-328402` had this exact defect and was
+  fixed by converting the loop to genuinely volumetric — repeat that pattern, but only on a machine
+  that can re-gate. Densities already exist: `S791_VOL_DES`, `S775_VOL_DES`, `A328_M755_RHO`.
+* **TD-003 (pre-existing tuning):** `FFIC-329401` `Kc = 0.8` gives a loop coefficient of
+  `1 - 5e-7`, i.e. the ratio master is effectively inert — moving the ratio SP will not move
+  FV-329401 on any useful timescale. Needs roughly 3e4 kg/h per T/M3, so `Kc` is four to five orders
+  low. NOT introduced by the T/M3 change (the old kg/kg basis had the same gain to within 0.25 %).
+  Design fixed point is unaffected, so the pin is safe; only operator SP moves expose it.
 
 ## Files actively edited
-* `frontend/overlays.js` (committed)
-* `handoff.md`, `CLAUDE.md` (committed)
-* `backend/main.py` (committed, UNGATED)
-* Verification tooling lives in the session scratchpad, not the repo: `boxlib.ps1`
-  (baked-DCS-box locator, .NET System.Drawing), `audit_overlay.ps1`, `crop.ps1`, `rowprof.ps1`,
-  `sheet.ps1`. Rebuild if needed — they are not tracked.
+`backend/main.py`, `frontend/overlays.js`, `handoff.md`, `TECH_DEBT.md`, `CLAUDE.md` — all committed.
+
+Verification tooling lives in the session scratchpad and is NOT tracked; rebuild if needed:
+`boxlib.ps1` (baked-DCS-box locator via .NET System.Drawing), `audit_overlay.ps1` (per-screen
+placement table), `sheet2.ps1` (contact sheet for eyeballing box identity), `apply_coords.ps1`
+(rewrites overlay x/y to measured bar centres), `crop.ps1`, `rowprof.ps1`.
 
 ## Everything tried that failed
-* Running anything Python: no interpreter. Not a PATH problem — no install exists.
-* `python`/`python3` on PATH resolve to the Microsoft Store alias stub, which exits non-zero.
-* Judging overlay placement from the whole black blob centroid: the baked DCS indicator is a
-  flag (wide value BAR + narrower TAB below), so the centroid sits ~5 px low. Isolate the BAR.
-* Isolating the bar by "longest contiguous run of rows at >=90 % of max width": the green value
-  text erodes row extent and truncates the run, landing on the box's top edge. Use first..last
-  row at >=60 % of max width instead — the tab is ~40 % of bar width, so 60 % separates cleanly.
-* Committing only `frontend/` to avoid the ungated `main.py`: impossible. The overlay binds and
-  the backend rename are one atomic change; a frontend-only commit leaves dead binds.
-* The audit workflow (52 agents): hit the session usage limit at 14/52 done. 38 refuters died,
-  so most raised findings were never adversarially checked. Re-run after reset if needed.
-* Making HIC/HV-329606 live: no motive-steam physics exists and a live draw would double-count
-  a golden-pin key (the 1400 kg/h is already inside lumped `M_USERS_LP`).
+* Running anything Python: no interpreter exists. `python`/`python3` on PATH resolve to the
+  Microsoft Store alias stub, which exits non-zero — and invoking it with a heredoc HANGS for the
+  full command timeout, so never pipe stdin into it.
+* Judging overlay placement from the whole black blob centroid: the baked DCS indicator is a flag
+  (wide value BAR plus a narrower TAB below), so the centroid sits about 5 px low. Isolate the BAR.
+* Isolating the bar as the "longest contiguous run of rows at >=90 % of max width": the green value
+  text erodes row extent and truncates the run, landing on the box's top edge. Use first..last row
+  at >=60 % of max width — the tab is about 40 % of bar width, so 60 % separates cleanly.
+* Rewriting `overlays.js` with PowerShell `Get-Content` / `Set-Content`: both default to the system
+  ANSI codepage here, which MOJIBAKED all 16 em dashes and prepended a BOM. Caught by the diff being
+  91 lines when only 46 were expected. Use `[System.IO.File]::ReadAllLines/WriteAllLines` with
+  `New-Object System.Text.UTF8Encoding $false`.
+* Naming a PowerShell loop variable `$e`-vs-`$r` carelessly: `$r` collides with a `-R` parameter
+  (PowerShell is case-insensitive) and throws a type-conversion error.
+* Committing only `frontend/` to dodge the ungated `main.py`: impossible, the overlay binds and the
+  backend rename are one atomic change; a frontend-only commit leaves dead binds.
+* Two audit workflows: the first hit the session limit at 14/52 agents, the second hit the WEEKLY
+  limit at 12/27 (resets Jul 22, 2am Africa/Cairo). In both, dead refuters returned a null verdict
+  which the script bucketed as "refuted", so its "0 survived" headline was an artifact — the 15
+  unjudged findings had to be triaged by hand. If re-running, count null verdicts separately.
+* Making HIC/HV-329606 live: no motive-steam physics exists and a live draw would double-count a
+  golden-pin key (the 1400 kg/h is already inside lumped `M_USERS_LP`).
 * Deriving `MV_DES` by subtraction and `PHIV` by division: breaks the PIC-323203 fixed point by
   round-off. `PHIV` must be defined first.
-* Judging the D011 balance from telemetry `m_kgh`: rounds to 1 dp, manufacturing a phantom
-  steady residual. Use dM/dt.
+* Judging the D011 balance from telemetry `m_kgh`: rounds to 1 dp, manufacturing a phantom steady
+  residual. Use dM/dt.
 * Short horizons (600/1200/1800 s) to demand Comp I "settle": Comp I's own tau is 16,098 s.
 * `ff718_perturb.py`: obsolete, kicks the wrong leg. Superseded by `dyn718r.py`.
 
 ## Next steps
-1. Get to a machine with Python. Run `scratchpad/regress.py` then `scratchpad/pindiff.py` against
-   `37504eb`. Expected `leaves: 25  keys: 15  diffs: 0`. Nothing else should be trusted first.
-2. Rule on the FFIC-329401 ratio basis above (749 in T/M3 is the evidenced answer). Apply with
-   the `RHO_744_KGM3` rename and the overlay unit restored to `T/M3` in one gated change.
-3. Push `master` to origin once gated.
-4. Unresolved overlay registration, measured but NOT fixed:
-   * `screen-323-1` — all 24 overlays share a uniform `dY ~ +21 px`. Whole-screen vertical
-     registration error, not per-element drift.
-   * `screen-321-1` — progressive `dY` from -2.6 at y=178 to -19.5 at y=587, i.e. a ~4 % y-scale
-     error; its header comment claims native 1287x612 but the PNG is 1355x644.
-   * Both may be masked in the live HMI by drag positions in localStorage `ots_ov_pos_v3`, which
-     override the seed coords. Confirm against the running HMI before editing the seed.
-   * `FFIC-329401` and `TIC-328012` sit on two-box SP/MV ratio panels; which row the live PV
-     should cover is a design decision, left alone.
-5. Unverified audit findings whose refuters died with the session limit: `overlays.js:313`
-   FV-326402 not renamed to FV-329402 (main.py agrees with the current spelling, so verify
-   against the P&ID before touching), and `Master_PID_Tuning_Constants.md:618` still naming the
-   loops by pre-rename tags.
+1. **Re-gate.** On a machine with Python: `scratchpad/regress.py` then `scratchpad/pindiff.py`.
+   Expected `leaves: 25  keys: 15  diffs: 0`. Four commits are already on origin unverified.
+2. Fix TD-002 (three volumetric faceplates) and TD-003 (FFIC-329401 gain), each with a re-gate.
+3. `Master_PID_Tuning_Constants.md` still names the loops by their pre-rename tags and the retired
+   ratio basis — refresh it.
+4. Confirm the 321-1 / 323-1 registration against the RUNNING HMI. Drag positions in localStorage
+   `ots_ov_pos_v3` override the seed coords, so a browser that has been drag-nudged before will not
+   show the corrected seeds until those keys are reset.
+5. `FFIC-329401` and `TIC-328012` sit on two-box SP/MV ratio panels; which row the live PV should
+   cover is a design decision, left alone.
 6. Decide whether to build the ejector motive-steam model.
-7. Still blocked on you: sprint items 7, 22, 25, and item 3a (#17) pending a 328D003 level
-   controller.
+7. Still blocked on you: sprint items 7, 22, 25, and item 3a (#17) pending a 328D003 level controller.
