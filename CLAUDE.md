@@ -34,12 +34,23 @@ Run these every session unless told otherwise.
 * **Caveman mode ON.** Invoke the `caveman` skill at session start and keep it active for all
   prose replies. Code, commit messages and PR text stay in normal English.
 * **Graphify.** The knowledge graph lives in `graphify-out/` (`GRAPH_REPORT.md`, `graph.json`,
-  `manifest.json`, `.graphify_root`, `.graphify_python`). Refresh it after code changes with
-  `graphify update .` from the repo root — no API cost. Check staleness by comparing
-  `GRAPH_REPORT.md`'s "Built from commit" against `git rev-parse HEAD`.
-  **Status: the `graphify` CLI is NOT installed on this machine** (not on PATH, not a pip module),
-  so the graph cannot currently be refreshed here. The existing build is from commit `411080c`.
-  Install the CLI before relying on it.
+  `manifest.json`, `.graphify_root`, `.graphify_python`). Refresh with `graphify update .` from the
+  repo root. Check staleness by comparing `GRAPH_REPORT.md`'s "Built from commit" against
+  `git rev-parse HEAD`. Existing build is from `411080c`; graph.json holds 6080 nodes / 6355 edges.
+  * The CLI IS installed (`graphifyy` 0.9.22, via pip into the 3.14.6 runtime below).
+    `graphify.exe` lives in `%LOCALAPPDATA%\Python\pythoncore-3.14-64\Scripts\` — NOT on PATH, so
+    call it by full path or go through `graphify-out\.graphify_python`.
+  * **`graphify update .` is NOT free on this repo and must not be run AST-only.** 58 doc/image
+    files need LLM semantic extraction with 0 cache hits, which requires either subagents or a
+    `GEMINI_API_KEY`/`GOOGLE_API_KEY`. Only code extraction (AST) is deterministic and free.
+  * **Do not merge an AST-only extraction.** One file, `docs/urea-project-conversation.md`,
+    supplies 4487 of the 6080 nodes (74 %). Merging without regenerating the semantic side lets
+    `build_merge`'s dedup collapse 4327 nodes and shrinks the graph to ~1858 — graphify's own
+    `to_json` shrink guard (#479) rejects the write, so the attempt just wastes a run. Refresh the
+    graph only when semantic extraction is actually available.
+  * If an update is aborted after `save_manifest`, DROP the stamped entries from
+    `graphify-out/manifest.json` for any file whose nodes never reached `graph.json`, or the next
+    `--update` will skip them as unchanged while the graph still holds their stale nodes.
 * **`/project-scaffolding`.** IDE-grade scaffolding wizard. NOTE: it is designed to create NEW
   projects (SDK selection, framework config, boilerplate). This repo is a mature codebase, so do
   NOT run it against the repo root — it risks overwriting working code. Use it only for a new

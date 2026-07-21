@@ -142,11 +142,21 @@ cd backend && %PY% -m pytest -q -p no:cacheprovider                             
 ## Standing session commands (see CLAUDE.md section 6)
 * **Caveman mode ON** — invoke the `caveman` skill at session start, keep it active for prose.
   Code, commit messages and PR text stay in normal English.
-* **Graphify** — knowledge graph in `graphify-out/`. Refresh with `graphify update .` from the repo
-  root (no API cost); check staleness by comparing `GRAPH_REPORT.md`'s "Built from commit" against
-  `git rev-parse HEAD`. **The `graphify` CLI is NOT installed here** — not on PATH, not a pip
-  module — so it cannot be refreshed on this machine. The existing build is from `411080c`
-  ("Add Unit 324 two-stage vacuum evaporation"), i.e. many commits stale.
+* **Graphify** — knowledge graph in `graphify-out/`, currently 6080 nodes / 6355 edges built from
+  `411080c`, i.e. many commits stale. The CLI is now INSTALLED (`graphifyy` 0.9.22); `graphify.exe`
+  is in `%LOCALAPPDATA%\Python\pythoncore-3.14-64\Scripts\` and is NOT on PATH.
+  **The refresh could not be completed this session and the graph was deliberately left untouched:**
+  * `detect_incremental` finds 131 changed files (73 code, 52 docs, 6 images) + 1 deleted.
+  * The 58 doc/image files have ZERO cache hits, so they need LLM semantic extraction — which needs
+    subagents (blocked: agent weekly limit, resets Jul 22 2am Africa/Cairo) or a Gemini key.
+  * Running AST-only and merging is actively HARMFUL: `docs/urea-project-conversation.md` alone
+    supplies 4487 of the 6080 nodes, and `build_merge`'s dedup collapses 4327 of them, shrinking the
+    graph to ~1858. graphify's `to_json` shrink guard (#479) refuses the write, so nothing was lost,
+    but the run is wasted. `graph.json` was verified intact at 6080 afterwards.
+  * The manifest WAS advanced by `save_manifest` before that was understood; its 73 code entries
+    were then dropped again so the next `--update` re-extracts them. Do the same if you abort a run
+    partway — otherwise files are marked done while the graph still holds their stale nodes.
+  * Re-run the full `/graphify` pipeline once semantic extraction is available.
 * **`/project-scaffolding`** — scaffolding wizard for NEW projects. Do NOT point it at this repo
   root; it would scaffold over a mature codebase. Use only for a new sub-project in an empty
   directory, confirming the target path first.
