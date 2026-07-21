@@ -2317,6 +2317,13 @@ def _lag1(store: dict, key: str, target: float, tau_s: float, dt: float) -> floa
 #   and the boot pin (design constants only, no FIC flow) is neutral by construction.
 RHO_401_KGM3 = 992.4    # 328D003 Comp-I flush 401: Amm.Water (PFD amm.water streams 735/791, ~992 kg/m3)
 RHO_718_KGM3 = 1065.0   # 323D011 lean-carbamate 718A/718B: Carb.Liq (PFD stream 718, 7123 kg/h / 6.7 m3/h)
+# 791 / 775 take the PFD's OWN "Density eff." row, NOT a mass/volume back-solve.  Both streams are
+# printed at a 2-significant-figure volume of 1.5 m3/h, so back-solving would fabricate 1534/1.5 =
+# 1022.7 and 1675/1.5 = 1116.7 -- 3.0 % and 2.0 % away from the tabulated densities.  (Stream 744
+# tolerated a back-solve only because its volume carries 3 figures: 31478/31.4 = 1002.5 vs 1002.)
+# Design volumes follow as 1534/992.4 = 1.546 and 1675/1095 = 1.530, both printing as the PFD's 1.5.
+RHO_791_KGM3 = 992.4    # 328D003 Comp-I wash 791 -> 323E011: Amm.Water 56 C / 4.1 bar (PFD col 791)
+RHO_775_KGM3 = 1095.0   # 328D001 carbamate reflux 775 -> 328C002: Carb.Liq 61 C / 2.6 bar (PFD col 775)
 
 
 def _fic_flow(c: dict, design: float, op_des: float, store: dict, key: str,
@@ -2856,11 +2863,16 @@ class State:
                            "Kc": 1.2 * RHO_401_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 2000.0 / RHO_401_KGM3}
         # FIC-323402 328D003 Comp-I wash 402 -> FV-323402 (REVERSE flow).
+        #   VOLUMETRIC loop (m3/h): the operator enters SP in m3/h, so the seeds are
+        #   M402_DES/RHO_791 (1534/992.4 = 1.546 m3/h, PFD stream 791), sp_hi is the old 6000 kg/h
+        #   span divided by rho, and Kc is scaled by rho so the loop coefficient 1-Kc*a*g is
+        #   IDENTICAL to the mass-basis tune noted below.  _fic_flow(rho=RHO_791_KGM3) still
+        #   returns kg/h, so the 323E011 / Comp-I mass balance is untouched.
         self.FIC_323402 = {"mode": "AUTO", "op": 50.0,
-                           "sp": R3232_E011_M402_DES, "pv": R3232_E011_M402_DES,
-                           "pv1": R3232_E011_M402_DES, "pv2": R3232_E011_M402_DES,
-                           "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: loop coef 1-Kc*a*g, a=0.0196. On the PFD-791 design (M402_DES=1534) g=1534/50=30.68, so Kc=0.5 -> coef 0.699, monotone with margin (the old 2931 basis gave g=58.6, coef 0.43; Kc=1.2 there gave coef -0.38 and rang).
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 6000.0}
+                           "sp": R3232_E011_M402_DES / RHO_791_KGM3, "pv": R3232_E011_M402_DES / RHO_791_KGM3,
+                           "pv1": R3232_E011_M402_DES / RHO_791_KGM3, "pv2": R3232_E011_M402_DES / RHO_791_KGM3,
+                           "Kc": 0.5 * RHO_791_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: loop coef 1-Kc*a*g, a=0.0196. On the PFD-791 design (M402_DES=1534) g=1534/50=30.68, so Kc=0.5 -> coef 0.699, monotone with margin (the old 2931 basis gave g=58.6, coef 0.43; Kc=1.2 there gave coef -0.38 and rang).  Kc*RHO_791 holds the vol-loop coef equal.
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 6000.0 / RHO_791_KGM3}
         # FIC-328405 ammonia-water stream 793, a normally-closed SPARE branch off the 328D003 Comp-I
         #   discharge header 343/733 (the same header that feeds 735 / 791 / 734) -> FV-328405.
         #   PFD-22 col 793: 0 kg/h, 0 m3/h, rho 992.4, 56 C -> the valve is SHUT at design, so the
@@ -2906,11 +2918,18 @@ class State:
                            "Kc": 3.0, "Ti": 200.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 45.0, "sp_hi": 80.0}
         # FIC-328404 328D001 reflux 775 -> FV-328404 (REVERSE flow, remote-CAS capable).
+        #   VOLUMETRIC loop (m3/h): seeds are M775_DES/RHO_775 (1675/1095 = 1.530 m3/h, PFD stream
+        #   775), sp_hi is the old 4000 kg/h span divided by rho, and Kc is scaled by rho so the
+        #   loop coefficient is IDENTICAL to the mass-basis tune noted below.
+        #   NOTE: this loop is seeded "CAS" but NO master is wired -- its _fic_flow call passes no
+        #   cas_sp, so _ctrl_ipd never overwrites the local sp and CAS behaves as AUTO at the seeded
+        #   SP.  The TIC-328008 -> FIC-328404 cascade is NOT implemented (TIC_328008's op is
+        #   computed and discarded).  Tracked as TD-004; do not assume CAS is live here.
         self.FIC_328404 = {"mode": "CAS", "op": R328_D001_FIC404_OP_DES,
-                           "sp": R328_D001_M775_DES, "pv": R328_D001_M775_DES,
-                           "pv1": R328_D001_M775_DES, "pv2": R328_D001_M775_DES,
-                           "Kc": 0.5, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: g=1675/30.2=55.5, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=67 (damped-oscillatory 51-102). Kc=0.5 -> M=27.7, coef 0.46 monotone.
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 4000.0}
+                           "sp": R328_D001_M775_DES / RHO_775_KGM3, "pv": R328_D001_M775_DES / RHO_775_KGM3,
+                           "pv1": R328_D001_M775_DES / RHO_775_KGM3, "pv2": R328_D001_M775_DES / RHO_775_KGM3,
+                           "Kc": 0.5 * RHO_775_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: g=1675/30.2=55.5, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=67 (damped-oscillatory 51-102). Kc=0.5 -> M=27.7, coef 0.46 monotone.  Kc*RHO_775 holds the vol-loop coef equal.
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 4000.0 / RHO_775_KGM3}
         # FIC-329402 328C003 hydrolyser MP-steam 911 -> FV-329402 (REVERSE flow, CAS).
         self.FIC_329402 = {"mode": "CAS", "op": 50.0,
                            "sp": R328_C003_M911_DES, "pv": R328_C003_M911_DES,
@@ -2928,7 +2947,17 @@ class State:
         self.FFIC_329401 = {"mode": "AUTO", "op": R328_C004_M931_DES,
                             "sp": R328_FFIC_RATIO_DES, "pv": R328_FFIC_RATIO_DES,
                             "pv1": R328_FFIC_RATIO_DES, "pv2": R328_FFIC_RATIO_DES,
-                            "Kc": 0.8, "Ti": 40.0, "Td": 0.0, "act": +1.0,
+                            # Kc 0.8 -> 8.0e5.  This master's PV is a RATIO of order 0.2 while its
+                            # output is an LP-steam demand of order 6495 kg/h, so the open-loop gain
+                            # is tiny: g = d(ratio)/d(m931) = 1/(1000*S744_VOL_DES) = 3.185e-5 T/M3
+                            # per kg/h.  With a = dt/(tau+dt) = 0.1/5.1 = 0.019608, Kc=0.8 gave a
+                            # loop coefficient 1-Kc*a*g of 1 - 5e-7, i.e. the master was INERT --
+                            # probe_ffic_gain.py measured a +5 % ratio SP step moving FV-329401 by
+                            # 0.0009 % in 600 s.  Kc = 0.5/(a*g) = 8.0e5 puts the coefficient at
+                            # 0.500, inside the 0.46-0.70 band the sibling flow loops use.
+                            # Design fixed point is untouched: pv == sp == pv1 == pv2 -> du == 0
+                            # for ANY Kc, so the boot pin cannot move.
+                            "Kc": 8.0e5, "Ti": 40.0, "Td": 0.0, "act": +1.0,
                             "op_lo": 0.0, "op_hi": 12000.0, "sp_lo": 0.0, "sp_hi": 0.5}
         # FIC-329401 328C004 LP-steam 931 slave (REVERSE flow) <- FFIC-329401 demand.
         self.FIC_329401 = {"mode": "CAS", "op": 50.0,
@@ -3777,7 +3806,8 @@ def step_sim(dt: float) -> dict:
     TI       = s.a328_d003_TI
     m_401    = _fic_flow(s.FIC_323401, R3232_E011_M401_DES, 50.0, s.tlag, "F_323401", dt,
                          rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
-    m_402    = _fic_flow(s.FIC_323402, R3232_E011_M402_DES, 50.0, s.tlag, "F_323402", dt)
+    m_402    = _fic_flow(s.FIC_323402, R3232_E011_M402_DES, 50.0, s.tlag, "F_323402", dt,
+                         rho=RHO_791_KGM3)         # SP in m3/h, returns kg/h
     # Stream 793: normally-closed spare off the same Comp-I discharge header as 735/791/734.
     # Design stroke 0 % -> 0 kg/h (PFD-22 col 793), full stroke = one branch capacity.  Opening it
     # draws real liquid out of Comp I, so it enters the holdup ODE as an export at TI (no enthalpy
@@ -3879,7 +3909,8 @@ def step_sim(dt: float) -> dict:
     pic202b_op = _ctrl_ipd(s.PIC_328202, s.a328_d001_P, dt)
     m_786_d001 = R328_D001_M786_DES * (pic202b_op / R328_D001_PV_OP_DES)  # vent -> 323E011
     gen786   = R328_D001_M786_DES * (m_737 / R328_D001_M737_DES)
-    m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt)
+    m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt,
+                         rho=RHO_775_KGM3)         # SP in m3/h, returns kg/h
     lvl_d001_328 = s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP
     lic501_op= _ctrl_ipd(s.LIC_328501, lvl_d001_328, dt)
     m_776    = R328_D001_M776_DES * (lic501_op / R328_D001_LV_OP_DES)     # draw -> 323E003
@@ -4479,9 +4510,11 @@ def step_sim(dt: float) -> dict:
                                "op": round(s.FIC_323401["op"], 1), "mode": s.FIC_323401["mode"],
                                "vol_m3h": round(m_401 / RHO_401_KGM3, 2),   # volumetric loop PV (m3/h), PFD 401 flush
                                "m_kgh": round(m_401, 1)},                   # delivered mass -> 328D003 (kg/h, HMB)
-                "FIC_323402": {"pv": round(s.FIC_323402["pv"], 1), "sp": round(s.FIC_323402["sp"], 1),
+                # FIC-323402 is a VOLUMETRIC loop: pv/sp are m3/h (the operator enters SP in m3/h).
+                "FIC_323402": {"pv": round(s.FIC_323402["pv"], 2), "sp": round(s.FIC_323402["sp"], 2),
                                "op": round(s.FIC_323402["op"], 1), "mode": s.FIC_323402["mode"],
-                               "vol_m3h": round(m_402 / R3232_E011_M402_DES * S791_VOL_DES, 2)},  # PFD stream 791
+                               "vol_m3h": round(m_402 / RHO_791_KGM3, 2),   # PFD stream 791 (raw, unlagged)
+                               "m_kgh": round(m_402, 1)},                   # delivered mass -> 323E011 (kg/h, HMB)
             },
             "C005": {                            # 323C005 off-gas scrubber -> 328V001
                 "TT_323C005": round(s.a323_c005_T, 1),                     # scrub liquid temp (C, hold 55)
@@ -4560,9 +4593,11 @@ def step_sim(dt: float) -> dict:
                                "op": round(s.PIC_328202["op"], 1), "mode": s.PIC_328202["mode"]},
                 "LIC_328501": {"pv": round(s.LIC_328501["pv"], 1), "sp": round(s.LIC_328501["sp"], 1),
                                "op": round(s.LIC_328501["op"], 1), "mode": s.LIC_328501["mode"]},
-                "FIC_328404": {"pv": round(s.FIC_328404["pv"], 1), "sp": round(s.FIC_328404["sp"], 1),
+                # FIC-328404 is a VOLUMETRIC loop: pv/sp are m3/h (the operator enters SP in m3/h).
+                "FIC_328404": {"pv": round(s.FIC_328404["pv"], 2), "sp": round(s.FIC_328404["sp"], 2),
                                "op": round(s.FIC_328404["op"], 1), "mode": s.FIC_328404["mode"],
-                               "vol_m3h": round(m_775 / R328_D001_M775_DES * S775_VOL_DES, 2)},  # PFD stream 775
+                               "vol_m3h": round(m_775 / RHO_775_KGM3, 2),   # PFD stream 775 (raw, unlagged)
+                               "m_kgh": round(m_775, 1)},                   # delivered mass -> 328C002 (kg/h, HMB)
                 "TIC_328002": {"pv": round(s.TIC_328002["pv"], 1), "sp": round(s.TIC_328002["sp"], 1),
                                "op": round(s.TIC_328002["op"], 2), "mode": s.TIC_328002["mode"]},
                 "TIC_328008": {"pv": round(s.TIC_328008["pv"], 1), "sp": round(s.TIC_328008["sp"], 1),

@@ -277,7 +277,7 @@
       { k: 'fic418', t: 'ind', x: 629,  y: 552, tag: 'FIC-323418', bind: 'LPCC_3232.C005.FIC_323418.pv', mode: 'LPCC_3232.C005.FIC_323418.mode', u: 'M3/H', dec: 2, note: '718B carbamate slipstream, 323C005 bottoms to 323E003; loop PV/SP are VOLUMETRIC (des 3.34 m3/h = 3560.4 kg/h at rho 1065)' },
       // ---- 323E011 / 323D011 pre-evaporator package : E011 block ----
       { k: 'tt011',  t: 'ind', x: 1027, y: 572, tag: 'TT-323011',  bind: 'LPCC_3232.E011.TT_323011',    u: 'C',   dec: 1 },
-      { k: 'fic402', t: 'ind', x: 1299, y: 296, tag: 'FIC-323402', bind: 'LPCC_3232.E011.FIC_323402.vol_m3h', mode: 'LPCC_3232.E011.FIC_323402.mode', u: 'M3/H', dec: 2, note: '328D003 Comp-I wash to 323E011, PFD stream 791, via FV-323402' },
+      { k: 'fic402', t: 'ind', x: 1299, y: 296, tag: 'FIC-323402', bind: 'LPCC_3232.E011.FIC_323402.pv', mode: 'LPCC_3232.E011.FIC_323402.mode', u: 'M3/H', dec: 2, note: '328D003 Comp-I wash to 323E011, PFD stream 791, via FV-323402' },
       { k: 'fv402',  t: 'avalve', x: 1253, y: 244, tag: 'FV-323402', bind: 'LPCC_3232.E011.FIC_323402.op', u: '%', dec: 1 },
       { k: 'fic401', t: 'ind', x: 579,  y: 637, tag: 'FIC-323401', bind: 'LPCC_3232.E011.FIC_323401.pv', mode: 'LPCC_3232.E011.FIC_323401.mode', u: 'M3/H', dec: 2, note: '323E011 draw / PFD 401 flush via FV-323401; loop PV/SP are VOLUMETRIC (des 0.83 m3/h = 823 kg/h at rho 992.4)' },
       { k: 'fv401',  t: 'avalve', x: 523, y: 682, tag: 'FV-323401', bind: 'LPCC_3232.E011.FIC_323401.op', u: '%', dec: 1 },
@@ -321,12 +321,12 @@
       { k: 'fv8401', t: 'avalve', x: 1014, y: 324, tag: 'FV-329401', bind: 'DESORB_328.C004.FIC_329401.op', u: '%', dec: 1 },
       // ---- 328D001 reflux drum : D001 block, TIC-328008 / FIC-328404 / PIC-328202 ----
       { k: 'tic8008', t: 'ind', x: 693, y: 50,  tag: 'TIC-328008', bind: 'DESORB_328.D001.TIC_328008.pv', mode: 'DESORB_328.D001.TIC_328008.mode', u: '%', dec: 1, note: '328C002 offgas H2O -> 328E004 (mol%, PFD 737 = 46.2)' },
-      { k: 'fic8404', t: 'ind', x: 570, y: 78,  tag: 'FIC-328404', bind: 'DESORB_328.D001.FIC_328404.vol_m3h', mode: 'DESORB_328.D001.FIC_328404.mode', u: 'M3/H', dec: 2, note: '328D001 carbamate reflux to 328C002, PFD stream 775, via FV-328404' },
+      { k: 'fic8404', t: 'ind', x: 570, y: 78,  tag: 'FIC-328404', bind: 'DESORB_328.D001.FIC_328404.pv', mode: 'DESORB_328.D001.FIC_328404.mode', u: 'M3/H', dec: 2, note: '328D001 carbamate reflux to 328C002, PFD stream 775, via FV-328404' },
       { k: 'fv8404', t: 'avalve', x: 462, y: 112, tag: 'FV-328404', bind: 'DESORB_328.D001.FIC_328404.op', u: '%', dec: 1 },
       { k: 'pic82021',t: 'ind', x: 878, y: 135, tag: 'PIC-328202', bind: 'DESORB_328.D001.PIC_328202.pv', mode: 'DESORB_328.D001.PIC_328202.mode', u: 'BAR A', dec: 2, note: '328D001 pressure via PV-328202' },
       { k: 'pv82021', t: 'avalve', x: 1295, y: 165, tag: 'PV-328202', bind: 'DESORB_328.D001.PIC_328202.op', u: '%', dec: 1 },
       // ---- 328D003 collection tank (drawn on 328-1) : ABSORB_328.D003 cross-ref ----
-      { k: 'fic8406', t: 'ind', x: 1088, y: 423, tag: 'FIC-328406', bind: 'ABSORB_328.D003.FIC_328406.vol_m3h', mode: 'ABSORB_328.D003.FIC_328406.mode', u: 'M3/H', dec: 2, note: '328D003 standby transfer draw on 755 collector line (spare, 0 idle), PFD stream 755, via FV-328406' },
+      { k: 'fic8406', t: 'ind', x: 1088, y: 423, tag: 'FIC-328406', bind: 'ABSORB_328.D003.FIC_328406.pv', mode: 'ABSORB_328.D003.FIC_328406.mode', u: 'M3/H', dec: 2, note: '328D003 standby transfer draw on 755 collector line (spare, 0 idle), PFD stream 755, via FV-328406' },
       { k: 'fv8406', t: 'avalve', x: 1069, y: 458, tag: 'FV-328406', bind: 'ABSORB_328.D003.FIC_328406.op', u: '%', dec: 1 },
       // ---- 323 recycle : LPCC_3232.E003.FIC_328402 cross-ref ----
       // FIC-328402 binds .pv (NOT .vol_m3h): the loop is now volumetric, so pv/sp are already

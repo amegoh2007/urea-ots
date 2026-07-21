@@ -449,6 +449,25 @@ function render322(s){
   const load=()=>{ try{ return JSON.parse(localStorage.getItem(CK))||{}; }catch(e){ return {}; } };
   const save=st=>{ try{ localStorage.setItem(CK, JSON.stringify(st)); }catch(e){} };
   let cur=null, curPV=null, mode='AUTO';
+  // Cascade SP authority: a slave in CAS does NOT own its setpoint — the master writes it every
+  // tick, so the operator must enter the SP on the MASTER's faceplate instead.  `sp.readOnly`
+  // below already blocks the field in CAS and apply() only ever sends `sp` in AUTO, so the write
+  // path is safe; this map exists so the note NAMES the owning master rather than saying
+  // "a linked parameter" and leaving the operator to guess where to go.
+  // Every entry mirrors a real `cas_sp=` wiring in main.py's step_sim.
+  const CAS_MASTER={
+    'PIC-329202':'TIC-323007',   // 323C003 steam pressure  <- shell temp master
+    'PIC-329208':'TIC-323012',   // 323F010 recirc heater   <- outlet temp master
+    'PIC-329203':'TIC-324001',   // 324E001 chest steam-P   <- melt temp master
+    'PIC-329212':'TIC-324002',   // 324E003 chest steam-P   <- melt temp master
+    'FIC-324401':'LIC-323507',   // 324E001 carbamate feed  <- 323D002 Comp-I level master
+    'FIC-329401':'FFIC-329401',  // 328C004 LP-steam 931    <- steam/feed ratio master (T/M3)
+    'FIC-335405':'FFIC-335406',  // 335 UF85 injection      <- UF85-to-product ratio master
+  };
+  // Declared in the control narrative but NOT wired in main.py: the loop is seeded CAS yet its
+  // _fic_flow call passes no cas_sp, so CAS behaves as AUTO at the seeded SP.  Say so plainly
+  // rather than name a master that is not actually driving anything.  Tracked as TD-004.
+  const CAS_UNWIRED={ 'FIC-328404':'TIC-328008' };
   const applyMode=v=>{                                                 // MAN=set opening, AUTO=set SP, CAS=linked param
     mode=v;
     bMan.classList.toggle('active', v==='MAN');
@@ -456,9 +475,12 @@ function render322(s){
     bCas.classList.toggle('active', v==='CAS');
     op.readOnly = (v!=='MAN');                                         // MAN: operator edits valve opening
     sp.readOnly = (v!=='AUTO');                                        // AUTO: operator edits setpoint
+    const tag=cur&&cur.tag, mst=tag&&CAS_MASTER[tag], unw=tag&&CAS_UNWIRED[tag];
     note.textContent =
       v==='MAN'  ? 'MAN — operator sets valve opening directly.' :
       v==='AUTO' ? 'AUTO — controller drives opening to hold SP.' :
+      mst        ? ('CAS — SP is written by ' + mst + '. To change it, open the ' + mst + ' faceplate; this field is read-only.') :
+      unw        ? ('CAS — ' + unw + ' is the intended master but that cascade is NOT wired in the engine yet, so CAS holds the seeded SP (TD-004).') :
                    'CAS — opening driven by a linked (cascade) parameter.';
     if(cur && cur.note) note.textContent += '  ·  ' + cur.note;   // per-loop cause->effect physics note
   };

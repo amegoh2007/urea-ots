@@ -58,7 +58,7 @@ positive direction) and promote the sweep `xchk` back to `chk`.
 
 ## TD-002 — three `.vol_m3h` faceplates write m3/h into kg/h controllers
 
-- **Status:** OPEN
+- **Status:** RESOLVED 2026-07-21 (see Resolution below)
 - **Opened:** 2026-07-21
 - **Files:**
   - `frontend/overlays.js:280` — `FIC-323402`, binds `LPCC_3232.E011.FIC_323402.vol_m3h`
@@ -121,7 +121,7 @@ but NOT the unit half, which needs the controller to actually run in m3/h.
 
 ## TD-003 — `FFIC-329401` master gain is orders of magnitude too small to move `FV-329401`
 
-- **Status:** OPEN
+- **Status:** RESOLVED 2026-07-21 (see Resolution below)
 - **Opened:** 2026-07-21
 - **Files:** `backend/main.py` — `self.FFIC_329401` seed (`Kc: 0.8`)
 
@@ -158,3 +158,126 @@ operator actually moves the ratio SP.
 Retune `Kc` on the same basis the sibling loops use (target loop coefficient roughly 0.25–0.7,
 monotone). Needs `scratchpad/regress.py` + `scratchpad/pindiff.py` to confirm the pin is still
 `leaves 25 / keys 15 / diffs 0` afterwards — not runnable on the current machine (no Python).
+
+---
+
+## Resolutions — 2026-07-21
+
+**Environment correction that unblocked all of this.** The claim in earlier commit messages and in
+`handoff.md` that "there is no Python interpreter on this machine" was **WRONG**. Python 3.14.6 is
+installed and works; it is reached as `python3` / `py`, resolved through the
+`PythonSoftwareFoundation.PythonManager` MSIX at
+`%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe` (the real binary lives under
+`%LOCALAPPDATA%\Python\pythoncore-3.14-64\`). The bare `python` alias IS a Store stub and errors —
+testing only that one alias, and `where.exe python`, produced the false conclusion. Every
+"NOT GATED" note in commits `37504eb`, `26d35de`, `76b97b7` and `c063485` is therefore retracted:
+the pin gate was run afterwards against `c063485` and PASSED at `leaves: 25  keys: 15  diffs: 0`.
+
+`pytest` and `httpx` were installed to run the suite. Baseline before any change: **103 passed**.
+Run the suite with `-p no:cacheprovider` — `backend/.pytest_cache` has stale directories that
+raise `WinError 183`.
+
+### TD-002 — RESOLVED
+
+`FIC-323402` (stream 791) and `FIC-328404` (stream 775) converted to genuine volumetric loops on
+the `FIC-328402` / `FIC-323401` pattern: seeds and `sp_hi` divided by rho, `Kc` multiplied by rho so
+the loop coefficient `1-Kc*a*g` is unchanged, `_fic_flow(rho=...)` still returning kg/h so the mass
+balances are untouched. All three overlays rebound from `.vol_m3h` to `.pv`, so `app.js:471` now
+takes the backend-authoritative branch and shows the ENGINE's mode instead of a localStorage guess.
+
+Densities were taken from the PFD's own `Density eff.` row, **not** a mass/volume back-solve:
+
+| stream | loop | kg/h | PFD vol | PFD rho | back-solve | used |
+|---|---|---|---|---|---|---|
+| 791 | FIC-323402 | 1534 | 1.5 | 992.4 | 1022.7 (+3.0 %) | **992.4** |
+| 775 | FIC-328404 | 1675 | 1.5 | 1095 | 1116.7 (+2.0 %) | **1095** |
+| 755 | FIC-328406 | 31478 | 31.3 | 1005 | 1005.7 (+0.07 %) | **1005** (unchanged) |
+
+Both 791 and 775 print a 2-significant-figure volume of 1.5 m3/h, so back-solving would have
+fabricated a density 2-3 % off the tabulated value. Stream 744 tolerated a back-solve only because
+its volume carries 3 figures. Resulting design volumes are 1534/992.4 = 1.546 and 1675/1095 = 1.530,
+both of which print as the PFD's 1.5.
+
+Verified: pin gate `leaves: 25  keys: 15  diffs: 0`, suite **103 passed** (no change from baseline).
+
+### TD-003 — RESOLVED
+
+`FFIC-329401` `Kc` raised 0.8 -> 8.0e5, derived rather than guessed:
+`g = 1/(1000*S744_VOL_DES) = 3.185e-5 T/M3 per kg/h`, `a = dt/(tau+dt) = 0.1/5.1 = 0.019608`,
+so `Kc = 0.5/(a*g) = 8.0e5` places the loop coefficient at 0.500 — inside the 0.46-0.70 band the
+sibling flow loops use.
+
+Measured with `scratchpad/probe_ffic_gain.py`, a +5 % ratio SP step (0.206847 -> 0.217189 T/M3):
+
+| | before (Kc 0.8) | after (Kc 8.0e5) |
+|---|---|---|
+| FV-329401 travel in 600 s | +0.0009 % | **+2.5000 %** |
+| FIC-329401 SP | 6495.12 kg/h | **6819.75 kg/h** (= 6495 x 1.05 exactly) |
+| ratio PV | 0.206851 (never moved) | **0.217189** (= new SP, zero offset) |
+
+Monotone approach, no ringing, settled by about 300 s. The design fixed point is untouched for any
+`Kc` because `pv == sp == pv1 == pv2` gives `du == 0`, so the pin is unaffected — confirmed
+`leaves: 25  keys: 15  diffs: 0`, suite **103 passed**.
+
+---
+
+## TD-004 — the `TIC-328008` -> `FIC-328404` cascade is declared but not wired
+
+- **Status:** OPEN
+- **Opened:** 2026-07-21
+- **Files:** `backend/main.py` — `self.FIC_328404` seed, its `_fic_flow` call, `_ctrl_ipd(s.TIC_328008, ...)`
+
+### Discrepancy
+
+`FIC-328404` is seeded `"mode": "CAS"` and `R323_CTRL_MODES` offers it `("MAN","AUTO","CAS")`, but
+its `_fic_flow` call passes **no** `cas_sp`. `_ctrl_ipd` only overwrites the local setpoint under
+`if c["mode"] == "CAS" and cas_sp is not None`, so in CAS the loop simply holds its seeded SP —
+it behaves as AUTO. Meanwhile `TIC-328008`'s output is computed every tick and then discarded; it
+is routed nowhere, and its own mode tuple is `("MAN","AUTO")` with no CAS.
+
+The stated control narrative is that with `FIC-328404` in CAS the operator sets the SP on the
+`TIC-328008` faceplate. That relationship does not exist in the engine today.
+
+For contrast, the cascades that ARE wired (each has a real `cas_sp=` in `step_sim`) are
+`PIC-329202`<-`TIC-323007`, `PIC-329208`<-`TIC-323012`, `PIC-329203`<-`TIC-324001`,
+`PIC-329212`<-`TIC-324002`, `FIC-324401`<-`LIC-323507`, `FIC-329401`<-`FFIC-329401`,
+`FIC-335405`<-`FFIC-335406`.
+
+### Interim mitigation (done)
+
+`app.js` now carries `CAS_MASTER` (the seven wired pairs, which the faceplate names explicitly so
+the operator knows which master owns the SP) and `CAS_UNWIRED`, which makes the `FIC-328404`
+faceplate state plainly that the cascade is not implemented rather than implying a live master.
+
+### Fix when scheduled
+
+Route `TIC-328008`'s output into the `FIC-328404` `_fic_flow` call as `cas_sp`, add `"CAS"` to
+`TIC_328008`'s mode tuple, and pick the master's `op` scaling so that at design the handed-down SP
+equals `R328_D001_M775_DES / RHO_775_KGM3` exactly — otherwise the design fixed point moves and the
+pin breaks. Needs a re-gate. Confirm the intended pairing against the P&ID first: `TIC-328008`'s PV
+is an inferential offgas H2O mol%, which is an unusual master for a carbamate reflux flow.
+
+---
+
+## TD-005 — `FIC-328406`'s PV is its own output, not a flow
+
+- **Status:** OPEN
+- **Opened:** 2026-07-21
+- **Files:** `backend/main.py` — `_ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)`, its telemetry block
+
+### Discrepancy
+
+`FIC-328406` is driven as `_ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)` — the controller is fed
+its OWN opening as the process variable, so `pv` tracks `op` in **percent**. It never goes through
+`_fic_flow`, so there is no flow model behind it. The telemetry then publishes
+`vol_m3h = pv / A328_M755_RHO`, which divides a percentage by a density.
+
+Harmless today: the loop is a standby spare pinned `MAN` at 0 (its mode tuple is `("MAN",)`, so the
+backend rejects AUTO and CAS), and 0 reads as 0 in any unit. It becomes wrong the moment an operator
+moves the opening in MAN — the overlay would display the opening percentage labelled `M3/H`.
+
+### Fix when scheduled
+
+Either drive it through `_fic_flow` against a real design flow for the 755 standby draw so `pv` is a
+genuine m3/h measurement, or drop the `vol_m3h` key and relabel the overlay `%` to match what the
+value actually is. Confirm from the 322P002 / 328D003 datasheets which is intended.

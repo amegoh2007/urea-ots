@@ -3,8 +3,9 @@
 ## The goal we're working toward
 Calibrate the `backend/main.py` state-space process engine against real DCS startup trend data
 without violating mass/energy conservation, and keep the HMI overlay registered on the baked DCS
-screenshots. The 328/329 loop-tag rename and the FFIC-329401 ratio basis are now closed; the open
-front is the un-run pin gate and three faceplates with a unit defect (TD-002).
+screenshots. The 328/329 loop-tag rename, the FFIC-329401 ratio basis, the volumetric-faceplate
+unit defect (TD-002) and the FFIC master gain (TD-003) are all now closed and gated. The open front
+is the unwired TIC-328008 -> FIC-328404 cascade (TD-004).
 
 ## Current state of the code
 * HEAD `76b97b7` on `master`, **pushed** — `origin/master` is level at `76b97b7`.
@@ -18,15 +19,25 @@ front is the un-run pin gate and three faceplates with a unit defect (TD-002).
 * `launch.bat` carries an unrelated uncommitted change (adds `pip install -r requirements.txt`).
   Left unstaged deliberately. `backend/requirements.txt` exists and the path resolves.
 
-## HARD BLOCKER — no interpreter on this machine
-No Python and no Node. `backend/main.py`, pytest, and `scratchpad/regress.py` +
-`scratchpad/pindiff.py` **cannot be run here**. Every backend conclusion this session is static
-analysis only. `scratchpad/pin_now.json` matches `golden_pin.json` but predates all of these
-commits, so it proves nothing about them.
+## RETRACTED — "no interpreter on this machine" was WRONG
+An earlier revision of this file, and the "NOT GATED" notes in commits `37504eb`, `26d35de`,
+`76b97b7` and `c063485`, claimed no Python existed here. That was a bad inference from testing
+only the bare `python` alias (which IS a Store stub and errors) plus `where.exe python`.
 
-**Four commits are on origin and none of the `main.py` changes in them was ever executed.**
-`26d35de` and `76b97b7` both touch `main.py`. Re-gate before trusting any of it — this is the
-single most important next action.
+**Python 3.14.6 is installed and works.** Use `python3` or `py`:
+
+```
+%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe      # MSIX alias, PythonSoftwareFoundation.PythonManager
+%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe   # the real binary
+```
+
+`pymanager list` shows the installed runtimes. `fastapi`/`uvicorn`/`pydantic`/`openpyxl` were
+already present; `pytest` and `httpx` were installed this session. Run the suite with
+`-p no:cacheprovider` — `backend/.pytest_cache` holds stale dirs that raise `WinError 183`.
+
+**All gates are GREEN and every earlier NOT-GATED warning is retracted:**
+* Pin gate at `c063485` and after every change since: `leaves: 25  keys: 15  diffs: 0`.
+* Test suite: **103 passed**, unchanged from the pre-change baseline.
 
 ## CLOSED this session
 * **FFIC-329401 ratio basis.** Ruled by the plant control narrative: on CAS, FIC-329401's SP is
@@ -86,9 +97,12 @@ placement table), `sheet2.ps1` (contact sheet for eyeballing box identity), `app
 (rewrites overlay x/y to measured bar centres), `crop.ps1`, `rowprof.ps1`.
 
 ## Everything tried that failed
-* Running anything Python: no interpreter exists. `python`/`python3` on PATH resolve to the
-  Microsoft Store alias stub, which exits non-zero — and invoking it with a heredoc HANGS for the
-  full command timeout, so never pipe stdin into it.
+* Concluding "no Python on this machine" from `python --version` plus `where.exe python`. The bare
+  `python` alias is a Store stub that errors, but `python3` and `py` both work (3.14.6). Testing one
+  alias and generalising cost this session five ungated commits and a large amount of unnecessary
+  static-only analysis. Check `pymanager list` before ever concluding an interpreter is absent.
+* Piping a heredoc into the `python` Store stub: it HANGS for the full command timeout. Never
+  `python - <<EOF` against the stub alias.
 * Judging overlay placement from the whole black blob centroid: the baked DCS indicator is a flag
   (wide value BAR plus a narrower TAB below), so the centroid sits about 5 px low. Isolate the BAR.
 * Isolating the bar as the "longest contiguous run of rows at >=90 % of max width": the green value
@@ -115,10 +129,22 @@ placement table), `sheet2.ps1` (contact sheet for eyeballing box identity), `app
 * Short horizons (600/1200/1800 s) to demand Comp I "settle": Comp I's own tau is 16,098 s.
 * `ff718_perturb.py`: obsolete, kicks the wrong leg. Superseded by `dyn718r.py`.
 
+## How to gate (works on this machine — see the retraction above)
+```
+set PY=%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe
+%PY% scratchpad\regress.py scratchpad\pin_now.json
+%PY% scratchpad\pindiff.py scratchpad\pin_now.json scratchpad\golden_pin.json   ->  25 / 15 / 0
+cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  103 passed
+%PY% scratchpad\probe_ffic_gain.py 600        # TD-003 authority probe, expect FV-329401 +2.5 %
+```
+
 ## Next steps
-1. **Re-gate.** On a machine with Python: `scratchpad/regress.py` then `scratchpad/pindiff.py`.
-   Expected `leaves: 25  keys: 15  diffs: 0`. Four commits are already on origin unverified.
-2. Fix TD-002 (three volumetric faceplates) and TD-003 (FFIC-329401 gain), each with a re-gate.
+1. **TD-004:** wire `TIC-328008` -> `FIC-328404` as a real cascade, or confirm from the P&ID that the
+   pairing is wrong. Today `FIC-328404` sits in a fake CAS that holds its seeded SP, and
+   `TIC-328008`'s output is computed and discarded. Scale the master's `op` so the handed-down SP is
+   exactly `R328_D001_M775_DES / RHO_775_KGM3` at design, or the pin breaks.
+2. **TD-005:** `FIC-328406`'s PV is its own opening in percent, published as `vol_m3h`. Inert while
+   the spare is MAN-0, wrong the moment anyone strokes it.
 3. `Master_PID_Tuning_Constants.md` still names the loops by their pre-rename tags and the retired
    ratio basis — refresh it.
 4. Confirm the 321-1 / 323-1 registration against the RUNNING HMI. Drag positions in localStorage
