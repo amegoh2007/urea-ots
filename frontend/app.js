@@ -463,11 +463,12 @@ function render322(s){
     'FIC-324401':'LIC-323507',   // 324E001 carbamate feed  <- 323D002 Comp-I level master
     'FIC-329401':'FFIC-329401',  // 328C004 LP-steam 931    <- steam/feed ratio master (T/M3)
     'FIC-335405':'FFIC-335406',  // 335 UF85 injection      <- UF85-to-product ratio master
+    'FIC-328404':'TIC-328008',   // 328D001 775 carbamate reflux <- offgas H2O master (PFD 737)
   };
   // Declared in the control narrative but NOT wired in main.py: the loop is seeded CAS yet its
   // _fic_flow call passes no cas_sp, so CAS behaves as AUTO at the seeded SP.  Say so plainly
   // rather than name a master that is not actually driving anything.  Tracked as TD-004.
-  const CAS_UNWIRED={ 'FIC-328404':'TIC-328008' };
+  const CAS_UNWIRED={};   // TD-004 CLOSED: the TIC-328008 -> FIC-328404 cascade is now wired.
   const applyMode=v=>{                                                 // MAN=set opening, AUTO=set SP, CAS=linked param
     mode=v;
     bMan.classList.toggle('active', v==='MAN');

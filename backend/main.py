@@ -924,6 +924,15 @@ A328_D003_M343_DES = R328_C002_M738_DES + R3232_E011_M402_DES + R3232_E011_M401_
 # 0 m3/h, so FIC-328405 sits at 0 % stroke at design; full stroke is one branch capacity, i.e.
 # the twin of the 791/734 legs (1534 kg/h).
 S793_CAP_KGH = R3232_E011_M402_DES                          # 1534.0 kg/h at 100 % stroke
+# Stream 741 (TD-005): purified process-condensate RECYCLE, 328E007 -> 328E001 -> 328D003 Comp I.
+# PFD-22 col 741 is "Pur. Pr. C", 0 kg/h / 0 m3/h at 40 C / 3.9 bar with rho 992.42 -- i.e. the line
+# exists but is NORMALLY CLOSED at 100 % load, exactly like the 793 spare.  Full-stroke capacity is
+# bounded by the condensate actually available: the 328C004 bottoms (739) that 328E007 condenses,
+# so nothing is fabricated.  The recycle diverts liquid that would otherwise leave the modelled
+# envelope as the 740 export and returns it to Comp I, so it enters the holdup ODE as an INFLOW.
+S741_CAP_KGH  = R328_C004_M739_DES                          # 33724 kg/h at 100 % stroke (740 source)
+RHO_741_KGM3  = 992.42                                      # kg/m3, PFD col 741 "Density eff." @ 40 C
+A328_M741_T   = 40.0                                        # C, PFD col 741 operating temperature
 S793_M_DES   = 0.0                                          # PFD design flow (normally closed)
 A328_D003_TI = 56.0 ; A328_D003_TII = 44.0
 A328_D003_V001_T = A323_C005_T                             # 55 °C V001 pass-through
@@ -2966,11 +2975,20 @@ class State:
                            "Kc": 0.30, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.30: PV in kg/h, process gain g=6495/50=129.9; loop coef 1-Kc*a*g, a=dt/(tau+dt)=0.0196; Kc=1.2 gives coef -2.06 (unstable 0<->100 limit cycle). Kc<0.39 monotonic; 0.30 -> coef 0.24, 2.6x margin.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 12000.0}
         # TIC-328008 inferential: offgas H2O content to reflux condenser 328E004 (mol%), from TT-328008 & PIC-328202.
-        self.TIC_328008 = {"mode": "AUTO", "op": 50.0,
+        # TIC-328008 is the MASTER of FIC-328404 (TD-004): its PV is the inferential H2O content of
+        # the gas leaving 328C002 to 328E004 (PFD 737), and it trims the 775 carbamate reflux to
+        # hold it.  act=-1 (DIRECT) is already correct: wetter offgas -> MORE reflux.
+        # Its OUTPUT is the slave's setpoint in kg/h (the FFIC-329401 convention -- _fic_flow
+        # divides cas_sp by rho itself, so a master feeding a volumetric loop still emits MASS).
+        # op therefore spans the slave's OLD mass span 0..4000 kg/h instead of 0..100 %, and Kc is
+        # scaled by that 40x span change (3.0 -> 120.0) so the master keeps its former authority.
+        # At design pv == sp == pv1 == pv2 -> du == 0 -> op holds R328_D001_M775_DES exactly, which
+        # _fic_flow turns into M775_DES/RHO_775 -- bit-identical to the slave's seeded sp.
+        self.TIC_328008 = {"mode": "AUTO", "op": R328_D001_M775_DES,
                            "sp": R328_D001_OFFGAS_H2O_DES, "pv": R328_D001_OFFGAS_H2O_DES,
                            "pv1": R328_D001_OFFGAS_H2O_DES, "pv2": R328_D001_OFFGAS_H2O_DES,
-                           "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
+                           "Kc": 120.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
+                           "op_lo": 0.0, "op_hi": 4000.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # TIC-328012 differential temp controller: TT-328013 (bottom 200) - TT-328012 (3rd tray 190) = 10 C.
         self.TIC_328012 = {"mode": "AUTO", "op": 50.0,
                            "sp": R328_C003_DT_DES, "pv": R328_C003_DT_DES,
@@ -3004,10 +3022,15 @@ class State:
                            "Kc": 0.06 * RHO_744_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.  Kc*RHO_744 holds the vol-loop coef equal.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0 / RHO_744_KGM3}
         # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
+        # FIC-328406 indicates the PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 ->
+        # 328D003 Comp I (TD-005).  Normally CLOSED at 100 % load (PFD 741 = 0 kg/h), so it is
+        # MAN at 0 % stroke.  It is now a real VOLUMETRIC measurement through _fic_flow rather
+        # than the controller being fed its own opening: design 0 -> pv 0, and stroking it in MAN
+        # shows genuine m3/h.  op_des = 100 so 0 % stroke is exactly 0 flow.
         self.FIC_328406 = {"mode": "MAN", "op": 0.0,
                            "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
-                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
-                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0}
+                           "Kc": 1.2 * RHO_741_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": S741_CAP_KGH / RHO_741_KGM3}
 
         # -- 328-2 controllers (LP absorber 322C001) ---------------------------
         # PIC-322201 322C001 absorber vent pressure -> PV-322201 (DIRECT, 3.9 bar a).
@@ -3814,13 +3837,21 @@ def step_sim(dt: float) -> dict:
     # term: an outflow at the bulk temperature contributes nothing to P_compI).
     m_793    = _fic_flow(s.FIC_328405, S793_CAP_KGH, 100.0, s.tlag, "F_328405", dt,
                          rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
+    # Stream 741 (TD-005): purified process-condensate RECYCLE 328E007 -> 328E001 -> 328D003 Comp I.
+    # Normally closed (PFD 741 = 0 kg/h at 100 % load), so at design m_741 == 0 and every term below
+    # is byte-identical to the pre-741 balance -- the boot pin cannot move.  Opening it returns
+    # liquid that would otherwise leave the envelope as the 740 export, so it is an INFLOW at the
+    # PFD-741 temperature (40 C) and carries its own enthalpy term against the Comp-I bulk TI.
+    m_741    = _fic_flow(s.FIC_328406, S741_CAP_KGH, 100.0, s.tlag, "F_328406", dt,
+                         rho=RHO_741_KGM3)                        # volumetric loop, returns kg/h
     m_735    = R328_C002_M738_DES * (s.a328_d003_MI / A328_D003_MI_DES)   # -> 738 via 328E007
-    in_compI = A328_D003_M719 + A328_D003_M720 + A328_D003_M721 + bot_c005
+    in_compI = A328_D003_M719 + A328_D003_M720 + A328_D003_M721 + bot_c005 + m_741
     out_compI= m_735 + m_401 + m_402 + m_793
     P_compI  = ((A328_D003_M719*(A328_D003_M719_T - TI)
                  + A328_D003_M720*(A328_D003_M720_T - TI)
                  + A328_D003_M721*(A328_D003_M721_T - TI)
-                 + bot_c005     *(A328_D003_V001_T  - TI))/3600.0*A328_CP
+                 + bot_c005     *(A328_D003_V001_T  - TI)
+                 + m_741        *(A328_M741_T       - TI))/3600.0*A328_CP
                 + in_compI/3600.0*A328_D003_LAM_I)
     s.a328_d003_TI = TI + P_compI*dt/max(s.a328_d003_MI*A328_CP, 1e-6)
     s.a328_d003_MI = max(s.a328_d003_MI + (in_compI - out_compI)/3600.0*dt, 1.0)
@@ -3909,8 +3940,16 @@ def step_sim(dt: float) -> dict:
     pic202b_op = _ctrl_ipd(s.PIC_328202, s.a328_d001_P, dt)
     m_786_d001 = R328_D001_M786_DES * (pic202b_op / R328_D001_PV_OP_DES)  # vent -> 323E011
     gen786   = R328_D001_M786_DES * (m_737 / R328_D001_M737_DES)
+    # TIC-328008 MASTER -> FIC-328404 slave (TD-004).  PV is the inferential H2O mol% of the gas
+    # leaving 328C002 to 328E004 (PFD 737), live on the drum pressure via PIC-328202 + 0.9 bar dP.
+    # Stepped HERE, immediately before its slave, so the cascade is same-tick like every other
+    # master in this engine; its PV depends only on constants and s.a328_d001_P, both already
+    # settled at this point.  On CAS, FV-328404 strokes to hold TIC-328008.
+    tic8008_op = _ctrl_ipd(s.TIC_328008,
+                           100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_TOP)
+                           / max(s.a328_d001_P + R328_E004_DP, 0.1), dt)      # 775-reflux demand (kg/h)
     m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt,
-                         rho=RHO_775_KGM3)         # SP in m3/h, returns kg/h
+                         rho=RHO_775_KGM3, cas_sp=tic8008_op)   # SP in m3/h, returns kg/h
     lvl_d001_328 = s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP
     lic501_op= _ctrl_ipd(s.LIC_328501, lvl_d001_328, dt)
     m_776    = R328_D001_M776_DES * (lic501_op / R328_D001_LV_OP_DES)     # draw -> 323E003
@@ -4154,10 +4193,13 @@ def step_sim(dt: float) -> dict:
 
     # ----- auxiliary faceplate trims (stepped for liveness; off the network)
     #   FIC-328405 / LIC-323503 dropped from here: both now step on the live 718A/718B/323D011 network.
-    _ctrl_ipd(s.TIC_328008, 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_TOP) / max(s.a328_d001_P + R328_E004_DP, 0.1), dt)   # inferential offgas H2O mol% at 328C002 top (117C/3.5bara), PHI to PFD 737; live on drum PIC-328202 + 0.9 bar dP
+    # (TIC-328008 is stepped earlier, immediately before its FIC-328404 slave -- see TD-004.
+    #  Stepping it a second time here would advance the controller twice per tick.)
     _ctrl_ipd(s.TIC_328012, s.a328_c003_T - R328_C003_T746, dt)              # differential PV: TT-328013 (bottom) - TT-328012 (3rd tray)
     _ctrl_ipd(s.SIC_323902, s.SIC_323902["op"], dt)
-    _ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)
+    # (FIC-328406 is now stepped by its own _fic_flow call on the 741 recycle -- see TD-005.
+    #  It used to be advanced here with its OWN opening as the PV, which made pv a percentage
+    #  that the telemetry then divided by a density.  Stepping it again would double-advance it.)
 
     # ----- Trips (P1-2 stateful interlocks) -----
     # Live initiator conditions (instantaneous). 21_2 = Urea-Synthesis main trip; its initiators
@@ -4630,11 +4672,14 @@ def step_sim(dt: float) -> dict:
                 "form735_th": round(m_735 / 1000.0, 2),                    # Comp-I formation -> 328C002 (t/h)
                 "collect755_th": round(m_755 / 1000.0, 2),                 # 322P002 collector -> 322C001 (t/h)
                 "flow755_m3h": round(m_755 / A328_M755_RHO, 2),            # FT-322402: 755 draw in m3/h (des 31.3)
-                "FIC_328406": {"pv": round(s.FIC_328406["pv"], 1), "sp": round(s.FIC_328406["sp"], 1),
+                # FIC-328406 is the PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 -> Comp I
+                # (TD-005).  Normally closed, so pv/sp read 0.00 m3/h at 100 % load.  It is now a
+                # VOLUMETRIC loop: pv/sp are already m3/h, and m_kgh carries the delivered mass that
+                # the Comp-I holdup ODE actually sees.
+                "FIC_328406": {"pv": round(s.FIC_328406["pv"], 2), "sp": round(s.FIC_328406["sp"], 2),
                                "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"],
-                               # 328D003 standby transfer pump on the 755 collector line (MAN-0 spare).
-                               # vol = pv(kg/h) / rho_755 -> 0.00 while idle; true m3/h if commissioned.
-                               "vol_m3h": round(s.FIC_328406["pv"] / A328_M755_RHO, 2)},  # PFD stream 755
+                               "vol_m3h": round(m_741 / RHO_741_KGM3, 2),   # PFD stream 741 (raw, unlagged)
+                               "m_kgh": round(m_741, 1)},                   # recycle -> 328D003 Comp I (kg/h)
                 "P002A":      {"on": s.aux_pumps["322P002A"]["on"], "mode": s.aux_pumps["322P002A"]["mode"]},
                 "P002B":      {"on": s.aux_pumps["322P002B"]["on"], "mode": s.aux_pumps["322P002B"]["mode"]},
             },

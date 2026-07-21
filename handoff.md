@@ -4,8 +4,9 @@
 Calibrate the `backend/main.py` state-space process engine against real DCS startup trend data
 without violating mass/energy conservation, and keep the HMI overlay registered on the baked DCS
 screenshots. The 328/329 loop-tag rename, the FFIC-329401 ratio basis, the volumetric-faceplate
-unit defect (TD-002) and the FFIC master gain (TD-003) are all now closed and gated. The open front
-is the unwired TIC-328008 -> FIC-328404 cascade (TD-004).
+unit defect (TD-002), the FFIC master gain (TD-003), the TIC-328008 -> FIC-328404 cascade (TD-004)
+and the FIC-328406 / PFD-741 recycle (TD-005) are all now closed and gated. TD-001 remains the only
+open item, plus the stale `graphify` graph and `Master_PID_Tuning_Constants.md`.
 
 ## Current state of the code
 * HEAD `76b97b7` on `master`, **pushed** — `origin/master` is level at `76b97b7`.
@@ -138,14 +139,21 @@ cd backend && %PY% -m pytest -q -p no:cacheprovider                             
 %PY% scratchpad\probe_ffic_gain.py 600        # TD-003 authority probe, expect FV-329401 +2.5 %
 ```
 
+## Standing session commands (see CLAUDE.md section 6)
+* **Caveman mode ON** — invoke the `caveman` skill at session start, keep it active for prose.
+  Code, commit messages and PR text stay in normal English.
+* **Graphify** — knowledge graph in `graphify-out/`. Refresh with `graphify update .` from the repo
+  root (no API cost); check staleness by comparing `GRAPH_REPORT.md`'s "Built from commit" against
+  `git rev-parse HEAD`. **The `graphify` CLI is NOT installed here** — not on PATH, not a pip
+  module — so it cannot be refreshed on this machine. The existing build is from `411080c`
+  ("Add Unit 324 two-stage vacuum evaporation"), i.e. many commits stale.
+* **`/project-scaffolding`** — scaffolding wizard for NEW projects. Do NOT point it at this repo
+  root; it would scaffold over a mature codebase. Use only for a new sub-project in an empty
+  directory, confirming the target path first.
+
 ## Next steps
-1. **TD-004:** wire `TIC-328008` -> `FIC-328404` as a real cascade, or confirm from the P&ID that the
-   pairing is wrong. Today `FIC-328404` sits in a fake CAS that holds its seeded SP, and
-   `TIC-328008`'s output is computed and discarded. Scale the master's `op` so the handed-down SP is
-   exactly `R328_D001_M775_DES / RHO_775_KGM3` at design, or the pin breaks.
-2. **TD-005:** `FIC-328406`'s PV is its own opening in percent, published as `vol_m3h`. Inert while
-   the spare is MAN-0, wrong the moment anyone strokes it.
-3. `Master_PID_Tuning_Constants.md` still names the loops by their pre-rename tags and the retired
+1. Install the `graphify` CLI, then `graphify update .` to bring the graph up from `411080c`.
+2. `Master_PID_Tuning_Constants.md` still names the loops by their pre-rename tags and the retired
    ratio basis — refresh it.
 4. Confirm the 321-1 / 323-1 registration against the RUNNING HMI. Drag positions in localStorage
    `ots_ov_pos_v3` override the seed coords, so a browser that has been drag-nudged before will not

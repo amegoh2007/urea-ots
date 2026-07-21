@@ -223,7 +223,7 @@ Monotone approach, no ringing, settled by about 300 s. The design fixed point is
 
 ## TD-004 — the `TIC-328008` -> `FIC-328404` cascade is declared but not wired
 
-- **Status:** OPEN
+- **Status:** RESOLVED 2026-07-21 (see Resolutions, part 2)
 - **Opened:** 2026-07-21
 - **Files:** `backend/main.py` — `self.FIC_328404` seed, its `_fic_flow` call, `_ctrl_ipd(s.TIC_328008, ...)`
 
@@ -261,7 +261,7 @@ is an inferential offgas H2O mol%, which is an unusual master for a carbamate re
 
 ## TD-005 — `FIC-328406`'s PV is its own output, not a flow
 
-- **Status:** OPEN
+- **Status:** RESOLVED 2026-07-21 (see Resolutions, part 2)
 - **Opened:** 2026-07-21
 - **Files:** `backend/main.py` — `_ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)`, its telemetry block
 
@@ -281,3 +281,67 @@ moves the opening in MAN — the overlay would display the opening percentage la
 Either drive it through `_fic_flow` against a real design flow for the 755 standby draw so `pv` is a
 genuine m3/h measurement, or drop the `vol_m3h` key and relabel the overlay `%` to match what the
 value actually is. Confirm from the 322P002 / 328D003 datasheets which is intended.
+
+---
+
+## Resolutions, part 2 — 2026-07-21
+
+### TD-004 — RESOLVED
+
+`TIC-328008` is now the wired MASTER of `FIC-328404`, per the control narrative: with the slave on
+CAS, `FV-328404` strokes the 775 carbamate reflux to hold the water content of the gas leaving
+328C002 to 328E004 (PFD stream 737).
+
+* The master's OUTPUT is now the slave setpoint in **kg/h** — the `FFIC-329401` convention. This
+  matters because `_fic_flow` divides `cas_sp` by rho itself, so a master feeding a volumetric loop
+  must still emit MASS. `op` therefore spans the slave's old mass span `0..4000` kg/h instead of
+  `0..100 %`, and `Kc` is scaled by that 40x span change (3.0 -> 120.0) to preserve authority.
+* `act = -1.0` (DIRECT) was already correct and is unchanged: wetter offgas -> more reflux.
+* The controller is now stepped immediately BEFORE its slave so the cascade is same-tick like every
+  other master in the engine. Its PV depends only on constants and `s.a328_d001_P`, both settled at
+  that point. The old step further down — where its output was computed and discarded — is removed;
+  leaving it would have advanced the controller twice per tick.
+
+Design fixed point: `pv == sp == pv1 == pv2` gives `du == 0`, so `op` holds `R328_D001_M775_DES`
+exactly, which `_fic_flow` turns into `M775_DES / RHO_775_KGM3` — bit-identical to the slave's
+seeded `sp`, and the clamp against `sp_lo/sp_hi` returns it unchanged.
+
+Measured with `scratchpad/probe_td004_cascade.py`, stepping the master SP down 5 % (46.21 -> 43.90
+mol%, i.e. demanding drier offgas):
+
+| t (s) | FV-328404 stroke | reflux demand | slave SP |
+|---|---|---|---|
+| 0 | 30.20 % | 1675 kg/h | 1.5297 m3/h |
+| 300 | 35.66 % | 1999.58 kg/h | 1.8261 m3/h |
+| 900 | 46.45 % | 2596.61 kg/h | 2.3713 m3/h |
+
+Direction is physically right — drier offgas demands MORE reflux. Still climbing at 900 s, which is
+expected for an inferential composition loop with `Ti = 250 s`.
+
+`app.js` `CAS_MASTER` now lists `FIC-328404 -> TIC-328008` as a live pair, and `CAS_UNWIRED` is empty.
+
+### TD-005 — RESOLVED
+
+`FIC-328406` now indicates the real PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 ->
+328D003 Comp I, instead of being fed its own opening as a PV.
+
+PFD-22 col 741 is "Pur. Pr. C", **0 kg/h / 0 m3/h** at 40 C / 3.9 bar, rho 992.42 — the line exists
+but is normally closed at 100 % load, exactly like the 793 spare. So:
+
+* New constants: `S741_CAP_KGH = R328_C004_M739_DES` (33724 kg/h full stroke — bounded by the
+  328C004 bottoms that 328E007 actually condenses, so nothing is fabricated), `RHO_741_KGM3 =
+  992.42` (the PFD's own "Density eff." row), `A328_M741_T = 40.0` C.
+* Driven through `_fic_flow(..., rho=RHO_741_KGM3)` with `op_des = 100`, so 0 % stroke is exactly
+  0 flow and the loop is a genuine VOLUMETRIC m3/h measurement matching its `M3/H` overlay label.
+* Wired into the Comp-I balance as an INFLOW: `in_compI` gains `m_741`, and `P_compI` gains
+  `m_741 * (A328_M741_T - TI)`. Stream 740 is a boundary export in this model (there is no tracked
+  `m_740` — only the `R328_E007_TH_OUT` temperature), so the recycle returns liquid that would
+  otherwise leave the envelope.
+* The previous `_ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)` self-referential step is removed.
+* Telemetry publishes `pv`/`sp` in m3/h plus `m_kgh`; the old `vol_m3h = pv / A328_M755_RHO` is gone
+  (it divided a percentage by the density of the WRONG stream — 755 is Amm. Water, 741 is
+  purified process condensate).
+
+At design `m_741 == 0`, so every term above is byte-identical to the pre-741 balance.
+
+Verified for both: pin gate `leaves: 25  keys: 15  diffs: 0`, suite **103 passed**.
