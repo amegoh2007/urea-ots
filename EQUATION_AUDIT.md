@@ -93,7 +93,8 @@ that limits training fidelity · **C** = cosmetic / documentation.
 | **F-5** | A | 324E003 / 324F003 | C1↔C3, C10 | Identical defect at Stage 2 (`R324_W_EV2` = 97.71 % hard). **CLOSED** — see §5. |
 | **F-6** | B | 322E002 | C5 EoS/activity | HPCC condensation split `φᵢ = HPCC_FRAC_GAS_DES` is **invariant to shell temperature and loop pressure**. Raising LP-steam pressure changes duty and `T_prod` (via NTU) but not one mole of condensate. **CLOSED** — see §5. |
 | **F-7** | B | 328C003 | C7 Kinetics | The hydrolyser carries **no reaction extent at all** — urea hydrolysis is lumped into the back-solved `R328_C003_LAM748`. Arrhenius hydrolysis kinetics exist only in the read-only `ppm_infer_328701` soft sensor, not in the mass balance. |
-| **F-8** | B | 323/324/328/329 | C2 Component balance | Species tracking (`MW_COMP`, 9 components) exists **only in unit 322**. Everything downstream of LV-322501 is lumped-mass. No component balance, hence no C6 summation equations, downstream. |
+| **F-8** | B | 323/324/328/329 | C2 Component balance | Species tracking (`MW_COMP`, 9 components) exists **only in unit 322**. Everything downstream of LV-322501 is lumped-mass. No component balance, hence no C6 summation equations, downstream. **CLOSED for 323 + 324** — see §5; the 328 train remains (F-7 depends on it). |
+| **F-11** | B | 323F010 | C2 / source data | **The PFD's stream-317 composition is not reachable from stream 319 by evaporation.** Removing 319's water, NH₃ and CO₂ at the tabulated percentages takes out 10 163 kg/h against a tabulated 8 750 kg/h total, so ≈1.4 t/h of urea would have to *appear* across 323F010, and no stream feeds it there (331, the urea-recovery return, enters 323D002 downstream and is only 1 451 kg/h of urea). Found by closing F-8 — the rigorous component balance exposed it. Needs a licensor data clarification, not a code change. |
 | **F-9** | C | tooling | — | `scratchpad/regress.py` `os.chdir(BACKEND)` before writing `argv[1]`, so the relative gate command in CLAUDE.md §7 / handoff.md fails with `FileNotFoundError`. Gate must be invoked with an **absolute** output path. **CLOSED** — `regress.py` now resolves `argv[1]` before the chdir (TD-010). |
 | **F-10** | A | 323E002, 323E010, 324E001, 324E003 | C3, C8 | **Condensing-steam heater duty is unbounded below.** `Q = UA·(Tsat(p_chest) − T)` with `p_chest` clamped to 0.02 bar a (Tsat ≈ 17.5 °C) makes a shut steam valve a *refrigerator*: probe measured the Evap-I melt driven to **22 °C** and the 323C003 column to **13.6 °C**. A condensing chest cannot remove heat — it simply stops condensing. Found by disturbance-probing the F-2..F-5 fixes; the defect pre-dates them but was masked while the boil-up ignored the duty. **CLOSED** — see §5. |
 
@@ -203,12 +204,12 @@ clamps `op`, so no integral state can wind). Instrument dynamics are available a
 | Category | Verdict |
 |---|---|
 | C1 Total mass balance | ✔ closes everywhere; `closure_resid` diagnostics in 322R001/322E003 |
-| C2 Component species balance | ✗ **unit 322 only** (F-8) |
+| C2 Component species balance | ~ rigorous in **322, 323 and 324** (9 species in the HP loop, 6 in the solution train); the 328 desorption/hydrolysis train is still lumped mass (F-8 remainder) |
 | C3 Energy balance | ✔ **re-coupled to mass in 323/324** (F-2..F-5, F-10 closed); correct elsewhere |
 | C4 Isenthalpic/isothermal flash | ✔ isenthalpic flash at 323F004 (F-1) and isothermal (T,P) Rachford-Rice at 322E002 (F-6). JT letdown elsewhere — appropriate |
 | C5 EoS & activity | ~ Antoine (NH₃, H₂O), Clausius–Clapeyron carbamate bubble-P, carbamate K_p = p²_NH₃·p_CO₂ / Raoult / Henry K-values at 322E002, back-solved activity coefficients baked into the anchored K_des. No cubic EoS — reduced-order by design |
-| C6 Summation equations | ~ satisfied by construction (fractions computed as nᵢ/Σn); the 322E002 Rachford-Rice root now enforces Σy=1 and Σx=1 explicitly, but only in unit 322 (F-8) |
-| C7 Kinetics & reaction | ✔ reactor (Inoue–Kanai), stripper (hydrolysis + Arrhenius biuret); ✗ hydrolyser (F-7) |
+| C6 Summation equations | ✔ enforced explicitly where a phase split exists: the 322E002 Rachford-Rice root (Σy=1, Σx=1) and the 323/324 relative-volatility normalisation (Σw=1, Σy=1, asserted every tick in telemetry). Unit 328 outstanding |
+| C7 Kinetics & reaction | ✔ reactor (Inoue–Kanai), stripper (hydrolysis + Arrhenius biuret), **323/324 biuret formation** (2 Urea → Biuret + NH₃, Arrhenius, 5 stages); ✗ hydrolyser (F-7) |
 | C8 Transport phenomena | ✔ ε-NTU throughout, Damköhler axial profile, Kremser, O'Connell |
 | C9 Hydraulic & equipment | ✔ IEC 60534 equal-%, √ΔP, Francis weir, affinity laws, ejector momentum law |
 | C10 Constitutive & properties | ~ densities and cp are **constants** (no T-dependence); `tsat_steam`, `psat_water_bara`, `psat_nh3_bara` are live |
@@ -326,8 +327,67 @@ assumed — see below.
 
 Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `123 passed`.
 
+### Units 323 + 324 — downstream component species balance (F-8, and F-11 found while closing it)
+
+Species tracking stopped dead at LV-322501. Everything downstream was lumped mass moved by design
+split fractions: no C2 component balance, therefore no C6 summation equation, and the only
+composition-aware objects were read-only soft sensors that could not feed back.
+
+The layer **rides on top of** the existing total-mass and energy ODEs — it does not touch one of
+them, which is why C1 is untouched by construction and the design anchors cannot move:
+
+$$\frac{d(M w_i)}{dt}=\dot m_{in}w_{in,i}-\dot m_{liq}w_i-\dot m_{vap}y_i+\nu_i\xi,\qquad \sum w_i=\sum y_i=1$$
+
+Six species (Urea, Biuret, NH₃, CO₂, H₂O, HCHO) across 323C003 → 323F004 → 323F010 → 323D002 →
+324E001 → 324E003. Two pieces of real physics fell out of the design data and had to be modelled:
+
+**Biuret formation, 2 Urea → Biuret + NH₃.** Back-solving the PFD biuret rise (0.24 % at stream 208
+to 0.85 % at stream 402) gives design extents of 0.660 / 0.000 / 0.136 / 1.487 / 0.996 kmol/h across
+C003/F004/F010/E001/E003 — 3.28 kmol/h ≈ 338 kg/h total, against the 322 kg/h the PFD stream flows
+imply. The extents rise with temperature exactly as expected, the two hot evaporators dominating,
+which is *why* UF-85 is dosed at all. Arrhenius, second order in the urea fraction, sharing the
+stripper's own activation energy — one biuret reaction, one Eₐ.
+
+**Vapour composition by relative volatility.** y is not a free vector; it is set by the live liquid
+through αᵢ (volatility relative to water), back-solved at the design point *after* the reaction
+extent is removed, so the component balance closes exactly:
+
+$$y_i=\frac{\alpha_i w_i}{\sum_j \alpha_j w_j}$$
+
+— and that normalisation **is** the C6 summation equation. Biuret and HCHO are forced non-volatile;
+water is the reference (α = 1) and carries the closure residual, which is what a balance closer
+should do.
+
+**Finding F-11, and the reconciliation it forced.** Closing the balance immediately exposed that the
+PFD's stream-317 composition is not reachable from stream 319: the tabulated percentages remove
+10 163 kg/h against a tabulated 8 750 kg/h total, so ≈1.4 t/h of urea must appear across 323F010 and
+nothing feeds it there. Left free, that deficit propagates and walks the 324 melt ≈1.8 pp below its
+PFD anchor — two disagreeing urea numbers on one HMI screen, which would be worse than the constant
+being replaced. So `sol_pin_strength` takes the **urea/water pair** from the mass-and-energy-
+validated evaporation path (`w1_live` / `w2_live` / `R324_W_IN` — the anchors F-4/F-5 already made
+live, and CLAUDE.md §0 says PFD values override derived ones) while Biuret, NH₃, CO₂ and HCHO stay
+exactly where the component balance put them. **323F010 is deliberately left un-pinned**, so the
+discrepancy stays visible at the stage that causes it instead of being smeared across the train.
+
+**Verification** (`scratchpad/probe_species_323_324.py`):
+
+| stage | species Urea % | PFD | Biuret % | PFD |
+|---|---|---|---|---|
+| 323C003 | 68.705 | 68.74 | 0.364 | 0.36 |
+| 323F004 | 71.702 | 71.74 | 0.380 | 0.37 |
+| 323F010 | **78.444** | 80.00 | 0.430 | 0.42 |
+| 323D002 | 80.000 | 80.00 | 0.425 | 0.42 |
+| 324E001 | 94.309 | 94.31 | 0.696 | 0.69 |
+| 324E003 | 97.709 | 97.71 | 0.856 | 0.85 |
+
+Σw reads exactly `100.0000` at every stage on every tick; Σy likewise. The species and scalar urea
+figures agree to the published resolution. The single off-anchor cell is 323F010 — F-11, by design.
+
+Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `133 passed`.
+
 ### Still open
 
-F-7 (hydrolyser kinetics) and F-8 (downstream component balance) are **not** landed — F-8 is a
-cross-unit architectural change that needs its own project, and F-7 depends on it. F-9 is a tooling
-note: invoke the gate with an absolute output path (now fixed in `regress.py` itself).
+F-7 (hydrolyser kinetics) and the **328 remainder of F-8** are not landed: the desorption/hydrolysis
+train is still lumped mass, and a reaction extent needs species to act on, so F-7 stays blocked on
+extending the same layer through 328. F-9 is closed in `regress.py` itself. F-11 needs a licensor
+data clarification rather than a code change.

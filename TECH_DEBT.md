@@ -460,7 +460,8 @@ Depends on TD-009: an extent needs species, and the 328 train is lumped-mass.
 
 ## TD-009 — component species balance exists only in unit 322
 
-**Status: OPEN** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-8) · severity B
+**Status: PARTLY CLOSED 2026-07-22** (units 323 + 324 landed; unit 328 outstanding) · raised
+2026-07-22 (`EQUATION_AUDIT.md`, finding F-8) · severity B
 
 `MW_COMP` (9 species) is tracked rigorously through 322F001 → 322E001 → 322E002 → 322R001 →
 322E003. Everything downstream of LV-322501 — the whole of 323, 324, 328, 322C001 — is **lumped
@@ -471,15 +472,43 @@ mass** with design split fractions and back-solved latents. Consequences:
   `ppm_infer_328701`, the TIC-328008 inferential), which are read-only and cannot feed back;
 * TD-008 has nowhere to put a reaction extent.
 
-This is the single largest remaining architectural gap. It is also the largest change in the
-engine, touching every 323/324/328 stage ODE and every telemetry group, so it needs to be planned
-as its own project rather than slotted into a fix pass.
+### How the 323 + 324 half was closed
+
+A six-species layer (Urea, Biuret, NH3, CO2, H2O, HCHO) that **rides on top of** the existing
+total-mass and energy ODEs rather than replacing them — `d(M·w_i)/dt = ṁ_in·w_in,i − ṁ_liq·w_i −
+ṁ_vap·y_i + ν_i·ξ`, using the SAME flows the mass ODEs already compute. C1 is therefore untouched
+by construction and the design anchors cannot move; C2 and C6 are added on top.
+
+Two pieces of real physics fell out of the design data:
+
+* **Biuret formation, 2 Urea → Biuret + NH3.** Back-solving the PFD rise (0.24 % at stream 208 to
+  0.85 % at 402) gives extents of 0.660 / 0.000 / 0.136 / 1.487 / 0.996 kmol/h across
+  C003/F004/F010/E001/E003 — 338 kg/h total against the 322 kg/h the PFD flows imply, with the two
+  hot evaporators dominating exactly as expected. Arrhenius, second order in urea, sharing the
+  stripper's activation energy.
+* **Relative-volatility vapour compositions**, `y_i = α_i·w_i / Σ α_j·w_j`, with α back-solved at
+  design *after* the reaction extent is removed. That normalisation IS the C6 summation equation.
+
+Everything is anchored: at the design seed w == w_des at every stage, so y == y_des, so every
+species flow equals its design value and dw/dt == 0. Σw reads exactly 100.0000 on every tick.
+
+Closing it immediately exposed **TD-011 / finding F-11** (below), which forced the documented
+`sol_pin_strength` reconciliation onto the PFD urea anchors.
+
+### Still open — the 328 train
+
+The desorption / hydrolysis train (328C002/C003/C004, 328D001/D003, 322C001) is still lumped mass.
+TD-008 (hydrolyser reaction extent) remains blocked on extending the same layer through it: an
+extent needs species to act on. The pattern is now established and proven, so this is a mechanical
+extension rather than an architectural one.
 
 ---
 
 ## TD-010 — `scratchpad/regress.py` cannot be invoked with the documented relative path
 
-**Status: OPEN** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-9) · severity C (tooling)
+**Status: RESOLVED 2026-07-22** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-9) · severity
+C (tooling). `regress.py` now resolves `argv[1]` against the original cwd before `os.chdir(BACKEND)`,
+so the documented relative gate command works. The workaround below is no longer needed.
 
 `regress.py` does `os.chdir(BACKEND)` before writing `argv[1]`, so the gate command printed in
 CLAUDE.md §7 and handoff.md —
@@ -491,3 +520,41 @@ CLAUDE.md §7 and handoff.md —
 against its original cwd, invoke the gate with an absolute output path:
 
     "$PY" scratchpad/regress.py "D:/Work/Urea Simulation/scratchpad/pin_now.json"
+
+
+---
+
+## TD-011 — PFD stream 317 composition is unreachable from stream 319
+
+**Status: OPEN — needs a licensor data clarification, not a code change** · raised 2026-07-22
+(`EQUATION_AUDIT.md`, finding F-11) · severity B
+
+Found by closing TD-009: the rigorous component balance would not close across 323F010.
+
+Removing stream 319's water, NH3 and CO2 at the PFD's own tabulated percentages takes out
+
+    water  101570·0.2635 − 92820·0.1947 = 8692 kg/h
+    NH3    101570·0.0088 − 92820·0.0008 =  820 kg/h
+    CO2    101570·0.0066 − 92820·0.0002 =  651 kg/h
+                                          -----------
+                                          10163 kg/h
+
+against a tabulated total loss of 101570 − 92820 = **8750 kg/h**. For the licensor's numbers to
+close, ≈1413 kg/h of urea has to *appear* across 323F010 — and nothing feeds it there. Stream 331
+(the urea-recovery return, 3270 kg/h at 44.37 % urea = 1451 kg/h of urea) is the right magnitude but
+enters 323D002, which is downstream of the tag whose composition is tabulated.
+
+Consequence in the model: left free, the deficit propagates and walks the 324 melt ≈1.8 pp below its
+PFD anchor, which would put two disagreeing urea numbers on the same HMI screen. `sol_pin_strength`
+therefore takes the urea/water pair from the mass-and-energy-validated evaporation path
+(`w1_live` / `w2_live` / `R324_W_IN`) per CLAUDE.md §0, while the rigorously balanced minor species
+are left untouched. **323F010 is deliberately not pinned**, so the discrepancy stays visible at the
+stage that causes it (it publishes 78.44 % against the tabulated 80 %) instead of being smeared
+across the train.
+
+### Fix when scheduled
+
+Ask the licensor which of the three is authoritative — stream 319's volatile percentages, stream
+317's 80 % urea, or the 8750 kg/h evaporation duty. Any one of the three moving into line closes it.
+Until then the reconciliation above is the honest treatment: rigorous where the data supports it,
+PFD-anchored where it does not, and the disagreement published rather than hidden.

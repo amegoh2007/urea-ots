@@ -86,10 +86,14 @@ def test_constants_present():
     # ~7e-6 above the fully-converged W0_DES.  Bit-exactness is unaffected (pin AND live both use this
     # captured value); Phase-2 (H-1 seed re-pin) drives this first-tick creep to zero.
     assert abs(main.REACT_W_FEED_DES - main.reactor.W0_DES) < 1e-4
-    # State defaults
-    assert abs(main.state.HIC_322605 - 60.0) < 1e-9
-    assert isinstance(main.state.react_overflow_kmolh, dict)
-    assert abs(sum(main.state.react_overflow_kmolh.values())
+    # State defaults.  Assert on a FRESH State, not the shared module-level one: any earlier test
+    # module that moves an HP-loop handle (e.g. the ejector spindle in test_equation_audit_species)
+    # leaves main.state settled somewhere else, and "defaults" is then whatever ran last.  This was
+    # a latent ordering dependency -- these assertions are about State.__init__, not about history.
+    st = main.State()
+    assert abs(st.HIC_322605 - 60.0) < 1e-9
+    assert isinstance(st.react_overflow_kmolh, dict)
+    assert abs(sum(st.react_overflow_kmolh.values())
                - sum(main.STRIP_FEED207_KMOLH.values())) < 1e-6
 
 

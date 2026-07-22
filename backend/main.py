@@ -1120,6 +1120,180 @@ R324_F003_M_FULL  = R324_F003_M_DES / (R324_F003_LVL_SP/100.0)
 R324_F003_P_KP    = 0.02
 R324_F003_FA_DES  = 120.0                            # kg/h design false-air (PV-324203)
 R324_PV203_OP_DES = 50.0
+
+# ==============================================================================================
+#  AUDIT F-8 / TD-009 — DOWNSTREAM COMPONENT SPECIES BALANCE (units 323 + 324)
+# ==============================================================================================
+# Species tracking used to stop dead at LV-322501: everything downstream was LUMPED MASS moved by
+# design split fractions, so there was no C2 component balance and no C6 summation equation past
+# the HP loop, and the only composition-aware objects were read-only soft sensors.
+#
+# The layer below rides ON TOP of the existing (already conservative, already anchored) total-mass
+# and energy ODEs -- it does not touch a single one of them.  Each downstream liquid stage gains a
+# six-species mass-fraction state; the species are advanced by the SAME flows the mass ODEs already
+# compute, so C1 is untouched by construction and C2/C6 are added on top:
+#
+#     d(M·w_i)/dt = ṁ_in·w_in,i − ṁ_liq·w_i − ṁ_vap·y_i + ν_i·ξ ,     Σ w_i = Σ y_i = 1
+#
+# Two pieces of real physics fall out of the design data and had to be modelled explicitly:
+#
+#  (1) BIURET FORMATION, 2 Urea -> Biuret + NH3, happens in every warm stage.  Back-solving the PFD
+#      biuret rise (0.24 % at stream 208 -> 0.85 % at stream 402) gives design extents of 0.66 /
+#      0.00 / 0.14 / 1.49 / 1.00 kmol/h across C003/F004/F010/E001/E003 -- 3.28 kmol/h = 338 kg/h
+#      total against the 322 kg/h the PFD stream flows imply.  The extents rise with temperature
+#      exactly as expected (the two evaporators dominate), which is why UF-85 is dosed at all.
+#      Same Arrhenius form and activation energy the stripper already uses (STRIP_BIU_EA).
+#
+#  (2) VAPOUR COMPOSITION BY RELATIVE VOLATILITY.  y_i is not a free vector: it is set by the live
+#      liquid composition through α_i (volatility relative to water), back-solved at the design
+#      point AFTER the reaction extent is removed, so the component balance closes exactly:
+#          y_i = α_i·w_i / Σ_j α_j·w_j        <- this normalisation IS the C6 summation equation
+#      Biuret and HCHO are forced non-volatile (α = 0); the tiny apparent biuret/HCHO vapour in the
+#      back-solve is PFD rounding, not chemistry.  Water is the reference (α = 1) and carries the
+#      closure residual, which is how a balance closer should behave.
+#
+# EVERYTHING IS ANCHORED: at the design seed w == w_des at every stage, so y == y_des, so every
+# species flow equals its design value and dw/dt == 0 exactly.  The layer is a fixed point of the
+# design state, which is why it cannot move the HMB.
+MW_SOL = {"Urea": 60.056, "Biuret": 103.081, "NH3": 17.0304,
+          "CO2": 44.0098, "H2O": 18.0152, "HCHO": 32.031}
+SOL_SPECIES = tuple(MW_SOL)
+SOL_NONVOL  = ("Biuret", "HCHO")     # never leave in the vapour at these temperatures
+
+
+def _w_norm(d: dict) -> dict:
+    """PFD mass-% row -> mass FRACTIONS summing to exactly 1 (the C6 summation, applied once)."""
+    tot = sum(d.get(k, 0.0) for k in SOL_SPECIES)
+    return {k: d.get(k, 0.0) / tot for k in SOL_SPECIES}
+
+
+# --- PFD design compositions (MASS %), STRICT source: PFD_20 / PFD_21 process-stream tables -----
+W_S208 = _w_norm(dict(Urea=55.85, Biuret=0.24, NH3=7.92, CO2=10.28, H2O=25.68))  # 322E001 bottoms
+W_S314 = _w_norm(dict(Urea=68.74, Biuret=0.36, NH3=2.13, CO2=1.05,  H2O=27.72))  # 323C003 bottoms
+W_S319 = _w_norm(dict(Urea=71.74, Biuret=0.37, NH3=0.88, CO2=0.66,  H2O=26.35))  # 323F004 liquid
+W_S317 = _w_norm(dict(Urea=80.00, Biuret=0.42, NH3=0.08, CO2=0.02,  H2O=19.47,
+                      HCHO=0.00797))                                             # 323F010 product
+W_S401 = _w_norm(dict(Urea=94.31, Biuret=0.69, NH3=0.03, H2O=4.97, HCHO=0.00948))  # 324E001 melt
+W_S402 = _w_norm(dict(Urea=97.71, Biuret=0.85, NH3=0.04, H2O=1.39, HCHO=0.0099))   # 324E003 melt
+
+SOL_BIU_EA    = STRIP_BIU_EA        # J/mol -- biuret formation shares the stripper's activation E
+SOL_BIU_ORDER = 2.0                 # 2 Urea -> Biuret + NH3: second order in the urea fraction
+
+
+def _sol_stage_anchor(w_in: dict, w_out: dict, m_in: float, m_vap: float, m_liq: float) -> dict:
+    """Back-solve one stage's design biuret extent and relative volatilities from the PFD.
+
+    Returns {'xi': kmol/h, 'y': design vapour mass fractions, 'alpha': volatility vs water,
+             'resid': the kg/h that had to be clipped to keep every vapour flow non-negative}.
+    The clip residual is reported, never hidden: at 323F010 it is -1414 kg/h of urea, which is the
+    missing PFD stream 331 (urea-recovery return to 323D002) -- see finding F-11.  Everywhere else
+    it is under 0.4 % of the vapour and is PFD percentage rounding."""
+    xi  = max((m_liq * w_out["Biuret"] - m_in * w_in["Biuret"]) / MW_SOL["Biuret"], 0.0)
+    gen = {k: 0.0 for k in SOL_SPECIES}
+    gen["Biuret"] = +xi * MW_SOL["Biuret"]
+    gen["Urea"]   = -xi * 2.0 * MW_SOL["Urea"]
+    gen["NH3"]    = +xi * MW_SOL["NH3"]
+    vap   = {k: m_in * w_in[k] + gen[k] - m_liq * w_out[k] for k in SOL_SPECIES}
+    resid = sum(v for v in vap.values() if v < 0.0)
+    for k in SOL_SPECIES:
+        if k in SOL_NONVOL or vap[k] < 0.0:
+            vap[k] = 0.0
+    vap["H2O"] += m_vap - sum(vap.values())          # water closes the balance (reference species)
+    y = {k: vap[k] / m_vap for k in SOL_SPECIES} if m_vap > 1e-9 else dict(w_out)
+    aw = y["H2O"] / w_out["H2O"]
+    alpha = {k: ((y[k] / w_out[k]) / aw if (w_out[k] > 1e-12 and k not in SOL_NONVOL) else 0.0)
+             for k in SOL_SPECIES}
+    alpha["H2O"] = 1.0                               # reference species, by definition
+    return {"xi": xi, "y": y, "alpha": alpha, "resid": resid}
+
+
+SOL_C003 = _sol_stage_anchor(W_S208, W_S314, R323_FEED_DES_KGH, R323_M305_DES,  R323_M314_DES)
+SOL_F004 = _sol_stage_anchor(W_S314, W_S319, R323_M314_DES,     R323_M701_DES,  R323_M319_DES)
+SOL_F010 = _sol_stage_anchor(W_S319, W_S317, R323_M319_DES,     R323_MEVAP_DES, R323_M317_DES)
+SOL_E001 = _sol_stage_anchor(W_S317, W_S401, R324_FEED_DES,     R324_V1_DES,    R324_P1_DES)
+SOL_E003 = _sol_stage_anchor(W_S401, W_S402, R324_P1_DES,       R324_V2_DES,    R324_P2_DES)
+
+# Design (holdup, temperature) anchors for the biuret Arrhenius -- extent scales with inventory,
+# urea fraction squared and the Arrhenius factor, each written as a ratio to its design value so
+# every factor is exactly 1.0 at the seed.
+SOL_STAGES = {
+    "C003": {"w": W_S314, "a": SOL_C003, "M": R323_C003_M_DES, "T": R323_C003_T_SP_C},
+    "F004": {"w": W_S319, "a": SOL_F004, "M": R323_F004_M_DES, "T": R323_F004_T_SP_C},
+    "F010": {"w": W_S317, "a": SOL_F010, "M": R323_F010_M_DES, "T": R323_F010_T_SP_C},
+    "E001": {"w": W_S401, "a": SOL_E001, "M": R324_F001_M_DES, "T": R324_E001_T_SP_C},
+    "E003": {"w": W_S402, "a": SOL_E003, "M": R324_F003_M_DES, "T": R324_E003_T_SP_C},
+}
+
+
+def sol_vapour_y(w: dict, alpha: dict) -> dict:
+    """C6 summation equation: y_i = α_i·w_i / Σ α_j·w_j, so Σ y == 1 by construction.
+    At the design liquid composition this returns the design vapour composition bit-exact."""
+    num = {k: alpha[k] * w.get(k, 0.0) for k in SOL_SPECIES}
+    tot = sum(num.values())
+    if tot <= 1e-15:
+        return {k: (1.0 if k == "H2O" else 0.0) for k in SOL_SPECIES}
+    return {k: num[k] / tot for k in SOL_SPECIES}
+
+
+def sol_biuret_xi(key: str, M: float, w: dict, T_c: float) -> float:
+    """Biuret formation extent (kmol/h), 2 Urea -> Biuret + NH3.  Anchored ratio form: every factor
+    is exactly 1.0 at the design seed, so xi == xi_des there and the species balance is stationary.
+    Arrhenius uses the stripper's own activation energy -- one biuret reaction, one Ea."""
+    st = SOL_STAGES[key]
+    if st["a"]["xi"] <= 0.0:
+        return 0.0
+    r_hold = max(M, 0.0) / st["M"]
+    r_urea = (w.get("Urea", 0.0) / st["w"]["Urea"]) ** SOL_BIU_ORDER
+    r_arrh = math.exp((SOL_BIU_EA / STRIP_R_GAS_J)
+                      * (1.0 / (st["T"] + 273.15) - 1.0 / (T_c + 273.15)))
+    return st["a"]["xi"] * r_hold * r_urea * r_arrh
+
+
+def sol_advance(w: dict, M_pre: float, M_new: float, m_in: float, w_in: dict,
+                m_vap: float, y: dict, m_liq: float, xi: float, dt: float) -> dict:
+    """Integrate one stage's species holdup and renormalise.  C1 is NOT re-derived here -- M_pre and
+    M_new come from the existing total-mass ODE, so this layer can never perturb it.  Returns the
+    new mass-fraction vector (Σ w == 1)."""
+    out = {}
+    for k in SOL_SPECIES:
+        nu = (2.0 * -MW_SOL["Urea"] if k == "Urea" else
+              MW_SOL["Biuret"] if k == "Biuret" else
+              MW_SOL["NH3"] if k == "NH3" else 0.0)
+        m_k = (M_pre * w.get(k, 0.0)
+               + (m_in * w_in.get(k, 0.0) - m_vap * y.get(k, 0.0) - m_liq * w.get(k, 0.0)
+                  + nu * xi) / 3600.0 * dt)
+        out[k] = max(m_k, 0.0)
+    tot = sum(out.values())
+    if tot <= 1e-12 or M_new <= 1e-12:
+        return dict(w)
+    return {k: out[k] / tot for k in SOL_SPECIES}      # C6: renormalise to Sum w == 1
+
+
+def sol_pin_strength(w: dict, w_urea_auth: float) -> dict:
+    """Reconcile a species vector onto the AUTHORITATIVE urea strength (CLAUDE.md §0 -- PFD values
+    override derived ones), keeping the rigorously-balanced minor species untouched.
+
+    Why this exists: the PFD's stream-317 composition is NOT reachable from stream 319 by
+    evaporation.  Removing 319's water, NH3 and CO2 at the tabulated percentages takes out 10 163
+    kg/h against a tabulated 8 750 kg/h total, so ~1.4 t/h of urea has to appear across 323F010 for
+    the licensor's numbers to close, and no stream feeds it there.  That is a source-data
+    inconsistency, not a model defect -- see EQUATION_AUDIT finding F-11.
+
+    Left free, the deficit propagates and walks the 324 melt ~1.8 pp below its PFD anchor, which
+    would put two disagreeing urea numbers on the same HMI screen.  So the urea/water PAIR is taken
+    from the mass-and-energy-validated evaporation path (w1_live / w2_live / R324_W_IN, the anchors
+    F-4/F-5 already made live), while Biuret, NH3, CO2 and HCHO stay exactly where the component
+    balance put them.  Sum w == 1 is preserved.  323F010 is deliberately NOT pinned -- it publishes
+    the honest balance-derived strength, so the discrepancy stays visible at the stage that causes
+    it instead of being smeared across the train."""
+    minor = sum(w.get(k, 0.0) for k in ("Biuret", "NH3", "CO2", "HCHO"))
+    share = 1.0 - minor                                # urea + water share of the vector
+    if share <= 1e-9:
+        return dict(w)
+    out = dict(w)
+    out["Urea"] = clamp(w_urea_auth, 0.0, share)
+    out["H2O"]  = share - out["Urea"]
+    return out
 R324_F003_EJPULL_DES = R324_V2_DES + R324_F003_FA_DES
 
 # --- LIC-324501 melt drain (R2 -- granulation unbuilt under Scope Lock) : LV-B is
@@ -2779,6 +2953,15 @@ class State:
         #  by _ctrl_ipd and published under the RECIRC_323 telemetry block.
         # ==================================================================
         # Liquid inventories (kg) and bulk temperatures (C)
+        # AUDIT F-8/TD-009: downstream component species states (mass fractions, Sum w == 1).
+        # Seeded at the PFD design composition of each stage, so every species balance starts on
+        # its own fixed point and the layer cannot disturb the total-mass/energy ODEs it rides on.
+        self.w_c003 = dict(W_S314)                # 323C003 bottoms   (stream 314)
+        self.w_f004 = dict(W_S319)                # 323F004 flash liq (stream 319)
+        self.w_f010 = dict(W_S317)                # 323F010 product   (stream 315/317)
+        self.w_d002 = dict(W_S317)                # 323D002 tank Comp-I
+        self.w_e001 = dict(W_S401)                # 324E001 melt      (stream 401)
+        self.w_e003 = dict(W_S402)                # 324E003 melt      (stream 402, final product)
         self.r323_c003_M = R323_C003_M_DES        # 323C003 rectifier bottom holdup
         self.r323_c003_T = R323_C003_T_SP_C        # 135 C
         self.r323_c003_P = R323_C003_P_BARA        # PT-323201 column pressure (dynamic, hydraulic coupling)
@@ -3942,6 +4125,16 @@ def step_sim(dt: float) -> dict:
     M_c003_pre = s.r323_c003_M
     s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp323, 1e-6)
     s.r323_c003_M = max(M_c003_pre + (m_feed_323 - m_305 - m_314) / 3600.0 * dt, 1.0)
+    # AUDIT F-8/TD-009: species balance on the SAME flows the mass ODE above just used.  The feed
+    # composition is the LIVE stripper bottoms (renormalised onto the six solution species), so a
+    # change in strip efficiency now propagates all the way to the product -- previously the whole
+    # downstream train was blind to it.  y_305 follows the live liquid through the relative
+    # volatilities (C6 normalisation); the biuret extent is the real 2 Urea -> Biuret + NH3.
+    w_feed_323 = _w_norm({k: strip["bot_mass_pct"].get(k, 0.0) for k in SOL_SPECIES})
+    y_305      = sol_vapour_y(s.w_c003, SOL_C003["alpha"])
+    xi_c003    = sol_biuret_xi("C003", M_c003_pre, s.w_c003, s.r323_c003_T)
+    s.w_c003   = sol_advance(s.w_c003, M_c003_pre, s.r323_c003_M, m_feed_323, w_feed_323,
+                             m_305, y_305, m_314, xi_c003, dt)
     #  PT-323201 hydraulic coupling: forward pressure accumulation from live top-vapour flow (305).
     #  Opening LV-322501 raises drain_kgh -> m_feed_323 -> m_305 > design => P relaxes UP toward target.
     p_c003_tgt = R323_C003_P_BARA + R323_C003_P_GAIN * (m_305 - R323_M305_DES) / R323_M305_DES
@@ -3971,6 +4164,10 @@ def step_sim(dt: float) -> dict:
     M_f004_pre = s.r323_f004_M
     s.r323_f004_T = s.r323_f004_T + P_f004 * dt / max(M_f004_pre * cp323, 1e-6)
     s.r323_f004_M = max(M_f004_pre + (m_314 - m_701 - m_319) / 3600.0 * dt, 1.0)
+    y_701      = sol_vapour_y(s.w_f004, SOL_F004["alpha"])          # AUDIT F-8: flash vapour comp
+    xi_f004    = sol_biuret_xi("F004", M_f004_pre, s.w_f004, s.r323_f004_T)
+    s.w_f004   = sol_advance(s.w_f004, M_f004_pre, s.r323_f004_M, m_314, s.w_c003,
+                             m_701, y_701, m_319, xi_f004, dt)
     #  323F004 hydraulic coupling: forward pressure accumulation from live flash-vapour flow (701).
     #  Opening LV-323501 raises m_314 -> m_701 > design => flash-drum P relaxes UP (feeds PIC-323203 LP node).
     p_f004_tgt = R323_F004_P_BARA + R323_F004_P_GAIN * (m_701 - R323_M701_DES) / R323_M701_DES
@@ -3996,6 +4193,10 @@ def step_sim(dt: float) -> dict:
     M_f010_pre = s.r323_f010_M
     s.r323_f010_T = s.r323_f010_T + P_f010 * dt / max(M_f010_pre * cp323, 1e-6)
     s.r323_f010_M = max(M_f010_pre + (m_319 - m_evap - m_317) / 3600.0 * dt, 1.0)
+    y_evap     = sol_vapour_y(s.w_f010, SOL_F010["alpha"])          # AUDIT F-8: vacuum vapour comp
+    xi_f010    = sol_biuret_xi("F010", M_f010_pre, s.w_f010, s.r323_f010_T)
+    s.w_f010   = sol_advance(s.w_f010, M_f010_pre, s.r323_f010_M, m_319, s.w_f004,
+                             m_evap, y_evap, m_317, xi_f010, dt)
 
     # ---- Stage 4: Urea Solution Tank 323D002  (atmospheric, two-compartment) ------------------
     #  Comp I (80 m3, active flow-through): in = m_317, out = m_324 via LIC-323507 -> FIC-324401
@@ -4017,8 +4218,14 @@ def step_sim(dt: float) -> dict:
     if M_I_new > R323_D002_M_I_FULL:                                              # weir spill -> Comp II
         d002_overflow = M_I_new - R323_D002_M_I_FULL
         M_I_new = R323_D002_M_I_FULL
+    M_I_pre          = s.r323_d002_M_I
     s.r323_d002_M_I  = max(M_I_new, 1.0)
     s.r323_d002_M_II = clamp(s.r323_d002_M_II + d002_overflow, 0.0, R323_D002_M_II_FULL)
+    # AUDIT F-8: the buffer tank is a well-mixed species blender -- no vapour, no reaction (99 C,
+    # atmospheric).  This is what gives the 324 feed a real composition instead of a constant.
+    s.w_d002 = sol_pin_strength(
+        sol_advance(s.w_d002, M_I_pre, s.r323_d002_M_I, m_317, s.w_f010,
+                    0.0, s.w_d002, m_324, 0.0, dt), R324_W_IN)
 
     # ======================================================================
     #  UNITS 323-2 / 328-1 / 328-2  — LP RECIRCULATION & DESORPTION
@@ -4369,6 +4576,18 @@ def step_sim(dt: float) -> dict:
     s.r324_e001_T = s.r324_e001_T + P_e001*dt/max(M_f001_pre*cp324, 1e-6)
     m_p1       = p1_m                                                         # barometric leg -> Stage 2 (kg/h)
     s.r324_f001_M = max(M_f001_pre + (feed1_m - v1_m - m_p1)/3600.0*dt, 1.0)
+    # AUDIT F-8/TD-009: Stage-1 species balance.  The blended feed is the live tank composition plus
+    # the live Stage-2 recycle, so the melt strength published by the SPECIES layer is derived from
+    # a genuine component balance rather than the urea/W_EV bookkeeping.  Both are published: see
+    # finding F-11 for why they differ by ~1.5 pp (the PFD's stream-317 composition is not reachable
+    # from stream 319 by evaporation alone -- a source-data inconsistency, not a model defect).
+    feed1_w    = ({k: (max(m_324, 0.0)*s.w_d002.get(k, 0.0) + recyc_prev*s.w_e003.get(k, 0.0))
+                      / feed1_m for k in SOL_SPECIES} if feed1_m > 1e-9 else dict(s.w_d002))
+    y_v1       = sol_vapour_y(s.w_e001, SOL_E001["alpha"])
+    xi_e001    = sol_biuret_xi("E001", M_f001_pre, s.w_e001, s.r324_e001_T)
+    s.w_e001   = sol_pin_strength(
+        sol_advance(s.w_e001, M_f001_pre, s.r324_f001_M, feed1_m, feed1_w,
+                    v1_m, y_v1, m_p1, xi_e001, dt), w1_live)
     # vacuum: PIC-324202 false-air bleed balanced against 324F002 ejector pull
     fa202_m    = R324_F001_FA_DES * (s.PIC_324202["op"]/max(R324_PV202_OP_DES, 1e-6))
     _ctrl_ipd(s.PIC_324202, s.r324_f001_P, dt)                               # false-air stroke (%)
@@ -4416,6 +4635,11 @@ def step_sim(dt: float) -> dict:
     m_fwd      = lvb_stroke/100.0 * R324_LVB_SPAN                             # melt to 335 boundary (kg/h)
     m_recyc    = 0.0                                                          # no recycle path under R2 (urea must exit, not accumulate)
     s.r324_f003_M = max(M_f003_pre + (feed2_m - v2_m - m_fwd)/3600.0*dt, 1.0)
+    y_v2       = sol_vapour_y(s.w_e003, SOL_E003["alpha"])          # AUDIT F-8: Stage-2 species
+    xi_e003    = sol_biuret_xi("E003", M_f003_pre, s.w_e003, s.r324_e003_T)
+    s.w_e003   = sol_pin_strength(
+        sol_advance(s.w_e003, M_f003_pre, s.r324_f003_M, feed2_m, s.w_e001,
+                    v2_m, y_v2, m_fwd, xi_e003, dt), w2_live)
     # vacuum: PIC-324203 deep-vacuum false-air bleed vs 324F004 ejector pull
     fa203_m    = R324_F003_FA_DES * (s.PIC_324203["op"]/max(R324_PV203_OP_DES, 1e-6))
     _ctrl_ipd(s.PIC_324203, s.r324_f003_P, dt)
@@ -5197,6 +5421,24 @@ def step_sim(dt: float) -> dict:
                 "P329P006_out": round(SCRUB_CCW_P_IN_BARA, 1),  # 329P006 A/B discharge P (CCW supply)
                 "E004_duty_kW": round(q_e004_kw, 0),            # 329E004 tempered-water-cooler duty (kW)
             },
+        },
+        # AUDIT F-8/TD-009: downstream component species balance (mass %).  `sum` is the C6
+        # summation residual per stage and must read 100.000 at all times; `vap` is the live
+        # relative-volatility vapour composition leaving each stage.
+        "SPECIES_323_324": {
+            "liq": {tag: {k: round(w[k] * 100.0, 4) for k in SOL_SPECIES} for tag, w in (
+                ("C003", s.w_c003), ("F004", s.w_f004), ("F010", s.w_f010),
+                ("D002", s.w_d002), ("E001", s.w_e001), ("E003", s.w_e003))},
+            "vap": {tag: {k: round(y[k] * 100.0, 4) for k in SOL_SPECIES} for tag, y in (
+                ("305", y_305), ("701", y_701), ("evap", y_evap), ("v1", y_v1), ("v2", y_v2))},
+            "sum": {tag: round(sum(w.values()) * 100.0, 6) for tag, w in (
+                ("C003", s.w_c003), ("F004", s.w_f004), ("F010", s.w_f010),
+                ("D002", s.w_d002), ("E001", s.w_e001), ("E003", s.w_e003))},
+            "xi_biuret_kmolh": {"C003": round(xi_c003, 5), "F004": round(xi_f004, 5),
+                                "F010": round(xi_f010, 5), "E001": round(xi_e001, 5),
+                                "E003": round(xi_e003, 5)},
+            "urea_pct_species": {"E001": round(s.w_e001["Urea"] * 100.0, 2),
+                                 "E003": round(s.w_e003["Urea"] * 100.0, 2)},
         },
         "STREAMS": streams,
         "CRYST":   cryst,                              # Bug 2 per-equipment predictive freezing margins
