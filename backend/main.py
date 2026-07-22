@@ -254,7 +254,14 @@ DT              = 0.1            # s sim tick
 #          stay BIT-IDENTICAL to SLOW -- only the wall-clock pace changes.  60x => a 6 h reactor
 #          relaxation is seen in ~6 real-min.  Tune the factor here.
 SIM_SPEED       = {"SLOW": 1.0, "FAST": 60.0}    # sim-seconds advanced per real-second, per mode
-STEP_CAP        = 0.5            # s, max physical sub-step (== existing dt clamp -> Euler-stable)
+STEP_CAP        = 0.25           # s, max physical sub-step.  Was 0.5, which is UNSTABLE: the
+                                 # fastest flow loops (FIC-328404 et al., tau_s=5 s pure-gain +
+                                 # 1-lag) go non-monotone above a critical step ~0.389 s, so at
+                                 # 0.5 a bare settle diverges (op slams to a rail, PV runs away)
+                                 # with no disturbance -- FAST mode and any wall-clock stall
+                                 # >=0.389 s in SLOW both cross it.  0.25 keeps every loop monotone
+                                 # with margin; the pin runs at dt=0.1 so the design anchor is
+                                 # untouched.  See Expert_Interrogation_Log CP-1.
 T_BL_FEED_C     = 25.0           # C, BL NH3 supply temp to 321D003 (design feed temp)
 
 # ----- 322F001 HP Ejector (liquid-liquid jet pump) model -----
@@ -926,11 +933,12 @@ A328_D003_M343_DES = R328_C002_M738_DES + R3232_E011_M402_DES + R3232_E011_M401_
 S793_CAP_KGH = R3232_E011_M402_DES                          # 1534.0 kg/h at 100 % stroke
 # Stream 741 (TD-005): purified process-condensate RECYCLE, 328E007 -> 328E001 -> 328D003 Comp I.
 # PFD-22 col 741 is "Pur. Pr. C", 0 kg/h / 0 m3/h at 40 C / 3.9 bar with rho 992.42 -- i.e. the line
-# exists but is NORMALLY CLOSED at 100 % load, exactly like the 793 spare.  Full-stroke capacity is
-# bounded by the condensate actually available: the 328C004 bottoms (739) that 328E007 condenses,
-# so nothing is fabricated.  The recycle diverts liquid that would otherwise leave the modelled
-# envelope as the 740 export and returns it to Comp I, so it enters the holdup ODE as an INFLOW.
-S741_CAP_KGH  = R328_C004_M739_DES                          # 33724 kg/h at 100 % stroke (740 source)
+# exists but is NORMALLY CLOSED at 100 % load, exactly like the 793 spare.  It is a DIVERSION of
+# the 740 boundary export (the condensed 328C004 bottoms, stream 739), NOT new mass: at run time
+# m_741 is clamped to m739_prev and the 740 export is published as (m_739 - m_741), so Comp I gains
+# exactly what the boundary loses and the plant balance closes (Expert_Interrogation_Log CP-2).
+# S741_CAP is the full-stroke ask; the min() against m739_prev enforces the physical cap.
+S741_CAP_KGH  = R328_C004_M739_DES                          # 33724 kg/h full-stroke ask (= design 740)
 RHO_741_KGM3  = 992.42                                      # kg/m3, PFD col 741 "Density eff." @ 40 C
 A328_M741_T   = 40.0                                        # C, PFD col 741 operating temperature
 S793_M_DES   = 0.0                                          # PFD design flow (normally closed)
@@ -3810,6 +3818,7 @@ def step_sim(dt: float) -> dict:
     m744_prev  = s.tlag.get("R3232_744",  R3232_E003_M744_DES)
     m718B_prev = s.tlag.get("R3232_718B", R3232_M718B_DES)
     m931_prev  = s.tlag.get("R328_M931",  R328_C004_M931_DES)
+    m739_prev  = s.tlag.get("R328_739",   R328_C004_M739_DES)   # 328C004 bottoms -> 328E007 -> 740
 
     # ----- Stage 1 : 323C005 vent scrub -> 328V001 -> Comp-I feed ---------
     Tc005    = s.a323_c005_T
@@ -3838,21 +3847,28 @@ def step_sim(dt: float) -> dict:
     m_793    = _fic_flow(s.FIC_328405, S793_CAP_KGH, 100.0, s.tlag, "F_328405", dt,
                          rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
     # Stream 741 (TD-005): purified process-condensate RECYCLE 328E007 -> 328E001 -> 328D003 Comp I.
-    # Normally closed (PFD 741 = 0 kg/h at 100 % load), so at design m_741 == 0 and every term below
-    # is byte-identical to the pre-741 balance -- the boot pin cannot move.  Opening it returns
-    # liquid that would otherwise leave the envelope as the 740 export, so it is an INFLOW at the
-    # PFD-741 temperature (40 C) and carries its own enthalpy term against the Comp-I bulk TI.
-    m_741    = _fic_flow(s.FIC_328406, S741_CAP_KGH, 100.0, s.tlag, "F_328406", dt,
-                         rho=RHO_741_KGM3)                        # volumetric loop, returns kg/h
+    # It is a DIVERSION of the 740 boundary export, NOT new mass: the 328C004 bottoms (739) are
+    # condensed in 328E007 to stream 740, and m_741 of that is taken back to Comp I while the
+    # REMAINDER (m_740 = m739_prev - m_741) leaves the envelope.  So the plant balance closes:
+    # Comp I gains m_741, the 740 export loses exactly m_741.  The draw is therefore clamped to the
+    # condensate that actually exists this tick (m739_prev, one-tick-delayed like every other tear).
+    # Normally closed (PFD 741 = 0 kg/h at 100 % load), so at design m_741 == 0, m_740 == m_739 and
+    # every term below is byte-identical to the pre-741 balance -- the boot pin cannot move.
+    m_741_raw = _fic_flow(s.FIC_328406, S741_CAP_KGH, 100.0, s.tlag, "F_328406", dt,
+                          rho=RHO_741_KGM3)                       # volumetric loop, returns kg/h
+    m_741    = min(m_741_raw, m739_prev)                          # cannot recycle more than 740 carries
     m_735    = R328_C002_M738_DES * (s.a328_d003_MI / A328_D003_MI_DES)   # -> 738 via 328E007
     in_compI = A328_D003_M719 + A328_D003_M720 + A328_D003_M721 + bot_c005 + m_741
     out_compI= m_735 + m_401 + m_402 + m_793
+    # Energy: the carbamate-formation exotherm (LAM_I) is back-solved on the CARBAMATE feed only, so
+    # it must NOT be levied on the 100 %-water 741 recycle -- apply it to (in_compI - m_741).  The
+    # recycle still carries its own sensible-heat term at the PFD-741 temperature (40 C) vs bulk TI.
     P_compI  = ((A328_D003_M719*(A328_D003_M719_T - TI)
                  + A328_D003_M720*(A328_D003_M720_T - TI)
                  + A328_D003_M721*(A328_D003_M721_T - TI)
                  + bot_c005     *(A328_D003_V001_T  - TI)
                  + m_741        *(A328_M741_T       - TI))/3600.0*A328_CP
-                + in_compI/3600.0*A328_D003_LAM_I)
+                + (in_compI - m_741)/3600.0*A328_D003_LAM_I)
     s.a328_d003_TI = TI + P_compI*dt/max(s.a328_d003_MI*A328_CP, 1e-6)
     s.a328_d003_MI = max(s.a328_d003_MI + (in_compI - out_compI)/3600.0*dt, 1.0)
     TII      = s.a328_d003_TII
@@ -4088,6 +4104,7 @@ def step_sim(dt: float) -> dict:
     s.tlag["R3232_744"]  = m_744
     s.tlag["R3232_718B"] = m_718B
     s.tlag["R328_M931"]  = m_931
+    s.tlag["R328_739"]   = m_739       # 328C004 bottoms this tick -> caps next tick's 741 recycle
 
     # ======================================================================
     #  UNIT 324 — TWO-STAGE VACUUM EVAPORATION  (rigorous, conservative)
@@ -4610,7 +4627,9 @@ def step_sim(dt: float) -> dict:
                 "LI_328504":  round(s.a328_c004_M / R328_C004_M_DES * 50.0, 1),
                 "steam931_th":round(m_931 / 1000.0, 2),                    # FIC-329401 LP steam (t/h)
                 "ovhd750_th": round(m_750 / 1000.0, 2),                    # relief -> 328C002 (t/h)
-                "bot739_th":  round(m_739 / 1000.0, 2),                    # bottoms -> 328E007 boundary (t/h)
+                "bot739_th":  round(m_739 / 1000.0, 2),                    # bottoms -> 328E007 (stream 739, t/h)
+                "recyc741_th":round(m_741 / 1000.0, 2),                    # 740 condensate diverted back to Comp I (FIC-328406, t/h)
+                "export740_th":round(max(m_739 - m_741, 0.0) / 1000.0, 2), # 740 leaving the envelope = 739 - 741 (t/h)
                 "TT_328006":   round(R328_E007_TH_OUT, 1),                 # stream 740 condensate temp (89C, 328E007 hot out)
                 "AI_328701":   round(_ai701_uS, 2),                        # process-condensate conductivity (uS/cm @25C)
                 "nh3_740_ppm": round(_nh3_740, 3),                        # derived trace NH3 slip (ppm mass)
