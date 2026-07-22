@@ -10,52 +10,81 @@ tag: are the equations bound correctly, is the solver engine right, is hybrid va
 and what equations are missing. Deliverable mode is **audit + auto-fix**, one unit at a time.
 
 ## Current state of the code
-* Audit report: **`EQUATION_AUDIT.md`** (new) — architecture verdicts, 10-item findings register,
-  per-tag tables for units 320/321/322/323/324/328/329, category coverage summary.
+* Audit report: **`EQUATION_AUDIT.md`** — architecture verdicts, 10-item findings register,
+  per-tag tables for units 320/321/322/323/324/328/329, category coverage summary, applied fixes.
 * **Solver verdict: Sequential-Modular is CORRECT for all ~57 tags.** Recycles are torn with
   prior-step lags; the tear variables are real dynamic states, dt ≪ every process τ, and SM gives
   bounded per-tick cost with no convergence failure — an EO solve could stall the HMI mid-transient
   and would put solver tolerance inside a `diffs 0` contract. No tag needs EO.
-* **Hybrid variability: required, already present, but uneven.** Split fractions, calibrated η
-  modifiers, back-solved λ/UA, Inoue-Kanai, the ejector spindle law and the soft sensors are all
-  legitimate hybrid layers. The gap is that several of them are *frozen constants* rather than
-  functions of state (finding F-6).
-* **LANDED this session — units 323 + 324 (findings F-1..F-5, F-10):** every vaporiser outside the
-  HP loop had its vapour rate bound as a frozen design split fraction of the live inflow, so the
-  mass balance and the energy balance were solved independently and the live heater duty had no
-  authority over the boil-up. Now:
-  * boil-up is duty-limited — `m_vap = min(φ·m_in, m_vap_des·q_avail/Q_des)` on 323C003/323E002,
-    323F010/323E010, 324E001, 324E003;
-  * 323F004 runs a **true isenthalpic flash**: saturation constraint
-    `T_flash = 106 + [Tsat(P) − Tsat(1.13)]` plus the enthalpy balance
-    `m_701·λ = m_314·cp·ΔT − M·cp·(T_sat−T)/τ`, which collapses the existing energy ODE to exactly
-    `dT/dt = (T_sat − T)/τ` (energy conserved);
-  * the 324 melt strengths `w1_live`/`w2_live` are **outputs**, not the pinned `R324_W_EV*`
-    constants, and drive `urea_pct` / `PY-324201` / `AY-324701`; Stage-2 feed enthalpy uses the live
-    Stage-1 outlet temperature; the recycle carries its live strength via `s.tlag["R324_recyc_w"]`;
-  * **F-10** — all four condensing-steam chests floored at `max(Q, 0)`. Un-floored, a shut steam
-    valve clamps `p_chest` to 0.02 bar a (Tsat ≈ 17.5 °C) and `UA·(Tsat − T)` turned every heater
-    into a *refrigerator*: probe-measured 22 °C Evap-I melt and 13.6 °C in 323C003;
-  * `conc_infer_324` gained a band clamp on the reference mole fraction — `w_des` is now a live
-    argument that legally reaches 0 on cold start and previously divided by zero there (this is
-    what broke the four `test_transient_coldstart` tests mid-pass).
-* New tests: `backend/test_equation_audit_323_324.py` (5). Suite 110 -> **115**.
-* Docs updated autonomously: As-Built reference gained **Revision Delta #15** (and its stale
-  "328E021 hot side is static" gap note marked CLOSED — stream 749 has been a live energy-balance
-  closure for some time). `TECH_DEBT.md` gained **TD-007..TD-010**.
-* `scratchpad/regress.py` fixed (TD-010): `argv[1]` is now resolved against the original cwd, so
-  the gate command as written in CLAUDE.md §7 finally works.
+* **Hybrid variability: required, already present, and now much less frozen.** Split fractions,
+  calibrated η modifiers, back-solved λ/UA, Inoue-Kanai, the ejector spindle law and the soft
+  sensors are all legitimate hybrid layers. Both remediation slots so far attacked the same defect
+  class — *a split fraction is only a valid hybrid layer if it is a function*, and several were
+  constants.
+
+### Remediation slot 1 — units 323 + 324 (findings F-1..F-5, F-10), commits `7ac7455` / `93a2fd6`
+Every vaporiser outside the HP loop had its vapour rate bound as a frozen design split fraction of
+the live inflow, so the mass balance and the energy balance were solved independently and the live
+heater duty had no authority over the boil-up. Now:
+* boil-up is duty-limited — `m_vap = min(φ·m_in, m_vap_des·q_avail/Q_des)` on 323C003/323E002,
+  323F010/323E010, 324E001, 324E003;
+* 323F004 runs a **true isenthalpic flash**: saturation constraint
+  `T_flash = 106 + [Tsat(P) − Tsat(1.13)]` plus the enthalpy balance
+  `m_701·λ = m_314·cp·ΔT − M·cp·(T_sat−T)/τ`, which collapses the existing energy ODE to exactly
+  `dT/dt = (T_sat − T)/τ` (energy conserved);
+* the 324 melt strengths `w1_live`/`w2_live` are **outputs**, not the pinned `R324_W_EV*`
+  constants, and drive `urea_pct` / `PY-324201` / `AY-324701`;
+* **F-10** — all four condensing-steam chests floored at `max(Q, 0)`. Un-floored, a shut steam
+  valve clamped `p_chest` to 0.02 bar a (Tsat ≈ 17.5 °C) and `UA·(Tsat − T)` turned every heater
+  into a *refrigerator*: probe-measured 22 °C Evap-I melt and 13.6 °C in 323C003;
+* `conc_infer_324` gained a band clamp on the reference mole fraction (`w_des` is now a live
+  argument that legally reaches 0 on cold start and divided by zero there).
+
+### Remediation slot 2 — 322E002 HPCC (finding F-6 / TD-007) — LANDED THIS SESSION
+`HPCC_FRAC_GAS_DES` was a split measured at 170 °C / 144.2 bar a and then frozen, making the
+condenser thermodynamically inert: shell temperature and synthesis pressure moved the duty and the
+NTU outlet temperature but **not one mole of condensate**. The calibration is not discarded — it
+becomes the anchor of a real flash.
+* `_hpcc_flash_split()` back-solves `K_des,i` from `HPCC_FRAC_GAS_DES` and the LIVE feed every tick
+  (so the melt's measured activity coefficients stay baked in), then corrects to live (T,P) via the
+  carbamate equilibrium `Kp = p²_NH₃·p_CO₂`. Because Kp is a **third-order** product the
+  dissociation-*pressure* slope is ΔH_carb/3 ≈ 53.3 kJ/mol — literature-confirmed (Bennett 1953;
+  Ramachandran 1998) and derived from a constant already in the code. Raoult for H₂O
+  (36 900 J/mol), Henry for N₂. φ_des ∈ {0,1} species sit outside the flash.
+* Rachford-Rice by **bisection, not Newton**: g(ψ) is strictly decreasing, so 60 sweeps are exact to
+  2⁻⁶⁰ at bounded cost with no possible convergence failure inside an OTS tick.
+* **The equilibrium flash alone was wrong for this vessel** and this is the important part. The
+  distributing K-values are tightly clustered, so a common factor moves the whole mixture together:
+  the raw target swings φ_CO₂ 0.0009 → 1.0 across 150 → 190 °C. `References/HPCC description.md`
+  §5.2–5.3 says 322E002 is interfacial **mass-transfer** limited, so φ is relaxed toward the target
+  over `HPCC_TAU_FILL_MIN`, making the split a dynamic state `s.hpcc_phi`. That was the genuinely
+  missing equation — the condenser had no composition dynamics at all.
+* Three independent anchors keep the pin: the flash short-circuits to the calibration when the T
+  and P ratios are exactly 1; `dt = 0` on module-load/boot-pin passes zeroes the relaxation; and the
+  result is blended through `_disturbance_gate` exactly as `T_prod` is.
+* `p_bub` de-pinned from the frozen `HPCC_T_PROD_DES_C` onto the live gated `T_prod` (telemetry
+  only — it does not enter `pt_target`, so no new loop). `phi_gas` published in the packet.
+* **Loop-gain check** against the `_disturbance_gate` runaway path came back **negative feedback**
+  in both legs, verified not assumed: T_prod spans 0.0205 °C (shell disturbance) and 0.2329 °C
+  (N/C disturbance) over the final five minutes — monotone convergence, no ringing.
+
+New tests: `backend/test_equation_audit_322e002.py` (8). Probe: `scratchpad/probe_322e002_flash.py`.
+Docs updated autonomously: As-Built gained **Revision Delta #16** and a rewritten §3.6 (the φ table
+now states it is the anchor, not the answer) and §1.4; `TECH_DEBT.md` TD-007 marked **CLOSED**;
+`EQUATION_AUDIT.md` §5 gained the 322E002 section and the C3/C4/C5/C6 category verdicts were
+refreshed (they still described the pre-remediation state).
 
 ## How to gate
 ```
 set PY=%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe
 %PY% scratchpad\regress.py scratchpad\pin_now.json
 %PY% scratchpad\pindiff.py scratchpad\pin_now.json scratchpad\golden_pin.json   ->  25 / 15 / 0
-cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  115 passed
+cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  123 passed
 ```
 Use `-p no:cacheprovider` — `backend/.pytest_cache` holds stale dirs that raise `WinError 183`.
-**The suite takes 4–6 minutes and the pin settle takes ~2** — run them with a raised timeout or in
-the background; the default 2-minute Bash timeout kills both before they print anything.
+**The suite takes 5–8 minutes and the pin settle takes ~2** — run them with a raised timeout or in
+the background; the default 2-minute Bash timeout kills both before they print anything. `pytest -q`
+buffers, so a background output file stays EMPTY until the run finishes — that is not a hang.
 
 ## Python on this machine (do NOT re-derive — this cost an earlier session dearly)
 The bare `python` alias is a Microsoft Store stub that errors. **Python 3.14.6 IS installed:**
@@ -70,14 +99,12 @@ Never conclude an interpreter is absent from one alias. Never pipe a heredoc int
   (model side correct; only the audit helper is stale). Directive was "leave phi_sp alone".
 * **TD-006** — G8 stripper duty is feed-PROPORTIONAL, not a rigorous per-species enthalpy balance,
   and there is no steam-limited flood regime. Needs a species-enthalpy layer.
-* **TD-007** (audit F-6) — HPCC 322E002 condensation split `HPCC_FRAC_GAS_DES` is invariant to
-  shell temperature and loop pressure. Must become φᵢ(T_prod, P) in anchored-correction form, and
-  the new loop gain must be checked against the `_disturbance_gate` self-excitation path.
 * **TD-008** (audit F-7) — 328C003 hydrolyser has no reaction extent; the Arrhenius rate law
   already exists but only inside the read-only `ppm_infer_328701` soft sensor. Depends on TD-009.
 * **TD-009** (audit F-8) — component species balance exists **only in unit 322**. Everything
   downstream of LV-322501 is lumped mass, so there is no C2 balance and no C6 summation equation
   downstream. Largest remaining architectural gap; needs its own project, not a fix slot.
+* ~~TD-007~~ — **CLOSED** this session (see remediation slot 2).
 
 ## Standing session commands (CLAUDE.md sections 6/7)
 * **Caveman mode ON** — invoke the `caveman` skill at session start; prose only, code/commits normal.
@@ -94,9 +121,16 @@ Never conclude an interpreter is absent from one alias. Never pipe a heredoc int
 ## Durable gotchas (things that wasted time — don't repeat)
 * **Subagent/workflow capacity is a real blocker.** A 12-agent audit workflow was launched and
   every agent died on "You've hit your session limit"; the workflow returned `[]` with
-  `agents_done 0, agents_error 12`. Zero results were cached, so resuming would re-run everything.
-  The audit was then done **inline in the main loop**, unit by unit, which is also what Scope Lock
-  wants. Prefer inline for this repo.
+  `agents_done 0, agents_error 12`. Zero results were cached. The audit was then done **inline in
+  the main loop**, unit by unit, which is also what Scope Lock wants. Prefer inline for this repo.
+* **`s.F_CO2_th` is NOT an operator handle** — `step_sim` recomputes it every tick from the feed
+  line (main.py:3277), so assigning it in a probe does nothing and the disturbance gate stays 0.
+  Use `s.ratio_SP`, `s.HIC_322602`, `s.HIC_322605` or `s.steam.valve_supply_pct`.
+* **`s.steam.valve_supply_pct` needs `s.steam.pic204_mode = "MAN"` first** — PIC-329204 in AUTO
+  drags the valve straight back to its seed and the gate never opens.
+* **The pin is a unit-322 contract only** (HPCC_UA, REACT_TEAR_DES, GCB pins …). It is blind to
+  323/324/328 behaviour, so `diffs 0` alone does NOT prove a downstream change is safe — probe it.
+  Conversely it IS sensitive to 322 changes, which is why 322E002 work needs the triple anchor.
 * Workflow audits: a dead/limit-killed refuter returns a NULL verdict; the script bucketed null as
   "refuted", so a "0 survived" headline was an artifact. Count nulls separately and Read the journal.
 * Overlay placement: the baked DCS indicator is a flag (wide value BAR + narrower TAB below), so the
@@ -106,17 +140,16 @@ Never conclude an interpreter is absent from one alias. Never pipe a heredoc int
   with `New-Object System.Text.UTF8Encoding $false`.
 * Backend changes to any of the four pin-hashed files invalidate the pin CACHE (forces a re-settle)
   but do NOT change the 15 pin VALUES — expect `diffs 0` still.
-* The pin is a **unit-322 contract only** (HPCC_UA, REACT_TEAR_DES, GCB pins …). It is blind to
-  323/324/328 behaviour, so `diffs 0` alone does NOT prove a downstream change is safe — probe it.
 
 ## Next steps
-1. **TD-007** (HPCC φᵢ(T,P)) — highest-value remaining fix; pin-sensitive, needs anchored-correction
-   form and a `_disturbance_gate` loop-gain check.
-2. **TD-009** then **TD-008** — species layer downstream of 322, then real hydrolyser kinetics.
-3. Refresh the graphify graph once semantic extraction is available (do not AST-only-merge).
-4. `Master_PID_Tuning_Constants.md` still names loops by pre-rename tags / the retired ratio basis.
-5. Confirm the 321-1 / 323-1 registration on the RUNNING HMI (LSK was bumped v3 -> v4).
-6. `FFIC-329401` / `TIC-328012` sit on two-box SP/MV ratio panels; which row the live PV covers is a
+1. **TD-009** — component species layer downstream of unit 322. Largest remaining gap and the
+   blocker for TD-008; needs its own project, not a fix slot.
+2. **TD-008** — real 328C003 hydrolyser kinetics, once TD-009 gives it species to work on.
+3. **TD-006** — rigorous stripper per-species enthalpy balance + steam-limited flood regime.
+4. Refresh the graphify graph once semantic extraction is available (do not AST-only-merge).
+5. `Master_PID_Tuning_Constants.md` still names loops by pre-rename tags / the retired ratio basis.
+6. Confirm the 321-1 / 323-1 registration on the RUNNING HMI (LSK was bumped v3 -> v4).
+7. `FFIC-329401` / `TIC-328012` sit on two-box SP/MV ratio panels; which row the live PV covers is a
    design decision, left alone.
-7. Decide whether to build the ejector motive-steam model.
-8. Blocked on you: sprint items 7, 22, 25, and item 3a (#17) pending a 328D003 level controller.
+8. Decide whether to build the ejector motive-steam model.
+9. Blocked on you: sprint items 7, 22, 25, and item 3a (#17) pending a 328D003 level controller.

@@ -59,7 +59,7 @@ Empirical / data-driven layers currently in place:
 
 | Layer | Where | Anchor |
 |---|---|---|
-| HPCC component split φᵢ | `HPCC_FRAC_GAS_DES` (main.py:1515) | design HMB |
+| HPCC component split φᵢ | `HPCC_FRAC_GAS_DES` → `_hpcc_flash_split` (main.py:1553 / 1971) | design HMB; now the **anchor** of a live (T,P) flash |
 | Stripper split fᵢ + η modifiers | `STRIP_FRAC_DES`, `g_T/g_NC/g_HC` (main.py:1453) | design HMB |
 | Reactor θᵢ vapour/liquid split | `REACT_THETA_OG` (main.py:1571) | design HMB |
 | Scrubber pinned discharges | `SCRUB_*_KMOLH_DES` (main.py:2140) | design HMB |
@@ -68,11 +68,14 @@ Empirical / data-driven layers currently in place:
 | Ejector negative equal-% spindle law | `EJ_SPINDLE_R` (main.py:1152) | 322F001 datasheet |
 | Soft sensors (`conc_infer_324`, `ppm_infer_328701`) | main.py:66 / 136 | PFD guarantees |
 
-**Where hybrid variability is still missing** is the substance of finding **F-6** below: the
-empirical split fractions are *frozen at their design values* and carry **no state dependence**.
+**Where hybrid variability was missing** is the substance of findings **F-1..F-6** below: the
+empirical split fractions were *frozen at their design values* and carried **no state dependence**.
 A split fraction is only a valid hybrid layer if it is a *function* — φᵢ(T, P, composition). As
-coded, φᵢ is a constant, so the units they describe cannot respond to the very disturbances an
-OTS exists to train on.
+originally coded, φᵢ was a constant, so the units they describe could not respond to the very
+disturbances an OTS exists to train on. Both remediation slots in §5 close exactly this class: the
+323/324 vaporisers now bind φ to the live duty, and 322E002 binds φᵢ to a live (T,P) flash. The
+constants are not discarded — each becomes the *anchor* of the function, evaluating to itself at the
+design seed, which is what keeps the HMB bit-exact.
 
 ---
 
@@ -83,16 +86,16 @@ that limits training fidelity · **C** = cosmetic / documentation.
 
 | ID | Sev | Unit | Category | Finding |
 |----|-----|------|----------|---------|
-| **F-1** | A | 323F004 | C4 Isenthalpic flash | Adiabatic-flash vapour is a **frozen split fraction** `m_701 = φ·m_314`, not an enthalpy balance. Feed temperature from Stage 1 can move ±30 °C and the flash produces identical vapour. |
-| **F-2** | A | 323C003 / 323E002 | C1↔C3 | Boil-up `m_305 = φ·m_feed` is **independent of the live heater duty** `Q_e002_kw`. Shutting PV-329202 gives zero duty yet full design overhead vapour; the energy deficit is dumped into the temperature ODE. |
-| **F-3** | A | 323F010 / 323E010 | C1↔C3 | Identical defect: `m_evap = φ·m_319` ignores `Q_e010_kw`. |
-| **F-4** | A | 324E001 / 324F001 | C1↔C3, C10 | `p1_m = urea1_in / R324_W_EV1` pins the Stage-1 melt at **94.31 % hard**. Water removed is fixed by a constant, not by `Q_e001_kw`. Cutting Evap-I steam cannot dilute the product. |
-| **F-5** | A | 324E003 / 324F003 | C1↔C3, C10 | Identical defect at Stage 2 (`R324_W_EV2` = 97.71 % hard). |
-| **F-6** | B | 322E002 | C5 EoS/activity | HPCC condensation split `φᵢ = HPCC_FRAC_GAS_DES` is **invariant to shell temperature and loop pressure**. Raising LP-steam pressure changes duty and `T_prod` (via NTU) but not one mole of condensate. |
+| **F-1** | A | 323F004 | C4 Isenthalpic flash | Adiabatic-flash vapour is a **frozen split fraction** `m_701 = φ·m_314`, not an enthalpy balance. Feed temperature from Stage 1 can move ±30 °C and the flash produces identical vapour. **CLOSED** — see §5. |
+| **F-2** | A | 323C003 / 323E002 | C1↔C3 | Boil-up `m_305 = φ·m_feed` is **independent of the live heater duty** `Q_e002_kw`. Shutting PV-329202 gives zero duty yet full design overhead vapour; the energy deficit is dumped into the temperature ODE. **CLOSED** — see §5. |
+| **F-3** | A | 323F010 / 323E010 | C1↔C3 | Identical defect: `m_evap = φ·m_319` ignores `Q_e010_kw`. **CLOSED** — see §5. |
+| **F-4** | A | 324E001 / 324F001 | C1↔C3, C10 | `p1_m = urea1_in / R324_W_EV1` pins the Stage-1 melt at **94.31 % hard**. Water removed is fixed by a constant, not by `Q_e001_kw`. Cutting Evap-I steam cannot dilute the product. **CLOSED** — see §5. |
+| **F-5** | A | 324E003 / 324F003 | C1↔C3, C10 | Identical defect at Stage 2 (`R324_W_EV2` = 97.71 % hard). **CLOSED** — see §5. |
+| **F-6** | B | 322E002 | C5 EoS/activity | HPCC condensation split `φᵢ = HPCC_FRAC_GAS_DES` is **invariant to shell temperature and loop pressure**. Raising LP-steam pressure changes duty and `T_prod` (via NTU) but not one mole of condensate. **CLOSED** — see §5. |
 | **F-7** | B | 328C003 | C7 Kinetics | The hydrolyser carries **no reaction extent at all** — urea hydrolysis is lumped into the back-solved `R328_C003_LAM748`. Arrhenius hydrolysis kinetics exist only in the read-only `ppm_infer_328701` soft sensor, not in the mass balance. |
 | **F-8** | B | 323/324/328/329 | C2 Component balance | Species tracking (`MW_COMP`, 9 components) exists **only in unit 322**. Everything downstream of LV-322501 is lumped-mass. No component balance, hence no C6 summation equations, downstream. |
-| **F-9** | C | tooling | — | `scratchpad/regress.py` `os.chdir(BACKEND)` before writing `argv[1]`, so the relative gate command in CLAUDE.md §7 / handoff.md fails with `FileNotFoundError`. Gate must be invoked with an **absolute** output path. |
-| **F-10** | A | 323E002, 323E010, 324E001, 324E003 | C3, C8 | **Condensing-steam heater duty is unbounded below.** `Q = UA·(Tsat(p_chest) − T)` with `p_chest` clamped to 0.02 bar a (Tsat ≈ 17.5 °C) makes a shut steam valve a *refrigerator*: probe measured the Evap-I melt driven to **22 °C** and the 323C003 column to **13.6 °C**. A condensing chest cannot remove heat — it simply stops condensing. Found by disturbance-probing the F-2..F-5 fixes; the defect pre-dates them but was masked while the boil-up ignored the duty. |
+| **F-9** | C | tooling | — | `scratchpad/regress.py` `os.chdir(BACKEND)` before writing `argv[1]`, so the relative gate command in CLAUDE.md §7 / handoff.md fails with `FileNotFoundError`. Gate must be invoked with an **absolute** output path. **CLOSED** — `regress.py` now resolves `argv[1]` before the chdir (TD-010). |
+| **F-10** | A | 323E002, 323E010, 324E001, 324E003 | C3, C8 | **Condensing-steam heater duty is unbounded below.** `Q = UA·(Tsat(p_chest) − T)` with `p_chest` clamped to 0.02 bar a (Tsat ≈ 17.5 °C) makes a shut steam valve a *refrigerator*: probe measured the Evap-I melt driven to **22 °C** and the 323C003 column to **13.6 °C**. A condensing chest cannot remove heat — it simply stops condensing. Found by disturbance-probing the F-2..F-5 fixes; the defect pre-dates them but was masked while the boil-up ignored the duty. **CLOSED** — see §5. |
 
 Findings previously documented but **already closed in code** (audit re-verified — do not re-report):
 
@@ -126,7 +129,7 @@ Legend: ✔ bound correctly · ~ bound, reduced/empirical (acceptable) · ✗ de
 |---|---|---|---|---|---|---|---|---|---|
 | **322F001** ejector | ✔ | ✔ 9-species | ✔ cp-weighted mix `T_d` | — | — | — | ✔ negative equal-% spindle `φ_sp = R^((θ_des−θ)/100)`, stall factor, gravity-head term, throat-choke cap | ✔ | motive-steam model absent (deliberate, handoff item 6) |
 | **322E001** stripper | ✔ | ✔ | ~ feed-proportional duty (TD-006) | — | ✔ hydrolysis ξ_hyd, Arrhenius biuret | ✔ NTU thermal ceiling, G/L strip-cool endotherm | ✔ | ✔ | TD-006: rigorous per-species enthalpy balance + steam-limited flood regime |
-| **322E002** HPCC | ✔ | ✔ | ✔ carbamate exotherm + sensible, ε-NTU quench | ✗ **F-6** frozen φᵢ | implicit carbamate | ✔ ε-NTU | ✔ | ~ | **F-6** — φᵢ must become φᵢ(T_prod, P) |
+| **322E002** HPCC | ✔ | ✔ | ✔ carbamate exotherm + sensible, ε-NTU quench | ✔ anchored (T,P) Rachford-Rice, film-relaxed (**F-6 closed**) | ✔ carbamate K_p = p²_NH₃·p_CO₂, Raoult (H₂O), Henry (N₂) | ✔ ε-NTU + interfacial relaxation | ✔ | ✔ | — |
 | **322R001** reactor | ✔ | ✔ exact atom conservation, `closure_resid` diagnostic | ✔ Damköhler 4-node axial profile | — | ✔ Modified Inoue–Kanai `X = X∞·f_L·f_W·f_T`, biuret | ✔ | ✔ Francis weir, narrow-band LT-322504 | ✔ **best-modelled tag in the plant** | θ(φ) HIC-322605 split modulation deferred (documented) |
 | **322E003** scrubber | ✔ | ✔ | ✔ ε-NTU CCW bridge, spindle & flood chokes | — | carbamate 2:1 stoich | ✔ | ✔ | ✔ | none material |
 | HV-322604 | ✔ | ✔ | ✔ | — | — | — | ✔ IEC 60534 equal-% `R^((θ−θ_des)/100)·√ΔP`, JT letdown `μ_JT·ΔP` | ✔ | none |
@@ -201,10 +204,10 @@ clamps `op`, so no integral state can wind). Instrument dynamics are available a
 |---|---|
 | C1 Total mass balance | ✔ closes everywhere; `closure_resid` diagnostics in 322R001/322E003 |
 | C2 Component species balance | ✗ **unit 322 only** (F-8) |
-| C3 Energy balance | ✗ **decoupled from mass in 323/324** (F-2..F-5); correct elsewhere |
-| C4 Isenthalpic/isothermal flash | ✗ **no flash equation anywhere** (F-1); JT letdown only |
-| C5 EoS & activity | ~ Antoine (NH₃, H₂O), Clausius–Clapeyron carbamate bubble-P, two back-solved activity coefficients. No EoS. **F-6** frozen splits |
-| C6 Summation equations | ~ satisfied by construction (fractions computed as nᵢ/Σn); no independent Σy=1 residual because no flash exists |
+| C3 Energy balance | ✔ **re-coupled to mass in 323/324** (F-2..F-5, F-10 closed); correct elsewhere |
+| C4 Isenthalpic/isothermal flash | ✔ isenthalpic flash at 323F004 (F-1) and isothermal (T,P) Rachford-Rice at 322E002 (F-6). JT letdown elsewhere — appropriate |
+| C5 EoS & activity | ~ Antoine (NH₃, H₂O), Clausius–Clapeyron carbamate bubble-P, carbamate K_p = p²_NH₃·p_CO₂ / Raoult / Henry K-values at 322E002, back-solved activity coefficients baked into the anchored K_des. No cubic EoS — reduced-order by design |
+| C6 Summation equations | ~ satisfied by construction (fractions computed as nᵢ/Σn); the 322E002 Rachford-Rice root now enforces Σy=1 and Σx=1 explicitly, but only in unit 322 (F-8) |
 | C7 Kinetics & reaction | ✔ reactor (Inoue–Kanai), stripper (hydrolysis + Arrhenius biuret); ✗ hydrolyser (F-7) |
 | C8 Transport phenomena | ✔ ε-NTU throughout, Damköhler axial profile, Kremser, O'Connell |
 | C9 Hydraulic & equipment | ✔ IEC 60534 equal-%, √ΔP, Francis weir, affinity laws, ejector momentum law |
@@ -247,8 +250,84 @@ every `min()` / `max()` guard is non-binding at design.
 
 Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `110 passed`.
 
+### Unit 322 — 322E002 HPCC live (T,P) phase split (F-6)
+
+The calibrated vector `HPCC_FRAC_GAS_DES` was measured at one point (170 °C, 144.2 bar a) and then
+frozen, so the condenser was thermodynamically **inert**. The fix does not discard the calibration —
+it anchors a real flash on it.
+
+**1. Back-solve the design K-values from the calibration, every tick, against the live feed.**
+Over the distributing set `D = {k : 0 < φ_des,k < 1} = {CO₂, NH₃, H₂O, N₂}`:
+
+$$\psi_{des}=\sum_{k\in D} z_k\,\varphi_{des,k},\qquad
+K_{des,k}=\frac{\varphi_{des,k}\,(1-\psi_{des})}{\psi_{des}\,(1-\varphi_{des,k})}$$
+
+This keeps the melt's measured activity coefficients baked into the K-values; only the *deviation*
+from the calibration point is model-driven.
+
+**2. Correct K to the live (T, P).** The NH₃/CO₂ "condensation" is not physical condensation — it is
+the carbamate equilibrium NH₂COONH₄(l) ⇌ 2 NH₃(g) + CO₂(g), $K_p = p_{NH_3}^2\,p_{CO_2}$, with
+ΔH_dis ≈ 160 kJ/mol — which is already in the code as `HPCC_DH_CARB_KJMOL`. Because K_p is a
+**third-order** product, the measured temperature coefficient of the dissociation *pressure* is one
+third of the reaction enthalpy (≈ 12.8 kcal/mol = 53.3 kJ/mol — Bennett 1953, Ramachandran 1998).
+With y_NH₃ ≈ 2 y_CO₂ this gives y_i ∝ K_p(T)^{1/3}/P, so
+
+$$K_k(T,P)=K_{des,k}\;\exp\!\left[\frac{\Delta H_k}{R}\!\left(\frac{1}{T_{des}}-\frac{1}{T}\right)\right]\frac{P_{des}}{P}$$
+
+with ΔH = ΔH_carb/3 for CO₂ and NH₃, ΔH = 36 900 J/mol (water latent at 170 °C) for H₂O by Raoult,
+and ΔH = 0 for N₂ (permanent gas, Henry). Species with φ_des exactly 1 (O₂/CH₄/H₂ — never condense)
+or exactly 0 (Urea/Biuret — never boil) sit **outside** the flash.
+
+**3. Solve Rachford-Rice by bisection, not Newton.** g(ψ) is strictly decreasing on [0,1], so a
+fixed 60-sweep bracket is exact to 2⁻⁶⁰ at bounded cost and **cannot** fail to converge. This is the
+same argument that keeps the flowsheet Sequential-Modular (§0 Q2): an OTS tick must never miss its
+deadline.
+
+**4. Rate-limit it — the equilibrium flash alone is wrong for this vessel.** The K-values of the
+distributing set are tightly clustered, so a common factor moves the whole mixture together: the raw
+equilibrium target swings φ_CO₂ from 0.0009 to 1.0 across 150 → 190 °C (probe Phase 0). That is not
+how a falling-film condenser behaves. `References/HPCC description.md` §5.2–5.3 is explicit that
+322E002 is **interfacial mass-transfer limited** — gas must diffuse to the film, cross the interface
+and react. So φ is relaxed toward the equilibrium target over the condenser's own holdup constant
+`HPCC_TAU_FILL_MIN` (6 min), making the split a genuine **dynamic state** `s.hpcc_phi`. This is the
+audit's *missing equation* for this tag: the condenser had no composition dynamics at all.
+
+**5. Anchoring.** Three independent guarantees, in order: the flash short-circuits to the
+calibration when `p_rat == 1.0 and T_K == T_des_K` (so no Rachford-Rice tolerance ever reaches the
+module-load or boot-pin passes); `dt = 0` on those passes makes the relaxation coefficient exactly
+0; and the result is blended through the Option-1 `_disturbance_gate` exactly as `T_prod` is, so
+`gate == 0` ⇒ φ ≡ `HPCC_FRAC_GAS_DES` bit-exact.
+
+Also fixed in the same tag: `p_bub` was evaluated at the frozen `HPCC_T_PROD_DES_C` — a bubble
+pressure taken at a fixed temperature is not a bubble pressure. It now uses the live (gated)
+`T_prod`. `P_bub` is telemetry only (PI-322E002); it does **not** enter `pt_target`, so no new loop.
+
+| Tag | Was | Now |
+|---|---|---|
+| 322E002 | `φᵢ = HPCC_FRAC_GAS_DES` (frozen constant) | anchored (T,P) Rachford-Rice flash, film-relaxed over `HPCC_TAU_FILL_MIN`, gate-blended |
+| 322E002 | `p_bub = bubble_p(170.0, L, W)` | `p_bub = bubble_p(T_prod, L, W)` |
+| 322E002 | no composition state | `s.hpcc_phi` — interfacial split, seeded at the calibration |
+
+**Loop-gain check** (the `_disturbance_gate` self-excitation path, `main.py:1878`). The new coupling
+is **negative feedback** in both legs: T↑ → K↑ → φ↑ → less CO₂ absorbed → q_carb↓ → T_adb↓ → T↓; and
+P↑ → K↓ → more condensation → duty↑ → LP header↑ → shell↑ → T↑ → K↑ (opposing). Measured, not
+assumed — see below.
+
+**Verification** (`scratchpad/probe_322e002_flash.py`):
+
+* *Design hold, 600 s* — gate 0.000000, T_prod drift **0.000e+00 °C**, and φ equals
+  `HPCC_FRAC_GAS_DES` **exactly, every component** (identity comparison, not a tolerance).
+* *MP supply valve 50 → 62 %* (PIC-329204 to MAN) — shell runs hotter, TT-322010 170.00 → 170.49 °C,
+  and the split follows: φ_CO₂ **0.2036 → 0.2342**, φ_NH₃ 0.2977 → 0.3357, gas product
+  **60.33 → 69.34 t/h**. Every one of these was *identically zero* before the fix.
+* *N/C setpoint cut to 92 %* — φ_CO₂ → 0.2105, level swells 49.7 → 55.3 %, duty 63 122 → 66 706 kW.
+* *Self-excitation* — T_prod spans **0.0205 °C** (steam disturbance) and **0.2329 °C** (N/C
+  disturbance) over the final five minutes: monotone convergence, no ringing, no runaway.
+
+Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `123 passed`.
+
 ### Still open
 
-F-6 (HPCC φᵢ(T,P)), F-7 (hydrolyser kinetics), F-8 (downstream component balance) are **not**
-landed — each is a unit-322 / cross-unit change that must take its own Scope-Lock slot. F-9 is a
-tooling note: invoke the gate with an absolute output path.
+F-7 (hydrolyser kinetics) and F-8 (downstream component balance) are **not** landed — F-8 is a
+cross-unit architectural change that needs its own project, and F-7 depends on it. F-9 is a tooling
+note: invoke the gate with an absolute output path (now fixed in `regress.py` itself).

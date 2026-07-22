@@ -23,6 +23,7 @@
 | 10 | 2026-07-17 | branch `master` | 328 desorption train (first Unit-328 entry; Sections 1–6 remain scoped to the 321/322 HP loop). Stream 746 freed from a static constant: the 328E021 cold outlet now tracks both live inlets as `T_746 = T_c002 + ε·(T_c003 − T_c002)`, ε = (190−139)/(200−139) = 51/61 — the *design-implied* effectiveness, since the rounded datasheet ε back-solves to 190.0021 °C and breaks the anchor. `sens_c003` re-pointed onto the same live node so display and energy balance cannot decouple (bit-identical at design). TT-328009 published off it. TT-328007 re-pointed from `R328_E007_TH_OUT` (89 °C, the 328E007 hot outlet — wrong node) onto the C002 bottoms draw (stream 743, 139 °C). TT-328005 (stream 739, 143 °C) and TT-328004 (C004 top tray = OVHD stream 750, 140 °C, via a derived 3 K offset) published. See Revision Delta #14. |
 
 | 11 | 2026-07-22 | branch `master` | Full modelling-equation audit of every equipment tag against the 11 equation categories (`EQUATION_AUDIT.md`). Units 323 + 324: vapour generation was a frozen design split fraction of the live inflow in every vaporiser, so the mass and energy balances were solved independently — the live heater duty had no authority over the boil-up, and the 324 melt strength was pinned by construction. Boil-up is now duty-limited, 323F004 runs a true isenthalpic flash (saturation constraint + enthalpy balance), the 324 melt strengths are live outputs, and all four condensing-steam chests are floored at zero duty (a shut valve had been turning them into refrigerators, dragging the melt to 22 °C). See Revision Delta #15. |
+| 12 | 2026-07-22 | branch `master` | Equation audit remediation, slot 2 — 322E002 HPCC (finding F-6 / TD-007). The condensation split `HPCC_FRAC_GAS_DES` was a point calibration frozen into a constant, so the condenser was thermodynamically inert: shell temperature and synthesis pressure moved the duty and the NTU outlet temperature but not one mole of condensate. The calibration is now the *anchor* of an isothermal (T,P) Rachford-Rice flash — design K back-solved from it every tick, corrected by the carbamate equilibrium Kp = p²_NH₃·p_CO₂ (dissociation-pressure slope ΔH_carb/3, Bennett 1953), Raoult for H₂O, Henry for N₂ — solved by bisection and rate-limited through the interfacial film over `HPCC_TAU_FILL_MIN`, making the split a dynamic state `s.hpcc_phi`. `P_bub` de-pinned from the frozen design temperature onto the live `T_prod`. See Revision Delta #16. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -149,6 +150,69 @@ $$\dot Q_{sens,c003}=\frac{\dot m_{746}}{3600}C_p\bigl(T_{746}-T_{C003}\bigr)=\f
     overhead 305 → 0, column 121 → 105 °C, and the downstream flash correctly makes **less** vapour
     (4.43 → 3.10 t/h) on its colder feed. All three were impossible before.
 
+16. **322E002 HPCC — live (T,P) phase split (equation audit F-6 / TD-007).** $\phi_i$ was the
+    calibrated vector `HPCC_FRAC_GAS_DES`, measured at 170 °C / 144.2 bar a and then **frozen**,
+    which made the condenser thermodynamically inert: the duty, the adiabatic exotherm spike and the
+    ε-NTU quench all tracked the live shell temperature, but not one mole of condensate moved. The
+    calibration is not discarded — it becomes the *anchor* of a real flash.
+
+    **(i) Design K back-solved from the calibration, every tick, against the live feed.** Over the
+    distributing set $D=\{k: 0<\phi_{des,k}<1\}=\{CO_2, NH_3, H_2O, N_2\}$,
+    $$\psi_{des}=\sum_{k\in D} z_k\phi_{des,k},\qquad
+      K_{des,k}=\frac{\phi_{des,k}(1-\psi_{des})}{\psi_{des}(1-\phi_{des,k})}$$
+    so the melt's measured activity coefficients stay baked into $K$; only the *deviation* from the
+    calibration point is model-driven.
+
+    **(ii) Correction to live $(T,P)$.** NH₃/CO₂ uptake here is not physical condensation but the
+    carbamate equilibrium $\mathrm{NH_2COONH_4(l)}\rightleftharpoons 2\,\mathrm{NH_3(g)}+\mathrm{CO_2(g)}$,
+    $K_p=p_{NH_3}^2 p_{CO_2}$, $\Delta H_{dis}\approx160$ kJ/mol — already in the code as
+    `HPCC_DH_CARB_KJMOL`. Because $K_p$ is a **third-order** product, the measured temperature
+    coefficient of the dissociation *pressure* is one third of the reaction enthalpy (≈ 12.8 kcal/mol
+    = 53.3 kJ/mol; Bennett 1953, Ramachandran 1998). With $y_{NH_3}\approx 2y_{CO_2}$,
+    $y_i\propto K_p(T)^{1/3}/P$, giving
+    $$K_k(T,P)=K_{des,k}\exp\!\Big[\tfrac{\Delta H_k}{R}\Big(\tfrac{1}{T_{des}}-\tfrac{1}{T}\Big)\Big]\frac{P_{des}}{P}$$
+    with $\Delta H=\Delta H_{carb}/3$ for CO₂ and NH₃, $\Delta H = 36\,900$ J/mol (water latent at
+    170 °C) for H₂O by Raoult, and $\Delta H = 0$ for N₂ (permanent gas, Henry). Species with
+    $\phi_{des}$ exactly 1 (O₂/CH₄/H₂) or exactly 0 (Urea/Biuret) are structurally non-distributing
+    and sit outside the flash.
+
+    **(iii) Rachford-Rice by bisection, not Newton.** $g(\psi)=\sum_k z_k(K_k-1)/[1+\psi(K_k-1)]$ is
+    strictly decreasing on $[0,1]$, so a fixed 60-sweep bracket is exact to $2^{-60}$ at bounded cost
+    and **cannot** fail to converge. Same argument that keeps the flowsheet Sequential-Modular: an
+    OTS tick must never miss its deadline.
+
+    **(iv) Interfacial rate limit — the missing equation.** The raw equilibrium target is far too
+    stiff for this vessel: the distributing $K$'s are tightly clustered, so a common factor moves the
+    whole mixture together and $\phi_{CO_2}$ swings 0.0009 → 1.0 across 150 → 190 °C. That is a true
+    property of the flash but not of a falling-film condenser — `References/HPCC description.md`
+    §5.2–5.3 is explicit that 322E002 is **interfacial mass-transfer limited**. $\phi$ is therefore
+    relaxed toward the target over the condenser holdup constant `HPCC_TAU_FILL_MIN` (6 min),
+    $$\phi_k \leftarrow \phi_k + \tfrac{\Delta t}{\tau_{film}}\big(\phi^{eq}_k-\phi_k\big),$$
+    making the split a genuine **dynamic state** `s.hpcc_phi`. The condenser previously had no
+    composition dynamics at all.
+
+    **(v) Anchoring — three independent guarantees.** The flash short-circuits to the calibration
+    when the $T$ and $P$ ratios are exactly 1 (module-load and boot-pin passes never enter the
+    solver); $\Delta t = 0$ on those passes zeroes the relaxation coefficient; and the result is
+    blended through the Option-1 `_disturbance_gate` exactly as $T_{prod}$ is, so gate $=0\Rightarrow
+    \phi\equiv$ `HPCC_FRAC_GAS_DES` bit-exact. Also fixed: $P_{bub}$ was evaluated at the frozen
+    `HPCC_T_PROD_DES_C` — a bubble pressure at a fixed temperature is not a bubble pressure — and now
+    uses the live gated $T_{prod}$ (telemetry only; it does not enter `pt_target`, so no new loop).
+
+    **Loop-gain check** against the `_disturbance_gate` self-excitation path: both new legs are
+    **negative feedback** ($T\uparrow \Rightarrow K\uparrow \Rightarrow \phi\uparrow \Rightarrow$ less
+    CO₂ absorbed $\Rightarrow q_{carb}\downarrow \Rightarrow T\downarrow$), verified rather than
+    assumed.
+
+    Verified — pin gate `leaves: 25  keys: 15  diffs: 0`; suite **123 passed** (8 new tests in
+    `backend/test_equation_audit_322e002.py`). Design hold 600 s: gate 0.000000, $T_{prod}$ drift
+    **0.000e+00 °C**, $\phi$ identical to `HPCC_FRAC_GAS_DES` on every component by identity
+    comparison. Dynamic acceptance — MP supply valve 50 → 62 % (PIC-329204 in MAN): TT-322010
+    170.00 → 170.49 °C and the split follows, $\phi_{CO_2}$ **0.2036 → 0.2342**, gas product
+    **60.33 → 69.34 t/h**; N/C setpoint cut to 92 %: $\phi_{CO_2}\to0.2105$, level swells 49.7 →
+    55.3 %, duty 63 122 → 66 706 kW. Self-excitation check: $T_{prod}$ spans **0.0205 °C** and
+    **0.2329 °C** respectively over the final five minutes — monotone convergence, no ringing.
+
 ---
 
 ## 1. Equipment & Node Mapping
@@ -218,7 +282,7 @@ Vertical shell-and-tube falling-film condenser. Tube side: co-current downward s
 | Normal Liquid Level (NLL) | 50 | % |
 | Liquid Holdup Time Constant $\tau_{fill}$ | 6.0 | min |
 
-**Thermodynamic role.** Condenses NH₃ + CO₂ from stripper top gas into ammonium carbamate ($2NH_3 + CO_2 \to NH_2COONH_4$, $\Delta H = -160$ kJ/mol). Calibrated split-fraction model assigns each component to gas/liquid via design fractions $\phi_i$. Carbamate-melt bubble-point $P_{bub}(T,L,W)$ sets loop outlet pressure. Shell duty = carbamate exotherm + gas sensible cooling.
+**Thermodynamic role.** Condenses NH₃ + CO₂ from stripper top gas into ammonium carbamate ($2NH_3 + CO_2 \to NH_2COONH_4$, $\Delta H = -160$ kJ/mol). The phase split is an isothermal $(T,P)$ Rachford-Rice flash **anchored on** the design fractions $\phi_i$ (§3.6) and rate-limited through the interfacial film over $\tau_{fill}$ — the same holdup constant that sets the sump inventory — so the split is a dynamic state, not an algebraic map. Carbamate-melt bubble-point $P_{bub}(T_{prod},L,W)$ sets loop outlet pressure. Shell duty = carbamate exotherm + gas sensible cooling.
 
 ### 1.5 322R001 — HP Urea Reactor
 Vertical autoclave, 11 sieve trays, liquid plug-flow. Carbamate dehydration $NH_2COONH_4 \to CO(NH_2)_2 + H_2O$ at ~54.3 % per-pass CO₂ conversion via Modified Inoue-Kanai kinetics.
@@ -478,7 +542,13 @@ Both floored at zero ($\max(k,0)$). Design-anchored bit-exact: $P_{bub}(170, L_{
 | HPCC_T_PROD_DES_C | $T_0$ | 170 (443.15 K) | °C (K) |
 | HPCC_P_DES_BARA | $P_{des}$ | 144.2 | bar a |
 
-### 3.6 HPCC Design Gas-Phase Split Fractions $\phi_i$
+### 3.6 HPCC Gas-Phase Split Fractions $\phi_i$ — calibration and live flash
+
+The vector below is the **calibration**, measured at 170 °C / 144.2 bar a. It is no longer the
+answer: it is the anchor from which $K_{des,i}$ is back-solved each tick, and the live split is an
+isothermal $(T,P)$ Rachford-Rice flash relaxed through the interfacial film (Revision Delta #16).
+At the design seed the flash short-circuits and the gate is shut, so $\phi_i$ *equals* this table
+bit-exact.
 
 | Component | $\phi_i$ (fraction → gas) | Component | $\phi_i$ |
 |---|---|---|---|
@@ -487,6 +557,33 @@ Both floored at zero ($\max(k,0)$). Design-anchored bit-exact: $P_{bub}(170, L_{
 | H₂O | 0.0450 | Urea | 0.0 |
 | N₂ | 0.982 | Biuret | 0.0 |
 | O₂ | 1.0 | | |
+
+**Distributing set** $D=\{k:0<\phi_{des,k}<1\}=\{CO_2, NH_3, H_2O, N_2\}$. O₂/CH₄/H₂ never condense
+and Urea/Biuret never boil, so both sets sit structurally outside the flash.
+
+$$\psi_{des}=\sum_{k\in D} z_k\phi_{des,k},\qquad
+  K_{des,k}=\frac{\phi_{des,k}(1-\psi_{des})}{\psi_{des}(1-\phi_{des,k})}$$
+
+$$K_k(T,P)=K_{des,k}\exp\!\Big[\frac{\Delta H_k}{R}\Big(\frac{1}{T_{des}}-\frac{1}{T}\Big)\Big]\frac{P_{des}}{P},
+\qquad
+\Delta H_k=\begin{cases}
+\Delta H_{carb}/3 = 53\,333 & k\in\{CO_2, NH_3\}\ \text{(carbamate } K_p=p^2_{NH_3}p_{CO_2}\text{)}\\
+36\,900 & k=H_2O\ \text{(Raoult, water latent @170 °C)}\\
+0 & k=N_2\ \text{(Henry, permanent gas)}
+\end{cases}$$
+
+$$\sum_{k\in D}\frac{z_k(K_k-1)}{1+\psi(K_k-1)}=0
+\;\xrightarrow{\text{bisection}}\;\psi,
+\qquad \phi^{eq}_k=\frac{K_k\psi}{1+\psi(K_k-1)}$$
+
+$$\phi_k \leftarrow \underbrace{\phi_k+\frac{\Delta t}{\tau_{film}}\big(\phi^{eq}_k-\phi_k\big)}_{\text{interfacial relaxation, } \tau_{film}=\texttt{HPCC\_TAU\_FILL\_MIN}},
+\qquad
+\phi^{pub}_k=\phi_{des,k}+g\big(\phi_k-\phi_{des,k}\big)$$
+
+with $g$ the Option-1 `_disturbance_gate`. The film relaxation is what makes the split physical: the
+bare equilibrium target swings $\phi_{CO_2}$ from 0.0009 to 1.0 across 150 → 190 °C, because the
+distributing $K$'s are tightly clustered and move together — 322E002 is mass-transfer limited, not
+equilibrium limited (`References/HPCC description.md` §5.2–5.3).
 
 ### 3.7 HPCC Shell-Side Duty & LP Steam Generation
 $$Q_{HPCC} = \underbrace{\dot n_{CO_2,abs}\cdot\Delta H_{carb}}_{Q_{carbamate}} + \underbrace{\dot m_{gas}\cdot c_{p,gas}\cdot(T_{strip,top} - T_{prod})}_{Q_{sensible}}$$

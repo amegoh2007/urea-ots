@@ -388,8 +388,8 @@ Both are larger, pin-sensitive efforts and were deferred deliberately rather tha
 
 ## TD-007 — HPCC 322E002 condensation split is invariant to shell temperature and loop pressure
 
-**Status: OPEN** · raised 2026-07-22 by the full equation audit (`EQUATION_AUDIT.md`, finding F-6)
-· severity B (limits training fidelity; not operator-triggerable into wrong physics)
+**Status: CLOSED 2026-07-22** · raised 2026-07-22 by the full equation audit (`EQUATION_AUDIT.md`,
+finding F-6) · severity B (limits training fidelity; not operator-triggerable into wrong physics)
 
 `hpcc_322e002` splits the combined tube-side feed with a frozen calibrated vector:
 
@@ -403,14 +403,39 @@ condensation) changes `T_prod` and `q_steam_kw` while the phase split stays exac
 This is the C5 (EoS / activity) gap of the audit: a split fraction is only a legitimate hybrid
 layer when it is a *function* φᵢ(T, P, composition). As coded it is a point calibration.
 
-### Why it was not fixed in this pass
+### How it was closed
 
-322E002 sits inside the pinned HP loop. Any φᵢ change must be an anchored correction —
-φᵢ(T_prod, P) ≡ HPCC_FRAC_GAS_DES at the design point — or the boot pin (`HPCC_UA`,
-`HPCC_LIQ_DES_LIVE`, `HPCC_NC_DES_LIVE`, `REACT_TEAR_DES`) moves and the `diffs 0` contract breaks.
-It also feeds the `_disturbance_gate` self-excitation path documented at main.py:1878, so the loop
-gain of the new coupling has to be checked against that runaway before it can land. Its own
-Scope-Lock slot.
+`_hpcc_flash_split()` binds an isothermal (T,P) Rachford-Rice flash **anchored on** the calibration
+rather than replacing it: `K_des,i` is back-solved every tick from `HPCC_FRAC_GAS_DES` and the live
+feed (so the melt's measured activity coefficients stay baked in), then corrected to the live product
+temperature and synthesis pressure by the carbamate equilibrium `Kp = p²_NH₃·p_CO₂` — whose
+dissociation-*pressure* slope is ΔH_carb/3 because Kp is a third-order product (Bennett 1953;
+Ramachandran 1998) — with Raoult for H₂O and Henry for N₂. Rachford-Rice is solved by **bisection**,
+not Newton: g(ψ) is strictly decreasing, so 60 sweeps are exact to 2⁻⁶⁰ at bounded cost with no
+possible convergence failure inside an OTS tick.
+
+The raw equilibrium target proved far too stiff on its own (φ_CO₂ 0.0009 → 1.0 across 150 → 190 °C,
+because the distributing K-values are tightly clustered and move together). That is a real property
+of the flash, not a coding error — but it is not how this vessel behaves. `References/HPCC
+description.md` §5.2–5.3 is explicit that 322E002 is interfacial **mass-transfer** limited, so φ is
+relaxed toward the target over the condenser holdup constant `HPCC_TAU_FILL_MIN`, making the split a
+dynamic state `s.hpcc_phi`. That was the genuinely missing equation: the condenser had no
+composition dynamics at all.
+
+Three independent anchors keep the pin: the flash short-circuits to the calibration when the T and P
+ratios are exactly 1 (module-load and boot-pin passes never enter the solver); `dt = 0` on those
+passes zeroes the relaxation; and the result is blended through `_disturbance_gate` exactly as
+`T_prod` is. Measured: gate 0.000000 and T_prod drift 0.000e+00 over a 600 s design hold, with φ
+identical to `HPCC_FRAC_GAS_DES` by identity comparison on every component.
+
+**Loop-gain check** (the runaway path at main.py:1878) came back **negative feedback** in both legs
+and was verified, not assumed: T_prod spans 0.0205 °C after a shell-temperature disturbance and
+0.2329 °C after an N/C disturbance over the final five minutes — monotone convergence, no ringing.
+Also fixed in the same pass: `p_bub` was evaluated at the frozen design temperature; it now uses the
+live gated `T_prod` (telemetry only — it does not enter `pt_target`, so no new loop).
+
+Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `123 passed`. Tests:
+`backend/test_equation_audit_322e002.py`. Probe: `scratchpad/probe_322e002_flash.py`.
 
 ---
 
