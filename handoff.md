@@ -115,7 +115,7 @@ The bare `python` alias is a Microsoft Store stub that errors. **Python 3.14.6 I
 ```
 Never conclude an interpreter is absent from one alias. Never pipe a heredoc into the stub alias.
 
-### Remediation slot 5 — 323E010 / 323F010 missing second feed (F-11), commit `TBD`
+### Remediation slot 5 — 323E010 / 323F010 missing second feed (F-11), commit `c669653`
 **F-11 was not a data error — the model was missing a feed.** The licensor confirms the real
 topology: **319 + 331 -> 323E010 (LP steam, shell side) -> 323F010 (vacuum) -> gas 790 + solution
 315**, and 315 is 317 before the pump. Stream 331 is the granulation-scrubber urea-recovery return
