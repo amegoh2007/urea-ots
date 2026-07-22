@@ -468,7 +468,13 @@ function render322(s){
   // Declared in the control narrative but NOT wired in main.py: the loop is seeded CAS yet its
   // _fic_flow call passes no cas_sp, so CAS behaves as AUTO at the seeded SP.  Say so plainly
   // rather than name a master that is not actually driving anything.  Tracked as TD-004.
-  const CAS_UNWIRED={};   // TD-004 CLOSED: the TIC-328008 -> FIC-328404 cascade is now wired.
+  // Seeded CAS in the backend but with NO cas_sp wired in step_sim, so CAS silently holds the
+  // seeded SP (behaves as AUTO). The faceplate says so plainly rather than naming a phantom master.
+  // (TIC-328008 -> FIC-328404 is NOT here: that cascade IS wired, see CAS_MASTER.)
+  const CAS_UNWIRED={
+    'TIC-323013':'no master is wired to it',                 // 323 tempered-water; boots CAS, no cas_sp
+    'FIC-329402':'its intended master TIC-328012 is not wired yet',   // 328C003 MP steam
+  };
   const applyMode=v=>{                                                 // MAN=set opening, AUTO=set SP, CAS=linked param
     mode=v;
     bMan.classList.toggle('active', v==='MAN');
@@ -481,7 +487,7 @@ function render322(s){
       v==='MAN'  ? 'MAN — operator sets valve opening directly.' :
       v==='AUTO' ? 'AUTO — controller drives opening to hold SP.' :
       mst        ? ('CAS — SP is written by ' + mst + '. To change it, open the ' + mst + ' faceplate; this field is read-only.') :
-      unw        ? ('CAS — ' + unw + ' is the intended master but that cascade is NOT wired in the engine yet, so CAS holds the seeded SP (TD-004).') :
+      unw        ? ('CAS — inactive here: ' + unw + ', so CAS just holds the seeded SP (behaves as AUTO).') :
                    'CAS — opening driven by a linked (cascade) parameter.';
     if(cur && cur.note) note.textContent += '  ·  ' + cur.note;   // per-loop cause->effect physics note
   };
@@ -522,7 +528,10 @@ function render322(s){
     const R323=new Set(['TIC-323007','PIC-329202','LIC-323501','LIC-323505','TIC-323012','PIC-329208','LIC-323507','FIC-324401','TIC-323013',
                         'PIC-323202','PIC-323203','LIC-323502','SIC-323901','SIC-323902','LIC-323503','FIC-323401','FIC-323402','FIC-328405','FIC-323418',
                         'LIC-328501','PIC-328202','TIC-328002','FIC-328404','FIC-329402','PIC-328203','FFIC-329401','FIC-329401','TIC-328008','TIC-328012',
-                        'LIC-328503','LIC-328504','LIC-328505','FIC-328402','FIC-328406','PIC-322201','LIC-322502']);
+                        'LIC-328503','LIC-328504','LIC-328505','FIC-328402','FIC-328406','PIC-322201','LIC-322502',
+                        // G7: 324/335 evaporation-train dict controllers, previously mis-routed to
+                        // controller_set and silently discarded. Must mirror R323_CTRL_MODES in main.py.
+                        'TIC-324001','PIC-329203','PIC-324202','TIC-324002','PIC-329212','PIC-324203','LIC-324501','FFIC-335406','FIC-335405']);
     const msg={type:T[cur.tag] || (R323.has(cur.tag) ? 'r323_ctrl_set' : 'controller_set'), id:cur.tag, mode};
     if(mode==='MAN'  && !isNaN(o)) msg.op=o;
     if(mode==='AUTO' && !isNaN(p)) msg.sp=p;

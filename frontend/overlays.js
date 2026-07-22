@@ -18,7 +18,9 @@
 // awaiting binding when its upstream unit (322E003 scrubber, etc.) is modelled.
 (function () {
   const STAGE_W = 1366, STAGE_H = 720;
-  const LSK = 'ots_ov_pos_v3';   // bumped: backgrounds swapped -> discard stale drag positions
+  const LSK = 'ots_ov_pos_v4';   // v4 (G7): the 46 seed coords rewritten on 321-1/323-1 were being
+                                 // overridden by stale v3 drag positions on exactly the stations the
+                                 // rewrite realigned -- bump discards them so the corrected seeds show.
 
   // bind = dot-path into the ws packet ('FI_321401', 'pumpA.current', 'SIC_321950.pv').
   // dec  = decimals. fp = controller id for left-click faceplate. No bind => empty slot.
@@ -321,7 +323,7 @@
       { k: 'fv8401', t: 'avalve', x: 1014, y: 324, tag: 'FV-329401', bind: 'DESORB_328.C004.FIC_329401.op', u: '%', dec: 1 },
       // ---- 328D001 reflux drum : D001 block, TIC-328008 / FIC-328404 / PIC-328202 ----
       { k: 'tic8008', t: 'ind', x: 693, y: 50,  tag: 'TIC-328008', bind: 'DESORB_328.D001.TIC_328008.pv', mode: 'DESORB_328.D001.TIC_328008.mode', u: '%', dec: 1, note: 'MASTER of FIC-328404: water content in the 328C002 -> 328E004 gas line (mol%, PFD 737 = 46.2). With FIC-328404 on CAS, FV-328404 strokes the 775 reflux to hold this' },
-      { k: 'fic8404', t: 'ind', x: 570, y: 78,  tag: 'FIC-328404', bind: 'DESORB_328.D001.FIC_328404.pv', mode: 'DESORB_328.D001.FIC_328404.mode', u: 'M3/H', dec: 2, note: '328D001 carbamate reflux to 328C002, PFD stream 775, via FV-328404' },
+      { k: 'fic8404', t: 'ind', x: 570, y: 78,  tag: 'FIC-328404', bind: 'DESORB_328.D001.FIC_328404.pv', mode: 'DESORB_328.D001.FIC_328404.mode', u: 'M3/H', dec: 2, cas: true, note: 'CAS slave of TIC-328008 (offgas H2O): FV-328404 strokes the 775 reflux to hold it; PFD stream 775' },
       { k: 'fv8404', t: 'avalve', x: 462, y: 112, tag: 'FV-328404', bind: 'DESORB_328.D001.FIC_328404.op', u: '%', dec: 1 },
       { k: 'pic82021',t: 'ind', x: 878, y: 135, tag: 'PIC-328202', bind: 'DESORB_328.D001.PIC_328202.pv', mode: 'DESORB_328.D001.PIC_328202.mode', u: 'BAR A', dec: 2, note: '328D001 pressure via PV-328202' },
       { k: 'pv82021', t: 'avalve', x: 1295, y: 165, tag: 'PV-328202', bind: 'DESORB_328.D001.PIC_328202.op', u: '%', dec: 1 },
@@ -722,6 +724,8 @@
       '#ov-cryst .row{font:600 11px Consolas,monospace;opacity:.96;white-space:nowrap;}' +
       '#ov-cryst .row .eq{display:inline-block;min-width:126px;}' +
       '#ov-cryst .row .st{display:inline-block;min-width:52px;font-weight:800;}' +
+      '#ov-cryst .row.oor{opacity:.55;}' +                    // OOR = UNASSESSED, greyed (never silent)
+      '#ov-cryst .row.flag .st{color:#ff5555;}' +             // hard process flags render red
       '@keyframes crystblink{50%{opacity:.42;}}';
     document.head.appendChild(s);
   }
@@ -927,24 +931,40 @@
   }
   function crystRender(s) {                         // read CRYST + flags each packet; amber WARN / red-blink ALARM
     if (!crystEl) return;
-    const C = s && s.CRYST, F = (s && s.flags) || {};
+    const C = (s && s.CRYST) || {}, F = (s && s.flags) || {};
     crystEl.classList.remove('warn', 'alarm');
-    if (!C) { crystEl.style.display = 'none'; return; }
-    const alarms = [], warns = [], bad = [];
+    const alarms = [], warns = [], bad = [], oor = [];
     for (const eq in C) {
       const r = C[eq]; if (!r) continue;
       if (r.state === 'ALARM')      alarms.push([eq, r]);
       else if (r.state === 'WARN')  warns.push([eq, r]);
       else if (r.state === 'BAD')   bad.push([eq, r]);   // bad PV surfaces too (never silently OK)
+      else if (r.state === 'OOR')   oor.push([eq, r]);   // G7(f): out-of-range shown greyed, not hidden
     }
-    const alarm = !!F.CARBAMATE_CRYST_ALARM || alarms.length > 0;
+    // G7(b): the four hard process flags used to reach no pixel. Surface them as red alarm rows.
+    const FLAG_LABEL = {
+      SCRUBBER_SOLIDIFICATION: '322E003 scrubber — SOLIDIFICATION',
+      STRIPPER_SOLIDIFICATION: '322E001 stripper — SOLIDIFICATION',
+      CARBAMATE_DEPOSITION:    'carbamate DEPOSITION',
+      RATIO_PV_BAD:            'AT-322701 N/C — PV INVALID (ratio frozen)',
+    };
+    const flagRows = Object.keys(FLAG_LABEL).filter(function (k) { return !!F[k]; });
+    const alarm = !!F.CARBAMATE_CRYST_ALARM || alarms.length > 0 || flagRows.length > 0;
     const warn  = !!F.CARBAMATE_CRYST_WARN  || warns.length > 0;
-    if (!alarm && !warn && bad.length === 0) { crystEl.style.display = 'none'; crystEl.innerHTML = ''; return; }
+    if (!alarm && !warn && bad.length === 0 && oor.length === 0) {
+      crystEl.style.display = 'none'; crystEl.innerHTML = ''; return;
+    }
     const rows = (alarm ? alarms.concat(warns) : warns).concat(bad);
     const cls  = alarm ? 'alarm' : 'warn';
-    const ttl  = alarm ? 'CARBAMATE CRYSTALLIZATION — ONSET'
-                       : 'CARBAMATE CRYSTALLIZATION — APPROACHING';
+    const ttl  = (flagRows.length && !alarms.length && !warns.length)
+                   ? 'PROCESS ALARM'
+                   : (alarm ? 'CARBAMATE CRYSTALLIZATION — ONSET'
+                            : 'CARBAMATE CRYSTALLIZATION — APPROACHING');
     let html = '<div class="ttl"><span class="ic">⚠</span>' + ttl + '</div>';
+    flagRows.forEach(function (k) {
+      html += '<div class="row flag"><span class="eq">' + FLAG_LABEL[k]
+            + '</span><span class="st">ALARM</span></div>';
+    });
     rows.forEach(function (p) {
       const eq = p[0], r = p[1];
       let det = '';
@@ -952,6 +972,10 @@
       else det = 'margin ' + r.margin + '°C'
                + (r.T_cryst != null ? '  (Tcryst ' + r.T_cryst + '°C, T ' + (r.T_cryst + r.margin).toFixed(1) + '°C)' : '');
       html += '<div class="row"><span class="eq">' + eq + '</span><span class="st">' + r.state + '</span>' + det + '</div>';
+    });
+    oor.forEach(function (p) {                            // greyed UNASSESSED rows, never silent
+      html += '<div class="row oor"><span class="eq">' + p[0]
+            + '</span><span class="st">UNASSESSED</span>out of assessed range</div>';
     });
     crystEl.innerHTML = html;
     crystEl.classList.add(cls);

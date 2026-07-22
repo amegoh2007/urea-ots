@@ -5040,6 +5040,22 @@ R323_CTRL_MODES = {
     # -- 328-2 (LP absorber) -----------------------------------------------
     "PIC_322201": ("MAN", "AUTO"),
     "LIC_322502": ("MAN", "AUTO"),
+    # -- 324-1 / 324-1b / 335 (evaporation + finishing) --------------------
+    #    G7: these are dict controllers, stepped in step_sim and published in telemetry, but were
+    #    absent from this whitelist AND the frontend R323 Set, so their faceplates routed to
+    #    controller_set -> getattr(s,'TIC-324001') misses on the dash -> every operator write was
+    #    silently discarded.  Adding them here + in app.js routes them through r323_ctrl_set, which
+    #    applies mode/sp/op to the dict with the correct clamps.  Modes mirror the sibling pattern:
+    #    a cascade master is MAN/AUTO, a CAS slave adds CAS.
+    "TIC_324001": ("MAN", "AUTO"),          # 324E001 melt-temp master -> PIC-329203
+    "PIC_329203": ("MAN", "AUTO", "CAS"),   # 324E001 chest steam-P slave
+    "PIC_324202": ("MAN", "AUTO"),          # 324F001 vacuum via false-air PV-324202
+    "TIC_324002": ("MAN", "AUTO"),          # 324E003 melt-temp master -> PIC-329212
+    "PIC_329212": ("MAN", "AUTO", "CAS"),   # 324E003 chest steam-P slave
+    "PIC_324203": ("MAN", "AUTO"),          # 324F003 deep vacuum via false-air PV-324203
+    "LIC_324501": ("MAN", "AUTO"),          # 324F003 product level
+    "FFIC_335406": ("MAN", "AUTO"),         # 335 UF85-to-product ratio master
+    "FIC_335405": ("MAN", "AUTO", "CAS"),   # 335 UF85 inject slave
 }
 
 # Auxiliary running/standby pump pairs toggled from the 323-2/328 overlays.
@@ -5138,6 +5154,12 @@ def handle_cmd(cmd: dict):
         cid  = cmd["id"]
         ctrl = getattr(s, cid, None)
         if ctrl is None:
+            # G7: do NOT swallow this.  controller_set handles the controllers.py OBJECT loops
+            # (pumps, SIC, ratio); the inline DICT loops go through r323_ctrl_set.  A miss here
+            # means the frontend routed a tag to the wrong handler (e.g. a dict loop absent from
+            # the R323 whitelist), which used to look alive but discard every write.  Surface it.
+            print(f"[controller_set] NAK: no object controller '{cid}' "
+                  f"(dict loop missing from R323_CTRL_MODES / frontend R323 Set?)", flush=True)
             return
         if "mode" in cmd:
             ctrl.set_mode(cmd["mode"])
