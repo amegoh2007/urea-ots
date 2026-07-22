@@ -79,7 +79,7 @@ construction and the design anchors cannot move. Two pieces of real physics fell
 **relative-volatility vapour compositions** `y_i = a_i*w_i / sum(a_j*w_j)`, which IS the C6
 summation. Sum w reads exactly 100.0000 at every stage, every tick. Feed composition is the LIVE
 stripper bottoms, so strip efficiency now reaches the product.
-Closing it exposed **F-11 / TD-011** — see OPEN items.
+Closing it exposed **F-11 / TD-011**, since resolved in slot 5.
 
 ### Remediation slot 4 — 328C003 hydrolyser reaction extent (F-7), commit `b60ffa5`
 The hydrolyser had **no extent at all** — a frozen overhead split with the endotherm in a back-solved
@@ -100,7 +100,7 @@ refreshed (they still described the pre-remediation state).
 set PY=%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe
 %PY% scratchpad\regress.py scratchpad\pin_now.json
 %PY% scratchpad\pindiff.py scratchpad\pin_now.json scratchpad\golden_pin.json   ->  25 / 15 / 0
-cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  136 passed
+cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  139 passed
 ```
 Use `-p no:cacheprovider` — `backend/.pytest_cache` holds stale dirs that raise `WinError 183`.
 **The suite takes 5–8 minutes and the pin settle takes ~2** — run them with a raised timeout or in
@@ -115,9 +115,26 @@ The bare `python` alias is a Microsoft Store stub that errors. **Python 3.14.6 I
 ```
 Never conclude an interpreter is absent from one alias. Never pipe a heredoc into the stub alias.
 
+### Remediation slot 5 — 323E010 / 323F010 missing second feed (F-11), commit `TBD`
+**F-11 was not a data error — the model was missing a feed.** The licensor confirms the real
+topology: **319 + 331 -> 323E010 (LP steam, shell side) -> 323F010 (vacuum) -> gas 790 + solution
+315**, and 315 is 317 before the pump. Stream 331 is the granulation-scrubber urea-recovery return
+(3270 kg/h, 44.37 % urea, 55 % water, **40 C**); the engine had it entering at 323D002, downstream
+of the balance it closes. Three closures on the licensor's own flows: total mass 104 840 vs 104 860
+(**0.019 %**), urea 0.06 %, and — decisively — **formaldehyde 7.52 kg/h in vs 7.39 out (1.7 %)**,
+which settles it because HCHO is non-volatile and 331 is its ONLY source anywhere in the plant.
+Before the fix the melt carried HCHO no stream fed; it lived only as a frozen number in `W_S317`.
+Back-solved stage residual **-1414 kg/h -> exactly 0.000**; water closure term 1.4 t/h -> 1.2 kg/h.
+323F010 still **un-pinned** but now lands on 79.963 % vs the PFD's 80.00 (was 78.444).
+Design duty **5048 -> 7249 kW** — 331 arrives 59 C below the product, so it is a heat SINK.
+`R323_MEVAP_DES` was written as a SUM deliberately so `R323_M317_DES` keeps its exact bits and every
+unit-324 constant stays byte-identical. `_sol_stage_anchor` / `sol_advance` gained an optional
+second inlet (adds 0.0 when absent, so the other four stages are bit-identical).
+New tests: 3 in `backend/test_equation_audit_species.py`. Probe: `scratchpad/probe_f11_331.py`.
+
 ## OPEN items (in TECH_DEBT.md)
 
-Eight of the eleven audit findings are closed. What is left:
+Nine of the eleven audit findings are closed. What is left:
 
 * **TD-009 remainder** (audit F-8, unit 328) — the desorption train (328C002/C003/C004, 328D001/
   D003, 322C001) is still lumped mass. The 323/324 half landed; the pattern is proven, so this is a
@@ -125,16 +142,18 @@ Eight of the eleven audit findings are closed. What is left:
 * **TD-006** — G8 stripper duty is feed-PROPORTIONAL, not a rigorous per-species enthalpy balance,
   and there is no steam-limited flood regime. Now unblocked: the species layer gives it the
   per-component basis it needed.
-* **TD-011** (audit F-11) — the PFD's stream-317 composition is **not reachable** from stream 319 by
-  evaporation: the tabulated percentages remove 10 163 kg/h against a tabulated 8 750 kg/h total, so
-  ~1.4 t/h of urea would have to appear across 323F010 and nothing feeds it there. Needs a licensor
-  data clarification, not a code change. Until then `sol_pin_strength` takes the urea/water pair
-  from the validated evaporation path and leaves 323F010 un-pinned so the gap stays visible.
 * **C10 constitutive properties** — densities and cp are still constants with no T-dependence
   (`tsat_steam`, `psat_water_bara`, `psat_nh3_bara` are live). The last "~" in the category table
   apart from C2/C6, which are the 328 remainder.
 * ~~TD-001~~ RESOLVED (log was stale — the helper already uses the negative law, real `chk`).
-* ~~TD-002..TD-005, TD-007, TD-008, TD-010~~ RESOLVED.
+* ~~TD-002..TD-005, TD-007, TD-008, TD-010, TD-011~~ RESOLVED.
+
+**Durable lesson from TD-011:** a component balance that will not close is evidence of a **missing
+stream** at least as often as it is evidence of bad source data. Check the topology against the
+licensor before concluding the numbers are wrong — and argue it with a conserved tracer (here,
+formaldehyde), because a species with exactly one source in the plant cannot be explained away as
+rounding. `sol_pin_strength` survives as a rounding guard on the 324 melt only; it is an identity at
+323F010 now.
 
 ## Standing session commands (CLAUDE.md sections 6/7)
 * **Caveman mode ON** — invoke the `caveman` skill at session start; prose only, code/commits normal.

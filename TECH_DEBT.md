@@ -510,18 +510,20 @@ by construction and the design anchors cannot move; C2 and C6 are added on top.
 Two pieces of real physics fell out of the design data:
 
 * **Biuret formation, 2 Urea → Biuret + NH3.** Back-solving the PFD rise (0.24 % at stream 208 to
-  0.85 % at 402) gives extents of 0.660 / 0.000 / 0.136 / 1.487 / 0.996 kmol/h across
-  C003/F004/F010/E001/E003 — 338 kg/h total against the 322 kg/h the PFD flows imply, with the two
+  0.85 % at 402) gives extents of 0.660 / 0.000 / 0.006 / 1.487 / 0.996 kmol/h across
+  C003/F004/F010/E001/E003 — 324.6 kg/h total against the 322 kg/h the PFD flows imply, with the two
   hot evaporators dominating exactly as expected. Arrhenius, second order in urea, sharing the
-  stripper's activation energy.
+  stripper's activation energy. (The 323F010 extent was 0.136 and the total 338 kg/h until TD-011
+  was resolved; stream 331 carries biuret in, so less of it has to be made at that stage.)
 * **Relative-volatility vapour compositions**, `y_i = α_i·w_i / Σ α_j·w_j`, with α back-solved at
   design *after* the reaction extent is removed. That normalisation IS the C6 summation equation.
 
 Everything is anchored: at the design seed w == w_des at every stage, so y == y_des, so every
 species flow equals its design value and dw/dt == 0. Σw reads exactly 100.0000 on every tick.
 
-Closing it immediately exposed **TD-011 / finding F-11** (below), which forced the documented
-`sol_pin_strength` reconciliation onto the PFD urea anchors.
+Closing it immediately exposed **TD-011 / finding F-11** (below) — which turned out to be a missing
+feed into 323E010, not a data error, and is now resolved. `sol_pin_strength` survives it as a
+rounding guard on the 324 melt only.
 
 ### Still open — the 328 train
 
@@ -552,10 +554,10 @@ against its original cwd, invoke the gate with an absolute output path:
 
 ---
 
-## TD-011 — PFD stream 317 composition is unreachable from stream 319
+## TD-011 — 323E010 was missing its second feed (PFD stream 331)
 
-**Status: OPEN — needs a licensor data clarification, not a code change** · raised 2026-07-22
-(`EQUATION_AUDIT.md`, finding F-11) · severity B
+**Status: RESOLVED 2026-07-22** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-11) ·
+severity B → **A** on diagnosis
 
 Found by closing TD-009: the rigorous component balance would not close across 323F010.
 
@@ -568,21 +570,36 @@ Removing stream 319's water, NH3 and CO2 at the PFD's own tabulated percentages 
                                           10163 kg/h
 
 against a tabulated total loss of 101570 − 92820 = **8750 kg/h**. For the licensor's numbers to
-close, ≈1413 kg/h of urea has to *appear* across 323F010 — and nothing feeds it there. Stream 331
-(the urea-recovery return, 3270 kg/h at 44.37 % urea = 1451 kg/h of urea) is the right magnitude but
-enters 323D002, which is downstream of the tag whose composition is tabulated.
+close, ≈1413 kg/h of urea has to *appear* across 323F010. It was raised as a suspected source-data
+inconsistency, on the reading that stream 331 (the urea-recovery return, 3270 kg/h at 44.37 % urea =
+1451 kg/h of urea) was the right magnitude but entered at 323D002, downstream.
 
-Consequence in the model: left free, the deficit propagates and walks the 324 melt ≈1.8 pp below its
-PFD anchor, which would put two disagreeing urea numbers on the same HMI screen. `sol_pin_strength`
-therefore takes the urea/water pair from the mass-and-energy-validated evaporation path
-(`w1_live` / `w2_live` / `R324_W_IN`) per CLAUDE.md §0, while the rigorously balanced minor species
-are left untouched. **323F010 is deliberately not pinned**, so the discrepancy stays visible at the
-stage that causes it (it publishes 78.44 % against the tabulated 80 %) instead of being smeared
-across the train.
+### What it actually was
 
-### Fix when scheduled
+**A topology error in the engine, not a data error.** Confirmed by the licensor: stream 331 joins
+stream 319 *ahead of* 323E010. The combined solution is heated by LP steam on the shell side, then
+separates in 323F010 under vacuum into gas stream 790 and liquid stream 315 (== 317 after the pump,
+which is why the two share a composition column in the PFD).
 
-Ask the licensor which of the three is authoritative — stream 319's volatile percentages, stream
-317's 80 % urea, or the 8750 kg/h evaporation duty. Any one of the three moving into line closes it.
-Until then the reconciliation above is the honest treatment: rigorous where the data supports it,
-PFD-anchored where it does not, and the disagreement published rather than hidden.
+The reading that raised the finding was the wrong one: the missing 1413 kg/h of urea was not
+unexplained, it was stream 331's, arriving at a stage the model did not connect it to. With the
+real topology, the total mass balance closes to 20 kg/h in 105 t/h (0.019 %) on the licensor's own
+tabulated flows, and the formaldehyde tracer is decisive — 331 carries 7.52 kg/h of HCHO in, 315
+carries 7.39 kg/h out, and 331 is the only formaldehyde source anywhere in the plant.
+
+### Fixed by
+
+`R323_M331_DES` / `R323_M331_T_C` as new PFD anchors; `R323_MEVAP_DES` becomes a sum so that
+`R323_M317_DES` keeps its exact bits and every unit-324 constant stays byte-identical; the stage
+energy balance gains the cold feed's sensible term (design duty 5048 → 7249 kW, since 331 lands
+59 °C below the product); `_sol_stage_anchor` and `sol_advance` take an optional second inlet.
+
+The back-solved stage residual goes from **−1414 kg/h to exactly 0.000**, and 323F010 — still
+un-pinned — now reaches **79.963 %** urea against the PFD's 80.00, where it published 78.44 before.
+`sol_pin_strength` is retained but is an identity at this stage; it holds the 324 melt against PFD
+percentage rounding per CLAUDE.md §0 and nothing more.
+
+**Durable lesson:** a component balance that will not close is evidence of a *missing stream* at
+least as often as it is evidence of bad data. Check the topology against the licensor before
+concluding the numbers are wrong — and prefer a conserved tracer (here, formaldehyde) to argue it,
+since a species with exactly one source in the plant cannot be explained away by rounding.

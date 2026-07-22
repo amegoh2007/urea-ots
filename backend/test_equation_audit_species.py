@@ -71,9 +71,9 @@ def test_species_fractions_are_physical():
 
 # ------------------------------------------------------------------- PFD anchors are reproduced
 def test_design_compositions_sit_on_their_pfd_anchors():
-    """C003, F004 and the three urea anchors must land on the PFD stream compositions.  323F010 is
-    deliberately NOT pinned — it publishes the balance-derived strength so finding F-11 stays
-    visible at the stage that causes it (see sol_pin_strength)."""
+    """Every stage must land on its PFD stream composition.  323F010 is still NOT pinned — it
+    publishes the strength the component balance actually produces — but since F-11 was closed by
+    adding stream 331 that number now arrives on the anchor by itself, which is the real test."""
     t = _fresh(600.0)
     liq = t["SPECIES_323_324"]["liq"]
     assert abs(liq["C003"]["Urea"] - 68.74) < 0.10, liq["C003"]["Urea"]     # PFD stream 314
@@ -81,8 +81,8 @@ def test_design_compositions_sit_on_their_pfd_anchors():
     assert abs(liq["D002"]["Urea"] - 80.00) < 1e-6, liq["D002"]["Urea"]     # PFD stream 317 anchor
     assert abs(liq["E001"]["Urea"] - 94.31) < 0.02, liq["E001"]["Urea"]     # PFD stream 401
     assert abs(liq["E003"]["Urea"] - 97.71) < 0.02, liq["E003"]["Urea"]     # PFD stream 402
-    # F-11: the un-pinned stage sits ~1.5 pp low, which is the source-data gap, not drift
-    assert 77.5 < liq["F010"]["Urea"] < 79.5, liq["F010"]["Urea"]
+    # F-11 CLOSED: un-pinned and still on anchor (79.96 vs 80.00).  It used to sit at 78.44.
+    assert abs(liq["F010"]["Urea"] - 80.00) < 0.10, liq["F010"]["Urea"]     # PFD stream 315
 
 
 def test_species_and_scalar_urea_agree():
@@ -163,6 +163,55 @@ def test_pin_strength_preserves_the_minor_species_and_the_sum():
     # identity at the anchor itself
     same = main.sol_pin_strength(w, w["Urea"])
     assert all(abs(same[k] - w[k]) < 1e-12 for k in main.SOL_SPECIES)
+
+
+# --------------------------------- F-11: PFD stream 331 is a real feed to 323E010 / 323F010
+def test_stream_331_closes_the_f010_total_mass_balance():
+    """323F010 takes TWO feeds — stream 319 from the flash drum and stream 331, the urea-recovery
+    return from the granulation scrubber — and both enter through 323E010.  With 331 present the
+    stage balance closes exactly; without it the back-solve had to clip 1414 kg/h of NEGATIVE urea
+    vapour, which is what finding F-11 reported."""
+    assert abs((main.R323_M319_DES + main.R323_M331_DES)
+               - (main.R323_MEVAP_DES + main.R323_M317_DES)) < 1e-9
+    assert main.SOL_F010["resid"] == 0.0, main.SOL_F010["resid"]
+    # every design vapour component is now physically possible without clipping
+    assert all(main.SOL_F010["y"][k] >= 0.0 for k in main.SOL_SPECIES)
+    assert main.SOL_F010["alpha"]["Urea"] > 0.0        # real (small) urea carryover, was clipped to 0
+    assert main.SOL_F010["alpha"]["CO2"] > main.SOL_F010["alpha"]["NH3"] > 1.0   # ordering is physical
+
+
+def test_stream_331_is_published_and_loads_the_pre_evaporator():
+    """331 is a battery-limit inflow (the granulation scrubber is outside the simulated boundary),
+    so it is constant — but it must be VISIBLE on the HMI and it must show up in the balance, or the
+    operator sees a separator whose outflow exceeds its inflow."""
+    t = _fresh(300.0)
+    f10 = t["RECIRC_323"]["F010"]
+    assert abs(f10["feed331_th"] - main.R323_M331_DES / 1000.0) < 6e-3
+    assert abs(f10["product317_th"] - main.R323_M317_DES / 1000.0) < 6e-3
+    # C1 across the stage, read off the published telemetry
+    assert abs((f10["feed331_th"] + t["RECIRC_323"]["F004"]["drain319_th"])
+               - (f10["evap_th"] + f10["product317_th"])) < 1e-2
+    # 331 arrives at 40 C against a 99 C product, so it is a heat SINK: the duty must exceed what
+    # the single-feed model asked for (~5048 kW), not merely differ from it.
+    assert main.R323_E010_Q_DES_KW > 6000.0, main.R323_E010_Q_DES_KW
+    assert abs(f10["Q_kW"] - main.R323_E010_Q_DES_KW) < 1.0
+
+
+def test_formaldehyde_traces_from_its_only_source_to_the_melt():
+    """Decisive evidence for the F-11 topology: stream 331 is the ONLY formaldehyde source anywhere
+    in the plant (UF-85 dosed into the granulation scrubber), and HCHO is non-volatile, so whatever
+    331 brings in must reappear in the product.  Before the fix the melt carried HCHO that no stream
+    fed — it existed only as a frozen constant in W_S317."""
+    t = _fresh(600.0)
+    liq = t["SPECIES_323_324"]["liq"]
+    assert liq["C003"]["HCHO"] == 0.0 and liq["F004"]["HCHO"] == 0.0   # upstream of the injection
+    assert liq["F010"]["HCHO"] > 0.0                                   # ... appears exactly here
+    assert liq["F010"]["HCHO"] < liq["E001"]["HCHO"] < liq["E003"]["HCHO"]  # concentrates, never boils
+    assert abs(liq["E003"]["HCHO"] - 0.0099) < 5e-4, liq["E003"]["HCHO"]    # PFD stream 402
+    # closes on the PFD to better than 2 % on a 7.5 kg/h stream
+    h_in = main.R323_M331_DES * main.W_S331["HCHO"]
+    h_out = main.R323_M317_DES * main.W_S317["HCHO"]
+    assert abs(h_out / h_in - 1.0) < 0.02, (h_in, h_out)
 
 
 # ------------------------------------------ F-7 / TD-008: 328C003 hydrolyser reaction extent

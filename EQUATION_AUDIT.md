@@ -94,7 +94,7 @@ that limits training fidelity · **C** = cosmetic / documentation.
 | **F-6** | B | 322E002 | C5 EoS/activity | HPCC condensation split `φᵢ = HPCC_FRAC_GAS_DES` is **invariant to shell temperature and loop pressure**. Raising LP-steam pressure changes duty and `T_prod` (via NTU) but not one mole of condensate. **CLOSED** — see §5. |
 | **F-7** | B | 328C003 | C7 Kinetics | The hydrolyser carries **no reaction extent at all** — urea hydrolysis is lumped into the back-solved `R328_C003_LAM748`. Arrhenius hydrolysis kinetics exist only in the read-only `ppm_infer_328701` soft sensor, not in the mass balance. **CLOSED** — see §5. |
 | **F-8** | B | 323/324/328/329 | C2 Component balance | Species tracking (`MW_COMP`, 9 components) exists **only in unit 322**. Everything downstream of LV-322501 is lumped-mass. No component balance, hence no C6 summation equations, downstream. **CLOSED for 323 + 324** — see §5; the 328 train remains (F-7 depends on it). |
-| **F-11** | B | 323F010 | C2 / source data | **The PFD's stream-317 composition is not reachable from stream 319 by evaporation.** Removing 319's water, NH₃ and CO₂ at the tabulated percentages takes out 10 163 kg/h against a tabulated 8 750 kg/h total, so ≈1.4 t/h of urea would have to *appear* across 323F010, and no stream feeds it there (331, the urea-recovery return, enters 323D002 downstream and is only 1 451 kg/h of urea). Found by closing F-8 — the rigorous component balance exposed it. Needs a licensor data clarification, not a code change. |
+| **F-11** | A | 323E010 / 323F010 | C1, C2, C3 | **The pre-evaporator was missing a feed.** Stream 317's composition is not reachable from 319 alone — the tabulated percentages remove 10 163 kg/h against an 8 750 kg/h total, so ≈1.4 t/h of urea had to *appear* across 323F010. Raised as a suspected source-data inconsistency; it was a **model topology error**. PFD stream 331 (urea-recovery return from the granulation scrubber, 3 270 kg/h, 44.37 % urea, 40 °C) joins 319 **ahead of 323E010** — the engine had it entering at 323D002, downstream of the balance it closes. Found by closing F-8; severity raised from B to A on confirmation, since it was a missing term in C1 and C3, not just C2. **CLOSED** — see §5. |
 | **F-9** | C | tooling | — | `scratchpad/regress.py` `os.chdir(BACKEND)` before writing `argv[1]`, so the relative gate command in CLAUDE.md §7 / handoff.md fails with `FileNotFoundError`. Gate must be invoked with an **absolute** output path. **CLOSED** — `regress.py` now resolves `argv[1]` before the chdir (TD-010). |
 | **F-10** | A | 323E002, 323E010, 324E001, 324E003 | C3, C8 | **Condensing-steam heater duty is unbounded below.** `Q = UA·(Tsat(p_chest) − T)` with `p_chest` clamped to 0.02 bar a (Tsat ≈ 17.5 °C) makes a shut steam valve a *refrigerator*: probe measured the Evap-I melt driven to **22 °C** and the 323C003 column to **13.6 °C**. A condensing chest cannot remove heat — it simply stops condensing. Found by disturbance-probing the F-2..F-5 fixes; the defect pre-dates them but was masked while the boil-up ignored the duty. **CLOSED** — see §5. |
 
@@ -203,9 +203,9 @@ clamps `op`, so no integral state can wind). Instrument dynamics are available a
 
 | Category | Verdict |
 |---|---|
-| C1 Total mass balance | ✔ closes everywhere; `closure_resid` diagnostics in 322R001/322E003 |
+| C1 Total mass balance | ✔ closes everywhere; `closure_resid` diagnostics in 322R001/322E003. 323E010/F010 gained its missing second feed, PFD stream 331 (F-11) |
 | C2 Component species balance | ~ rigorous in **322, 323 and 324** (9 species in the HP loop, 6 in the solution train); the 328 desorption/hydrolysis train is still lumped mass (F-8 remainder) |
-| C3 Energy balance | ✔ **re-coupled to mass in 323/324** (F-2..F-5, F-10 closed); correct elsewhere |
+| C3 Energy balance | ✔ **re-coupled to mass in 323/324** (F-2..F-5, F-10 closed); 323E010 now also pays the sensible duty on the 40 °C stream-331 return (F-11); correct elsewhere |
 | C4 Isenthalpic/isothermal flash | ✔ isenthalpic flash at 323F004 (F-1) and isothermal (T,P) Rachford-Rice at 322E002 (F-6). JT letdown elsewhere — appropriate |
 | C5 EoS & activity | ~ Antoine (NH₃, H₂O), Clausius–Clapeyron carbamate bubble-P, carbamate K_p = p²_NH₃·p_CO₂ / Raoult / Henry K-values at 322E002, back-solved activity coefficients baked into the anchored K_des. No cubic EoS — reduced-order by design |
 | C6 Summation equations | ✔ enforced explicitly where a phase split exists: the 322E002 Rachford-Rice root (Σy=1, Σx=1) and the 323/324 relative-volatility normalisation (Σw=1, Σy=1, asserted every tick in telemetry). Unit 328 outstanding |
@@ -358,32 +358,92 @@ $$y_i=\frac{\alpha_i w_i}{\sum_j \alpha_j w_j}$$
 water is the reference (α = 1) and carries the closure residual, which is what a balance closer
 should do.
 
-**Finding F-11, and the reconciliation it forced.** Closing the balance immediately exposed that the
-PFD's stream-317 composition is not reachable from stream 319: the tabulated percentages remove
-10 163 kg/h against a tabulated 8 750 kg/h total, so ≈1.4 t/h of urea must appear across 323F010 and
-nothing feeds it there. Left free, that deficit propagates and walks the 324 melt ≈1.8 pp below its
-PFD anchor — two disagreeing urea numbers on one HMI screen, which would be worse than the constant
-being replaced. So `sol_pin_strength` takes the **urea/water pair** from the mass-and-energy-
-validated evaporation path (`w1_live` / `w2_live` / `R324_W_IN` — the anchors F-4/F-5 already made
-live, and CLAUDE.md §0 says PFD values override derived ones) while Biuret, NH₃, CO₂ and HCHO stay
-exactly where the component balance put them. **323F010 is deliberately left un-pinned**, so the
-discrepancy stays visible at the stage that causes it instead of being smeared across the train.
+**Finding F-11, raised here and since closed.** Closing the balance immediately exposed that the
+PFD's stream-317 composition was not reachable from stream 319: the tabulated percentages removed
+10 163 kg/h against a tabulated 8 750 kg/h total, so ≈1.4 t/h of urea had to appear across 323F010
+with nothing feeding it there. That was reported as a possible source-data inconsistency and
+absorbed by `sol_pin_strength`. **It was not a data error — it was a missing feed.** See the
+dedicated section below.
 
-**Verification** (`scratchpad/probe_species_323_324.py`):
+**Verification** (`scratchpad/probe_species_323_324.py`, `scratchpad/probe_f11_331.py`):
 
 | stage | species Urea % | PFD | Biuret % | PFD |
 |---|---|---|---|---|
-| 323C003 | 68.705 | 68.74 | 0.364 | 0.36 |
-| 323F004 | 71.702 | 71.74 | 0.380 | 0.37 |
-| 323F010 | **78.444** | 80.00 | 0.430 | 0.42 |
-| 323D002 | 80.000 | 80.00 | 0.425 | 0.42 |
-| 324E001 | 94.309 | 94.31 | 0.696 | 0.69 |
-| 324E003 | 97.709 | 97.71 | 0.856 | 0.85 |
+| 323C003 | 68.707 | 68.74 | 0.364 | 0.36 |
+| 323F004 | 71.704 | 71.74 | 0.380 | 0.37 |
+| 323F010 | 79.963 | 80.00 | 0.431 | 0.42 |
+| 323D002 | 80.000 | 80.00 | 0.423 | 0.42 |
+| 324E001 | 94.310 | 94.31 | 0.692 | 0.69 |
+| 324E003 | 97.710 | 97.71 | 0.852 | 0.85 |
 
 Σw reads exactly `100.0000` at every stage on every tick; Σy likewise. The species and scalar urea
-figures agree to the published resolution. The single off-anchor cell is 323F010 — F-11, by design.
+figures agree to the published resolution. Every stage now lands on its anchor, 323F010 included,
+and 323F010 is still **un-pinned** — it arrives there by balance alone.
 
-Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `133 passed`.
+Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `133 passed` (139 after F-11).
+
+### 323E010 / 323F010 — the missing second feed (F-11, CLOSED)
+
+F-11 was reported as a licensor-data inconsistency. It was a **topology error in the model**. The
+pre-evaporator takes two feeds, not one:
+
+$$\text{319} + \text{331} \;\longrightarrow\; \text{323E010 (LP steam, shell side)} \;\longrightarrow\; \text{323F010 (vacuum)} \;\longrightarrow\; \underbrace{\text{790}}_{\text{vapour}} + \underbrace{\text{315}}_{\text{liquid}}$$
+
+Stream 331 is the urea-recovery return from the granulation scrubber — 3 270 kg/h at 44.37 % urea,
+55 % water, **40 °C**. The engine had it entering at 323D002, downstream of the stage whose balance
+it closes. Stream 315 is the separator discharge; 317 is the same stream after the pump (0.5 → 3
+bar a), which is why their PFD compositions are identical.
+
+Three independent checks confirm the topology on the licensor's own numbers:
+
+| check | in | out | closure |
+|---|---|---|---|
+| total mass | 319 + 331 = 104 840 | 315 + 790 = 104 860 | **0.019 %** |
+| urea | 72 866 + 1 451 = 74 317 | 74 256 + 17 = 74 273 | 0.06 % |
+| **formaldehyde** | 331 → **7.52 kg/h** | 315 → **7.39 kg/h** | **1.7 %** |
+
+The formaldehyde tracer is decisive. HCHO is non-volatile and stream 331 is its **only** source
+anywhere in the plant (UF-85 is dosed into the granulation scrubber). Before this fix the melt
+carried formaldehyde that no stream fed — it existed purely as a frozen number inside `W_S317`.
+Now it traces 331 → 315/317 → 401 → 402 and reproduces the PFD at every stage:
+
+| stage | model HCHO % | PFD |
+|---|---|---|
+| 323C003 / 323F004 | 0.000000 | — (upstream of the injection) |
+| 323F010 | 0.008100 | 0.00797 |
+| 324E001 | 0.009400 | 0.00948 |
+| 324E003 | 0.009800 | 0.0099 |
+
+**What changed.** `R323_M331_DES = 3270` and `R323_M331_T_C = 40` are new PFD anchors. The vapour
+constant becomes a sum, `R323_MEVAP_DES = φ_evap·m₃₁₉ + m₃₃₁` — written that way deliberately so
+`R323_M317_DES` keeps the exact bits it had, leaving every unit-324 constant byte-identical. The
+stage energy balance gains the cold feed's sensible term:
+
+$$\dot m_{319}c_p(106-99) \;+\; \dot m_{331}c_p(40-99) \;+\; Q_{E010} \;=\; \dot m_{evap}\lambda_{evap}$$
+
+331 arrives 59 °C below the product, so it is a heat **sink**: the back-solved design duty rises
+5 048 → **7 249 kW**, and the pre-evaporator now pays both to heat the return stream and to boil the
+extra water it carries. `_sol_stage_anchor` and `sol_advance` take an optional second inlet, summed
+component-wise before the balance is struck.
+
+**Result.** The back-solved stage residual — the negative vapour the old anchor had to clip — goes
+from **−1 414 kg/h to exactly 0.000**, and the water closure term falls from ≈1.4 t/h to **1.2 kg/h
+in 12 020** (0.01 %). 323F010 reaches **79.963 %** urea unaided against the PFD's 80.00, where it
+previously sat at 78.444 and needed `sol_pin_strength` to hide the gap. Urea gains a real
+relative volatility (α = 0.0014, a small carryover matching the PFD's 0.14 % urea in stream 790)
+where it had been clipped to zero. Total biuret formation lands at **324.6 kg/h** against the
+322 kg/h the PFD flows imply — 0.8 %, down from 5 % — because stream 331 carries biuret in, which
+drops the back-solved 323F010 extent 0.136 → 0.006 kmol/h.
+
+`sol_pin_strength` is kept but is now an identity at this stage; it remains only to hold the 324
+melt against PFD percentage rounding per CLAUDE.md §0.
+
+One residual PFD inconsistency, noted not fixed: stream 790's tabulated 2.29 % CO₂ (276 kg/h) does
+not close against its own 319/315 CO₂ figures, which force 651 kg/h. The balance is authoritative
+and the model follows it; 315's CO₂ is tabulated as 0.02 %, where one rounding digit carries ±90
+kg/h of leverage. Same class as the 12 040 vs 12 020 vapour total.
+
+Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `139 passed`.
 
 ### 328C003 — hydrolyser reaction extent (F-7)
 
@@ -432,5 +492,6 @@ Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `136 passed`.
 The **328 remainder of F-8** — the desorption train's own species vector (328C002/C003/C004,
 328D001/D003, 322C001) is still lumped mass. F-7 closed without it because hydrolysis is a
 flow-through conversion needing only the feed's urea content, but a full C2 balance across 328
-remains. F-9 is closed in `regress.py` itself. **F-11** needs a licensor data clarification rather
-than a code change.
+remains. F-9 is closed in `regress.py` itself. **F-11 is closed**: it was a missing feed
+(PFD stream 331 into 323E010), not a licensor data error — confirmed by the licensor and by the
+formaldehyde tracer, which has no other source in the plant.

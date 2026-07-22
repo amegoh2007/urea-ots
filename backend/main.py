@@ -564,9 +564,20 @@ R323_F004_P_GAIN    = 0.45                      # bar a per unit fractional flas
 R323_F004_P_TAU_S   = 90.0                      # s, flash-drum pressure relaxation
 
 # --- Stage 3: Pre-evaporator 323E010 + Separator 323F010 (vacuum 0.46 bar a, hold 99 C)
+#  AUDIT F-11 (CLOSED): this stage takes TWO feeds, not one.  Stream 319 (323F004 liquid) is joined
+#  by stream 331 -- the urea-recovery return from the granulation scrubber -- and the combined
+#  solution is heated by LP steam on the 323E010 shell side before flashing in 323F010 under vacuum:
+#      319 + 331  ->  323E010  ->  323F010  ->  vapour 790 + liquid 315   (315 == 317 after the pump)
+#  With 331 missing, the PFD's stream-317 composition was simply unreachable from 319 by
+#  evaporation, and ~1.4 t/h of urea had to appear from nowhere across the stage.  With it, the
+#  total mass balance closes to 20 kg/h in 105 t/h (0.019 %) on the licensor's own tabulated flows,
+#  and the formaldehyde tracer settles it beyond doubt: 331 carries 7.5 kg/h HCHO in, stream 315
+#  carries 7.4 kg/h out, and 331 is the ONLY source of formaldehyde anywhere in the train.
 R323_F010_P_BARA    = 0.46                      # bar a, FIXED vacuum boundary (Ejector I 324F002)
 R323_F010_T_SP_C    = 99.0                      # C, product boundary (stream 315/317, 80% urea)
-R323_PHI_VEVAP      = 8750.0 / 101570.0         # 0.086147 evaporated-water split (-> vacuum sys)
+R323_M331_DES       = 3270.0                    # kg/h, PFD stream 331 (44.37 % urea, 55 % water)
+R323_M331_T_C       = 40.0                      # C,    PFD stream 331 -- a COLD side feed
+R323_PHI_VEVAP      = 8750.0 / 101570.0         # 0.086147 water boiled off stream 319 itself
 R323_EVAP_LAMBDA    = 2280.0                    # kJ/kg, water latent @ 0.46 bar a
 R323_E010_OP_DES    = 40.0                      # %, PV-329208 design stroke
 R323_E010_PCHEST_DES = R323_E010_OP_DES / 100.0 * R323_P_STEAM_SUP   # 1.76 bar a
@@ -586,7 +597,11 @@ R323_M305_DES  = R323_PHI_V305  * R323_FEED_DES_KGH                       # top 
 R323_M314_DES  = (1.0 - R323_PHI_V305) * R323_FEED_DES_KGH                # rectifier bottom -> flash
 R323_M701_DES  = R323_PHI_V701  * R323_M314_DES                           # flash vapor -> LPCC
 R323_M319_DES  = (1.0 - R323_PHI_V701) * R323_M314_DES                    # flash liquid -> pre-evap
-R323_MEVAP_DES = R323_PHI_VEVAP * R323_M319_DES                           # evaporated water -> vac
+# Total vapour to the vacuum system (PFD stream 790) = the water boiled off 319 PLUS everything
+# stream 331 brings in that does not leave in the product.  Written as a SUM so that R323_M317_DES
+# below keeps the exact bits it had before F-11 -- unit 324 hangs off it and must not move.
+#   in  101 570 + 3 270 = 104 840      out  92 820 + 12 020 = 104 840      (PFD 790 tabulates 12 040)
+R323_MEVAP_DES = R323_PHI_VEVAP * R323_M319_DES + R323_M331_DES           # vapour 790 -> vacuum
 R323_M317_DES  = (1.0 - R323_PHI_VEVAP) * R323_M319_DES                   # product -> tank
 R323_M324_DES  = R323_M317_DES                                           # tank throughput -> Unit 324
 
@@ -598,9 +613,13 @@ R323_E002_UA_KW = R323_E002_Q_DES_KW / (tsat_steam(R323_E002_PCHEST_DES) - R323_
 # Stage 2 adiabatic flash: mdot_314*cp*(135-106) - mdot_701*lambda_701 = 0
 R323_LAMBDA_701 = (R323_M314_DES/3600.0*R323_CP_SOLN*(R323_C003_T_SP_C - R323_F004_T_SP_C)) \
                   / (R323_M701_DES/3600.0)                                 # kJ/kg (~1734.8)
-# Stage 3 energy balance: mdot_319*cp*(106-99) + Q_E010 - mdot_evap*lambda_evap = 0
+# Stage 3 energy balance (F-11: TWO feeds):
+#   mdot_319*cp*(106-99) + mdot_331*cp*(40-99) + Q_E010 - mdot_evap*lambda_evap = 0
+# Stream 331 arrives at 40 C against a 99 C product, so it is a heat SINK: the pre-evaporator has to
+# pay to bring it up to boiling as well as to evaporate the extra water it carries.
 R323_E010_Q_DES_KW = (R323_MEVAP_DES/3600.0*R323_EVAP_LAMBDA
-                      - R323_M319_DES/3600.0*R323_CP_SOLN*(R323_F004_T_SP_C - R323_F010_T_SP_C))  # kW (~5048)
+                      - R323_M319_DES/3600.0*R323_CP_SOLN*(R323_F004_T_SP_C - R323_F010_T_SP_C)
+                      - R323_M331_DES/3600.0*R323_CP_SOLN*(R323_M331_T_C - R323_F010_T_SP_C))  # kW (~7253)
 R323_E010_UA_KW = R323_E010_Q_DES_KW / (tsat_steam(R323_E010_PCHEST_DES) - R323_F010_T_SP_C)  # kW/K
 
 # --- AUDIT F-1/F-2/F-3: design LATENT duties, so vapour generation is energy-limited ----------
@@ -613,12 +632,13 @@ R323_E010_UA_KW = R323_E010_Q_DES_KW / (tsat_steam(R323_E010_PCHEST_DES) - R323_
 # reproduces the design vapour BIT-EXACT (the min() ties on two identical values).
 #   Stage 1  m_feed·cp·(T_feed − 135) + Q_E002  == m_305·λ_305       (== R323_LAMBDA_305 back-solve)
 #   Stage 2  m_314·cp·(135 − 106)               == m_701·λ_701       (adiabatic: no Q term)
-#   Stage 3  m_319·cp·(106 − 99)   + Q_E010     == m_evap·λ_evap
+#   Stage 3  m_319·cp·(106 − 99) + m_331·cp·(40 − 99) + Q_E010  == m_evap·λ_evap
 R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(R323_FEED_DES_T_C - R323_C003_T_SP_C)
                      + R323_E002_Q_DES_KW)                            # kW available to boil 305
 R323_Q701_DES_KW  = (R323_M314_DES/3600.0*R323_CP_SOLN
                      * (R323_C003_T_SP_C - R323_F004_T_SP_C))         # kW released by the 4.1->1.13 letdown
 R323_QEVAP_DES_KW = (R323_M319_DES/3600.0*R323_CP_SOLN*(R323_F004_T_SP_C - R323_F010_T_SP_C)
+                     + R323_M331_DES/3600.0*R323_CP_SOLN*(R323_M331_T_C - R323_F010_T_SP_C)
                      + R323_E010_Q_DES_KW)                            # kW available to evaporate
 # 323F004 isenthalpic-flash saturation anchor.  T and P of a flashing drum are NOT independent:
 # the liquid sits at its bubble point.  The boiling-point elevation of the urea liquor is held at
@@ -1171,6 +1191,7 @@ def _w_norm(d: dict) -> dict:
 W_S208 = _w_norm(dict(Urea=55.85, Biuret=0.24, NH3=7.92, CO2=10.28, H2O=25.68))  # 322E001 bottoms
 W_S314 = _w_norm(dict(Urea=68.74, Biuret=0.36, NH3=2.13, CO2=1.05,  H2O=27.72))  # 323C003 bottoms
 W_S319 = _w_norm(dict(Urea=71.74, Biuret=0.37, NH3=0.88, CO2=0.66,  H2O=26.35))  # 323F004 liquid
+W_S331 = _w_norm(dict(Urea=44.37, Biuret=0.41, H2O=55.00, HCHO=0.23))            # granulation return
 W_S317 = _w_norm(dict(Urea=80.00, Biuret=0.42, NH3=0.08, CO2=0.02,  H2O=19.47,
                       HCHO=0.00797))                                             # 323F010 product
 W_S401 = _w_norm(dict(Urea=94.31, Biuret=0.69, NH3=0.03, H2O=4.97, HCHO=0.00948))  # 324E001 melt
@@ -1180,20 +1201,27 @@ SOL_BIU_EA    = STRIP_BIU_EA        # J/mol -- biuret formation shares the strip
 SOL_BIU_ORDER = 2.0                 # 2 Urea -> Biuret + NH3: second order in the urea fraction
 
 
-def _sol_stage_anchor(w_in: dict, w_out: dict, m_in: float, m_vap: float, m_liq: float) -> dict:
+def _sol_stage_anchor(w_in: dict, w_out: dict, m_in: float, m_vap: float, m_liq: float,
+                      w_in2: dict = None, m_in2: float = 0.0) -> dict:
     """Back-solve one stage's design biuret extent and relative volatilities from the PFD.
+
+    A stage with a second inlet passes w_in2/m_in2 and the two feeds are summed component-wise
+    before the balance is struck.  323F010 is the one that needs it: PFD stream 331, the
+    urea-recovery return from the granulation scrubber, joins stream 319 ahead of 323E010.
 
     Returns {'xi': kmol/h, 'y': design vapour mass fractions, 'alpha': volatility vs water,
              'resid': the kg/h that had to be clipped to keep every vapour flow non-negative}.
-    The clip residual is reported, never hidden: at 323F010 it is -1414 kg/h of urea, which is the
-    missing PFD stream 331 (urea-recovery return to 323D002) -- see finding F-11.  Everywhere else
-    it is under 0.4 % of the vapour and is PFD percentage rounding."""
-    xi  = max((m_liq * w_out["Biuret"] - m_in * w_in["Biuret"]) / MW_SOL["Biuret"], 0.0)
+    The clip residual is reported, never hidden.  It used to be -1414 kg/h of urea at 323F010 with
+    stream 331 absent (finding F-11); with the real two-feed topology it is 0.0 there and the water
+    closure term falls from ~1.4 t/h to ~1 kg/h.  Everywhere else it is under 0.4 % of the vapour
+    and is PFD percentage rounding."""
+    m_i = {k: m_in * w_in[k] + (m_in2 * w_in2[k] if w_in2 else 0.0) for k in SOL_SPECIES}
+    xi  = max((m_liq * w_out["Biuret"] - m_i["Biuret"]) / MW_SOL["Biuret"], 0.0)
     gen = {k: 0.0 for k in SOL_SPECIES}
     gen["Biuret"] = +xi * MW_SOL["Biuret"]
     gen["Urea"]   = -xi * 2.0 * MW_SOL["Urea"]
     gen["NH3"]    = +xi * MW_SOL["NH3"]
-    vap   = {k: m_in * w_in[k] + gen[k] - m_liq * w_out[k] for k in SOL_SPECIES}
+    vap   = {k: m_i[k] + gen[k] - m_liq * w_out[k] for k in SOL_SPECIES}
     resid = sum(v for v in vap.values() if v < 0.0)
     for k in SOL_SPECIES:
         if k in SOL_NONVOL or vap[k] < 0.0:
@@ -1209,7 +1237,8 @@ def _sol_stage_anchor(w_in: dict, w_out: dict, m_in: float, m_vap: float, m_liq:
 
 SOL_C003 = _sol_stage_anchor(W_S208, W_S314, R323_FEED_DES_KGH, R323_M305_DES,  R323_M314_DES)
 SOL_F004 = _sol_stage_anchor(W_S314, W_S319, R323_M314_DES,     R323_M701_DES,  R323_M319_DES)
-SOL_F010 = _sol_stage_anchor(W_S319, W_S317, R323_M319_DES,     R323_MEVAP_DES, R323_M317_DES)
+SOL_F010 = _sol_stage_anchor(W_S319, W_S317, R323_M319_DES,     R323_MEVAP_DES, R323_M317_DES,
+                             w_in2=W_S331, m_in2=R323_M331_DES)   # F-11: 319 + 331 -> E010 -> F010
 SOL_E001 = _sol_stage_anchor(W_S317, W_S401, R324_FEED_DES,     R324_V1_DES,    R324_P1_DES)
 SOL_E003 = _sol_stage_anchor(W_S401, W_S402, R324_P1_DES,       R324_V2_DES,    R324_P2_DES)
 
@@ -1250,17 +1279,20 @@ def sol_biuret_xi(key: str, M: float, w: dict, T_c: float) -> float:
 
 
 def sol_advance(w: dict, M_pre: float, M_new: float, m_in: float, w_in: dict,
-                m_vap: float, y: dict, m_liq: float, xi: float, dt: float) -> dict:
+                m_vap: float, y: dict, m_liq: float, xi: float, dt: float,
+                m_in2: float = 0.0, w_in2: dict = None) -> dict:
     """Integrate one stage's species holdup and renormalise.  C1 is NOT re-derived here -- M_pre and
     M_new come from the existing total-mass ODE, so this layer can never perturb it.  Returns the
-    new mass-fraction vector (Σ w == 1)."""
+    new mass-fraction vector (Σ w == 1).  m_in2/w_in2 carry a stage's second inlet where it has one
+    (323F010 takes PFD stream 331 alongside stream 319 -- finding F-11)."""
     out = {}
     for k in SOL_SPECIES:
         nu = (2.0 * -MW_SOL["Urea"] if k == "Urea" else
               MW_SOL["Biuret"] if k == "Biuret" else
               MW_SOL["NH3"] if k == "NH3" else 0.0)
         m_k = (M_pre * w.get(k, 0.0)
-               + (m_in * w_in.get(k, 0.0) - m_vap * y.get(k, 0.0) - m_liq * w.get(k, 0.0)
+               + (m_in * w_in.get(k, 0.0) + (m_in2 * w_in2.get(k, 0.0) if w_in2 else 0.0)
+                  - m_vap * y.get(k, 0.0) - m_liq * w.get(k, 0.0)
                   + nu * xi) / 3600.0 * dt)
         out[k] = max(m_k, 0.0)
     tot = sum(out.values())
@@ -1312,19 +1344,17 @@ def sol_pin_strength(w: dict, w_urea_auth: float) -> dict:
     """Reconcile a species vector onto the AUTHORITATIVE urea strength (CLAUDE.md §0 -- PFD values
     override derived ones), keeping the rigorously-balanced minor species untouched.
 
-    Why this exists: the PFD's stream-317 composition is NOT reachable from stream 319 by
-    evaporation.  Removing 319's water, NH3 and CO2 at the tabulated percentages takes out 10 163
-    kg/h against a tabulated 8 750 kg/h total, so ~1.4 t/h of urea has to appear across 323F010 for
-    the licensor's numbers to close, and no stream feeds it there.  That is a source-data
-    inconsistency, not a model defect -- see EQUATION_AUDIT finding F-11.
+    Why this exists: it originally absorbed finding F-11, when stream 317's composition looked
+    unreachable from 319 by evaporation and ~1.4 t/h of urea had to appear across 323F010.  That
+    turned out to be a missing FEED, not a source-data error -- stream 331 joins 319 ahead of
+    323E010 -- and with the real topology in place 323F010 now lands on the PFD anchor by balance
+    alone, so this reconciliation is an identity there.
 
-    Left free, the deficit propagates and walks the 324 melt ~1.8 pp below its PFD anchor, which
-    would put two disagreeing urea numbers on the same HMI screen.  So the urea/water PAIR is taken
-    from the mass-and-energy-validated evaporation path (w1_live / w2_live / R324_W_IN, the anchors
-    F-4/F-5 already made live), while Biuret, NH3, CO2 and HCHO stay exactly where the component
-    balance put them.  Sum w == 1 is preserved.  323F010 is deliberately NOT pinned -- it publishes
-    the honest balance-derived strength, so the discrepancy stays visible at the stage that causes
-    it instead of being smeared across the train."""
+    It is kept because CLAUDE.md §0 still applies downstream: the PFD publishes urea to 2 dp, and
+    the residual percentage rounding across 324E001/E003 would otherwise let the melt strength creep
+    off its anchor.  The urea/water PAIR is taken from the mass-and-energy-validated evaporation
+    path (w1_live / w2_live / R324_W_IN, the anchors F-4/F-5 already made live), while Biuret, NH3,
+    CO2 and HCHO stay exactly where the component balance put them.  Sum w == 1 is preserved."""
     minor = sum(w.get(k, 0.0) for k in ("Biuret", "NH3", "CO2", "HCHO"))
     share = 1.0 - minor                                # urea + water share of the vector
     if share <= 1e-9:
@@ -4214,7 +4244,13 @@ def step_sim(dt: float) -> dict:
 
     # ---- Stage 3: Pre-evaporator 323F010 + Heater 323E010  (vacuum 0.46 bar, hold 99 C) ------
     #  Cascade  TIC-323012 (temp master) -> PIC-329208 (LP-steam chest-P slave) -> heater duty.
-    #  Un-controlled separator -> modelled pass-through (m_317 = m_319 - m_evap); holdup ~ const.
+    #  Un-controlled separator -> pass-through (m_317 = m_319 + m_331 - m_evap); holdup ~ const.
+    #  AUDIT F-11: stream 331 (urea-recovery return from the granulation scrubber) joins stream 319
+    #  ahead of 323E010.  It is a battery-limit inflow -- the granulation scrubber is outside the
+    #  simulated boundary -- so it is a constant here, exactly like the 323C005 demin make-up
+    #  (ui_guidelines.md §4).  It is COLD (40 C) and 55 % water, so it both loads the heater and
+    #  feeds the vacuum vapour; without it the stage could not reach the PFD's 80 % product.
+    m_331     = R323_M331_DES                                                     # kg/h, PFD stream 331
     tic12_op  = _ctrl_ipd(s.TIC_323012, s.r323_f010_T, dt)                        # steam-P demand (bar a)
     pic08_pv  = clamp(s.PIC_329208["op"] / 100.0 * R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)
     pic08_op  = _ctrl_ipd(s.PIC_329208, pic08_pv, dt, cas_sp=tic12_op)            # steam valve stroke (%)
@@ -4223,19 +4259,23 @@ def step_sim(dt: float) -> dict:
     # AUDIT F-3 — same energy limit as Stage 1: the pre-evaporator cannot evaporate more water
     # than its live LP-steam duty (plus the feed's sensible surplus) can supply.
     qevap_avail_kw = (m_319 / 3600.0 * cp323 * (s.r323_f004_T - s.r323_f010_T)
+                      + m_331 / 3600.0 * cp323 * (R323_M331_T_C - s.r323_f010_T)
                       + Q_e010_kw)                                                # kW available as latent
-    m_evap    = min(R323_PHI_VEVAP * m_319,
-                    max(R323_MEVAP_DES * (qevap_avail_kw / R323_QEVAP_DES_KW), 0.0))  # evaporated water -> vac (kg/h)
-    m_317     = max(m_319 - m_evap, 0.0)                                          # concentrated product -> tank (kg/h)
+    # Flow cap in anchored-ratio form: at design the numerator and denominator are bit-identical, so
+    # the ratio is exactly 1.0 and the cap reproduces R323_MEVAP_DES exactly (the min() then ties).
+    m_evap    = min(R323_MEVAP_DES * ((m_319 + m_331) / (R323_M319_DES + R323_M331_DES)),
+                    max(R323_MEVAP_DES * (qevap_avail_kw / R323_QEVAP_DES_KW), 0.0))  # vapour 790 -> vac (kg/h)
+    m_317     = max(m_319 + m_331 - m_evap, 0.0)                                  # concentrated product -> tank (kg/h)
     P_f010    = (m_319 / 3600.0 * cp323 * (s.r323_f004_T - s.r323_f010_T)
+                 + m_331 / 3600.0 * cp323 * (R323_M331_T_C - s.r323_f010_T)
                  + Q_e010_kw - m_evap / 3600.0 * R323_EVAP_LAMBDA)               # net kW on holdup
     M_f010_pre = s.r323_f010_M
     s.r323_f010_T = s.r323_f010_T + P_f010 * dt / max(M_f010_pre * cp323, 1e-6)
-    s.r323_f010_M = max(M_f010_pre + (m_319 - m_evap - m_317) / 3600.0 * dt, 1.0)
+    s.r323_f010_M = max(M_f010_pre + (m_319 + m_331 - m_evap - m_317) / 3600.0 * dt, 1.0)
     y_evap     = sol_vapour_y(s.w_f010, SOL_F010["alpha"])          # AUDIT F-8: vacuum vapour comp
     xi_f010    = sol_biuret_xi("F010", M_f010_pre, s.w_f010, s.r323_f010_T)
     s.w_f010   = sol_advance(s.w_f010, M_f010_pre, s.r323_f010_M, m_319, s.w_f004,
-                             m_evap, y_evap, m_317, xi_f010, dt)
+                             m_evap, y_evap, m_317, xi_f010, dt, m_in2=m_331, w_in2=W_S331)
 
     # ---- Stage 4: Urea Solution Tank 323D002  (atmospheric, two-compartment) ------------------
     #  Comp I (80 m3, active flow-through): in = m_317, out = m_324 via LIC-323507 -> FIC-324401
@@ -5020,7 +5060,8 @@ def step_sim(dt: float) -> dict:
                 "TT_323010":  round(s.r323_f010_T, 1),                       # pre-evap temp (C, hold 99)
                 "P_bara":     R323_F010_P_BARA,                              # vacuum (bar a, fixed)
                 "LI_323F010": round(s.r323_f010_M / R323_F010_M_FULL * 100.0, 1),
-                "evap_th":    round(m_evap / 1000.0, 2),                     # evaporated water -> vac (t/h)
+                "feed331_th": round(m_331 / 1000.0, 2),                      # urea-recovery return (t/h)
+                "evap_th":    round(m_evap / 1000.0, 2),                     # vapour 790 -> vac (t/h)
                 "product317_th": round(m_317 / 1000.0, 2),                   # product -> 323D002 (t/h)
                 "Q_kW":       round(Q_e010_kw, 0),                           # heater 323E010 duty (kW)
                 "TIC_323012": {"pv": round(s.TIC_323012["pv"], 1), "sp": round(s.TIC_323012["sp"], 1),

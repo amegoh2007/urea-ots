@@ -24,6 +24,7 @@
 
 | 11 | 2026-07-22 | branch `master` | Full modelling-equation audit of every equipment tag against the 11 equation categories (`EQUATION_AUDIT.md`). Units 323 + 324: vapour generation was a frozen design split fraction of the live inflow in every vaporiser, so the mass and energy balances were solved independently — the live heater duty had no authority over the boil-up, and the 324 melt strength was pinned by construction. Boil-up is now duty-limited, 323F004 runs a true isenthalpic flash (saturation constraint + enthalpy balance), the 324 melt strengths are live outputs, and all four condensing-steam chests are floored at zero duty (a shut valve had been turning them into refrigerators, dragging the melt to 22 °C). See Revision Delta #15. |
 | 12 | 2026-07-22 | branch `master` | Equation audit remediation, slot 2 — 322E002 HPCC (finding F-6 / TD-007). The condensation split `HPCC_FRAC_GAS_DES` was a point calibration frozen into a constant, so the condenser was thermodynamically inert: shell temperature and synthesis pressure moved the duty and the NTU outlet temperature but not one mole of condensate. The calibration is now the *anchor* of an isothermal (T,P) Rachford-Rice flash — design K back-solved from it every tick, corrected by the carbamate equilibrium Kp = p²_NH₃·p_CO₂ (dissociation-pressure slope ΔH_carb/3, Bennett 1953), Raoult for H₂O, Henry for N₂ — solved by bisection and rate-limited through the interfacial film over `HPCC_TAU_FILL_MIN`, making the split a dynamic state `s.hpcc_phi`. `P_bub` de-pinned from the frozen design temperature onto the live `T_prod`. See Revision Delta #16. |
+| 13 | 2026-07-22 | branch `master` | Equation audit remediation, slot 5 — 323E010 / 323F010 (finding F-11 / TD-011). The pre-evaporator was modelled with **one feed** when it has two: PFD stream 331, the granulation-scrubber urea-recovery return (3270 kg/h, 44.37 % urea, 40 °C), joins stream 319 ahead of 323E010 and flashes with it in 323F010 under vacuum (gas 790, solution 315 ≡ 317 after the pump). The engine had 331 entering at 323D002, downstream of the balance it closes, which is why stream 317's composition was unreachable from 319 and ≈1.4 t/h of urea had to appear from nowhere. Raised as a suspected source-data error; confirmed instead as a model topology error — the total mass balance closes to 0.019 % on the licensor's own flows, and the formaldehyde tracer (331 is its only source in the plant) closes to 1.7 %. Severity raised B → A: it was a missing term in C1 and C3, not just C2. Design duty 5048 → 7249 kW for the 40 °C feed's sensible load; unit-324 constants deliberately left byte-identical. See Revision Delta #17. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -212,6 +213,69 @@ $$\dot Q_{sens,c003}=\frac{\dot m_{746}}{3600}C_p\bigl(T_{746}-T_{C003}\bigr)=\f
     **60.33 → 69.34 t/h**; N/C setpoint cut to 92 %: $\phi_{CO_2}\to0.2105$, level swells 49.7 →
     55.3 %, duty 63 122 → 66 706 kW. Self-excitation check: $T_{prod}$ spans **0.0205 °C** and
     **0.2329 °C** respectively over the final five minutes — monotone convergence, no ringing.
+
+17. **323E010 / 323F010 — the pre-evaporator was missing a feed (equation audit F-11 / TD-011).**
+    Raised while closing the 323/324 component balance as a suspected *source-data* inconsistency:
+    stream 317's tabulated composition is not reachable from stream 319 by evaporation. Removing
+    319's water, NH₃ and CO₂ at the PFD's own percentages takes out
+    $8692 + 820 + 651 = 10\,163$ kg/h against a tabulated total loss of
+    $101\,570 - 92\,820 = 8750$ kg/h, so $\approx 1.4$ t/h of urea has to *appear* across the stage.
+    It was **not** a data error. The licensor confirms the real topology is a **two-feed** stage:
+
+    $$\underbrace{319}_{\text{323F004 liquid}} + \underbrace{331}_{\text{urea-recovery return}}
+      \;\longrightarrow\; \text{323E010 (LP steam, shell side)}
+      \;\longrightarrow\; \text{323F010 (vacuum)}
+      \;\longrightarrow\; \underbrace{790}_{\text{gas}} + \underbrace{315}_{\text{solution}}$$
+
+    Stream 331 is the granulation-scrubber return — 3270 kg/h, 44.37 % urea, 55 % water, **40 °C**.
+    The engine had it entering at 323D002, *downstream* of the balance it closes. Stream 315 is the
+    separator discharge and 317 is the same stream after the pump (0.5 → 3 bar a), which is why the
+    PFD gives them one composition column.
+
+    **(i) Evidence.** Three independent closures on the licensor's own tabulated flows: total mass
+    $319+331 = 104\,840$ against $315+790 = 104\,860$ (**0.019 %**); urea $74\,317$ against $74\,273$
+    (0.06 %); and — decisively — **formaldehyde**, $7.52$ kg/h in via 331 against $7.39$ kg/h out via
+    315 (1.7 %). HCHO is non-volatile and stream 331 is its *only* source anywhere in the plant
+    (UF-85 is dosed into the granulation scrubber), so it cannot be argued away as rounding. Before
+    this fix the melt carried formaldehyde that no stream fed — it existed only as a frozen number
+    inside `W_S317`.
+
+    **(ii) Mass.** `R323_M331_DES` $=3270$ and `R323_M331_T_C` $=40$ enter as new PFD anchors. The
+    vapour constant becomes a **sum**, $\dot m_{evap,des} = \phi_{evap}\dot m_{319,des} + \dot
+    m_{331,des}$, written that way deliberately so `R323_M317_DES` keeps its exact bits and every
+    unit-324 constant stays byte-identical. The runtime flow cap moves to anchored-ratio form,
+    $\dot m_{evap,des}\cdot\frac{\dot m_{319}+\dot m_{331}}{\dot m_{319,des}+\dot m_{331,des}}$, so
+    numerator and denominator are bit-identical at the seed and the ratio is exactly 1.
+
+    **(iii) Energy.** The stage balance gains the cold feed's sensible term:
+    $$\dot m_{319}c_p(T_{319}-T) \;+\; \dot m_{331}c_p(T_{331}-T) \;+\; Q_{E010}
+      \;=\; \dot m_{evap}\lambda_{evap}$$
+    331 lands 59 °C below the product, so it is a heat **sink** — the back-solved design duty rises
+    $5048 \to \mathbf{7249}$ kW and `R323_E010_UA_KW` with it. The pre-evaporator now pays both to
+    bring the return stream to boiling and to evaporate the extra water it carries.
+
+    **(iv) Species.** `_sol_stage_anchor` and `sol_advance` take an optional second inlet, summed
+    component-wise before the balance is struck (adding $0.0$ when absent, so the other four stages
+    stay bit-identical). The back-solved stage residual — the negative vapour the old anchor had to
+    clip — falls from $\mathbf{-1414}$ kg/h to **exactly 0.000**, and the water closure term from
+    $\approx 1.4$ t/h to **1.2 kg/h in 12 020** (0.01 %). Urea gains a real relative volatility
+    $\alpha = 0.0014$ (a small carryover matching the PFD's 0.14 % urea in stream 790) where it had
+    been clipped to zero.
+
+    Verified — pin gate `leaves: 25  keys: 15  diffs: 0`; suite **139 passed** (3 new tests in
+    `backend/test_equation_audit_species.py`). Design hold 600 s: C1 closure residual
+    **0.000e+00 kg/h**, and zero drift on `evap_th`, `product317_th` and TT-323010 across a second
+    600 s window. 323F010 — still **un-pinned** — now reaches **79.963 %** urea against the PFD's
+    80.00, where it published 78.444 and needed `sol_pin_strength` to hide the gap; HCHO traces
+    331 → 315/317 → 401 → 402 at 0.0081 / 0.0094 / 0.0098 % against the PFD's 0.00797 / 0.00948 /
+    0.0099. Total biuret formation lands at **324.6 kg/h** against the 322 kg/h the PFD flows imply
+    (0.8 %, down from 5 %), because 331 carries biuret in and the 323F010 extent drops
+    $0.136 \to 0.006$ kmol/h.
+
+    One residual PFD inconsistency, noted not fixed: stream 790's tabulated 2.29 % CO₂ (276 kg/h)
+    does not close against its own 319/315 CO₂ figures, which force 651 kg/h. The balance is
+    authoritative and the model follows it; 315's CO₂ is tabulated as 0.02 %, where one rounding
+    digit carries $\pm 90$ kg/h of leverage.
 
 ---
 
