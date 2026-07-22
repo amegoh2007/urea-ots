@@ -7,6 +7,11 @@ import os, sys, json
 HERE = os.path.dirname(os.path.abspath(__file__))
 BACKEND = os.path.normpath(os.path.join(HERE, "..", "backend"))
 
+# TD-010: resolve argv[1] against the ORIGINAL cwd before chdir(BACKEND), otherwise the relative
+# gate command documented in CLAUDE.md §7 / handoff.md writes to backend/scratchpad/... and dies
+# with FileNotFoundError *after* paying the full settle cost.
+out = os.path.abspath(sys.argv[1]) if len(sys.argv) > 1 else os.path.join(HERE, "pin_out.json")
+
 cache = os.path.join(BACKEND, ".boot_pin_cache.json")
 if os.path.exists(cache):
     os.remove(cache)
@@ -16,7 +21,6 @@ sys.path.insert(0, BACKEND)
 import main  # noqa: E402  -> triggers _pin_hpcc_ua() full settle
 
 pin = main._collect_pin()
-out = sys.argv[1] if len(sys.argv) > 1 else os.path.join(HERE, "pin_out.json")
 with open(out, "w", encoding="utf-8") as f:
     json.dump(pin, f, indent=2)
 print("wrote", out)

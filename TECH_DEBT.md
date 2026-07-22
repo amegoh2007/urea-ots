@@ -383,3 +383,86 @@ live, so specific steam consumption is trainable, and zero feed draws zero steam
    pressure excursion. Couple `m_strip` into the MP header dynamics once (1) lands.
 
 Both are larger, pin-sensitive efforts and were deferred deliberately rather than rushed.
+
+---
+
+## TD-007 — HPCC 322E002 condensation split is invariant to shell temperature and loop pressure
+
+**Status: OPEN** · raised 2026-07-22 by the full equation audit (`EQUATION_AUDIT.md`, finding F-6)
+· severity B (limits training fidelity; not operator-triggerable into wrong physics)
+
+`hpcc_322e002` splits the combined tube-side feed with a frozen calibrated vector:
+
+    gas = {k: feed[k] * HPCC_FRAC_GAS_DES.get(k, 0.0) for k in MW_COMP}      # main.py:1922
+
+`HPCC_FRAC_GAS_DES` is a constant. The duty, the adiabatic exotherm spike and the ε-NTU quench all
+respond to the live shell temperature `t_shell` and to throughput, but **not one mole of condensate
+moves**. Raising the LP-steam pressure (hotter shell ⇒ less driving force ⇒ physically less
+condensation) changes `T_prod` and `q_steam_kw` while the phase split stays exactly at design.
+
+This is the C5 (EoS / activity) gap of the audit: a split fraction is only a legitimate hybrid
+layer when it is a *function* φᵢ(T, P, composition). As coded it is a point calibration.
+
+### Why it was not fixed in this pass
+
+322E002 sits inside the pinned HP loop. Any φᵢ change must be an anchored correction —
+φᵢ(T_prod, P) ≡ HPCC_FRAC_GAS_DES at the design point — or the boot pin (`HPCC_UA`,
+`HPCC_LIQ_DES_LIVE`, `HPCC_NC_DES_LIVE`, `REACT_TEAR_DES`) moves and the `diffs 0` contract breaks.
+It also feeds the `_disturbance_gate` self-excitation path documented at main.py:1878, so the loop
+gain of the new coupling has to be checked against that runaway before it can land. Its own
+Scope-Lock slot.
+
+---
+
+## TD-008 — 328C003 hydrolyser carries no reaction extent
+
+**Status: OPEN** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-7) · severity B
+
+`NH2CONH2 + H2O ⇌ 2 NH3 + CO2` is the entire purpose of 328C003, and the engine models it as a
+frozen overhead split `gen748 = R328_C003_PHI748 * in_c003` with the reaction endotherm lumped into
+the back-solved latent `R328_C003_LAM748`. There is no extent, no rate, no residence-time
+dependence in the mass balance.
+
+The kinetics already exist in the codebase — `ppm_infer_328701` uses first-order Arrhenius
+hydrolysis (`R328_AI701_EA_UREA = 72000` J/mol, `R328_AI701_KEFF_UREA`, `R328_AI701_TAU_S = 3600` s)
+— but only as a **read-only soft sensor**. Promoting that same rate law into the 328C003 mass
+balance would make MP-steam rate and residence time actually govern urea destruction, which is what
+the loop is trained on.
+
+Depends on TD-009: an extent needs species, and the 328 train is lumped-mass.
+
+---
+
+## TD-009 — component species balance exists only in unit 322
+
+**Status: OPEN** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-8) · severity B
+
+`MW_COMP` (9 species) is tracked rigorously through 322F001 → 322E001 → 322E002 → 322R001 →
+322E003. Everything downstream of LV-322501 — the whole of 323, 324, 328, 322C001 — is **lumped
+mass** with design split fractions and back-solved latents. Consequences:
+
+* no C2 component balance and therefore no C6 summation equations (Σy = 1, Σx = 1) downstream;
+* composition-driven behaviour is reachable only through soft sensors (`conc_infer_324`,
+  `ppm_infer_328701`, the TIC-328008 inferential), which are read-only and cannot feed back;
+* TD-008 has nowhere to put a reaction extent.
+
+This is the single largest remaining architectural gap. It is also the largest change in the
+engine, touching every 323/324/328 stage ODE and every telemetry group, so it needs to be planned
+as its own project rather than slotted into a fix pass.
+
+---
+
+## TD-010 — `scratchpad/regress.py` cannot be invoked with the documented relative path
+
+**Status: OPEN** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-9) · severity C (tooling)
+
+`regress.py` does `os.chdir(BACKEND)` before writing `argv[1]`, so the gate command printed in
+CLAUDE.md §7 and handoff.md —
+
+    %PY% scratchpad\regress.py scratchpad\pin_now.json
+
+— resolves the output to `backend/scratchpad/pin_now.json`, which does not exist, and dies with
+`FileNotFoundError` **after** paying the full settle cost. Until the script resolves `argv[1]`
+against its original cwd, invoke the gate with an absolute output path:
+
+    "$PY" scratchpad/regress.py "D:/Work/Urea Simulation/scratchpad/pin_now.json"

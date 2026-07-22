@@ -22,6 +22,8 @@
 | 9 | 2026-07-16 | branch `master` | 323E003 tempered-water circuit built out (first Unit-323 entry in this document; Sections 1–6 remain scoped to the 321/322 HP loop). TIC-323013 re-anchored from the 323E003 shell outlet (74 °C) onto the tempered-water **supply** (PFD stream 1102, 55 °C) and its SP span re-cut to 45–65 °C, which had previously *forbidden* the design SP. TV-323013A/B given true split-range opposites off one `op` (`θ_B = 100 − θ_A`, sum ≡ 100). The `(op/50)` linear duty fudge retired for the physical driving force `Q = UA·(T_shell − ½(T_sup+T_ret))` — bit-identical at design. TT-323015 (stream 1103, 65 °C) published from the new return state. See Revision Delta #13. |
 | 10 | 2026-07-17 | branch `master` | 328 desorption train (first Unit-328 entry; Sections 1–6 remain scoped to the 321/322 HP loop). Stream 746 freed from a static constant: the 328E021 cold outlet now tracks both live inlets as `T_746 = T_c002 + ε·(T_c003 − T_c002)`, ε = (190−139)/(200−139) = 51/61 — the *design-implied* effectiveness, since the rounded datasheet ε back-solves to 190.0021 °C and breaks the anchor. `sens_c003` re-pointed onto the same live node so display and energy balance cannot decouple (bit-identical at design). TT-328009 published off it. TT-328007 re-pointed from `R328_E007_TH_OUT` (89 °C, the 328E007 hot outlet — wrong node) onto the C002 bottoms draw (stream 743, 139 °C). TT-328005 (stream 739, 143 °C) and TT-328004 (C004 top tray = OVHD stream 750, 140 °C, via a derived 3 K offset) published. See Revision Delta #14. |
 
+| 11 | 2026-07-22 | branch `master` | Full modelling-equation audit of every equipment tag against the 11 equation categories (`EQUATION_AUDIT.md`). Units 323 + 324: vapour generation was a frozen design split fraction of the live inflow in every vaporiser, so the mass and energy balances were solved independently — the live heater duty had no authority over the boil-up, and the 324 melt strength was pinned by construction. Boil-up is now duty-limited, 323F004 runs a true isenthalpic flash (saturation constraint + enthalpy balance), the 324 melt strengths are live outputs, and all four condensing-steam chests are floored at zero duty (a shut valve had been turning them into refrigerators, dragging the melt to 22 °C). See Revision Delta #15. |
+
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
 The Rev-1 equation set below reflects the engine at the 2026-06-05 commit. The following verified changes have since landed and are documented in full (math + verification) in `backend/reports/FULL_AUDIT_REPORT.md`. Where the live engine now differs from Sections 1–6, that report is authoritative.
@@ -95,8 +97,57 @@ $$\dot Q_{sens,c003}=\frac{\dot m_{746}}{3600}C_p\bigl(T_{746}-T_{C003}\bigr)=\f
    **bit-identical** to the retired constant form ($\texttt{repr}$-equal at $-375.2111111111111$ kW) ⇒ the C003 fixed point is untouched and the change is a strict improvement at zero anchor cost.
    **328C004 top tray (TT-328004).** House derived-offset idiom (the `R328_C003_DT_DES` precedent, line 564) — anchored on the PFD's **stream 750 = 140 °C**, the C004 overhead, which *is* the top-tray vapour: `R328_C004_DT_DES = R328_C004_T − R328_C002_T750 = 143 − 140 = 3` K, so `TT_328004 = T_{C004} − 3` **tracks the live bottoms** rather than standing as a second constant.
    Verified — **pin gate `leaves: 25  keys: 15  diffs: 0`** (no `R328_*` key is pinned, but `main.py` ∈ `_PIN_SRC_FILES` ⇒ re-gated). Design probe (6000 ticks @ 0.1 s): `TT_328007 = 139.0`, `TT_328009 = 190.0`, `TT_328005 = 143.0`, `TT_328004 = 140.0`, all four on their PFD anchors; `TT_328C003 = 200.0` **unchanged** (the live `sens_c003` does not move the C003 fixed point), `TT_328012 = 190.0`, `bot747 = 34.06` t/h (design 34,062), `bot743 = 33.77` t/h (design 33,769) ⇒ the mass states are undisturbed. Dynamic acceptance (**the actual point of the item** — the old code could not have moved at all): $T_{C003}$ +10 K ⇒ $T_{746}$ **+8.4** vs the closed form $\varepsilon\cdot10=8.361$; $T_{C002}$ +10 K ⇒ $T_{746}$ **+1.6** vs $(1-\varepsilon)\cdot10=1.639$ — residual is the 1-dp telemetry rounding, not model error. Convexity sweep $T_{C003}\in\{100,139,170,200,260\}$ ⇒ $T_{746}\in\{106.4,\,139.0,\,164.9,\,190.0,\,240.2\}$, every point inside $[\min,\max]$ of the two inlets **including the reversed-ΔT case** ⇒ clamp-free by construction, as claimed.
-   **⚠ Documented open gaps (NOT fixed — Scope Lock).** (a) The E021 **hot** side is still static — `m_749 = m_747  # via 328E021 (148 °C)` with `R328_C004_T749 = 148.0` is the exact mirror of the defect fixed here, on stream 749; this item is scoped to the cold outlet. (b) `TT_328012`/`TIC_328012` are **deliberately** left on the constant `R328_C003_T746`: the C003 **3rd tray** is a *different physical node* from the 746 feed and the model conflates the two (its own comment reads "3rd-tray / 746 absolute"), so making the tray track E021's effectiveness would be *wrong* physics dressed as a fix. TIC-328012's `_ctrl_ipd` return is discarded (display-only) ⇒ pin-safe either way. (c) `R328_E007_TH_OUT = 89.0` is **orphaned** by (ii) but deliberately **retained** as the stream-740 boundary design datum — the `R3232_TW_T` precedent (deleting such a datum is a rejected approach). (d) `tt8011w`/`tt8012w` both bind `DESORB_328.C003.TT_328012` — a duplicate-bind of the Δ#13(iii) class, noted and not yet addressed.
+   **⚠ Documented open gaps (NOT fixed — Scope Lock).** (a) ~~The E021 **hot** side is still static~~ — **CLOSED** (re-verified by the 2026-07-22 equation audit, Δ#15). Stream 749 is now a live energy-balance closure, `T749_raw = T_{C003} − (ṁ_{746}(T_{746}−T_{C002}) + \texttt{R328\_E021\_LOSS\_DT})/ṁ_{749}`, bounded by the two live inlet temperatures, so 328E021 can neither create nor destroy energy off-design. `R328_C004_T749 = 148.0` survives only as the design datum feeding `R328_E021_LOSS_DT`. (b) `TT_328012`/`TIC_328012` are **deliberately** left on the constant `R328_C003_T746`: the C003 **3rd tray** is a *different physical node* from the 746 feed and the model conflates the two (its own comment reads "3rd-tray / 746 absolute"), so making the tray track E021's effectiveness would be *wrong* physics dressed as a fix. TIC-328012's `_ctrl_ipd` return is discarded (display-only) ⇒ pin-safe either way. (c) `R328_E007_TH_OUT = 89.0` is **orphaned** by (ii) but deliberately **retained** as the stream-740 boundary design datum — the `R3232_TW_T` precedent (deleting such a datum is a rejected approach). (d) `tt8011w`/`tt8012w` both bind `DESORB_328.C003.TT_328012` — a duplicate-bind of the Δ#13(iii) class, noted and not yet addressed.
    `main.py` constants (`R328_C004_DT_DES`; `R328_E021_EPS_T` + its provenance comment) + the 328C003 runtime (live `T_746`, re-pointed `sens_c003`) + `DESORB_328` telemetry (`TT_328007` re-pointed to `s.a328_c002_T`; new `TT_328009`, `TT_328005`, `TT_328004`) + `frontend/overlays.js` screen-328-1 (`tt8009w`/`tt8005w`/`tt8004w` → bound `tt8009`/`tt8005`/`tt8004`; `tt8007w` → `tt8007`, its stale `// 328E007 process outlet 89C` comment corrected to the 743 draw).
+
+15. **Units 323 + 324 — energy ↔ mass re-coupling (equation audit F-1..F-5, F-10).** Full audit
+    in `EQUATION_AUDIT.md`. Every vapour rate outside the HP loop was a **frozen design split
+    fraction of the live inflow**, so the total-mass balance and the energy balance were solved
+    *independently*: the live heater duty entered only the temperature ODE and had no authority
+    over the boil-up. Shutting PV-329202 gave $Q_{E002}\to0$ while 323C003 still produced the full
+    design overhead, and the whole latent deficit was dumped into $dT/dt$. In Unit 324 the melt
+    strength was pinned outright by `p_m = ṁ_{urea,in}/w_{EV}`, so no operator action could dilute
+    the product — while the `conc_infer_324` soft sensors *did* move off design, showing the HMI a
+    strength the mass balance refused to produce.
+
+    **(i) Duty-limited vaporisation.** Each vaporiser now takes the smaller of the composition
+    demand and what its live duty can actually boil:
+    $$\dot m_{vap} = \min\!\Big(\phi\,\dot m_{in},\; \dot m_{vap,des}\cdot\frac{q_{avail}}{Q_{des}}\Big),
+      \qquad q_{avail} = \dot m_{in} c_p (T_{in}-T) + Q_{live}$$
+    applied to 323C003/323E002 ($\phi_{305}$), 323F010/323E010 ($\phi_{evap}$), 324E001 and 324E003.
+    Each $Q_{des}$ constant is written in the **same float operand order** as its runtime
+    $q_{avail}$, so the ratio is exactly $1.0$ at the seed and both `min()` branches evaluate
+    identically ⇒ design bit-exact.
+
+    **(ii) True isenthalpic flash at 323F004.** $\dot m_{701}=\phi_{701}\dot m_{314}$ was blind to
+    feed temperature. Replaced by the pair of statements a flash actually obeys — a **saturation
+    constraint** (the liquid sits at its bubble point; the urea boiling-point elevation is held at
+    its design value, the same frozen-activity assumption `conc_infer_324` makes)
+    $$T_{flash} = 106 + \big[T_{sat}(P_{drum}) - T_{sat}(1.13)\big]$$
+    and the **enthalpy balance**
+    $$\dot m_{701}\lambda_{701} = \dot m_{314}c_p(T_{in}-T) - \frac{M c_p (T_{sat}-T)}{\tau}.$$
+    Because $\lambda_{701}$ was itself back-solved at the design point, substituting this into the
+    existing energy ODE collapses it to exactly $dT/dt = (T_{sat}-T)/\tau$ — energy is conserved and
+    the drum now walks to its bubble point instead of standing frozen at 106 °C.
+
+    **(iii) Live melt strength (324).** $w_1, w_2$ are now *outputs*: $w = \dot m_{urea,in}/\dot m_{melt}$,
+    published to `urea_pct`, `PY-324201` and `AY-324701`; the Stage-2 feed enthalpy uses the live
+    Stage-1 outlet temperature; the recycle carries its live strength through `s.tlag["R324_recyc_w"]`.
+    `conc_infer_324` gained a band clamp on the reference mole fraction — `w_des` is now a live
+    argument that legally reaches 0 on a cold start (it previously divided by zero there).
+
+    **(iv) F-10 — a condensing chest cannot refrigerate.** $Q = UA\,(T_{sat}(p_{chest}) - T)$ was
+    unbounded below; with $p_{chest}$ clamped to 0.02 bar a ($T_{sat}\approx17.5$ °C) a shut steam
+    valve turned every heater into a cooler — probe-measured **22 °C** melt in Evap-I and **13.6 °C**
+    in 323C003. Floored at zero on all four chests (323E002, 323E010, 324E001, 324E003); strongly
+    positive at design ⇒ identity ⇒ bit-exact.
+
+    Verified — pin gate `leaves: 25  keys: 15  diffs: 0`; suite **115 passed** (5 new tests in
+    `backend/test_equation_audit_323_324.py`). Design probe (480 s): 94.3 % / 97.7 % / 106.0 °C /
+    24.56 / 4.43 / 8.74 t/h, **zero drift**. Dynamic acceptance — Evap-I steam cut: evaporation → 0,
+    product **94.3 % → 80.0 %**, melt coasts 130 → 100 °C toward its 99 °C feed; 323E002 steam cut:
+    overhead 305 → 0, column 121 → 105 °C, and the downstream flash correctly makes **less** vapour
+    (4.43 → 3.10 t/h) on its colder feed. All three were impossible before.
 
 ---
 
