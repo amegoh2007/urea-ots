@@ -169,17 +169,50 @@ Never conclude an interpreter is absent from one alias. Never pipe a heredoc int
 
 **All eleven audit findings are closed.** What is left is the two remaining category gaps:
 
-* **TD-006** — G8 stripper duty is feed-PROPORTIONAL, not a rigorous per-species enthalpy balance,
-  and there is no steam-limited flood regime. Now fully unblocked. **Research done, not yet coded:**
-  the Wallis limit for a Stamicarbon 1" CO₂-stripper tube is **145 kg/h of solution at 183 °C /
-  140 bar, with plants held to 70 % of it** (Brouwer, *How to Solve Stripper Efficiency Issues*,
-  UreaKnowHow 2025, citing IFS Proceeding 166). Flooding starts at the TOP of the tubes (roughly
-  half the liquid has evaporated by then, so gas and liquid loads peak there). Symptom to reproduce:
-  **bottom outlet temperature rising 3–4 °C in 15 minutes**, then more NH₃ to the LP recirculation
-  and rising LP pressure. Design efficiency 80 % on a 6 m effective tube length. Corrosion story for
-  the training scenario: passive ≤0.1 mm/y, active 20–30 mm/y once flooding depletes the oxygen;
-  the flooding limit *rises* over a stripper's life as the ID corrodes (110 % → 120 % plant load).
-  Implement the penalty in anchored-ratio form so it is exactly inactive at design.
+* **TD-006** — **half closed 2026-07-23.** The **hydrodynamic flooding limit is coded, gated and
+  pushed**; the per-species enthalpy balance is what remains.
+
+  *What landed.* The unit had no tube geometry at all — every "flood" term in `stripper_322e001`
+  was a thermal metaphor for the steam-dilution branch, not a hydraulic limit. The licensor DDS
+  (Uhde UD-AU-322-DZ-0003-003 p.3) supplies **2600 tubes, 31 × 3.0 mm → ID 25.0 mm, 6000 mm eff.**,
+  and the sheet is self-consistent: N·π·d_o·L = 1519.27 m² against its own tabulated 1519.00
+  (+0.018 %), so the tube count is confirmed rather than trusted. Three documents then agree —
+  the bore is **0.984″**, so the 145 kg/h "1-inch tube" limit applies unscaled; the 6.000 m
+  effective length is exactly what Brouwer ties to 80 % design efficiency; and the quoted 183 °C
+  reference *is* `STRIP_FEED207_T_C`.
+
+  *The key structural result.* 280 797 / 2600 / 145 = **0.7448** — the plant runs at 74.5 % of its
+  flooding limit, onset at 134 % load. So the constraint is **one-sided and does not bind at the
+  design seed**: `max(φ−1, 0)` returns the literal `0.0`, making `1−e⁰ = 0` and `1/(1+Kx) = 1`
+  exact identities. **No anchored ratio was needed** — the pin guarantee rests on a physical fact,
+  not on float operand ordering, which is a stronger contract than the plan had assumed.
+
+  *Calibration from the literature, not fitted.* Brouwer's 3–4 °C-in-15-min bottom signature fixes
+  `STRIP_FLOOD_T_K` = 3.83, capped by the same 11 °C reactor-liquor ceiling the steam-dilution
+  branch already uses; the model returns 3.50 °C at 10 % over the limit. Measured cascade: overhead
+  NH₃ recovery 89 % → 56 % at onset → 30 % at 180 % load, volatiles held in the bottoms and
+  slipping to LP, exactly as described.
+
+  *One sign trap, avoided on purpose:* `g_flood` reaches the **split only, never `eta_T`** —
+  flooding *increases* residence time, so hydrolysis and biuret rise; `eta_T` scales `xi_hyd`, so
+  folding it in would have cut hydrolysis the wrong way. A regression test pins this.
+
+  *Deliberately not modelled:* the corrosion/lifetime drift (110 → 120 % as the bore grows) and the
+  active-corrosion metallurgy — both multi-year effects with no place in a shift-length scenario.
+  *One unsourced number:* `STRIP_FLOOD_ETA_K`; Brouwer publishes no efficiency-vs-flooding curve, so
+  it reuses the unit's existing choke scale (`STRIP_ETA_KT` = 1.50) rather than invent a fit.
+
+  **Still open — the per-species enthalpy half.** The bit-exactness contract is mapped in
+  TECH_DEBT TD-006 so it need not be re-derived: the replacement must sit at
+  `STRIP_DUTY_DES_KW * <factor> * 3600.0` with `<factor>` evaluating to a bare `1.0`, which an
+  enthalpy ratio `H_live/H_des` computed by one shared function gives as `X/X`. It needs a
+  carbamate dissociation enthalpy and NH₃/CO₂ latents at ~183 °C/140 bar — **none exist in the
+  codebase**, and the literature sweep that would have sourced them did not complete (the subagent
+  fleet hit the session limit). Per CLAUDE.md §1 they must be sourced or back-solved, not guessed.
+
+  **Incidental finding, not fixed:** `eta_P` is a **dead lever** — `P_bara` is always passed the
+  frozen `STRIP_P_DES_BARA`, so synthesis pressure has *no* effect on stripping efficiency. That is
+  physically wrong and worth its own slot.
 * **C10 constitutive properties** — densities and cp are still constants with no T-dependence
   (`tsat_steam`, `psat_water_bara`, `psat_nh3_bara` are live). The 328 datasheet work supplied two
   hard anchors: **PFD stream 739 = 923.28 kg/m³ @ 143 °C and the datasheet's 923.25 @ 143 °C**, both
@@ -247,7 +280,11 @@ rounding. `sol_pin_strength` survives as a rounding guard on the 324 melt only; 
 1. **TD-009** — component species layer downstream of unit 322. Largest remaining gap and the
    blocker for TD-008; needs its own project, not a fix slot.
 2. **TD-008** — real 328C003 hydrolyser kinetics, once TD-009 gives it species to work on.
-3. **TD-006** — rigorous stripper per-species enthalpy balance + steam-limited flood regime.
+3. **TD-006 second half** — rigorous stripper per-species enthalpy balance. The flooding half is
+   done; the enthalpy half is blocked only on sourcing a carbamate dissociation enthalpy and
+   NH₃/CO₂ latents at ~183 °C/140 bar. The bit-exactness contract is already written down.
+3a. `eta_P` dead lever in `stripper_322e001` — synthesis pressure currently has zero effect on
+   stripping efficiency. Small, self-contained, physically wrong; good candidate for a fix slot.
 4. Refresh the graphify graph once semantic extraction is available (do not AST-only-merge).
 5. `Master_PID_Tuning_Constants.md` still names loops by pre-rename tags / the retired ratio basis.
 6. Confirm the 321-1 / 323-1 registration on the RUNNING HMI (LSK was bumped v3 -> v4).

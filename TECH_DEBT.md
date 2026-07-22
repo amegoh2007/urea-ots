@@ -354,8 +354,80 @@ Verified for both: pin gate `leaves: 25  keys: 15  diffs: 0`, suite **103 passed
 
 ## TD-006 — stripper duty is feed-proportional, not a full enthalpy balance
 
-- **Status:** OPEN (partial fix shipped as G8) — **design research complete 2026-07-22, not yet coded**
+- **Status:** **HALF CLOSED 2026-07-23** — the hydrodynamic flooding limit is coded, gated and
+  pushed. The per-species enthalpy half remains OPEN.
 - **Opened:** 2026-07-21
+
+### Flooding half — CLOSED 2026-07-23
+
+The unit had **no tube geometry at all**: `grep -E "N_TUBE|TUBE_|D_TUBE|L_TUBE"` returned zero
+hits, and every "flood" term already in `stripper_322e001` was a *thermal* metaphor for the
+steam-dilution branch (`raw_load < 0`), not a hydraulic limit. A falling-film stripper's real
+ceiling is a **liquid-load** limit that is independent of steam duty.
+
+Geometry came from the licensor DDS (**Uhde UD-AU-322-DZ-0003-003 rev 00, page 3**), and the sheet
+is self-consistent — its own tabulated surface area confirms the tube count, so the number is not
+a single cell read on trust:
+
+| | DDS | |
+|---|---|---|
+| number of tubes | **2600** | line 34 |
+| tube OD × wall | 31 × 3.0 mm → **ID 25.0 mm** | line 36 |
+| effective length | **6000 mm** | line 35 |
+| exchange surface | 1519.00 m² | line 25 |
+| cross-check | N·π·d_o·L = **1519.27 m²** | **+0.018 %** ✓ |
+| ρ_G / ρ_L,in | 10.28 / 989.88 kg/m³ | lines 13–14 |
+
+**Three documents agree, so nothing was fabricated:**
+- the DDS bore is 25.0 mm = **0.984 inch**, so the 145 kg/h "1-inch tube" figure applies *without
+  scaling*;
+- the DDS effective length is **6.000 m**, exactly the length Brouwer ties to the 80 % design
+  stripping efficiency;
+- the quoted reference condition, 183 °C, **is `STRIP_FEED207_T_C`** — this stripper's own feed
+  temperature — and 140 bar is within 3 % of its 144 bar tube side.
+
+**Where the plant sits, computed not tuned:**
+
+```
+280 797 / 2600 / 145  =  0.7448      108.0 kg/h per tube, 74.5 % of the limit
+plant limit 377 000 kg/h        ->   flooding onset at 134 % of design load
+```
+
+That 134 % is the same order as Brouwer's "110 % when new, 120 % at end of life", and slightly
+roomier — which is what a 0.984″ bore at 144 bar rather than 140 bar should give.
+
+**The bit-exactness argument is structural, not an anchored ratio.** Because 0.7448 < 1.0 the
+constraint is *one-sided and does not bind at the design seed*: `flood_x = max(frac − 1, 0)`
+returns the literal `0.0`, so `1 − e^0 = 0.0` and `1/(1 + K·0.0) = 1.0` are exact identities. The
+plant genuinely operates below its flooding limit, so the term cannot move a single bit of the pin.
+Verified: `g_flood == 1.0` and `dT_flood == 0.0` compare equal, and the gate prints
+`leaves: 25  keys: 15  diffs: 0`.
+
+**Calibration, from the literature rather than fitted:** Brouwer's "3–4 °C in 15 minutes" bottom-
+temperature signature fixes `STRIP_FLOOD_T_K`. The rise is capped by the *same* 11 °C ceiling the
+existing steam-dilution branch uses (`STRIP_T_FLOOD_ANCHOR_C − STRIP_T_BOTTOM_DES_C` = 183 − 172),
+because both describe one end state — unstripped reactor liquor falling through untouched. Solving
+`11.0 × (1 − e^(−K·0.10)) = 3.5` gives **K = 3.83**, and the model returns 3.50 °C at 10 % over.
+
+**One sign trap, avoided deliberately.** `g_flood` multiplies the *split* only, never `eta_T`.
+`eta_T` scales `xi_hyd`, and flooding **increases** residence time ("stagnation or upward dragging
+of the film"), so hydrolysis and biuret go *up*. Folding `g_flood` into `eta_T` would have cut
+hydrolysis — the wrong sign. The rise is already carried without a new term: `dT_flood` raises
+`T_bot` and `xi_biu` is Arrhenius in `T_bot_K`. A regression test pins this.
+
+Measured cascade (overhead NH₃ recovery, exactly Brouwer's described failure): 89 % at design →
+56 % at onset → 30 % at 180 % load, with the volatiles held in the bottoms and slipping to LP.
+
+- **Landed:** `backend/main.py` constant block + `stripper_322e001`;
+  `backend/test_equation_audit_322e001_flood.py` (11 tests)
+- **Not modelled, deliberately:** the corrosion/lifetime drift (limit rising 110 → 120 % as the
+  bore grows) and the metallurgical active-corrosion mode. Both are *multi-year* effects with no
+  place in a shift-length OTS scenario; recorded here so the omission is a decision, not an
+  oversight.
+- **One number is not sourced:** `STRIP_FLOOD_ETA_K`. Brouwer states efficiency drops but publishes
+  **no curve**, so rather than invent a fitted slope it reuses the unit's existing efficiency-choke
+  scale (`STRIP_ETA_KT` = 1.50). If a real efficiency-vs-flooding curve ever surfaces, this is the
+  single number to replace.
 
 ### Research complete — the flooding constants, sourced
 
@@ -380,18 +452,59 @@ Metallurgy note for the training scenario: 25-22-2 austenitic tubes are suscepti
 mode; Safurex®/E-type super-duplex is immune to active corrosion, though the stripping-efficiency
 loss remains either way.
 
-Implementation shape (matching the pattern used everywhere else): compute the Wallis dimensionless
-velocities at the top axial node, and apply the efficiency penalty as an **anchored ratio** that
-evaluates to exactly 1.0 at the design liquid load, so the boot pin cannot move. Then let the
-existing energy balance carry the bottoms temperature up on its own — the 3–4 °C/15 min signature
-should be an *output*, not a scripted event.
+*Superseded by what was actually built.* The plan above proposed a Wallis calculation at the top
+axial node with the penalty written as an **anchored ratio**. Two things changed on contact with
+the data:
 
-### The remaining half — per-species enthalpy
+1. **No anchored ratio was needed.** The design point sits at 74.5 % of the limit, so the
+   constraint simply does not bind at the seed — a cleaner and more honest guarantee than an
+   anchored ratio, because it rests on a physical fact rather than on float operand ordering.
+2. **The Wallis form was not used to *set* the limit.** Evaluating √j\*_g + √j\*_l at design gives
+   **0.84–1.08** depending on which gas load is taken for the top of the tube, against a classic
+   Wallis C of 0.7–1.0 — i.e. the correlation's own threshold band straddles the design point, so
+   fitting C would have been fitting noise. The licensor-specific empirical 145 kg/h/tube figure is
+   the better anchor: it is what the plant's own engineers use and it needs no C/m fit. The Wallis
+   algebra is retained in [`scratchpad/probe_td006_flood.py`](scratchpad/probe_td006_flood.py) as
+   the documented reasoning, and remains available if the limit ever needs shifting with gas
+   density (pressure/temperature) off the reference condition.
+
+### The remaining half — per-species enthalpy (STILL OPEN)
 
 Now fully unblocked: the species layer reaches 322 (9 components) and, since the F-8 closure, 323,
 324 and 328. The stripper duty should become sensible + carbamate dissociation endotherm + latent,
 per species, rather than `STRIP_DUTY_DES_KW * strip_load`.
 - **Files:** `backend/main.py` step_sim steam-balance handshake (`Q_strip_kjh`), `stripper_322e001`
+
+**The exact bit-exactness contract to honour** (mapped while closing the flooding half, so the next
+session does not have to re-derive it). At `main.py` the handshake reads:
+
+```python
+m_feed_strip = sum(strip["feed_kmolh"][k] * MW_COMP[k] for k in MW_COMP)
+strip_load   = max(m_feed_strip / STRIP_FEED_DES_KGH, 0.0)   # exactly 1.0 at design
+Q_strip_kjh  = STRIP_DUTY_DES_KW * strip_load * 3600.0
+```
+
+`m_feed_strip` is bit-identical to `STRIP_FEED_DES_KGH` at the seed **only because both iterate
+`for k in MW_COMP` in the same order** with the same operand order. Any replacement must therefore
+sit in the same left-to-right position — `STRIP_DUTY_DES_KW * <new_factor> * 3600.0` — with
+`<new_factor>` evaluating to a bare `1.0`. The natural construction is an enthalpy ratio
+`H_live / H_des` where both sides are computed by the *same function*, so the seed gives `X / X`.
+
+**What it still needs, and what must not be invented.** The unit has exactly one thermal constant,
+`STRIP_CP_BOTTOM = 2.93`. A per-species balance needs an ammonium-carbamate dissociation enthalpy
+and NH₃/CO₂ latent heats at ~183 °C / 140 bar. None of these exist in the codebase, and the
+literature sweep that would have sourced them **did not complete** (the subagent fleet hit the
+session limit). Per CLAUDE.md §1 these must be sourced or back-solved from the design duty, not
+guessed. Sensible-heat and reaction extents are already available (`STRIP_FEED207_T_C` = 183,
+`STRIP_T_BOTTOM_DES_C` = 172, `xi_hyd` = 88.1 kmol/h), so only the dissociation and latent terms
+are missing.
+
+**Incidental finding while mapping this — worth its own fix.** `eta_P` in `stripper_322e001` is a
+**dead lever**: `P_bara` is always passed the frozen `STRIP_P_DES_BARA`, so
+`eta_P = clamp(2.0 − P_bara/STRIP_P_DES_BARA, …)` is identically 1.0 in the live loop. Synthesis
+pressure therefore has *no* effect on stripping efficiency, which is physically wrong — stripper
+performance is strongly pressure-sensitive. Not fixed here (out of scope, and it would move the
+pin's sensitivity surface), but it should not stay hidden.
 
 ### What G8 fixed
 

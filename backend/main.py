@@ -459,6 +459,64 @@ STRIP_UREA0 = _STRIP_FEED_DES["Urea"]                           # 1302.6  design
 STRIP_CP_BOTTOM      = 2.93     # kJ/kg·K, bottom-solution (urea/carbamate/NH3 melt) mean cp ~175 °C
 STRIP_FEED_DES_KGH   = sum(_STRIP_FEED_DES[k] * MW_COMP[k] for k in MW_COMP)   # 280797 kg/h design feed
 STRIP_DT_STEAM_DES_C = STRIP_DUTY_DES_KW * 3600.0 / (STRIP_FEED_DES_KGH * STRIP_CP_BOTTOM)  # ΔT_steam,des ≈172.4 °C
+
+# ==========================================================================================
+#  TUBE BUNDLE + HYDRODYNAMIC FLOODING LIMIT   (audit TD-006, second half)
+#
+#  Until now the unit had NO tube geometry at all -- every "flood" term above is a THERMAL
+#  metaphor for the steam-dilution branch (raw_load < 0), not a hydraulic limit.  A real
+#  falling-film stripper has a hard hydrodynamic ceiling: once the rising gas core shears the
+#  descending film off the wall, the film thickens, liquid is dragged upward, residence time
+#  collapses and stripping stops.  That is a LIQUID-LOAD limit, independent of steam duty.
+#
+#  Geometry: licensor DDS 322E001 (Uhde UD-AU-322-DZ-0003-003 rev 00, page 3).  The DDS is
+#  self-consistent -- its own tabulated surface area confirms the tube count:
+#      N·π·d_o·L = 2600 × π × 0.031 × 6.000 = 1519.27 m²   vs line 25 "1519.00"   (+0.018 %)
+STRIP_N_TUBES        = 2600     # DDS line 34, number of tubes
+STRIP_TUBE_OD_M      = 0.031    # DDS line 36, tube O.D. 31 mm
+STRIP_TUBE_WALL_M    = 0.003    # DDS line 36, wall thickness 3.0 mm
+STRIP_TUBE_ID_M      = STRIP_TUBE_OD_M - 2.0 * STRIP_TUBE_WALL_M   # 0.025 m == 0.984 inch
+STRIP_TUBE_L_EFF_M   = 6.000    # DDS line 35, tube length "6000 mm eff."
+STRIP_SURF_DES_M2    = 1519.00  # DDS line 25, exchange surface per exchanger
+STRIP_RHO_G_DES      = 10.28    # DDS line 14, tube-side gas density at operating conditions
+STRIP_RHO_L_IN_DES   = 989.88   # DDS line 13, tube-side liquid density in
+#
+#  The limit itself: Brouwer, "How to Solve Stripper Efficiency Issues", UreaKnowHow 2025,
+#  citing IFS Proceeding 166 -- "at a temperature of the reactor outlet solution of 183 °C and
+#  a pressure of 140 bar, the flooding limit in a 1-inch tube is found to be 145 kg of solution
+#  per hour.  In practice, an upper limit of 70 % of this value is applied."
+#  Three documents agree and nothing has to be fabricated:
+#    * the DDS tube I.D. is 25.0 mm = 0.984 inch, so the 1-inch figure applies WITHOUT scaling;
+#    * the DDS effective tube length is 6.000 m, and the same paper states that 6 m effective
+#      length is what gives a Stamicarbon CO2 stripper its 80 % design stripping efficiency;
+#    * the quoted reference condition (183 °C) is STRIP_FEED207_T_C, this stripper's own feed
+#      temperature, and 140 bar is within 3 % of its 144 bar tube side.
+STRIP_FLOOD_KGH_TUBE = 145.0    # kg/h of solution per tube at the flooding limit
+STRIP_FLOOD_PRACTICE = 0.70     # industry operating cap as a fraction of the limit
+#  DESIGN FLOODING FRACTION -- a COMPUTED result, not a tuned constant:
+#      280797 / 2600 / 145 = 0.7448,  i.e. 108.0 kg/h per tube, 74.5 % of the limit.
+#  Two consequences, both load-bearing:
+#    1. the plant-level limit is 145 × 2600 = 377 000 kg/h, so flooding starts at 134 % of design
+#       plant load -- the same order as Brouwer's "110 % when new, 120 % at end of life";
+#    2. because 0.7448 < 1.0 the flooding term is IDENTICALLY INACTIVE at the design seed.  It is
+#       a one-sided constraint that does not bind, so it cannot move a single bit of the pinned
+#       design state.  That is the whole bit-exactness argument for this block -- not an anchored
+#       ratio, just a constraint the plant genuinely operates below.
+STRIP_FLOOD_DES_FRAC = STRIP_FEED_DES_KGH / STRIP_N_TUBES / STRIP_FLOOD_KGH_TUBE   # 0.7448
+#  Bottom-temperature signature.  Brouwer: "a sudden temperature increase of the stripper bottom
+#  temperature, let's say 3-4 °C in 15 minutes, is a clear indication for reaching the flooding
+#  limit".  The rise is capped by the SAME ceiling the existing steam-dilution branch already
+#  uses -- strip_flood_gap = reactor overflow T − bottom T = 183 − 172 = 11 °C -- because both
+#  describe the same end state: unstripped reactor liquor falling through the tubes untouched.
+#  K is then FIXED by Brouwer's own number rather than tuned: at 10 % over the limit,
+#      11.0 × (1 − e^(−K·0.10)) = 3.5 °C   ->   K = 3.83.
+STRIP_FLOOD_T_K      = 3.83     # bottom-T rise ramp per unit excess over the flooding limit
+#  Efficiency penalty.  Brouwer is explicit that efficiency drops but publishes NO curve, so
+#  rather than invent a fitted slope this reuses the unit's existing efficiency-choke scale
+#  (STRIP_ETA_KT, the same 1.5 used by the thermal, N/C and H/C chokes).  Flagged in TECH_DEBT:
+#  if a real efficiency-vs-flooding curve ever surfaces, this is the one number to replace.
+#  (Kept a bare literal rather than an alias because STRIP_ETA_KT is defined further down.)
+STRIP_FLOOD_ETA_K    = 1.50     # == STRIP_ETA_KT, the unit's existing efficiency-choke scale
 # --- CO2 stripping-gas endotherm (Stamicarbon G/L): the bottom CO2 sweep is held by the compressor while
 #   the reactor liquid feed varies.  When ṁ_feed collapses at constant CO2, the Gas/Liquid ratio spikes,
 #   forcing carbamate decomposition + NH3/CO2 evaporation -- a strong ENDOTHERM that OVERPOWERS the steam
@@ -1996,6 +2054,26 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # volatiles LEAVE WITH THE BOTTOMS (mod × g_T split cut below) — classic NH3 slip to the LP section.
     strip_flood_gap = max(STRIP_T_FLOOD_ANCHOR_C - STRIP_T_BOTTOM_DES_C, 1e-6)
     dT_bot = dT_load if raw_load > 0.0 else strip_flood_gap * (1.0 - math.exp(raw_load / strip_flood_gap))
+    # HYDRODYNAMIC FLOODING (TD-006).  Everything above is a THERMAL response -- it asks whether the
+    # shell steam can keep up with the liquid.  This asks a different and independent question: can the
+    # tube physically carry the film at all?  Once the rising gas core shears the descending film off
+    # the wall the film thickens, liquid is dragged upward, and stripping stops regardless of how much
+    # steam is available.  Licensor DDS geometry + the IFS-166 limit (see the constant block):
+    #     flood_frac = ṁ_feed / N_tubes / 145 kg/h      = 0.7448 at design (108.0 of 145 kg/h per tube)
+    # flood_x is the EXCESS over the limit and is EXACTLY 0.0 at design because max() returns the
+    # literal 0.0 for any negative argument -- 0.7448 − 1.0 < 0.  Every term below is therefore an
+    # exact identity at the seed (1 − e^0 = 0.0 ; 1/(1 + K·0.0) = 1.0), so the pin cannot move.
+    flood_frac = m_feed_kgh / STRIP_N_TUBES / STRIP_FLOOD_KGH_TUBE
+    flood_x    = max(flood_frac - 1.0, 0.0)                       # 0.0 at design, exactly
+    # Flooded tubes hold un-decomposed carbamate and hot reactor liquor falls through untouched, so the
+    # BOTTOM RUNS HOTTER -- Brouwer's 3-4 °C signature -- capped by the same 183 °C reactor-liquor
+    # ceiling the steam-dilution branch already asymptotes to.
+    dT_flood   = strip_flood_gap * (1.0 - math.exp(-STRIP_FLOOD_T_K * flood_x))   # 0.0 at design
+    dT_bot     = dT_bot + dT_flood                                # + 0.0 is bit-exact
+    # ...and the split CLOSES: the volatiles stay in the bottoms and slip to the LP section via
+    # LV-322501, which is exactly the cascade Brouwer describes (more NH3 in the bottoms -> more gas
+    # to LP recirculation -> LP pressure rises -> operators must cut load).
+    g_flood    = 1.0 / (1.0 + STRIP_FLOOD_ETA_K * flood_x)        # 1.0 at design, exactly
     # CO2 STRIPPING ENDOTHERM (G/L cooling): excess strip gas per liquid forces carbamate decomposition +
     # NH3/CO2 flash -> endothermic.  r_GL = (G/L)/(G/L)_des − 1 = co2_scale·ṁ_feed,des/ṁ_feed − 1 (=0 at
     # design).  Only feed-lean / CO2-rich (r_GL>0) cools; the feed-spike branch (r_GL<0) is left untouched.
@@ -2035,7 +2113,12 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # Feed-load (flood) choke g_T<1 CUTS the split -- steam-limited stripping leaves the volatiles in
     # the BOTTOMS (NH3 slip to LP via LV-322501), it does NOT lift them overhead.  min(g_T,1) keeps the
     # feed-lean branch (g_T>1, already rewarded through eta_T) and the design point (g_T=1) bit-exact.
-    mod = clamp(eta_T_steam * eta_co2 * eta_P, 0.0, 1.12) * min(g_T, 1.0)
+    # g_flood multiplies the SPLIT only, never eta_T.  eta_T drives xi_hyd, and flooding does not
+    # suppress hydrolysis -- Brouwer is explicit that a flooded tube's liquid residence time INCREASES
+    # ("stagnation or upward dragging of the film"), so hydrolysis and biuret go UP, not down.  That
+    # rise is already carried, without a new term: dT_flood raises T_bot, and xi_biu is Arrhenius in
+    # T_bot_K.  Folding g_flood into eta_T would have cut hydrolysis, i.e. the wrong sign.
+    mod = clamp(eta_T_steam * eta_co2 * eta_P, 0.0, 1.12) * min(g_T, 1.0) * g_flood
     slip = max(1.0 - g_NC, 0.0) + max(1.0 - g_HC, 0.0)   # composition (N/C, H/C) breakthrough only
     top = {}; bot = {}
     for k in MW_COMP:
@@ -2066,6 +2149,9 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC, "g_T": g_T,
         "dT_load": dT_load, "dT_bot": dT_bot, "dT_strip": dT_strip, "r_GL": r_GL, "m_feed_kgh": m_feed_kgh,  # energy-balance + G/L strip-cool diag
         "L_strip": L_strip, "W_strip": W_strip, "slip": slip,
+        # TD-006 hydrodynamic flooding diagnostics (all inert at design: 0.7448 / 0.0 / 1.0 / 0.0)
+        "flood_frac": flood_frac, "flood_x": flood_x, "g_flood": g_flood, "dT_flood": dT_flood,
+        "flood_kgh_tube": m_feed_kgh / STRIP_N_TUBES,
     }
 
 

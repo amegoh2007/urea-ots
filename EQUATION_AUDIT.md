@@ -129,7 +129,7 @@ Legend: ✔ bound correctly · ~ bound, reduced/empirical (acceptable) · ✗ de
 | Tag | C1 | C2 | C3 | C5 | C7 | C8 | C9 | Q1 | Q4 |
 |---|---|---|---|---|---|---|---|---|---|
 | **322F001** ejector | ✔ | ✔ 9-species | ✔ cp-weighted mix `T_d` | — | — | — | ✔ negative equal-% spindle `φ_sp = R^((θ_des−θ)/100)`, stall factor, gravity-head term, throat-choke cap | ✔ | motive-steam model absent (deliberate, handoff item 6) |
-| **322E001** stripper | ✔ | ✔ | ~ feed-proportional duty (TD-006) | — | ✔ hydrolysis ξ_hyd, Arrhenius biuret | ✔ NTU thermal ceiling, G/L strip-cool endotherm | ✔ | ✔ | TD-006: rigorous per-species enthalpy balance + steam-limited flood regime |
+| **322E001** stripper | ✔ | ✔ | ~ feed-proportional duty (TD-006) | — | ✔ hydrolysis ξ_hyd, Arrhenius biuret | ✔ NTU thermal ceiling, G/L strip-cool endotherm, **Wallis/IFS-166 hydrodynamic flooding limit** | ✔ | ✔ | TD-006 **half closed**: flooding limit landed (§5); per-species enthalpy balance still open |
 | **322E002** HPCC | ✔ | ✔ | ✔ carbamate exotherm + sensible, ε-NTU quench | ✔ anchored (T,P) Rachford-Rice, film-relaxed (**F-6 closed**) | ✔ carbamate K_p = p²_NH₃·p_CO₂, Raoult (H₂O), Henry (N₂) | ✔ ε-NTU + interfacial relaxation | ✔ | ✔ | — |
 | **322R001** reactor | ✔ | ✔ exact atom conservation, `closure_resid` diagnostic | ✔ Damköhler 4-node axial profile | — | ✔ Modified Inoue–Kanai `X = X∞·f_L·f_W·f_T`, biuret | ✔ | ✔ Francis weir, narrow-band LT-322504 | ✔ **best-modelled tag in the plant** | θ(φ) HIC-322605 split modulation deferred (documented) |
 | **322E003** scrubber | ✔ | ✔ | ✔ ε-NTU CCW bridge, spindle & flood chokes | — | carbamate 2:1 stoich | ✔ | ✔ | ✔ | none material |
@@ -601,11 +601,68 @@ gives 0.30 → 1161 from its own Arrhenius, fitted to neither.
 Tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `scratchpad/probe_f8_pfd_units.py`,
 `scratchpad/probe_f8_328.py`.
 
+### 322E001 — the hydrodynamic flooding limit (TD-006, first half CLOSED)
+
+The stripper had **no tube geometry at all**. Every term in `stripper_322e001` whose comment said
+"flood" was a *thermal* metaphor for the steam-dilution branch — it asked whether the shell steam
+could keep up with the liquid. A falling-film stripper's real ceiling asks a different and
+independent question: **can the tube physically carry the film?** Once the rising gas core shears
+the descending film off the wall, the film thickens, liquid is dragged upward and stripping stops
+regardless of available steam. That is a liquid-load limit, not an energy one.
+
+Geometry from the licensor DDS (Uhde UD-AU-322-DZ-0003-003 rev 00, page 3), which is
+self-consistent — its own tabulated surface area confirms the tube count:
+
+$$N\,\pi\,d_o\,L \;=\; 2600 \times \pi \times 0.031 \times 6.000 \;=\; 1519.27\ \mathrm{m^2}
+\qquad\text{vs DDS line 25: } 1519.00\ \mathrm{m^2}\quad (+0.018\,\%)$$
+
+The limit itself is Brouwer (*UreaKnowHow*, 2025) citing **IFS Proceeding 166**: 145 kg/h of
+solution per 1″ tube at 183 °C / 140 bar, with practice capping at 70 %. Three independent
+documents let it be used with no fabrication:
+
+| | |
+|---|---|
+| DDS bore **25.0 mm = 0.984″** | the "1-inch tube" figure applies without scaling |
+| DDS effective length **6.000 m** | exactly the length Brouwer ties to 80 % design efficiency |
+| quoted reference **183 °C** | *is* `STRIP_FEED207_T_C`, this stripper's own feed temperature |
+
+$$\phi_{\text{flood,des}}=\frac{280\,797}{2600 \times 145}=0.7448
+\qquad\Rightarrow\qquad 108.0\ \mathrm{kg/h}\ \text{per tube, onset at }134\,\%\text{ load}$$
+
+**The pin argument here is structural, not an anchored ratio** — and that is stronger. Because
+$\phi_{\text{des}} < 1$ the constraint is one-sided and does not bind at the seed:
+$x=\max(\phi-1,0)$ returns the literal `0.0`, so $1-e^{0}=0$ and $1/(1+Kx)=1$ are *exact
+identities*. The plant genuinely runs below its flooding limit; no float-ordering trick is
+involved. Verified by equality, not tolerance: `g_flood == 1.0`, `dT_flood == 0.0`.
+
+Calibration comes from the literature rather than a fit. Brouwer's control-room signature — bottom
+outlet **+3–4 °C in 15 min** — fixes $K$, capped by the *same* 11 °C ceiling the existing
+steam-dilution branch uses (183 − 172 °C), since both describe one end state, unstripped reactor
+liquor falling through untouched:
+
+$$11.0\left(1-e^{-K(0.10)}\right)=3.5\ \Rightarrow\ K=3.83 \qquad\text{model returns } 3.50\ ^\circ\mathrm{C}$$
+
+One sign trap avoided deliberately: `g_flood` multiplies the **split only, never `eta_T`**.
+Flooding *increases* residence time, so hydrolysis and biuret rise; since `eta_T` scales `xi_hyd`,
+folding `g_flood` in would have cut hydrolysis — the wrong sign. That rise is already carried
+without a new term, because `dT_flood` raises `T_bot` and `xi_biu` is Arrhenius in `T_bot_K`.
+
+Measured cascade, matching Brouwer's described failure exactly — overhead NH₃ recovery 89 % at
+design → 56 % at onset → 30 % at 180 % load, the volatiles held in the bottoms and slipping to LP.
+
+Tests: 11 in `backend/test_equation_audit_322e001_flood.py`. Probe:
+`scratchpad/probe_td006_flood.py`.
+
 ### Still open
 
 F-9 is closed in `regress.py` itself. **F-11 is closed**: it was a missing feed (PFD stream 331 into
 323E010), not a licensor data error — confirmed by the licensor and by the formaldehyde tracer,
 which has no other source in the plant. What remains is **C10** (temperature-dependent density and
-cp) and **TD-006** (HP stripper per-species enthalpy and the Wallis flooding limit); 328D001/D003
-and 322C001 still carry lumped mass, though the columns that set the plant's water spec no longer
-do.
+cp) and the **second half of TD-006** (HP stripper per-species enthalpy — the flooding half landed
+above); 328D001/D003 and 322C001 still carry lumped mass, though the columns that set the plant's
+water spec no longer do.
+
+One finding surfaced while mapping the stripper and is recorded rather than left hidden: `eta_P` is
+a **dead lever** — `P_bara` is always passed the frozen `STRIP_P_DES_BARA`, so the synthesis-pressure
+term is identically 1.0 in the live loop and pressure has no effect on stripping efficiency. That is
+physically wrong; see TECH_DEBT TD-006.

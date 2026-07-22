@@ -26,6 +26,7 @@
 | 12 | 2026-07-22 | branch `master` | Equation audit remediation, slot 2 — 322E002 HPCC (finding F-6 / TD-007). The condensation split `HPCC_FRAC_GAS_DES` was a point calibration frozen into a constant, so the condenser was thermodynamically inert: shell temperature and synthesis pressure moved the duty and the NTU outlet temperature but not one mole of condensate. The calibration is now the *anchor* of an isothermal (T,P) Rachford-Rice flash — design K back-solved from it every tick, corrected by the carbamate equilibrium Kp = p²_NH₃·p_CO₂ (dissociation-pressure slope ΔH_carb/3, Bennett 1953), Raoult for H₂O, Henry for N₂ — solved by bisection and rate-limited through the interfacial film over `HPCC_TAU_FILL_MIN`, making the split a dynamic state `s.hpcc_phi`. `P_bub` de-pinned from the frozen design temperature onto the live `T_prod`. See Revision Delta #16. |
 | 13 | 2026-07-22 | branch `master` | Equation audit remediation, slot 5 — 323E010 / 323F010 (finding F-11 / TD-011). The pre-evaporator was modelled with **one feed** when it has two: PFD stream 331, the granulation-scrubber urea-recovery return (3270 kg/h, 44.37 % urea, 40 °C), joins stream 319 ahead of 323E010 and flashes with it in 323F010 under vacuum (gas 790, solution 315 ≡ 317 after the pump). The engine had 331 entering at 323D002, downstream of the balance it closes, which is why stream 317's composition was unreachable from 319 and ≈1.4 t/h of urea had to appear from nowhere. Raised as a suspected source-data error; confirmed instead as a model topology error — the total mass balance closes to 0.019 % on the licensor's own flows, and the formaldehyde tracer (331 is its only source in the plant) closes to 1.7 %. Severity raised B → A: it was a missing term in C1 and C3, not just C2. Design duty 5048 → 7249 kW for the 40 °C feed's sensible load; unit-324 constants deliberately left byte-identical. See Revision Delta #17. |
 | 14 | 2026-07-22 | branch `master` | Equation audit remediation, slot 6 — unit 328 desorption train (finding F-8 remainder / TD-009). The last lumped-mass island: 328C002 and 328C004 moved material with **frozen overhead split constants** and no composition existed anywhere in the unit. Closing it required first settling the PFD's composition-unit convention — **liquid rows are mass %, vapour rows are mole %** — without which the licensor's table appears to destroy 800 kg/h of carbon across 328C002; the tabulated `Average Molar Weight` row is the discriminator, verified across ~90 streams. Read correctly, all three columns close per component to under 2 kg/h in 34–40 t/h. The Uhde mechanical datasheet UD-AU-328-EC-0001 supplied the geometry (328C002 and 328C004 are ONE 25.5 m stacked tower; 15 and 22 executed trays; ID 1250 mm; 40 mm weir; 3125 × ⌀6 mm holes), replacing a 900 s residence-time guess with real holdup and making the tray count load-bearing through a Kremser stage correction. Two defects surfaced: the hydrolyser was fed **stream 738's urea fraction instead of stream 746's** (+7.9 %), and the trace-species ODE is stiff enough (1.4 g of NH₃ inventory against 330 kg/h throughput) that explicit Euler walked the train off its design point — `des_advance` is implicit. The same units finding retired the stream-790 "accepted variance" recorded under Delta #17. See Revision Delta #18. |
+| 15 | 2026-07-23 | branch `master` | Equation audit remediation, slot 7 — 322E001 HP stripper, hydrodynamic flooding (TD-006, first half). The unit carried **no tube geometry whatsoever**; every term whose comment read "flood" was a *thermal* metaphor for the steam-dilution branch, which asks only whether the shell steam keeps up with the liquid. A falling-film stripper's real ceiling is the independent question of whether the tube can physically carry the film — a liquid-load limit. Licensor DDS UD-AU-322-DZ-0003-003 p.3 supplies 2600 tubes, 31 × 3.0 mm (ID 25.0 mm), 6000 mm effective, and is self-consistent: N·π·d_o·L = 1519.27 m² against its own tabulated 1519.00 (+0.018 %), so the tube count is confirmed rather than trusted. Three documents then agree — the bore is 0.984″ so the IFS-166 "145 kg/h per 1-inch tube" limit applies unscaled; the 6.000 m effective length is exactly what Brouwer ties to 80 % design efficiency; and the quoted 183 °C reference *is* `STRIP_FEED207_T_C`. The design point computes to **74.5 % of the limit** (108.0 of 145 kg/h per tube, onset at 134 % load), so the constraint is one-sided and **does not bind at the seed** — no anchored ratio was required, and the pin guarantee rests on a physical fact rather than float operand ordering. See Revision Delta #19. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -343,6 +344,76 @@ $$\dot Q_{sens,c003}=\frac{\dot m_{746}}{3600}C_p\bigl(T_{746}-T_{C003}\bigr)=\f
     9.6 / 122 / 1108 / 16 035 ppm. Dropping the hydrolyser from 200 °C to 160 °C drives the urea slip
     0.30 → 1161 ppm — independently corroborating the *Urea Simulator Gap Resolution* study's
     prediction of "0.32 ppm to over 1200 ppm", from an Arrhenius fitted to neither.
+
+19. **322E001 HP stripper — hydrodynamic flooding limit** (TD-006, first half; audit slot 7).
+
+    The unit carried **no tube geometry at all**. Every term in `stripper_322e001` whose comment
+    read "flood" was a *thermal* metaphor for the steam-dilution branch $(\text{raw\_load} < 0)$:
+    it asks whether the shell steam can keep up with the liquid. A falling-film stripper's real
+    ceiling is an independent question — **can the tube physically carry the film?** Once the
+    rising gas core shears the descending film off the wall, the film thickens, liquid is dragged
+    upward, and stripping stops regardless of available steam. That is a liquid-load limit.
+
+    **Geometry, and why the tube count can be trusted.** Licensor DDS 322E001
+    (Uhde UD-AU-322-DZ-0003-003 rev 00, page 3) gives $N = 2600$, $d_o \times t = 31 \times 3.0$ mm,
+    $L_{\text{eff}} = 6000$ mm. The sheet is self-consistent — its own tabulated exchange surface
+    confirms the count, so the number is not a single cell read on trust:
+
+    $$N\,\pi\,d_o\,L = 2600 \times \pi \times 0.031 \times 6.000 = 1519.27\ \mathrm{m^2}
+      \qquad\text{vs line 25: } 1519.00\ \mathrm{m^2} \quad (+0.018\,\%)$$
+
+    **Three documents agree, so nothing is fabricated.** The limit is 145 kg/h of solution per 1″
+    tube at 183 °C / 140 bar (Brouwer, *UreaKnowHow* 2025, citing IFS Proceeding 166). It applies
+    here directly because the DDS bore is $d_i = 0.031 - 2(0.003) = 0.025$ m $= 0.984''$; because
+    the DDS effective length 6.000 m is exactly the length the same paper ties to a Stamicarbon
+    stripper's 80 % design efficiency; and because the quoted 183 °C reference *is*
+    `STRIP_FEED207_T_C`, this stripper's own feed temperature.
+
+    **The design point, computed rather than tuned:**
+
+    $$\phi_{\text{flood}} = \frac{\dot m_{\text{feed}}}{N\,\dot m_{\text{flood,tube}}}
+      = \frac{280\,797}{2600 \times 145} = 0.7448$$
+
+    i.e. 108.0 kg/h per tube, **74.5 % of the limit**, with flooding onset at 134 % of design plant
+    load — the same order as the literature's "110 % when new, 120 % at end of life".
+
+    **The pin argument is structural, not an anchored ratio — and that is stronger.** Because
+    $\phi_{\text{des}} < 1$ the constraint is one-sided and does not bind at the seed. With
+    $x = \max(\phi - 1,\, 0)$ returning the literal $0.0$:
+
+    $$\Delta T_{\text{flood}} = \Delta T_{\text{gap}}\left(1 - e^{-K_T x}\right) \;\big|_{x=0} = 0,
+      \qquad
+      g_{\text{flood}} = \frac{1}{1 + K_\eta x}\;\Big|_{x=0} = 1$$
+
+    are *exact identities*, not near-misses. No float operand ordering is involved: the guarantee
+    rests on the physical fact that the plant operates below its flooding limit. Verified by
+    equality — `g_flood == 1.0`, `dT_flood == 0.0` — with the gate at `diffs: 0`.
+
+    **Calibration from the literature, not fitted.** The bottom-temperature signature Brouwer gives
+    for flooding onset — +3–4 °C in 15 minutes — fixes $K_T$, capped by the *same* ceiling the
+    steam-dilution branch already uses, $\Delta T_{\text{gap}} = 183 - 172 = 11$ °C, since both
+    describe one end state (unstripped reactor liquor falling through untouched):
+
+    $$11.0\left(1 - e^{-K_T (0.10)}\right) = 3.5 \;\Rightarrow\; K_T = 3.83
+      \qquad\text{model returns } 3.50\ ^\circ\mathrm{C}$$
+
+    **One sign trap, avoided deliberately.** $g_{\text{flood}}$ multiplies the **split only, never
+    $\eta_T$**. Flooding *increases* liquid residence time — Brouwer's "stagnation or upward
+    dragging of the film" — so hydrolysis and biuret rise. Since $\eta_T$ scales $\xi_{\text{hyd}}$,
+    folding $g_{\text{flood}}$ into it would have *cut* hydrolysis, the wrong sign. The rise is
+    already carried without any new term, because $\Delta T_{\text{flood}}$ raises $T_{\text{bot}}$
+    and $\xi_{\text{biu}}$ is Arrhenius in $T_{\text{bot}}$.
+
+    **Verification.** Inert below onset (`g_flood` exactly 1.0 at 50–130 % load). Above it, the
+    cascade Brouwer describes appears as an *output*: overhead NH₃ recovery 89 % at design → 56 % at
+    onset → 30 % at 180 % load, the volatiles held in the bottoms and slipping to the LP section via
+    LV-322501, with $T_{\text{bot}}$ rising and staying bounded by the condensing shell steam.
+
+    **Deliberately not modelled:** the corrosion/lifetime drift (the limit rising 110 → 120 % as the
+    bore grows) and the active-corrosion metallurgy — multi-year effects with no place in a
+    shift-length scenario. **One unsourced constant:** $K_\eta$; the source states efficiency drops
+    but publishes no curve, so it reuses the unit's existing choke scale (`STRIP_ETA_KT` = 1.50)
+    rather than invent a fit.
 
 ---
 
