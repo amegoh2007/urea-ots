@@ -93,7 +93,7 @@ that limits training fidelity · **C** = cosmetic / documentation.
 | **F-5** | A | 324E003 / 324F003 | C1↔C3, C10 | Identical defect at Stage 2 (`R324_W_EV2` = 97.71 % hard). **CLOSED** — see §5. |
 | **F-6** | B | 322E002 | C5 EoS/activity | HPCC condensation split `φᵢ = HPCC_FRAC_GAS_DES` is **invariant to shell temperature and loop pressure**. Raising LP-steam pressure changes duty and `T_prod` (via NTU) but not one mole of condensate. **CLOSED** — see §5. |
 | **F-7** | B | 328C003 | C7 Kinetics | The hydrolyser carries **no reaction extent at all** — urea hydrolysis is lumped into the back-solved `R328_C003_LAM748`. Arrhenius hydrolysis kinetics exist only in the read-only `ppm_infer_328701` soft sensor, not in the mass balance. **CLOSED** — see §5. |
-| **F-8** | B | 323/324/328/329 | C2 Component balance | Species tracking (`MW_COMP`, 9 components) exists **only in unit 322**. Everything downstream of LV-322501 is lumped-mass. No component balance, hence no C6 summation equations, downstream. **CLOSED for 323 + 324** — see §5; the 328 train remains (F-7 depends on it). |
+| **F-8** | B | 323/324/328/329 | C2 Component balance | Species tracking (`MW_COMP`, 9 components) existed **only in unit 322**; everything downstream of LV-322501 was lumped mass moved by frozen split fractions, so there was no component balance and no C6 summation equation past the HP loop. **CLOSED** — 323 + 324 first (§5), then the 328 desorption train (§5), which also required settling the PFD's composition-unit convention: liquid rows are mass %, vapour rows are **mole %**. Read as mass % the PFD appears to destroy 800 kg/h of carbon across 328C002. It does not. |
 | **F-11** | A | 323E010 / 323F010 | C1, C2, C3 | **The pre-evaporator was missing a feed.** Stream 317's composition is not reachable from 319 alone — the tabulated percentages remove 10 163 kg/h against an 8 750 kg/h total, so ≈1.4 t/h of urea had to *appear* across 323F010. Raised as a suspected source-data inconsistency; it was a **model topology error**. PFD stream 331 (urea-recovery return from the granulation scrubber, 3 270 kg/h, 44.37 % urea, 40 °C) joins 319 **ahead of 323E010** — the engine had it entering at 323D002, downstream of the balance it closes. Found by closing F-8; severity raised from B to A on confirmation, since it was a missing term in C1 and C3, not just C2. **CLOSED** — see §5. |
 | **F-9** | C | tooling | — | `scratchpad/regress.py` `os.chdir(BACKEND)` before writing `argv[1]`, so the relative gate command in CLAUDE.md §7 / handoff.md fails with `FileNotFoundError`. Gate must be invoked with an **absolute** output path. **CLOSED** — `regress.py` now resolves `argv[1]` before the chdir (TD-010). |
 | **F-10** | A | 323E002, 323E010, 324E001, 324E003 | C3, C8 | **Condensing-steam heater duty is unbounded below.** `Q = UA·(Tsat(p_chest) − T)` with `p_chest` clamped to 0.02 bar a (Tsat ≈ 17.5 °C) makes a shut steam valve a *refrigerator*: probe measured the Evap-I melt driven to **22 °C** and the 323C003 column to **13.6 °C**. A condensing chest cannot remove heat — it simply stops condensing. Found by disturbance-probing the F-2..F-5 fixes; the defect pre-dates them but was masked while the boil-up ignored the duty. **CLOSED** — see §5. |
@@ -204,7 +204,7 @@ clamps `op`, so no integral state can wind). Instrument dynamics are available a
 | Category | Verdict |
 |---|---|
 | C1 Total mass balance | ✔ closes everywhere; `closure_resid` diagnostics in 322R001/322E003. 323E010/F010 gained its missing second feed, PFD stream 331 (F-11) |
-| C2 Component species balance | ~ rigorous in **322, 323 and 324** (9 species in the HP loop, 6 in the solution train); the 328 desorption/hydrolysis train is still lumped mass (F-8 remainder) |
+| C2 Component species balance | ✔ rigorous in **322, 323, 324 and 328** (9 species in the HP loop, 6 in the solution and desorption trains); 328D001/D003 and 322C001 remain lumped mass |
 | C3 Energy balance | ✔ **re-coupled to mass in 323/324** (F-2..F-5, F-10 closed); 323E010 now also pays the sensible duty on the 40 °C stream-331 return (F-11); correct elsewhere |
 | C4 Isenthalpic/isothermal flash | ✔ isenthalpic flash at 323F004 (F-1) and isothermal (T,P) Rachford-Rice at 322E002 (F-6). JT letdown elsewhere — appropriate |
 | C5 EoS & activity | ~ Antoine (NH₃, H₂O), Clausius–Clapeyron carbamate bubble-P, carbamate K_p = p²_NH₃·p_CO₂ / Raoult / Henry K-values at 322E002, back-solved activity coefficients baked into the anchored K_des. No cubic EoS — reduced-order by design |
@@ -438,10 +438,22 @@ drops the back-solved 323F010 extent 0.136 → 0.006 kmol/h.
 `sol_pin_strength` is kept but is now an identity at this stage; it remains only to hold the 324
 melt against PFD percentage rounding per CLAUDE.md §0.
 
-One residual PFD inconsistency, noted not fixed: stream 790's tabulated 2.29 % CO₂ (276 kg/h) does
-not close against its own 319/315 CO₂ figures, which force 651 kg/h. The balance is authoritative
-and the model follows it; 315's CO₂ is tabulated as 0.02 %, where one rounding digit carries ±90
-kg/h of leverage. Same class as the 12 040 vs 12 020 vapour total.
+**Correction (closed while closing F-8).** This section previously recorded "one residual PFD
+inconsistency, noted not fixed": stream 790's tabulated 2.29 % CO₂ read as 276 kg/h against the
+651 kg/h the 319/331/315 balance forces. That was a **units misreading on our side, not licensor
+data**. Stream 790 is tabulated as `Vapour`, and the PFD gives vapour compositions in **mole %**
+(§5, F-8). At 2.29 mol % of 646.9 kmol/h, stream 790 carries **652.0 kg/h** of CO₂ — the 651 the
+balance forces. Every species across the stage closes:
+
+| species | in 319 + 331 | out 315 + 790 | diff |
+|---|---|---|---|
+| CO₂ | 670.4 | 670.6 | −0.25 |
+| H₂O | 28 562.2 | 28 566.5 | −4.33 |
+| NH₃ | 893.8 | 890.7 | +3.12 |
+| Urea | 74 317.2 | 74 310.4 | +6.82 |
+
+There is no accepted variance at 323F010. The stage closes on all four species to under 7 kg/h in
+104 840.
 
 Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `139 passed`.
 
@@ -487,11 +499,113 @@ training lesson:
 
 Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `136 passed`.
 
+### Unit 328 — the desorption train's own species layer (F-8 remainder, CLOSED)
+
+The last lumped-mass island. 328C002 and 328C004 moved material with **frozen overhead split
+constants** — `R328_C002_PHI737 = 6665/40434`, `R328_C004_PHI750 = 6833/40557` — a fixed fraction of
+whatever flowed in leaving overhead, with no composition anywhere in the unit.
+
+#### The PFD composition-unit convention
+
+Nothing here could be anchored until one thing was settled. Read as mass %, the PFD says **carbon is
+not conserved** across 328C002: 1658 kg/h of CO₂ in, 858 out, 800 kg/h gone. It is conserved. The
+PFD tabulates **liquid streams in mass % and vapour/gas streams in mole %**, and the tabulated
+`Average Molar Weight` row is the discriminator. For stream 737:
+
+$$\overline{M}_{\text{mole}} = \sum y_i M_i = 20.81 \quad\text{(tabulated: 20.81)} \qquad
+\overline{M}_{\text{mass}} = \Big(\sum w_i / M_i\Big)^{-1} = 18.94$$
+
+Checked across ~90 streams in all four process-stream tables, every stream lands on its class —
+`Carb. Gas` / `Vapour` / `CO2` / `Air` / `Inerts` / steam are mole %; `Urea Sol.` / `Carb. Liq.` /
+`Amm. Water` / `Vap. Cond.` are mass %. Read that way the whole train closes per component with
+nothing fitted:
+
+| | 328C002 | 328C003 | 328C004 |
+|---|---|---|---|
+| total mass | 40 434 → 40 434 | 34 874 → 34 874 | 40 557 → 40 557 |
+| CO₂ | −0.15 | −0.01 | +1.79 |
+| H₂O | −0.53 | −1.37 | +0.85 |
+| NH₃ | +0.16 | −1.68 | +1.47 |
+| Urea | −0.34 | 0.00 | −0.03 |
+
+(kg/h, against 34–40 t/h throughputs.) The same convention retired the F-11 "accepted variance"
+above. Probe: `scratchpad/probe_f8_pfd_units.py`.
+
+#### What the mechanical datasheet settled
+
+Uhde **UD-AU-328-EC-0001 rev 01** gives what the PFD cannot: **328C002 and 328C004 are one 25.5 m
+tower**, C002 stacked on C004 on a common skirt, each with its own sump. Stamicarbon's own
+description agrees independently — it calls them the "top part" and "bottom part" of the desorber,
+with the bottom part's off-gas used as the top part's stripping agent, which is exactly PFD stream
+750 → 328C002.
+
+| | 328C002 | 328C004 |
+|---|---|---|
+| executed trays (DDS line 35) | **15** | **22** |
+| shell ID / tray spacing | 1250 mm / 500 mm | 1250 mm / 500 mm |
+| perforation, weir | 3125 × ⌀6 mm, 40 mm weir | same |
+| free area / active area | 9.11 % | 9.11 % |
+| holdup (trays + sump at NLL) | **1588 kg** (was 8442) | **1436 kg** (was 8431) |
+
+Holdup was a 900 s residence-time guess; it is now geometry, and the real columns respond ~5×
+faster than the model did. Level is defined as $M/M_\text{des}\times 50$, so the design point is
+untouched — only the transient speed changes.
+
+The tray counts are **load-bearing**, not decorative. The back-solved α are lumped single-stage
+equivalents (α_NH₃ = 5.1 × 10⁴ in 328C004, because one well-mixed stage must reproduce what 22 real
+trays achieve — Henry's law for dilute NH₃ at 143 °C is nearer 10). Left static, the columns would
+separate identically whatever the operator did to the steam. So α moves with the column's Kremser
+residual $r(S,N)$, $N$ from the executed tray count times the overall efficiency already derived for
+328C004. For a trace species on one well-mixed stage the overhead fraction is
+$m_v\alpha/(m_v\alpha+m_l)$, and setting that equal to $1-r$ inverts **exactly**:
+
+$$\alpha_\text{eff} \;=\; \frac{L}{V}\cdot\frac{1-r}{r}$$
+
+so the correction is an identity of the lumped form, not a fitted fudge. Written as a ratio of that
+expression at live over design conditions, it is bit-exactly 1.0 at the seed.
+
+#### Two defects this exposed
+
+* **The hydrolyser was fed the wrong stream's urea.** `R328_C003_W_UREA_746` was hardcoded 0.0082 —
+  stream **738**, the feed to 328C002 — where the PFD gives stream 743/746 as **0.76 %**. 328C002
+  dilutes 31 114 kg/h of feed into 33 769 kg/h of bottoms, so the hydrolyser was handed 276.9 kg/h
+  of urea against the tabulated **256.6**, +7.9 %. It now reads off the live 328C002 vector.
+* **The trace-species ODE is violently stiff.** 328C004 holds 1436 kg of liquid at 1 ppm ammonia —
+  **1.4 grams** — while 330 kg/h flows through. Its ammonia time constant is ~0.015 s against a
+  0.25 s tick. Explicit Euler overshoots ~16×, clamps at zero, and walked 328C002 from 0.63 % to
+  2.2 % ammonia over four simulated hours. `des_advance` is **implicit**: lagging the summation
+  denominator makes the removal term linear in $w_k$, so the step is closed-form, needs no
+  iteration, cannot go negative, and is exactly stationary when source equals sink — which is what
+  makes the design point a genuine fixed point.
+
+**Verification** — 4 h design hold, then the two levers an operator actually has:
+
+| after 4 h | 328C002 NH₃ | 328C002 CO₂ | 328C003 NH₃ | 328C004 NH₃ |
+|---|---|---|---|---|
+| PFD | 0.630 % | 0.110 % | 0.9699 % | 1.00 ppm |
+| model | 0.630 % | 0.110 % | 0.9693 % | 0.998 ppm |
+
+| FIC-329401 LP strip steam | 100 % | 90 % | 80 % | 70 % | 50 % |
+|---|---|---|---|---|---|
+| NH₃ in purified condensate | **1.0 ppm** | 9.6 | 122 | 1108 | 16 035 |
+| CO₂ | 1.0 ppm | 9.6 | 292 | 3901 | 20 514 |
+
+| TIC-328012 hydrolyser | 200 °C | 190 °C | 180 °C | 170 °C | 160 °C |
+|---|---|---|---|---|---|
+| urea slip | **0.30 ppm** | 8.1 | 82 | 399 | 1161 |
+
+The last row is independent corroboration: the *Urea Simulator Gap Resolution* study predicts the
+slip going "from 0.32 ppm to over 1200 ppm" when the bottom falls from 200 °C to 160 °C. The engine
+gives 0.30 → 1161 from its own Arrhenius, fitted to neither.
+
+Tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `scratchpad/probe_f8_pfd_units.py`,
+`scratchpad/probe_f8_328.py`.
+
 ### Still open
 
-The **328 remainder of F-8** — the desorption train's own species vector (328C002/C003/C004,
-328D001/D003, 322C001) is still lumped mass. F-7 closed without it because hydrolysis is a
-flow-through conversion needing only the feed's urea content, but a full C2 balance across 328
-remains. F-9 is closed in `regress.py` itself. **F-11 is closed**: it was a missing feed
-(PFD stream 331 into 323E010), not a licensor data error — confirmed by the licensor and by the
-formaldehyde tracer, which has no other source in the plant.
+F-9 is closed in `regress.py` itself. **F-11 is closed**: it was a missing feed (PFD stream 331 into
+323E010), not a licensor data error — confirmed by the licensor and by the formaldehyde tracer,
+which has no other source in the plant. What remains is **C10** (temperature-dependent density and
+cp) and **TD-006** (HP stripper per-species enthalpy and the Wallis flooding limit); 328D001/D003
+and 322C001 still carry lumped mass, though the columns that set the plant's water spec no longer
+do.

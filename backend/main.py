@@ -721,8 +721,7 @@ R328_C002_M743_DES = R328_C002_IN_DES - R328_C002_M737_DES  # 33769 bottoms -> h
 R328_C002_T_BOT = 139.0 ; R328_C002_T_TOP = 117.0
 R328_C002_T738 = 114.0 ; R328_C002_T748 = 188.0 ; R328_C002_T750 = 140.0
 R328_D001_T = 61.0                                          # 775 reflux temperature (from 328D001)
-R328_C002_M_TAU_S = 900.0
-R328_C002_M_DES   = R328_C002_M743_DES/3600.0 * R328_C002_M_TAU_S         # 8442 kg
+# Holdup: see the F-8 geometry block below -- R328_C002_M_DES is set there from the datasheet.
 R328_C002_LAM748 = 2000.0 ; R328_C002_LAM750 = 2100.0       # kJ/kg condensation of recycle OVHDs
 # sensible net onto the 139°C bottoms (kW), then λ737 closes M·cp·dT/dt = 0:
 R328_C002_SENS = ((R328_C002_M738_DES*(R328_C002_T738 - R328_C002_T_BOT)
@@ -770,8 +769,7 @@ R328_C004_M750_DES = R328_C004_PHI750 * R328_C004_IN_DES    # 6833
 R328_C004_M739_DES = R328_C004_IN_DES - R328_C004_M750_DES  # 33724 bottoms -> 328E007 -> boundary
 R328_C004_T = 143.0 ; R328_C004_T749 = 148.0
 R328_C004_DT_DES = R328_C004_T - R328_C002_T750             # 3 C bottom (143) - top tray (140 = OVHD 750), TT-328004
-R328_C004_M_TAU_S = 900.0
-R328_C004_M_DES   = R328_C004_M739_DES/3600.0 * R328_C004_M_TAU_S         # 8431 kg
+# Holdup: see the F-8 geometry block below -- R328_C004_M_DES is set there from the datasheet.
 R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C004_T)
                      + R328_C004_M931_DES/3600.0*R328_C004_M931_DH)
                     / (R328_C004_M750_DES/3600.0))                        # kJ/kg (~2130)
@@ -779,6 +777,62 @@ R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C0
 # measurement is the FIC-328402 wash leg (PFD stream 744, 323E003 -> 328D003 Comp-II), not a
 # 328C002 term,
 # so the denominator must exist first.  See the RHO_744_KGM3 block.
+
+# ==========================================================================
+#  AUDIT F-8 -- desorber GEOMETRY from the licensor mechanical datasheet
+#  Uhde UD-AU-328-EC-0001 rev 01, "Desorption Column I / II", pages 2-3 (DDS),
+#  6 (principle sketch), 7 (tray arrangement), 9 (section X-X), 10 (tray detail).
+#
+#  The drawing settles a structural question the PFD alone cannot: 328C002 and
+#  328C004 are ONE 25.5 m tower, C002 stacked on top of C004 on a common skirt,
+#  each with its own sump.  Stamicarbon's own description agrees -- it calls them
+#  the "top part" and "bottom part" of the desorber, with the hydrolyser between
+#  them and the bottom part's off-gas used as the top part's stripping agent
+#  (van der Zande, "Zero waste urea production", Nitrogen+Syngas 2019).  That is
+#  exactly streams 750 -> 328C002 and 748 -> 328C002 in the PFD.
+#
+#  Holdup was previously a 900 s residence-time GUESS (8442 / 8431 kg).  The
+#  datasheet replaces the guess with geometry: tray inventory over the executed
+#  tray count plus the sump at its drawn normal liquid level.  The result is ~5x
+#  smaller, i.e. the real columns respond ~5x faster than the model did.
+#  Level is defined as M / M_DES * 50, so the design point is untouched (50 % at
+#  the seed either way) -- only the transient speed changes.
+# ==========================================================================
+R328_COL_ID      = 1.250                      # m,  shell inside diameter, both sections (DDS line 27)
+R328_COL_AREA    = math.pi / 4.0 * R328_COL_ID ** 2                     # 1.2272 m2
+R328_TRAY_DC_W   = 0.202                      # m,  downcomer chord width off the wall (section X-X)
+_r328_R          = R328_COL_ID / 2.0
+_r328_seg        = (_r328_R ** 2 * math.acos((_r328_R - R328_TRAY_DC_W) / _r328_R)
+                    - (_r328_R - R328_TRAY_DC_W)
+                    * math.sqrt(2.0 * _r328_R * R328_TRAY_DC_W - R328_TRAY_DC_W ** 2))
+R328_TRAY_ACTIVE = R328_COL_AREA - 2.0 * _r328_seg                      # 0.9700 m2 bubbling area
+R328_TRAY_NHOLE  = 3125                       # holes per tray, dia 6 mm, equally spaced (section X-X)
+R328_TRAY_DHOLE  = 0.006                      # m
+R328_TRAY_AHOLE  = R328_TRAY_NHOLE * math.pi / 4.0 * R328_TRAY_DHOLE ** 2   # 0.0884 m2 (9.1 % of active)
+R328_TRAY_HWEIR  = 0.040                      # m,  outlet weir height (section C-C)
+R328_FROTH_PHI   = 0.5                        # clear-liquid height / weir height on an aerated tray
+R328_C002_NTRAY  = 15                         # executed trays, 328C002 (DDS line 35)
+R328_C004_NTRAY  = 22                         # executed trays, 328C004 (DDS line 35)
+R328_C002_H_NLL  = 1.150                      # m,  sump normal liquid level above T.L. (tray arrangement)
+R328_C004_H_NLL  = 0.920                      # m
+# Densities: the PFD rules (CLAUDE.md §0).  Its stream-739 "Density eff." 923.28 kg/m3 @ 143 C and
+# the datasheet's 923.25 @ 143 C agree to 3e-5 relative -- two independent licensor documents on the
+# same number, and both are simply water at 143 C, which is what a <1 ppm purified condensate is.
+# For 328C002 the two differ (PFD 743 = 933.0 @ 139 C, datasheet = 944.0 @ 138 C); the datasheet
+# figure is the conservative MECHANICAL design value used for weights and hydrostatic head, so the
+# process model takes the PFD's.
+R328_C002_RHO    = 933.0                      # kg/m3, PFD stream 743 @ 139 C
+R328_C004_RHO    = 923.28                     # kg/m3, PFD stream 739 @ 143 C
+
+
+def _r328_holdup(ntray: int, h_nll: float, rho: float) -> float:
+    """Design liquid inventory of a desorber section = aerated tray holdup + sump at NLL (kg)."""
+    return (ntray * R328_TRAY_ACTIVE * R328_TRAY_HWEIR * R328_FROTH_PHI
+            + R328_COL_AREA * h_nll) * rho
+
+
+R328_C002_M_DES = _r328_holdup(R328_C002_NTRAY, R328_C002_H_NLL, R328_C002_RHO)   # ~1588 kg (was 8442)
+R328_C004_M_DES = _r328_holdup(R328_C004_NTRAY, R328_C004_H_NLL, R328_C004_RHO)   # ~1436 kg (was 8431)
 
 # ==========================================================================
 #  323E011 + 323D011  (LP carbamate condenser + drum, 45 °C, 1.13 bar a)
@@ -1301,6 +1355,244 @@ def sol_advance(w: dict, M_pre: float, M_new: float, m_in: float, w_in: dict,
     return {k: out[k] / tot for k in SOL_SPECIES}      # C6: renormalise to Sum w == 1
 
 
+# ==================================================================================================
+#  AUDIT F-8 -- rigorous species layer through the desorption train (328C002 / 328C003 / 328C004)
+#
+#  THE PFD COMPOSITION-UNIT CONVENTION.  Before any of this could be anchored, one thing had to be
+#  settled.  A straight mass-% reading of the PFD-22 rows says CARBON IS NOT CONSERVED across
+#  328C002: 1658 kg/h CO2 in, 858 kg/h out, 800 kg/h gone.  That is not a licensor error.  The PFD
+#  tabulates LIQUID streams in MASS % and VAPOUR/GAS streams in MOLE %, and the "Average Molar
+#  Weight" row is the discriminator that proves it -- for stream 737 the mole-% reading reproduces
+#  the tabulated 20.81 to 0.001 while the mass-% reading gives 18.94.  Checked across ~90 streams in
+#  all four process-stream tables, every stream lands on its class:
+#      Carb. Gas / Vapour / CO2 / Air / Inerts / steam ... MOLE %
+#      Urea Sol. / Carb. Liq. / Amm. Water / Vap. Cond. .. MASS %
+#  Read that way the whole train closes per component to under 2 kg/h in 34-40 t/h, with NOTHING
+#  fitted.  See scratchpad/probe_f8_pfd_units.py.
+#
+#  The same convention retires an "accepted variance" recorded during F-11: stream 790's tabulated
+#  2.29 % CO2 was read as mass % (276 kg/h) and did not close against the 651 kg/h the 319/331/315
+#  balance forces.  As mole % it is 652.0 kg/h.  It closes to 0.25 kg/h.  The variance was a
+#  units misreading of mine, not licensor data.
+#
+#  WHAT THIS REPLACES.  328C002 and 328C004 ran on FROZEN overhead split constants
+#  (R328_C002_PHI737, R328_C004_PHI750): a fixed fraction of whatever flowed in left overhead, with
+#  no composition anywhere in unit 328.  Nothing carried urea, NH3 or CO2 as a tracked quantity, so
+#  the hydrolyser's urea load had to be a hardcoded fraction -- and it was the WRONG stream's:
+#  R328_C003_W_UREA_746 was 0.0082, which is stream 738 (the feed to 328C002), where the PFD gives
+#  stream 743/746 as 0.76 %.  328C002 dilutes 31 114 kg/h of feed into 33 769 kg/h of bottoms, so
+#  the hydrolyser was being handed 276.9 kg/h of urea against the tabulated 256.6, +7.9 %.  With a
+#  real component balance in 328C002 that number is computed, not assumed, and the error cannot
+#  recur.
+# ==================================================================================================
+
+
+def _w_from_molepct(d: dict) -> dict:
+    """PFD VAPOUR row (MOLE %) -> mass fractions.  See the convention note above: liquid rows are
+    mass %, vapour rows are mole %, and mixing the two silently destroys carbon."""
+    m = {k: d.get(k, 0.0) * MW_SOL[k] for k in SOL_SPECIES}
+    tot = sum(m.values())
+    return {k: m[k] / tot for k in SOL_SPECIES}
+
+
+# --- PFD_22 design compositions, STRICT source: PFD_No__22_Desorption process-stream table --------
+W_S738 = _w_norm(dict(CO2=3.71,  H2O=90.24, NH3=5.23,  Urea=0.82))   # liquid: condensate -> 328C002
+W_S775 = _w_norm(dict(CO2=23.63, H2O=47.10, NH3=29.20, Urea=0.07))   # liquid: 328D001 reflux
+W_S743 = _w_norm(dict(CO2=0.11,  H2O=98.50, NH3=0.63,  Urea=0.76))   # liquid: 328C002 bottoms (=746)
+W_S747 = _w_norm(dict(CO2=0.02,  H2O=99.02, NH3=0.97))               # liquid: 328C003 bottoms (=749)
+# Stream 739/740 is the <1 ppm purified condensate.  The PFD tabulates NH3 and urea AT 1 ppm and
+# leaves CO2 blank -- blank because it rounds to 0.00 %, not because it is absent: 6.8 kg/h of CO2
+# enters 328C004 in stream 749 and the column has exactly two outlets.  Taken as zero the volatility
+# back-solve divides into it, pins alpha_CO2 to 0, and that CO2 can then never leave -- it piles up
+# in the sump forever.  Given the same 1 ppm basis the licensor used for the other two traces on
+# this very stream, it strips out with the ammonia, which is what a desorber does to dissolved CO2.
+W_S739 = _w_norm(dict(H2O=99.9997, NH3=1.0e-4, Urea=1.0e-4, CO2=1.0e-4))   # liquid: purified
+W_S737 = _w_from_molepct(dict(CO2=12.32, H2O=46.21, NH3=41.47))      # VAPOUR: 328C002 OVHD -> 328D001
+W_S748 = _w_from_molepct(dict(CO2=13.06, H2O=82.37, NH3=4.57))       # VAPOUR: 328C003 OVHD -> 328C002
+W_S750 = _w_from_molepct(dict(CO2=0.03,  H2O=94.88, NH3=5.08))       # VAPOUR: 328C004 OVHD -> 328C002
+W_STEAM = _w_norm(dict(H2O=100.0))                                   # 911 MP / 931 LP stripping steam
+
+
+def _des_stage_anchor(feeds, w_out: dict, m_liq: float, m_vap: float,
+                      hydrolyse: bool = False, y_pfd: dict = None) -> dict:
+    """Back-solve one desorber/hydrolyser stage from the PFD, the unit-328 counterpart of
+    _sol_stage_anchor.  Kept separate rather than folded into that function so unit 328 carries zero
+    blast radius into the 323/324 stages the boot pin depends on.
+
+    feeds is a list of (w, kg/h) pairs -- 328C002 has FOUR inlets (738 + 775 + 748 + 750), which is
+    the whole reason a new anchor was needed.  hydrolyse=True back-solves the urea-hydrolysis extent
+        NH2CONH2 + H2O -> 2 NH3 + CO2
+    from the urea that disappears across the stage; the licensor's own numbers put it at 4.2734
+    kmol/h in 328C003 (256.6 kg/h of urea destroyed, and stream 747 tabulates no urea at all).
+
+    y_pfd, where the PFD tabulates the overhead composition, is used only to REPORT how far the
+    back-solved vapour sits from the licensor's -- an independent check the 323/324 stages never
+    had, because no vapour composition is tabulated there.  It is never fed back into the anchor:
+    the back-solve is what makes the component balance close exactly, which is what makes the design
+    state a fixed point of the species ODE.
+
+    Returns {'xi', 'y', 'alpha', 'resid', 'dev'}."""
+    m_i = {k: 0.0 for k in SOL_SPECIES}
+    for w, m in feeds:
+        for k in SOL_SPECIES:
+            m_i[k] += m * w[k]
+    xi = max((m_i["Urea"] - m_liq * w_out["Urea"]) / MW_SOL["Urea"], 0.0) if hydrolyse else 0.0
+    gen = {k: 0.0 for k in SOL_SPECIES}
+    gen["Urea"] = -xi * MW_SOL["Urea"]
+    gen["H2O"]  = -xi * MW_SOL["H2O"]
+    gen["NH3"]  = +xi * 2.0 * MW_SOL["NH3"]
+    gen["CO2"]  = +xi * MW_SOL["CO2"]
+    vap   = {k: m_i[k] + gen[k] - m_liq * w_out[k] for k in SOL_SPECIES}
+    resid = sum(v for v in vap.values() if v < 0.0)
+    for k in SOL_SPECIES:
+        if k in SOL_NONVOL or vap[k] < 0.0:
+            vap[k] = 0.0
+    vap["H2O"] += m_vap - sum(vap.values())          # water closes the balance (reference species)
+    y = {k: vap[k] / m_vap for k in SOL_SPECIES} if m_vap > 1e-9 else dict(w_out)
+    aw = y["H2O"] / w_out["H2O"]
+    alpha = {k: ((y[k] / w_out[k]) / aw if (w_out[k] > 1e-12 and k not in SOL_NONVOL) else 0.0)
+             for k in SOL_SPECIES}
+    alpha["H2O"] = 1.0                               # reference species, by definition
+    dev = max(abs(y[k] - y_pfd[k]) for k in SOL_SPECIES) if y_pfd else 0.0
+    return {"xi": xi, "y": y, "alpha": alpha, "resid": resid, "dev": dev}
+
+
+# ORDER MATTERS.  328C003 and 328C004 both discharge overhead into 328C002, so 328C002 must be
+# anchored against the compositions the model will actually deliver there -- its own back-solved
+# DES_C003["y"] / DES_C004["y"] -- and NOT against the PFD's tabulated 748 / 750 rows.  The two
+# differ by up to 0.2 %pt (PFD percentage rounding), and anchoring on the tabulated rows while
+# feeding the back-solved ones makes the design state a slow LEAK instead of a fixed point: it
+# showed up as 328C002 ammonia climbing 0.63 % -> 1.53 % over twenty simulated minutes.
+# There is no circularity -- both upstream anchors need only tabulated liquid rows.
+DES_C003 = _des_stage_anchor(
+    [(W_S743, R328_C003_M746_DES), (W_STEAM, R328_C003_M911_DES)],
+    W_S747, R328_C003_M747_DES, R328_C003_M748_DES, hydrolyse=True, y_pfd=W_S748)
+DES_C004 = _des_stage_anchor(
+    [(W_S747, R328_C004_M749_DES), (W_STEAM, R328_C004_M931_DES)],
+    W_S739, R328_C004_M739_DES, R328_C004_M750_DES, y_pfd=W_S750)
+DES_C002 = _des_stage_anchor(
+    [(W_S738, R328_C002_M738_DES), (W_S775, R328_C002_M775_DES),
+     (DES_C003["y"], R328_C002_M748_DES), (DES_C004["y"], R328_C002_M750_DES)],
+    W_S743, R328_C002_M743_DES, R328_C002_M737_DES, y_pfd=W_S737)
+
+# Design overhead DUTY of each desorber, in exactly the operand order the runtime uses, so the live
+# ratio is bit-exactly 1.0 at the seed and the energy-limited overhead rate reproduces its design
+# value.  These are algebraic identities of the LAM737 / LAM750 back-solves above -- writing them
+# out is what lets the runtime stop using a frozen split fraction.
+R328_C002_Q_DES = (R328_C002_SENS
+                   + R328_C002_M748_DES / 3600.0 * R328_C002_LAM748
+                   + R328_C002_M750_DES / 3600.0 * R328_C002_LAM750)              # kW == m737*lam737
+R328_C004_Q_DES = (R328_C004_M749_DES / 3600.0 * R328_CP
+                   * (R328_C004_T749 - R328_C004_T)
+                   + R328_C004_M931_DES / 3600.0 * R328_C004_M931_DH)             # kW == m750*lam750
+
+# --- how the datasheet TRAY COUNT earns its keep -------------------------------------------------
+# The back-solved alphas above are LUMPED single-stage-equivalent volatilities, not tray-level
+# equilibrium constants: alpha_NH3 comes out at 5.1e4 in 328C004 because one well-mixed stage has to
+# reproduce what 22 real trays achieve (Henry's law for dilute NH3 at 143 C is nearer 10).  Stated
+# plainly so nobody mistakes it for thermodynamics.
+#
+# Left there, the columns would separate identically no matter what the operator did to the steam --
+# a 22-tray column and a single flash degrade very differently.  So the lumped alpha is made to move
+# with the column's Kremser residual r(S, N), N coming from the datasheet's EXECUTED tray count
+# (15 and 22, DDS line 35) times the overall efficiency already derived for 328C004.  For a trace
+# species on one well-mixed stage the fraction leaving overhead is m_vap*alpha/(m_vap*alpha + m_liq),
+# and setting that equal to (1 - r) inverts EXACTLY to
+#       alpha_eff = (L / V) * (1 - r) / r
+# so the correction is an identity of the lumped form, not a fitted fudge.  Written as a ratio of
+# that expression at live over design conditions: the two calls are bit-identical at the seed, the
+# ratio is exactly 1.0, and alpha_live == alpha_des to the last bit.
+#
+# Applied to the volatile pair (NH3, CO2) using the NH3 stripping factor -- NH3 is what the desorber
+# is guaranteed on and what dominates its duty.  Water is the reference (alpha == 1) and urea does
+# not strip, so neither moves.
+R328_TRAY_EO      = R328_AI701_NTHEO_C004 / R328_C004_NTRAY      # 0.635 overall efficiency, O'Connell
+R328_NTHEO_C002   = R328_TRAY_EO * R328_C002_NTRAY               # 9.525 theoretical stages, 15 trays
+R328_DES_VOLATILE = ("NH3", "CO2")
+
+
+def _des_kfac(m_liq: float, m_vap: float, r: float) -> float:
+    """Single-stage-equivalent volatility that reproduces a Kremser residual r: (L/V)(1-r)/r."""
+    return (m_liq / max(m_vap, 1e-9)) * (1.0 - r) / max(r, 1e-12)
+
+
+DES_STAGES = {
+    "C002": {"a": DES_C002, "w": W_S743, "N": R328_NTHEO_C002, "T": R328_C002_T_BOT,
+             "M": R328_C002_M_DES,
+             "V": R328_C002_M748_DES + R328_C002_M750_DES,   # stripping agent: the two hot OVHDs
+             "L": R328_C002_M743_DES},
+    "C004": {"a": DES_C004, "w": W_S739, "N": R328_AI701_NTHEO_C004, "T": R328_C004_T,
+             "M": R328_C004_M_DES,
+             "V": R328_C004_M931_DES,                        # stripping agent: the LP steam
+             "L": R328_C004_M739_DES},
+}
+for _st in DES_STAGES.values():
+    _st["S"] = R328_AI701_KINF_C004 * (_st["V"] / _st["L"])
+    _st["r"] = _kremser_resid(_st["S"], _st["N"])
+    _st["k"] = _des_kfac(_st["L"], _st["V"], _st["r"])
+
+
+def des_alpha_live(key: str, T_c: float, m_vap: float, m_liq: float) -> dict:
+    """Live lumped volatilities for a desorber section, anchored so that at the design seed every
+    factor is exactly 1.0 and the returned dict is bit-identical to the back-solved design alphas."""
+    st = DES_STAGES[key]
+    S_live = clamp(R328_AI701_KINF_C004 * math.exp(
+        -(R328_AI701_DHSTRIP / 8.314) * (1.0 / (T_c + 273.15) - 1.0 / (st["T"] + 273.15))
+    ) * (m_vap / max(m_liq, 1e-9)), 1e-6, 1e6)
+    k_live = _des_kfac(m_liq, m_vap, _kremser_resid(S_live, st["N"]))
+    # Anti-overflow bounds only -- S^(N+1) with N ~ 14 goes infinite on a cold-start transient.  Both
+    # bounds are orders of magnitude outside anything the plant reaches, so the design seed passes
+    # through untouched (clamp returns its argument when it is already inside the band) and
+    # alpha_live stays bit-identical to the anchor there.
+    f = clamp(k_live / st["k"], 1e-6, 1e6)
+    return {k: (v * f if k in R328_DES_VOLATILE else v) for k, v in st["a"]["alpha"].items()}
+
+
+def des_advance(w: dict, M_new: float, feeds, m_vap: float, alpha: dict,
+                m_liq: float, xi: float, dt: float):
+    """Integrate one desorption-train stage's species holdup and renormalise.  The unit-328
+    counterpart of sol_advance: N feeds instead of at most two, and the reaction is urea HYDROLYSIS
+        NH2CONH2 + H2O -> 2 NH3 + CO2      (xi in kmol/h)
+    rather than biuret formation.  C1 is not re-derived here -- M_new comes from the existing
+    total-mass ODE, so this layer cannot perturb the heat-and-mass balance.  Returns (w, y).
+
+    IMPLICIT Euler, unlike the explicit sol_advance upstream, and it has to be.  The trace species
+    here are violently stiff: 328C004 holds 1436 kg of liquid at 1 ppm ammonia -- 1.4 GRAMS of NH3 --
+    while 330 kg/h flows through it.  Its ammonia time constant is ~0.015 s against a 0.25 s tick, so
+    explicit Euler overshoots by ~16x, slams into the non-negativity clamp, and walks the whole
+    desorption train off its design point (328C002 ammonia crept 0.63 % -> 2.2 % over four hours).
+    The removal term is LINEAR in w_k once the summation denominator is lagged one tick --
+    y_k = (alpha_k / SUM_j alpha_j w_j) * w_k -- so the implicit step is closed-form, needs no
+    iteration, is unconditionally stable, cannot go negative, and is EXACTLY stationary when
+    src == sink*m_k.  That last property is what makes the design point a genuine fixed point."""
+    den = sum(alpha.get(k, 0.0) * w.get(k, 0.0) for k in SOL_SPECIES)
+    c = ({k: alpha.get(k, 0.0) / den for k in SOL_SPECIES} if den > 1e-15
+         else {k: 0.0 for k in SOL_SPECIES})           # y_k = c_k * w_k
+    M = max(M_new, 1.0)
+    h = dt / 3600.0
+    out = {}
+    for k in SOL_SPECIES:
+        f_in = 0.0
+        for w_f, m_f in feeds:
+            f_in += m_f * w_f.get(k, 0.0)
+        src  = f_in + DES_HYD_NU.get(k, 0.0) * xi              # kg/h into the liquid
+        sink = (m_vap * c[k] + m_liq) / M                      # 1/h, coefficient on m_k
+        out[k] = max((M * w.get(k, 0.0) + src * h) / (1.0 + sink * h), 0.0)
+    tot = sum(out.values())
+    if tot <= 1e-12:
+        return dict(w), sol_vapour_y(w, alpha)
+    w_new = {k: out[k] / tot for k in SOL_SPECIES}     # C6: renormalise to Sum w == 1
+    return w_new, sol_vapour_y(w_new, alpha)
+
+
+# kg per kmol of urea hydrolysed:  NH2CONH2 + H2O -> 2 NH3 + CO2
+# CO2 is written as the CLOSER rather than as its own molar mass.  MW_SOL rounds NH3 to 17.0304
+# where the reaction needs 17.0307, so the literal coefficients leave 6e-4 kg/kmol unbalanced --
+# 0.0026 kg/h at the design extent.  Physically nothing; but CLAUDE.md §1 says 100 % conservation of
+# mass, and a stoichiometry vector that does not sum to zero is a mass source no matter how small.
+DES_HYD_NU = {"Urea": -MW_SOL["Urea"], "H2O": -MW_SOL["H2O"], "NH3": 2.0 * MW_SOL["NH3"]}
+DES_HYD_NU["CO2"] = -(DES_HYD_NU["Urea"] + DES_HYD_NU["H2O"] + DES_HYD_NU["NH3"])
+
 # ---- AUDIT F-7 / TD-008: 328C003 hydrolyser reaction extent -----------------------------------
 # NH2CONH2 + H2O -> 2 NH3 + CO2 is the entire purpose of 328C003, and the engine modelled it as a
 # frozen overhead split `gen748 = R328_C003_PHI748 * in_c003` with the endotherm buried in the
@@ -1321,7 +1613,11 @@ def sol_advance(w: dict, M_pre: float, M_new: float, m_in: float, w_in: dict,
 #     gen748 = xi * (2*MW_NH3 + MW_CO2)  +  gas_strip_des * (m_911 / m_911_des)
 # Both terms are exactly their design value at the seed, so gen748 == R328_C003_M748_DES bit-exact
 # and the 328C003 pressure ODE stays stationary.
-R328_C003_W_UREA_746 = 0.0082        # PFD: urea mass fraction in the desorber-I bottoms (stream 746)
+# AUDIT F-8: this was hardcoded 0.0082 -- stream 738's urea, not stream 746's.  328C002 dilutes the
+# 31 114 kg/h feed into 33 769 kg/h of bottoms, so the PFD tabulates 743/746 at 0.76 %, and the
+# hydrolyser was being handed 276.9 kg/h of urea instead of 256.6 (+7.9 %).  Now taken from the one
+# place the composition lives, so the two cannot drift apart again.
+R328_C003_W_UREA_746 = W_S743["Urea"]   # PFD: urea mass fraction in the desorber-I bottoms (746)
 R328_C003_UREA_DES   = R328_C003_M746_DES * R328_C003_W_UREA_746        # 276.9 kg/h urea to hydrolyse
 R328_C003_X_DES      = 1.0 - math.exp(-R328_AI701_KEFF_UREA * R328_AI701_TAU_S)   # 0.99996 plug flow
 R328_C003_XI_DES     = R328_C003_UREA_DES / MW_SOL["Urea"] * R328_C003_X_DES      # 4.611 kmol/h
@@ -3201,6 +3497,19 @@ class State:
         self.a328_c003_P = R328_C003_P_BARA
         self.a328_c004_M = R328_C004_M_DES
         self.a328_c004_T = R328_C004_T
+        # ---- AUDIT F-8: species vectors for the desorption train.  Seeded on the PFD bottoms
+        #      composition of each section, which is exactly what its anchor was struck against, so
+        #      dw/dt == 0 at the seed and the layer cannot move the heat-and-mass balance.
+        self.w_328c002 = dict(W_S743)             # 328C002 bottoms  (stream 743 = 746)
+        self.w_328c003 = dict(W_S747)             # 328C003 bottoms  (stream 747 = 749)
+        self.w_328c004 = dict(W_S739)             # 328C004 bottoms  (stream 739 = 740, purified)
+        # Torn vapour compositions: 328C003 and 328C004 both discharge overhead INTO 328C002, which
+        # is solved first in the tick, so their compositions carry one step of lag -- exactly the
+        # tear the flows already use (m748_prev / m750_prev).
+        # Seeded on the BACK-SOLVED vapour, not the tabulated PFD row -- that is what the model
+        # delivers from tick 1 onward, and seeding on anything else steps the 328C002 balance.
+        self.y_328_748 = dict(DES_C003["y"])      # 328C003 OVHD -> 328C002
+        self.y_328_750 = dict(DES_C004["y"])      # 328C004 OVHD -> 328C002
         # ---- 322C001 LP absorber (43 C, 3.9 bar a)
         self.a328_c001_M = A328_C001_M_DES
         self.a328_c001_T = A328_C001_T
@@ -4389,7 +4698,6 @@ def step_sim(dt: float) -> dict:
     Tc002    = s.a328_c002_T
     m_738    = m_735
     in_c002  = m_738 + m748_prev + m750_prev + m775_prev
-    m_737    = R328_C002_PHI737 * in_c002                                 # OVHD split -> 328D001
     lvl_c002 = s.a328_c002_M / R328_C002_M_DES * 50.0
     lic503_op= _ctrl_ipd(s.LIC_328503, lvl_c002, dt)
     m_743    = R328_C002_M743_DES * (lic503_op / 50.0)                    # bottoms -> hydrolyser
@@ -4397,11 +4705,26 @@ def step_sim(dt: float) -> dict:
                  + m775_prev*(R328_D001_T   - Tc002)
                  + m748_prev*(R328_C002_T748 - Tc002)
                  + m750_prev*(R328_C002_T750 - Tc002))/3600.0*R328_CP)
-    P_c002   = (sens_c002 + m748_prev/3600.0*R328_C002_LAM748
-                + m750_prev/3600.0*R328_C002_LAM750
-                - m_737/3600.0*R328_C002_LAM737)
-    s.a328_c002_T = Tc002 + P_c002*dt/max(s.a328_c002_M*R328_CP, 1e-6)
-    s.a328_c002_M = max(s.a328_c002_M + (in_c002 - m_737 - m_743)/3600.0*dt, 1.0)
+    # AUDIT F-8: the overhead is ENERGY-limited, not a frozen fraction of the inflow.  What leaves
+    # overhead is what the two condensing hot recycle vapours (748 @188, 750 @140) plus the sensible
+    # net can actually boil, capped by the throughput ratio.  Anchored-ratio form: both caps evaluate
+    # bit-exactly to R328_C002_M737_DES at the design seed, so the min() ties and P_c002 keeps the
+    # exact expression -- and therefore the exact bits -- it had under the frozen split.
+    q_c002   = (sens_c002 + m748_prev/3600.0*R328_C002_LAM748
+                + m750_prev/3600.0*R328_C002_LAM750)
+    m_737    = min(R328_C002_M737_DES * (in_c002 / R328_C002_IN_DES),
+                   max(R328_C002_M737_DES * (q_c002 / R328_C002_Q_DES), 0.0))
+    P_c002   = q_c002 - m_737/3600.0*R328_C002_LAM737
+    M_c002_pre = s.a328_c002_M
+    s.a328_c002_T = Tc002 + P_c002*dt/max(M_c002_pre*R328_CP, 1e-6)
+    s.a328_c002_M = max(M_c002_pre + (in_c002 - m_737 - m_743)/3600.0*dt, 1.0)
+    # Species: four inlets.  The two vapour recycles carry LAGGED compositions, the same tear the
+    # flows already use (m748_prev / m750_prev) -- 328C003 and 328C004 are solved later in the tick.
+    a_c002   = des_alpha_live("C002", Tc002, m748_prev + m750_prev, m_743)
+    s.w_328c002, y_737 = des_advance(s.w_328c002, s.a328_c002_M,
+                                     [(W_S738, m_738), (W_S775, m775_prev),
+                                      (s.y_328_748, m748_prev), (s.y_328_750, m750_prev)],
+                                     m_737, a_c002, m_743, 0.0, dt)
 
     # ----- Stage 4 : 328C003  Hydrolyser (200°C, MP-steam 911) -----------
     Tc003    = s.a328_c003_T
@@ -4419,7 +4742,11 @@ def step_sim(dt: float) -> dict:
     # the MP steam carries over and scales with the live 911 flow.  Both == design at the seed, so
     # gen748 == R328_C003_M748_DES bit-exact and the pressure ODE below stays stationary.
     x_hyd_328  = hydrolysis_x_328c003(Tc003, m_746)
-    urea_in_328 = m_746 * R328_C003_W_UREA_746
+    # AUDIT F-8: the urea load is now READ OFF the live 328C002 bottoms vector instead of a hardcoded
+    # fraction.  At the seed w_328c002["Urea"] == W_S743["Urea"] == R328_C003_W_UREA_746, so this is
+    # bit-identical at design -- but off-design the hydrolyser now sees whatever 328C002 actually
+    # passes it, which is the whole point of giving unit 328 a species balance.
+    urea_in_328 = m_746 * s.w_328c002["Urea"]
     xi_hyd_328 = urea_in_328 / MW_SOL["Urea"] * x_hyd_328                 # kmol/h urea destroyed
     gas_hyd    = xi_hyd_328 * R328_HYD_GAS_MW                             # kg/h NH3 + CO2 produced
     gas_str    = R328_C003_GASSTR_DES * (m_911 / R328_C003_M911_DES)      # kg/h stripped by MP steam
@@ -4433,8 +4760,16 @@ def step_sim(dt: float) -> dict:
     sens_c003= m_746/3600.0*R328_CP*(T_746 - Tc003)
     P_c003   = sens_c003 + m_911/3600.0*R328_C003_M911_DH - m_748/3600.0*R328_C003_LAM748
     s.a328_c003_P = max(s.a328_c003_P + R328_C003_P_KP*(gen748 - m_748)/3600.0*dt, 0.1)
-    s.a328_c003_T = Tc003 + P_c003*dt/max(s.a328_c003_M*R328_CP, 1e-6)
-    s.a328_c003_M = max(s.a328_c003_M + (in_c003 - m_748 - m_747)/3600.0*dt, 1.0)
+    M_c003_pre = s.a328_c003_M
+    s.a328_c003_T = Tc003 + P_c003*dt/max(M_c003_pre*R328_CP, 1e-6)
+    s.a328_c003_M = max(M_c003_pre + (in_c003 - m_748 - m_747)/3600.0*dt, 1.0)
+    # Species: the hydrolyser is a LIQUID-FILLED column (Stamicarbon, "Zero waste urea production"),
+    # not a stripping cascade, so its volatilities stay at the design anchor -- no Kremser stage
+    # correction.  The reaction extent is the live Arrhenius xi_hyd_328 computed above.
+    s.w_328c003, y_748 = des_advance(s.w_328c003, s.a328_c003_M,
+                                     [(s.w_328c002, m_746), (W_STEAM, m_911)],
+                                     m_748, DES_C003["alpha"], m_747, xi_hyd_328, dt)
+    s.y_328_748 = y_748
 
     # ----- Stage 5 : 328C004  Desorber-II (143°C, LP-steam 931, FFIC) -----
     Tc004    = s.a328_c004_T
@@ -4460,14 +4795,24 @@ def step_sim(dt: float) -> dict:
     ffic_op  = _ctrl_ipd(s.FFIC_329401, ffic_pv, dt)                     # 931-flow demand (kg/h)
     m_931    = _fic_flow(s.FIC_329401, R328_C004_M931_DES, 50.0, s.tlag, "F_329401", dt, cas_sp=ffic_op)
     in_c004  = m_749 + m_931
-    m_750    = R328_C004_PHI750 * in_c004                                # OVHD split -> 328C002
     lvl_c004 = s.a328_c004_M / R328_C004_M_DES * 50.0
     lic504_op= _ctrl_ipd(s.LIC_328504, lvl_c004, dt)
     m_739    = R328_C004_M739_DES * (lic504_op / 50.0)                    # bottoms -> 328E007 boundary
     sens_c004= m_749/3600.0*R328_CP*(T_749 - Tc004)
-    P_c004   = sens_c004 + m_931/3600.0*R328_C004_M931_DH - m_750/3600.0*R328_C004_LAM750
-    s.a328_c004_T = Tc004 + P_c004*dt/max(s.a328_c004_M*R328_CP, 1e-6)
-    s.a328_c004_M = max(s.a328_c004_M + (in_c004 - m_750 - m_739)/3600.0*dt, 1.0)
+    # AUDIT F-8: energy-limited overhead, same anchored-ratio form as 328C002 -- what the LP strip
+    # steam plus the sensible net can boil, capped by throughput.  Replaces R328_C004_PHI750.
+    q_c004   = sens_c004 + m_931/3600.0*R328_C004_M931_DH
+    m_750    = min(R328_C004_M750_DES * (in_c004 / R328_C004_IN_DES),
+                   max(R328_C004_M750_DES * (q_c004 / R328_C004_Q_DES), 0.0))
+    P_c004   = q_c004 - m_750/3600.0*R328_C004_LAM750
+    M_c004_pre = s.a328_c004_M
+    s.a328_c004_T = Tc004 + P_c004*dt/max(M_c004_pre*R328_CP, 1e-6)
+    s.a328_c004_M = max(M_c004_pre + (in_c004 - m_750 - m_739)/3600.0*dt, 1.0)
+    a_c004   = des_alpha_live("C004", Tc004, m_931, m_739)
+    s.w_328c004, y_750 = des_advance(s.w_328c004, s.a328_c004_M,
+                                     [(s.w_328c003, m_749), (W_STEAM, m_931)],
+                                     m_750, a_c004, m_739, 0.0, dt)
+    s.y_328_750 = y_750
 
     # ----- Stage 6 : 328D001  Desorber-I reflux drum (61°C, 328E004) -----
     Td001    = s.a328_d001_T
@@ -5538,6 +5883,19 @@ def step_sim(dt: float) -> dict:
                                 "E003": round(xi_e003, 5)},
             "urea_pct_species": {"E001": round(s.w_e001["Urea"] * 100.0, 2),
                                  "E003": round(s.w_e003["Urea"] * 100.0, 2)},
+            # AUDIT F-8: the desorption train's own species vectors.  The two ppm figures are now a
+            # MASS-BALANCE result rather than the read-only ppm_infer_328701 soft sensor -- AI-328701
+            # can finally be read against something the plant model actually computes.
+            "des_liq": {tag: {k: round(w[k] * 100.0, 6) for k in SOL_SPECIES} for tag, w in (
+                ("C002", s.w_328c002), ("C003", s.w_328c003), ("C004", s.w_328c004))},
+            "des_vap": {tag: {k: round(y[k] * 100.0, 4) for k in SOL_SPECIES} for tag, y in (
+                ("737", y_737), ("748", y_748), ("750", y_750))},
+            "des_sum": {tag: round(sum(w.values()) * 100.0, 6) for tag, w in (
+                ("C002", s.w_328c002), ("C003", s.w_328c003), ("C004", s.w_328c004))},
+            "condensate_ppm": {"NH3": round(s.w_328c004["NH3"] * 1e6, 3),
+                               "Urea": round(s.w_328c004["Urea"] * 1e6, 3),
+                               "CO2": round(s.w_328c004["CO2"] * 1e6, 3)},
+            "xi_hydrolysis_kmolh": round(xi_hyd_328, 5),
         },
         "STREAMS": streams,
         "CRYST":   cryst,                              # Bug 2 per-equipment predictive freezing margins

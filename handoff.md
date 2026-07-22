@@ -112,6 +112,39 @@ unit-324 constant stays byte-identical. `_sol_stage_anchor` / `sol_advance` gain
 second inlet (adds 0.0 when absent, so the other four stages are bit-identical).
 New tests: 3 in `backend/test_equation_audit_species.py`. Probe: `scratchpad/probe_f11_331.py`.
 
+### Remediation slot 6 — unit 328 desorption train species layer (F-8 remainder / TD-009)
+
+The last lumped-mass island. 328C002 and 328C004 moved material with **frozen overhead split
+constants** (`R328_C002_PHI737`, `R328_C004_PHI750`) and no composition existed anywhere in unit 328.
+
+**The finding that made it anchorable.** Read as mass %, the PFD says carbon is not conserved across
+328C002 — 1658 kg/h CO₂ in, 858 out. It is: **liquid rows are mass %, vapour/gas rows are MOLE %**,
+and the tabulated `Average Molar Weight` row proves it (stream 737 reads 20.81 as mole %, 18.94 as
+mass %; the PFD tabulates 20.81). Verified across ~90 streams in all four tables. Read correctly all
+three columns close per component to **under 2 kg/h in 34–40 t/h**, nothing fitted.
+*This also retired the stream-790 "accepted variance" recorded in slot 5 — same misreading; 790's
+CO₂ closes to 0.25 kg/h.* Probe: `scratchpad/probe_f8_pfd_units.py`.
+
+**From the Uhde datasheet UD-AU-328-EC-0001** (`Urea Simulation Docs/New folder/328-1/`, a scanned
+PDF — render it with PyMuPDF, `pdftotext` returns nothing): 328C002 and 328C004 are **ONE 25.5 m
+stacked tower**, corroborated independently by Stamicarbon's "top part / bottom part of the
+desorber" wording. 15 and 22 executed trays, ID 1250 mm, 40 mm weir, 3125 × ⌀6 mm holes. Holdup went
+from a 900 s guess (8442 / 8431 kg) to geometry (**1588 / 1436 kg**) — the real columns respond ~5×
+faster. The tray counts drive a Kremser stage correction so the columns degrade like columns.
+
+**Two defects it exposed.** `R328_C003_W_UREA_746` was hardcoded **0.0082 — stream 738's urea, not
+stream 746's** (+7.9 % on the hydrolyser load; PFD says 0.76 %). And the trace-species ODE is stiff:
+328C004 holds **1.4 grams** of NH₃ against 330 kg/h throughput, τ ≈ 0.015 s vs a 0.25 s tick —
+explicit Euler walked 328C002 from 0.63 % to 2.2 % ammonia over four simulated hours. `des_advance`
+is **implicit** (closed-form, no iteration, exactly stationary at design).
+
+**Verification.** 4 h hold on the PFD compositions. LP strip steam 100/90/80/70/50 % → condensate
+NH₃ **1.0 / 9.6 / 122 / 1108 / 16 035 ppm**. Hydrolyser 200→160 °C → urea slip **0.30 → 1161 ppm**,
+matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" prediction.
+
+New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
+`probe_f8_328.py`.
+
 ## How to gate
 ```
 set PY=%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe
@@ -134,19 +167,28 @@ Never conclude an interpreter is absent from one alias. Never pipe a heredoc int
 
 ## OPEN items (in TECH_DEBT.md)
 
-Nine of the eleven audit findings are closed. What is left:
+**All eleven audit findings are closed.** What is left is the two remaining category gaps:
 
-* **TD-009 remainder** (audit F-8, unit 328) — the desorption train (328C002/C003/C004, 328D001/
-  D003, 322C001) is still lumped mass. The 323/324 half landed; the pattern is proven, so this is a
-  mechanical extension rather than an architectural one. **Largest remaining item.**
 * **TD-006** — G8 stripper duty is feed-PROPORTIONAL, not a rigorous per-species enthalpy balance,
-  and there is no steam-limited flood regime. Now unblocked: the species layer gives it the
-  per-component basis it needed.
+  and there is no steam-limited flood regime. Now fully unblocked. **Research done, not yet coded:**
+  the Wallis limit for a Stamicarbon 1" CO₂-stripper tube is **145 kg/h of solution at 183 °C /
+  140 bar, with plants held to 70 % of it** (Brouwer, *How to Solve Stripper Efficiency Issues*,
+  UreaKnowHow 2025, citing IFS Proceeding 166). Flooding starts at the TOP of the tubes (roughly
+  half the liquid has evaporated by then, so gas and liquid loads peak there). Symptom to reproduce:
+  **bottom outlet temperature rising 3–4 °C in 15 minutes**, then more NH₃ to the LP recirculation
+  and rising LP pressure. Design efficiency 80 % on a 6 m effective tube length. Corrosion story for
+  the training scenario: passive ≤0.1 mm/y, active 20–30 mm/y once flooding depletes the oxygen;
+  the flooding limit *rises* over a stripper's life as the ID corrodes (110 % → 120 % plant load).
+  Implement the penalty in anchored-ratio form so it is exactly inactive at design.
 * **C10 constitutive properties** — densities and cp are still constants with no T-dependence
-  (`tsat_steam`, `psat_water_bara`, `psat_nh3_bara` are live). The last "~" in the category table
-  apart from C2/C6, which are the 328 remainder.
+  (`tsat_steam`, `psat_water_bara`, `psat_nh3_bara` are live). The 328 datasheet work supplied two
+  hard anchors: **PFD stream 739 = 923.28 kg/m³ @ 143 °C and the datasheet's 923.25 @ 143 °C**, both
+  of which are simply *water at 143 °C* — direct evidence that the desorption train's liquid can ride
+  a water correlation (Kell) with a urea-fraction correction. Implement as
+  `rho(T) = RHO_DES * (1 + beta*(T - T_DES))`-style anchored corrections so every property is
+  bit-exactly its present constant at the design temperature and the pin cannot move.
 * ~~TD-001~~ RESOLVED (log was stale — the helper already uses the negative law, real `chk`).
-* ~~TD-002..TD-005, TD-007, TD-008, TD-010, TD-011~~ RESOLVED.
+* ~~TD-002..TD-005, TD-007..TD-011~~ RESOLVED.
 
 **Durable lesson from TD-011:** a component balance that will not close is evidence of a **missing
 stream** at least as often as it is evidence of bad source data. Check the topology against the
@@ -154,6 +196,17 @@ licensor before concluding the numbers are wrong — and argue it with a conserv
 formaldehyde), because a species with exactly one source in the plant cannot be explained away as
 rounding. `sol_pin_strength` survives as a rounding guard on the 324 melt only; it is an identity at
 323F010 now.
+
+**Durable lesson from TD-009 (328 half), two of them:**
+1. **Check the units on the source table before believing a violated conservation law.** The PFD
+   mixes mass % (liquid rows) and mole % (vapour rows). Read uniformly it destroys 800 kg/h of
+   carbon across 328C002 and appears to contradict itself at stream 790. The `Average Molar Weight`
+   row is the discriminator and it is unambiguous. We spent a whole finding on stream 790 as an
+   "accepted licensor variance" that never existed.
+2. **A species layer that works at percent concentrations does not automatically work at ppm.**
+   Integrator choice is set by the *smallest* inventory in the vessel, not the largest — check
+   τ = M·wᵢ/flow for the trace species before reusing an explicit scheme. 328C004 holds 1.4 grams of
+   ammonia; explicit Euler at a 0.25 s tick overshoots it 16-fold.
 
 ## Standing session commands (CLAUDE.md sections 6/7)
 * **Caveman mode ON** — invoke the `caveman` skill at session start; prose only, code/commits normal.

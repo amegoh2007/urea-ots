@@ -354,8 +354,43 @@ Verified for both: pin gate `leaves: 25  keys: 15  diffs: 0`, suite **103 passed
 
 ## TD-006 — stripper duty is feed-proportional, not a full enthalpy balance
 
-- **Status:** OPEN (partial fix shipped as G8)
+- **Status:** OPEN (partial fix shipped as G8) — **design research complete 2026-07-22, not yet coded**
 - **Opened:** 2026-07-21
+
+### Research complete — the flooding constants, sourced
+
+Primary source: **Brouwer, *How to Solve Stripper Efficiency Issues*, UreaKnowHow, June 2025**,
+which attributes the flooding figure to **IFS Proceeding 166**. Corroborated by Stamicarbon's own
+stripper literature.
+
+| quantity | value | note |
+|---|---|---|
+| flooding limit, 1″ tube | **145 kg/h of solution** | at 183 °C reactor-outlet, 140 bar |
+| design operating fraction | **70 % of that limit** | "in practice, an upper limit of 70 % is applied" |
+| where flooding starts | **top of the tubes** | ~half the liquid has evaporated by the bottom, so gas and liquid loads peak at the top |
+| design stripping efficiency | **80 %** on a 6 m effective tube | Chiyoda's 8 m gives 82 % |
+| shell-side MP steam | 20–23 bar | |
+| control-room symptom | **bottom outlet +3–4 °C in 15 min** | "a clear indication for reaching the flooding limit" |
+| downstream consequence | more NH₃ in the bottoms → more gas to LP recirculation → **LP pressure rises**, operators must cut load | |
+| corrosion, passive | ≤ 0.1 mm/year | oxygen from passivation air maintains the oxide layer |
+| corrosion, active | **20–30 mm/year** | stagnant flooded liquid depletes the oxygen; ends in tube rupture |
+| lifetime drift | flooding limit **110 % of plant load when new → 120 % at end of life** | ID grows with passive corrosion; the limit is linear in it |
+
+Metallurgy note for the training scenario: 25-22-2 austenitic tubes are susceptible to the active
+mode; Safurex®/E-type super-duplex is immune to active corrosion, though the stripping-efficiency
+loss remains either way.
+
+Implementation shape (matching the pattern used everywhere else): compute the Wallis dimensionless
+velocities at the top axial node, and apply the efficiency penalty as an **anchored ratio** that
+evaluates to exactly 1.0 at the design liquid load, so the boot pin cannot move. Then let the
+existing energy balance carry the bottoms temperature up on its own — the 3–4 °C/15 min signature
+should be an *output*, not a scripted event.
+
+### The remaining half — per-species enthalpy
+
+Now fully unblocked: the species layer reaches 322 (9 components) and, since the F-8 closure, 323,
+324 and 328. The stripper duty should become sensible + carbamate dissociation endotherm + latent,
+per species, rather than `STRIP_DUTY_DES_KW * strip_load`.
 - **Files:** `backend/main.py` step_sim steam-balance handshake (`Q_strip_kjh`), `stripper_322e001`
 
 ### What G8 fixed
@@ -488,7 +523,7 @@ outstanding — this closes the reaction, not the species accounting around it.
 
 ## TD-009 — component species balance exists only in unit 322
 
-**Status: PARTLY CLOSED 2026-07-22** (units 323 + 324 landed; unit 328 outstanding) · raised
+**Status: RESOLVED 2026-07-22** (323 + 324, then the 328 desorption train) · raised
 2026-07-22 (`EQUATION_AUDIT.md`, finding F-8) · severity B
 
 `MW_COMP` (9 species) is tracked rigorously through 322F001 → 322E001 → 322E002 → 322R001 →
@@ -525,12 +560,46 @@ Closing it immediately exposed **TD-011 / finding F-11** (below) — which turne
 feed into 323E010, not a data error, and is now resolved. `sol_pin_strength` survives it as a
 rounding guard on the 324 melt only.
 
-### Still open — the 328 train
+### How the 328 half was closed
 
-The desorption / hydrolysis train (328C002/C003/C004, 328D001/D003, 322C001) is still lumped mass.
-TD-008 (hydrolyser reaction extent) remains blocked on extending the same layer through it: an
-extent needs species to act on. The pattern is now established and proven, so this is a mechanical
-extension rather than an architectural one.
+Not the mechanical extension it was billed as. Three things had to be settled first.
+
+**1. The PFD's composition-unit convention.** Read as mass %, the licensor's own table says carbon
+is not conserved across 328C002 — 1658 kg/h of CO₂ in, 858 out. That reading is wrong: **liquid
+rows are mass %, vapour/gas rows are mole %**, and the tabulated `Average Molar Weight` proves it
+(stream 737 reads 20.81 as mole %, 18.94 as mass %; the PFD tabulates 20.81). Verified across ~90
+streams in all four tables. Read correctly, all three columns close per component to under 2 kg/h in
+34–40 t/h with nothing fitted. This also retired the "accepted variance" recorded against stream 790
+under TD-011 — that was the same misreading, and 790's CO₂ closes to 0.25 kg/h.
+
+**2. The mechanical datasheet.** Uhde UD-AU-328-EC-0001 rev 01 shows 328C002 and 328C004 are **one
+25.5 m tower**, C002 stacked on C004 — corroborated independently by Stamicarbon's own "top part /
+bottom part of the desorber" description. It gives 15 and 22 executed trays, ID 1250 mm, 40 mm weir,
+3125 × ⌀6 mm perforation. Holdup stopped being a 900 s residence-time guess (8442 / 8431 kg) and
+became geometry (1588 / 1436 kg) — the real columns respond ~5× faster than the model did. The tray
+counts also set the Kremser stage count that makes the columns degrade like columns instead of like
+a single flash.
+
+**3. Two defects the lumped model was hiding.**
+
+* `R328_C003_W_UREA_746` was hardcoded **0.0082 — stream 738's urea, not stream 746's**. 328C002
+  dilutes 31 114 kg/h of feed into 33 769 kg/h of bottoms, so the PFD gives 743/746 as 0.76 % and
+  the hydrolyser was being handed 276.9 kg/h of urea against the tabulated 256.6, **+7.9 %**. It now
+  reads off the live 328C002 species vector, so the two cannot drift apart again.
+* **The trace species are violently stiff.** 328C004 holds 1436 kg of liquid at 1 ppm ammonia —
+  1.4 grams — while 330 kg/h flows through it. τ ≈ 0.015 s against a 0.25 s tick. Explicit Euler
+  (which is what the 323/324 layer uses, correctly, because nothing there is at ppm) overshoots
+  ~16×, hits the non-negativity clamp, and walked 328C002 from 0.63 % to 2.2 % ammonia over four
+  simulated hours. `des_advance` is implicit; lagging the summation denominator makes the removal
+  term linear in wᵢ, so the step is closed-form and exactly stationary at the design point.
+
+**Durable lesson:** *a species layer that works at percent concentrations does not automatically
+work at ppm.* Integrator choice is set by the smallest inventory in the vessel, not the largest.
+Check τ = M·wᵢ/(flow) for the trace species before reusing an explicit scheme.
+
+The frozen overhead splits `R328_C002_PHI737` / `R328_C004_PHI750` are gone from the runtime —
+overheads are energy-limited in the same anchored-ratio form used at 323F010. TD-008's hydrolyser
+extent now acts on real species.
 
 ---
 
@@ -603,3 +672,59 @@ percentage rounding per CLAUDE.md §0 and nothing more.
 least as often as it is evidence of bad data. Check the topology against the licensor before
 concluding the numbers are wrong — and prefer a conserved tracer (here, formaldehyde) to argue it,
 since a species with exactly one source in the plant cannot be explained away by rounding.
+
+---
+
+## TD-012 — C10 constitutive properties: densities and cp are compile-time constants
+
+- **Status:** OPEN — **design research complete 2026-07-22, not yet coded**
+- **Opened:** 2026-07-22 (`EQUATION_AUDIT.md`, category C10)
+- **Files:** `backend/main.py` — `R323_CP_SOLN`, `R328_CP`, `A328_CP`, `R3232_CP`, `RHO_744_KGM3`,
+  `R328_C002_RHO`, `R328_C004_RHO` and the rest of the density/cp constants
+
+`tsat_steam`, `psat_water_bara` and `psat_nh3_bara` are live functions of state; liquid density and
+cp are not. Volumetric controllers (FIC-323402, FIC-328402/404/406, FFIC-329401) are therefore blind
+to thermal expansion: heat a stream and its true volumetric flow rises, but the simulated
+transmitter does not see it.
+
+### What the PFD's own density row says
+
+The licensor tabulates `Density eff.` for every stream at its own temperature and composition — **43
+distinct (T, w, ρ) liquid points** across PFD_20/21/22, and per CLAUDE.md §0 they outrank any
+literature correlation. Tested against the standard Kell (1975) water fit
+(`scratchpad/probe_c10_density.py`):
+
+| stream | T °C | PFD ρ | Kell | error |
+|---|---|---|---|---|
+| 120 Proc. Con. | 60 | 983.27 | 983.20 | **−0.007 %** |
+| 742G Pur. Pr. C | 88 | 966.40 | 966.65 | +0.026 % |
+| 740 Pur. Pr. C | 89 | 965.74 | 965.99 | +0.026 % |
+| 739 Pur. Pr. C | 143 | 923.28 | 923.31 | **+0.004 %** |
+
+Four independent points under 0.03 %. This is the quantitative form of the claim made under TD-009
+that the purified condensate simply *is* water — and stream 739's 923.28 also matches the Uhde
+datasheet's 923.25 for 328C004 to 3 × 10⁻⁵.
+
+### The finding that shapes the fix
+
+**Above about 150 °C the PFD's density row is ~4 % higher than water can actually be.** Stream 747
+is 99.02 % water at 200 °C and tabulated at 897.7 kg/m³; saturated water at 200 °C is 864.7, and
+compressed liquid at its tabulated 16.6 bar is barely different. Stream 746 at 190 °C is tabulated
+908.5 against ~876. The excess grows monotonically with temperature — +0.6 % at 148 °C, +3.7 % at
+190 °C, +3.8 % at 200 °C — which is the signature of a property model that under-predicts thermal
+expansion, not of the dissolved solids (0.76 % urea buys about 0.25 %).
+
+So a single global correlation fitted to the PFD would be wrong, and a single global correlation
+fitted to real water would contradict §0 at the design point. Neither is the answer.
+
+### Fix when scheduled
+
+Anchored ratio, the pattern already used for every other live property in this engine:
+
+    rho(T) = RHO_DES * rho_ref(T) / rho_ref(T_DES)
+
+Absolute value comes from the PFD at the design point (§0 satisfied, and the ratio is bit-exactly
+1.0 there, so the pin cannot move); only the *derivative* comes from physics. `rho_ref` must be
+valid past 150 °C — Kell is not, and drifts 3.7 % by 190 °C — so use an IAPWS saturated-liquid fit
+over 0–250 °C. Same treatment for cp. Record explicitly that the PFD's above-150 °C densities are
+followed at the anchor and departed from off it, with the numbers above as the justification.
