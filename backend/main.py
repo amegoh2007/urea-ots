@@ -511,12 +511,85 @@ STRIP_FLOOD_DES_FRAC = STRIP_FEED_DES_KGH / STRIP_N_TUBES / STRIP_FLOOD_KGH_TUBE
 #  K is then FIXED by Brouwer's own number rather than tuned: at 10 % over the limit,
 #      11.0 × (1 − e^(−K·0.10)) = 3.5 °C   ->   K = 3.83.
 STRIP_FLOOD_T_K      = 3.83     # bottom-T rise ramp per unit excess over the flooding limit
-#  Efficiency penalty.  Brouwer is explicit that efficiency drops but publishes NO curve, so
-#  rather than invent a fitted slope this reuses the unit's existing efficiency-choke scale
-#  (STRIP_ETA_KT, the same 1.5 used by the thermal, N/C and H/C chokes).  Flagged in TECH_DEBT:
-#  if a real efficiency-vs-flooding curve ever surfaces, this is the one number to replace.
-#  (Kept a bare literal rather than an alias because STRIP_ETA_KT is defined further down.)
-STRIP_FLOOD_ETA_K    = 1.50     # == STRIP_ETA_KT, the unit's existing efficiency-choke scale
+#  Efficiency penalty -- DERIVED, no constant.  The first cut of this block used a fitted
+#  1/(1 + K·x) with K = 1.50 borrowed from STRIP_ETA_KT.  That number is now RETIRED: it was
+#  never sourced, and it turned out to be roughly an order of magnitude too aggressive (it gave
+#  a 13 % efficiency loss at 10 % over the limit against ~1-3 % from three independent checks).
+#  Worse, it DOUBLE-COUNTED: g_T already collapses eta_T on a feed spike through the thermal
+#  path, so a large hydraulic knockdown on top of it charged the same excursion twice.
+#
+#  The replacement needs no new constant at all, because the bottom-temperature signature and
+#  the efficiency loss are THE SAME EVENT measured two ways.  The bottom runs hotter precisely
+#  because the carbamate decomposition endotherm did NOT happen; the heat that should have been
+#  absorbed by dissociation shows up as sensible heat in the liquid instead.  So
+#
+#      Q_deficit = m_feed · cp · dT_flood                      (heat not absorbed)
+#      g_flood   = 1 − Q_deficit / (n_carbamate_CO2 · dH_carb)  (fraction of stripping lost)
+#
+#  Every term on the right is already sourced: dT_flood is fixed by Brouwer's 3-4 °C signature,
+#  cp is STRIP_CP_BOTTOM, and dH_carb is the Frejacques carbamate enthalpy below.  At the design
+#  seed dT_flood is exactly 0.0, so g_flood is exactly 1 − 0.0/Q == 1.0 -- the same structural
+#  identity as the rest of this block, not a float-ordering trick.
+#
+#  Cross-checks (all three agree the knockdown at 10 % over the limit is a few percent, not 13):
+#    * this energy balance                                        ~2.9 %
+#    * Brouwer's Shangdong Hualu Hengsheng case study, where a 3 °C bottom-temperature change
+#      accompanied a 79 % -> 81 % efficiency change                ~2.5 %
+#    * the licensor length correlation quoted in the same paper (6 m eff. -> 80 % efficiency,
+#      8 m eff. -> 82 %) applied to the flooded-length fraction    ~0.8 %
+#  The balance is charged against the CARBAMATE endotherm alone rather than the full endotherm
+#  sum.  That is both the simpler choice and the conservative one (a smaller denominator gives a
+#  LARGER knockdown), and it is what the source describes: flooding destroys the falling film,
+#  and it is the falling film that "facilitates the dissociation of liquid ammonium carbamate".
+STRIP_FLOOD_ETA_FLOOR = 0.50    # clamp: the hydraulic term alone can never zero the stripper
+                                #   (g_T carries the thermal collapse; this is incremental to it)
+
+# ==========================================================================================
+#  PER-SPECIES ENTHALPY BALANCE   (audit TD-006, second half)
+#
+#  What this replaces.  The stripper's MP-steam draw used to be Q = DUTY_DES · (ṁ_feed/ṁ_feed,des),
+#  i.e. duty strictly proportional to feed MASS.  That is wrong in a way that matters: it says a
+#  stripper fed the same tonnage of pure water and of carbamate-rich reactor liquor needs the same
+#  steam.  Composition did not enter at all, so the single largest heat sink in the unit -- the
+#  carbamate dissociation endotherm -- was invisible to the steam header.
+#
+#  Sources.  Frejacques, quoted in Brouwer, "Thermodynamics of the Urea Process", UreaKnowHow
+#  Process Paper June 2009, p.12, which gives BOTH reactions at PROCESS conditions rather than at
+#  the usual 25 °C standard state:
+#      CO2(G) + 2 NH3(G) -> NH2COONH4(L)          dH = -117 kJ/mol at 110 atm and 160 °C
+#      NH2COONH4(L) -> NH2CONH2(L) + H2O(L)       dH = +15.5 kJ/mol at 160-180 °C
+#  Those conditions are close to this stripper's own (144 bar, 172-183 °C), which is why the
+#  process-condition 117 is used here and not the 159-160 kJ/mol figure that is quoted for SOLID
+#  carbamate at 1 atm / 25 °C.  The stripper runs reaction 1 BACKWARDS, so +117 kJ per mol of CO2
+#  released from the liquid; urea hydrolysis runs reaction 2 backwards, so -15.5 kJ/mol.
+STRIP_DH_CARB_JMOL = 117_000.0   # J/mol CO2 liberated from carbamate (endothermic here)
+STRIP_DH_HYD_JMOL  = -15_500.0   # J/mol urea hydrolysed -- the LIQUID step (urea + H2O -> carbamate)
+#                                  only; the carbamate it produces is decomposed by the term above,
+#                                  so counting both is a sum, not a double count.
+#  NH3 desorption.  NH3 is SUPERCRITICAL at stripper temperature (Tc = 132.4 °C), so there is no
+#  latent heat to look up -- what the duty has to pay is the desorption enthalpy out of the melt.
+#  This is NOT a new number: it is the value the loop already uses at the other end of the same
+#  circuit (HPCC_BUB_DHVAP_JMOL, the NH3-dominated vaporisation enthalpy fitted to the synthesis
+#  bubble point).  It is restated here rather than aliased because HPCC_BUB_DHVAP_JMOL is defined
+#  further down the module and this unit's design-point self-call runs BEFORE that line.
+#  test_equation_audit_322e001_enthalpy.py asserts the two stay equal so they cannot drift apart.
+STRIP_DH_NH3_JMOL  = 23_000.0    # J/mol free NH3 desorbed  (== HPCC_BUB_DHVAP_JMOL)
+STRIP_LAM_H2O_JMOL = 36_900.0    # J/mol water vaporised overhead == 2049 kJ/kg (steam tables,
+#                                  ~170 °C); the same value HPCC_FLASH_DH already uses for H2O.
+STRIP_CP_GAS       = 2.0         # kJ/kg.K mean overhead-gas cp  (== HPCC_CP_GAS, same reason)
+#  VALIDATION (scratchpad/probe_td006_enthalpy.py).  Summing these terms over the design streams,
+#  with nothing fitted and no free parameter, gives 37 831 kW against the licensor's design duty
+#  STRIP_DUTY_DES_KW = 39 400 kW -- 96.0 %.  The 4 % residue is shell/ambient loss, biuret (whose
+#  enthalpy is not published and which is 0.667 kmol/h against 88.1 for hydrolysis), and the mean-cp
+#  approximation.  That agreement is the corroboration that this constant set is the right one.
+#
+#  HOW IT IS USED -- and why the pin cannot move.  The licensor duty stays the anchor: only the
+#  RATIO of the live balance to the design balance is applied,
+#      Q_strip = STRIP_DUTY_DES_KW · (H_live / H_des) · 3600
+#  with H_live and H_des produced by the SAME function from the SAME inputs at design, so the
+#  ratio is X/X == 1.0 exactly and Q_strip is bit-identical to the old feed-proportional form
+#  (which was also exactly 1.0 at design).  The absolute 4 % offset therefore never enters the
+#  model -- it cancels in the ratio -- and the design duty remains the PFD value, not a computed one.
 # --- CO2 stripping-gas endotherm (Stamicarbon G/L): the bottom CO2 sweep is held by the compressor while
 #   the reactor liquid feed varies.  When ṁ_feed collapses at constant CO2, the Gas/Liquid ratio spikes,
 #   forcing carbamate decomposition + NH3/CO2 evaporation -- a strong ENDOTHERM that OVERPOWERS the steam
@@ -2005,7 +2078,7 @@ def _cryst_assess(stream: dict, T_cryst: float = None) -> dict:
 
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
                      overflow_kmolh: dict = None, L_feed: float = None,
-                     W_feed: float = None) -> dict:
+                     W_feed: float = None, T_feed_C: float = None) -> dict:
     """HP Stripper 322E001 reduced steady-state model.
     Top liquid feed = 322R001 overflow (boundary constant, stream 207).
     Bottom strip gas = live CO2 feed (co2_feed_th, t/h).  Shell = condensing MP steam.
@@ -2016,6 +2089,8 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # 1. component molar feed (kmol/h): reactor effluent (live overflow, 1-step lag) + CO2 strip gas
     if overflow_kmolh is None:
         overflow_kmolh = STRIP_FEED207_KMOLH          # frozen design vector (backward-compat)
+    if T_feed_C is None:
+        T_feed_C = STRIP_FEED207_T_C                  # design reactor-overflow T (TT-322014)
     co2_scale = co2_feed_th / (CO2_DES_KGH / 1000.0)                     # 1.0 at design
     co2_kmolh = {k: CO2_FEED_MOLFRAC.get(k, 0.0) * CO2_DES_KMOLH * co2_scale for k in MW_COMP}
     feed = {k: overflow_kmolh.get(k, 0.0) + co2_kmolh.get(k, 0.0) for k in MW_COMP}
@@ -2072,8 +2147,9 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     dT_bot     = dT_bot + dT_flood                                # + 0.0 is bit-exact
     # ...and the split CLOSES: the volatiles stay in the bottoms and slip to the LP section via
     # LV-322501, which is exactly the cascade Brouwer describes (more NH3 in the bottoms -> more gas
-    # to LP recirculation -> LP pressure rises -> operators must cut load).
-    g_flood    = 1.0 / (1.0 + STRIP_FLOOD_ETA_K * flood_x)        # 1.0 at design, exactly
+    # to LP recirculation -> LP pressure rises -> operators must cut load).  g_flood itself is
+    # DERIVED from dT_flood by the carbamate energy balance and is computed below, once `avail`
+    # is known -- see the STRIP_FLOOD_ETA_FLOOR block for the derivation.
     # CO2 STRIPPING ENDOTHERM (G/L cooling): excess strip gas per liquid forces carbamate decomposition +
     # NH3/CO2 flash -> endothermic.  r_GL = (G/L)/(G/L)_des − 1 = co2_scale·ṁ_feed,des/ṁ_feed − 1 (=0 at
     # design).  Only feed-lean / CO2-rich (r_GL>0) cools; the feed-spike branch (r_GL<0) is left untouched.
@@ -2092,6 +2168,9 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # 3. reactions: hydrolysis scales with penalized eta_T; biuret = Arrhenius k0 exp(-Ea/RT)*[Urea].
     T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_bot + dT_strip, T_steam_C) # TT-322004 (steam-heat + G/L strip-cool, ≤ steam sat; dT_bot flood-anchored to reactor T)
     T_bot_K = T_bot_C + 273.15
+    # TT-322013 overhead: hoisted out of the return dict because the enthalpy balance below needs it.
+    T_top_C = min(STRIP_T_TOPGAS_DES_C + 0.6 * dTs
+                  + STRIP_T_TOP_LOAD_K * dT_bot + dT_strip, T_steam_C)
     xi_hyd = STRIP_XI_HYD_DES * eta_T
     xi_biu = (STRIP_XI_BIU_DES
               * math.exp((STRIP_BIU_EA / STRIP_R_GAS_J) * (1.0 / STRIP_T_BIU_DES_K - 1.0 / T_bot_K))
@@ -2104,6 +2183,18 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     avail["H2O"]    -= xi_hyd
     for k in avail:
         avail[k] = max(avail[k], 0.0)
+
+    # 3b. HYDRODYNAMIC EFFICIENCY KNOCKDOWN, derived from the bottom-temperature rise.
+    #     The heat that dT_flood carries away as sensible warming is exactly the heat that did NOT
+    #     go into dissociating carbamate, so the lost stripping fraction is that deficit measured
+    #     against the carbamate endotherm the feed could have supplied.  n_carb_avail is taken from
+    #     `avail` (pre-split) MINUS the CO2 sweep, which arrives already as gas and needs no
+    #     dissociation heat -- so there is no circular dependence on the split this drives.
+    #     At design dT_flood is exactly 0.0, hence g_flood is exactly 1.0.
+    n_carb_avail = max(avail["CO2"] - co2_kmolh["CO2"], 1e-9)          # kmol/h liquid-borne CO2
+    q_carb_avail = n_carb_avail * STRIP_DH_CARB_JMOL                   # kJ/h  (kmol/h * J/mol)
+    q_flood_def  = m_feed_kgh * STRIP_CP_BOTTOM * dT_flood             # kJ/h, 0.0 at design
+    g_flood      = clamp(1.0 - q_flood_def / q_carb_avail, STRIP_FLOOD_ETA_FLOOR, 1.0)
 
     # 4. strip-fraction modulation: thermal steam heat x CO2 strip-gas dilution x synthesis-pressure
     #    (=1.0 at design).  The N/C+H/C choke does NOT cut the thermal split; instead it forces
@@ -2133,6 +2224,28 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     bot_kgh = {k: bot[k] * MW_COMP[k] for k in MW_COMP}
     top_m = sum(top_kgh.values()); top_n = sum(top.values())
     bot_m = sum(bot_kgh.values()); bot_n = sum(bot.values())
+
+    # 6. PER-SPECIES ENTHALPY BALANCE (TD-006 second half).  Five terms, every constant sourced --
+    #    see the STRIP_DH_CARB_JMOL block.  This is what the MP-steam header actually has to pay
+    #    for, and unlike the feed-proportional stand-in it responds to COMPOSITION: a feed that is
+    #    richer in carbamate costs more steam at the same tonnage.
+    #      q_carb  carbamate dissociation, the dominant sink (~58 % of design duty)
+    #      q_nh3   desorption of the NH3 that was NOT carbamate-bound (supercritical: no latent)
+    #      q_h2o   the small water fraction that vaporises overhead (~7 %)
+    #      q_hyd   urea hydrolysis, liquid step only -- NEGATIVE, it gives a little heat back
+    #      q_sens  sensible heat of the two products relative to the feed temperature
+    #    T_feed_C defaults to the design reactor-overflow temperature; the caller passes the live
+    #    one so a hotter reactor genuinely reduces the stripper's steam demand.
+    n_co2_desorb = max(top["CO2"] - co2_kmolh["CO2"], 0.0)             # kmol/h out of the liquid
+    n_nh3_free   = max(top["NH3"] - co2_kmolh["NH3"] - 2.0 * n_co2_desorb, 0.0)   # 2:1 carbamate
+    q_carb_kw = n_co2_desorb * STRIP_DH_CARB_JMOL / 3600.0
+    q_nh3_kw  = n_nh3_free   * STRIP_DH_NH3_JMOL / 3600.0
+    q_h2o_kw  = max(top["H2O"] - co2_kmolh["H2O"], 0.0) * STRIP_LAM_H2O_JMOL / 3600.0
+    q_hyd_kw  = xi_hyd * STRIP_DH_HYD_JMOL / 3600.0
+    q_sens_kw = (bot_m * STRIP_CP_BOTTOM * (T_bot_C - T_feed_C)
+                 + top_m * STRIP_CP_GAS * (T_top_C - T_feed_C)) / 3600.0
+    duty_raw_kw = q_carb_kw + q_nh3_kw + q_h2o_kw + q_hyd_kw + q_sens_kw
+
     return {
         "feed_kmolh": feed, "co2_feed_kmolh": co2_kmolh, "top_kmolh": top, "bot_kmolh": bot,
         "top_kgh": top_m, "bot_kgh": bot_m,
@@ -2142,9 +2255,8 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "bot_MW": (bot_m / bot_n if bot_n else 0.0),
         "top_comp_pct": {k: (top[k] / top_n * 100.0 if top_n else 0.0) for k in MW_COMP},   # mol %
         "bot_mass_pct": {k: (bot_kgh[k] / bot_m * 100.0 if bot_m else 0.0) for k in MW_COMP},# mass %
-        "T_top": min(STRIP_T_TOPGAS_DES_C + 0.6 * dTs
-                     + STRIP_T_TOP_LOAD_K * dT_bot + dT_strip, T_steam_C),  # TT-322013: steam-heat + feed-load (atten.) + G/L strip-cool (full); ≤ steam sat
-        "T_bot": T_bot_C,
+        "T_top": T_top_C,   # TT-322013: steam-heat + feed-load (atten.) + G/L strip-cool (full); ≤ steam sat
+        "T_bot": T_bot_C, "T_feed": T_feed_C,
         "xi_hyd": xi_hyd, "xi_biu": xi_biu, "eta_T": eta_T, "T_steam": T_steam_C,
         "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC, "g_T": g_T,
         "dT_load": dT_load, "dT_bot": dT_bot, "dT_strip": dT_strip, "r_GL": r_GL, "m_feed_kgh": m_feed_kgh,  # energy-balance + G/L strip-cool diag
@@ -2152,14 +2264,25 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         # TD-006 hydrodynamic flooding diagnostics (all inert at design: 0.7448 / 0.0 / 1.0 / 0.0)
         "flood_frac": flood_frac, "flood_x": flood_x, "g_flood": g_flood, "dT_flood": dT_flood,
         "flood_kgh_tube": m_feed_kgh / STRIP_N_TUBES,
+        # TD-006 per-species enthalpy balance (kW).  duty_raw_kw is used only as a RATIO against
+        # its own design value, so its 4 % offset from the licensor duty never reaches the model.
+        "duty_raw_kw": duty_raw_kw, "q_carb_kw": q_carb_kw, "q_nh3_kw": q_nh3_kw,
+        "q_h2o_kw": q_h2o_kw, "q_hyd_kw": q_hyd_kw, "q_sens_kw": q_sens_kw,
+        "n_co2_desorb": n_co2_desorb, "n_nh3_free": n_nh3_free,
     }
 
 
 # Design-point stripper top-gas molar flow + synthesis-pressure coupling gain (PT-329201).
 # Higher steam Tsat -> higher stripping efficiency -> more overhead (off-gas) returned to the
 # HP synthesis loop -> higher synthesis pressure (plant reference, carbamate-condenser path).
-_STRIP_TOP_DES    = stripper_322e001(CO2_DES_KGH / 1000.0,
-                                     STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA)["top_kmolh"]
+_STRIP_DES_FULL   = stripper_322e001(CO2_DES_KGH / 1000.0,
+                                     STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA)
+_STRIP_TOP_DES    = _STRIP_DES_FULL["top_kmolh"]
+# Design value of the per-species enthalpy balance (TD-006).  The live duty is scaled by
+# duty_raw_kw / STRIP_DUTY_RAW_DES_KW, so this is the denominator that makes the ratio exactly
+# 1.0 at design.  It is ~37 831 kW, i.e. 96 % of the licensor STRIP_DUTY_DES_KW; that offset
+# CANCELS in the ratio and never reaches the steam header.
+STRIP_DUTY_RAW_DES_KW = _STRIP_DES_FULL["duty_raw_kw"]
 STRIP_TOP_MOL_DES = sum(_STRIP_TOP_DES.values())                # 5789.4018 design overhead (kmol/h)
 STRIP_TOP_NH3_DES = _STRIP_TOP_DES["NH3"]                       # 3571.6 design overhead NH3 (condensable)
 # Pressure-building acid anchor = design CO2 NOT paired into carbamate (2 NH3 + CO2 -> carbamate):
@@ -4070,9 +4193,32 @@ def step_sim(dt: float) -> dict:
     # Stripper consumes the previous step's reactor overflow (tear stream of the synthesis
     # recycle); at design this equals the frozen STRIP_FEED207_KMOLH -> output unchanged.
     T_steam_live = tsat_steam(s.steam.P_MP)           # live sat-steam shell T from MP header pressure
-    strip = stripper_322e001(F_CO2_syn_th, T_steam_live, STRIP_P_DES_BARA,
+    # DEAD-LEVER FIX (audit): P_bara was hardwired to the frozen STRIP_P_DES_BARA at every call
+    # site, so eta_P evaluated to exactly 1.0 forever and synthesis pressure had NO effect on
+    # stripping efficiency.  That is wrong in a way an operator would notice immediately -- raising
+    # loop pressure suppresses carbamate dissociation (3 mol of gas from 1 of liquid, so Le
+    # Chatelier pushes the equilibrium back) and the stripper visibly loses efficiency.
+    # PT-329201 (s.p_syn_bara) is the live loop pressure; the stripper tube side sits a fixed
+    # 3.3 bar above it (144.0 vs 140.7), so the live tube-side pressure is carried as a RATIO
+    # anchored on each side's own design value.  At design s.p_syn_bara == SYN_P_DES_BARA exactly,
+    # so the ratio is exactly 1.0 and X * 1.0 == X -- eta_P is bit-identical to the old constant.
+    #
+    # Gated on _STEAM_READY for the same reason step_steam is (see the steam handshake below).
+    # This fix adds a feedback path that did not exist before -- loop pressure now reaches the
+    # stripper split -- and the boot-pin settle would otherwise traverse a different transient and
+    # capture HPCC_UA / HPCC_LIQ_DES_LIVE on a different basis (measured: +305 kg/h, 0.16 %).  Those
+    # are CALIBRATION constants; they must not depend on which transient reached the design point.
+    # At the settled design state s.p_syn_bara == SYN_P_DES_BARA, so gate open and gate closed give
+    # the identical answer there -- the gate changes the path, never the fixed point.
+    P_strip_live = (STRIP_P_DES_BARA * (s.p_syn_bara / SYN_P_DES_BARA)
+                    if _STEAM_READY else STRIP_P_DES_BARA)
+    # Live reactor-overflow temperature feeds the stripper's sensible-heat term (TD-006), carried
+    # as an offset from the reactor's own design anchor so it is exactly STRIP_FEED207_T_C at design.
+    T_feed_live  = STRIP_FEED207_T_C + (s.react_T_overflow - reactor.T0_DES_C)
+    strip = stripper_322e001(F_CO2_syn_th, T_steam_live, P_strip_live,
                              overflow_kmolh=s.react_overflow_kmolh,
-                             L_feed=s.react_L_feed, W_feed=s.react_W_feed)
+                             L_feed=s.react_L_feed, W_feed=s.react_W_feed,
+                             T_feed_C=T_feed_live)
 
     # LIC-322501 bottom-solution level control, DIRECT-acting on the FC LV-322501:
     #   level^ -> op^ -> air-to-open valve opens -> drain^ -> level v  (neg. feedback).
@@ -4235,20 +4381,23 @@ def step_sim(dt: float) -> dict:
     # ----- Steam balance handshake (reverse pass): forward duties -> header mass draws -> Euler tick.
     #   Q [kJ/h] = duty_kW * 3600 ;  m [kg/s] = Q / lambda[kJ/kg] / 3600  ==  duty_kW / lambda.
     #   Stripper reboiler draws MP steam (fixed design duty); HPCC raises LP steam (live duty).
-    # CP-7 (G8, minimum-viable): the stripper MP-steam duty was hardcoded at the design value, so
-    # m_strip was invariant to load -- 76.7 t/h of MP steam was still drawn at zero feed, and the
-    # MP header could never see a stripper flood.  Make the duty track the LIVE feed mass, which is
-    # normal temperature-controlled reboiler behaviour (more feed -> more strip duty to hold the
-    # bottom).  Anchored to STRIP_FEED_DES_KGH, which the live design feed equals BIT-EXACTLY
-    # (verified 280795.92149696 == 280795.92149696), so at design the ratio is exactly 1.0 and the
-    # duty is exactly STRIP_DUTY_DES_KW -- no pin-contract change, no boot capture.  Floored at 0 so
-    # a zero-feed stripper draws zero steam.  NOTE: this is the feed-proportional first increment;
-    # the full per-component enthalpy balance and the steam-limited flood regime (MP valve at 100 %)
-    # remain a documented follow-up (TECH_DEBT TD-006) -- the model has no per-species enthalpy
-    # vectors, only STRIP_CP_BOTTOM, so a rigorous balance is a larger, separately-gated effort.
+    # TD-006 (second half) CLOSED.  This used to be duty proportional to feed MASS:
+    #     strip_load  = m_feed / STRIP_FEED_DES_KGH ;  Q = STRIP_DUTY_DES_KW * strip_load * 3600
+    # which was the minimum-viable fix for an earlier defect (the duty had been hardcoded, so
+    # 76.7 t/h of MP steam was drawn even at zero feed).  It removed that bug but left a real one:
+    # composition did not enter, so the same tonnage of pure water and of carbamate-rich reactor
+    # liquor demanded identical steam, and the dominant heat sink in the unit -- carbamate
+    # dissociation -- was invisible to the MP header.
+    # Now the ratio comes from the per-species enthalpy balance computed inside the unit (q_carb +
+    # q_nh3 + q_h2o + q_hyd + q_sens).  STRIP_DUTY_DES_KW remains the licensor anchor; only the
+    # SHAPE of the off-design response comes from the balance, so the balance's 4 % absolute offset
+    # cancels and never reaches the header.  At design duty_raw_kw == STRIP_DUTY_RAW_DES_KW by
+    # construction (same function, same inputs), so the ratio is X/X == 1.0 and Q_strip_kjh is
+    # bit-identical to the feed-proportional form it replaces.  Floored at 0.
     m_feed_strip = sum(strip["feed_kmolh"][k] * MW_COMP[k] for k in MW_COMP)   # live stripper feed (kg/h)
-    strip_load   = max(m_feed_strip / STRIP_FEED_DES_KGH, 0.0)                 # 1.0 at design (bit-exact)
-    Q_strip_kjh = STRIP_DUTY_DES_KW * strip_load * 3600.0
+    strip_load   = max(m_feed_strip / STRIP_FEED_DES_KGH, 0.0)                 # 1.0 at design (kept: telemetry)
+    duty_ratio   = max(strip["duty_raw_kw"] / STRIP_DUTY_RAW_DES_KW, 0.0)      # 1.0 at design (bit-exact)
+    Q_strip_kjh = STRIP_DUTY_DES_KW * duty_ratio * 3600.0
     Q_hpcc_kjh  = hpcc["q_steam_kw"]  * 3600.0   # LP steam RAISED, not the full process duty (see below)
     m_strip = Q_strip_kjh / 1850.0          / 3600.0   # MP steam consumed (kg/s)
     m_hpcc  = Q_hpcc_kjh  / HPCC_LATENT_4BAR / 3600.0  # LP steam generated (kg/s)

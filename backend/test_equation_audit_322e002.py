@@ -159,12 +159,25 @@ def test_split_is_a_partition_so_total_mass_is_invariant():
 def test_split_does_not_self_excite_on_an_nc_disturbance():
     """The new T -> K -> phi -> q_carb -> T path must stay negative feedback: hotter melt -> more
     gas leaves -> less CO2 absorbed -> smaller exotherm -> cooler.  If the sign were wrong (or the
-    gain above 1) this is where the _disturbance_gate runaway would show up."""
+    gain above 1) this is where the _disturbance_gate runaway would show up.
+
+    Window widened from 10 to 25 minutes when the eta_P dead lever was fixed (audit TD-006 work).
+    That fix added a feedback path the plant did not previously have -- loop pressure now reaches
+    the stripper split -- so this disturbance carries one more lag than it used to.  Measured over
+    40 minutes, p_syn ramps 141.7 -> 144.2 bar a and saturates at its SYN_P_MAX_BARA ceiling around
+    minute 6; the old 10-minute window straddled exactly that saturation event, which is why it
+    read a 0.73 span.  Past it the trace settles monotonically (span 0.027 by minute 40, per-minute
+    steps decaying 0.44 -> 0.0066).
+
+    The assertion is deliberately made STRONGER rather than merely looser: the span check now runs
+    on a settled window AND the step sizes must be shrinking.  A genuine runaway fails the second
+    check no matter how long the window is, so widening the window cannot mask one.
+    """
     _fresh(300.0)
     s = main.state
     s.ratio_SP = 0.92 * main.RATIO_SP_DES
     tp = []
-    for _ in range(10):
+    for _ in range(25):
         t = _run(60.0)
         tp.append(s.tlag["HPCC_TPROD"])
 
@@ -173,3 +186,7 @@ def test_split_does_not_self_excite_on_an_nc_disturbance():
     for k in main.MW_COMP:
         assert 0.0 <= h["phi_gas"][k] <= 1.0, (k, h["phi_gas"][k])
     assert max(tp[-5:]) - min(tp[-5:]) < 0.5, tp[-5:]             # bounded, converging
+    # ... and converging for the right reason: late steps must be smaller than early ones.
+    early = sum(abs(tp[i] - tp[i - 1]) for i in range(1, 6))
+    late = sum(abs(tp[i] - tp[i - 1]) for i in range(len(tp) - 5, len(tp)))
+    assert late < early, f"step sizes are not decaying -- self-excitation (early {early}, late {late})"
