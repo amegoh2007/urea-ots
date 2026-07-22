@@ -89,7 +89,11 @@ def conc_infer_324(w_des: float, T_des: float, P_des: float,
 
     aw_des  = P_des  / psat_water_bara(T_des)
     aw_live = P_live / psat_water_bara(T_live)
-    xw_des  = _w_to_xw(w_des)
+    # AUDIT F-4/F-5: w_des is now the LIVE melt strength, not a frozen constant, so it can legally
+    # reach 0 on a cold start (no urea in the vessel yet) -> xw_des -> 1.0 -> _xw_to_w divides by
+    # zero.  Clamp the reference mole fraction into the same physical band already applied to the
+    # live one.  The design point (w = 0.9431 / 0.9771) sits far inside the band -> bit-exact.
+    xw_des  = min(max(_w_to_xw(w_des), 1e-9), 1.0 - 1e-9)
     xw_live = xw_des * (aw_live / aw_des)
     xw_live = min(max(xw_live, 1e-9), 1.0 - 1e-9)    # keep physical off-design
     return (w_des + (_xw_to_w(xw_live) - _xw_to_w(xw_des))) * 100.0
@@ -599,6 +603,30 @@ R323_E010_Q_DES_KW = (R323_MEVAP_DES/3600.0*R323_EVAP_LAMBDA
                       - R323_M319_DES/3600.0*R323_CP_SOLN*(R323_F004_T_SP_C - R323_F010_T_SP_C))  # kW (~5048)
 R323_E010_UA_KW = R323_E010_Q_DES_KW / (tsat_steam(R323_E010_PCHEST_DES) - R323_F010_T_SP_C)  # kW/K
 
+# --- AUDIT F-1/F-2/F-3: design LATENT duties, so vapour generation is energy-limited ----------
+# Every vapour rate above was a frozen split fraction of the live INFLOW, i.e. the total-mass
+# balance (C1) and the energy balance (C3) were solved independently.  Shutting PV-329202 drove
+# Q_E002 -> 0 while the column still boiled the full design overhead, and the whole deficit was
+# dumped into the temperature ODE (non-physical: no heat, no boil-up).  The three constants below
+# are each the SAME expression, in the SAME float operation order, as the corresponding runtime
+# `q_avail` term, so at the design seed the ratio q_avail/Q_DES is exactly 1.0 and the duty limit
+# reproduces the design vapour BIT-EXACT (the min() ties on two identical values).
+#   Stage 1  m_feed·cp·(T_feed − 135) + Q_E002  == m_305·λ_305       (== R323_LAMBDA_305 back-solve)
+#   Stage 2  m_314·cp·(135 − 106)               == m_701·λ_701       (adiabatic: no Q term)
+#   Stage 3  m_319·cp·(106 − 99)   + Q_E010     == m_evap·λ_evap
+R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(R323_FEED_DES_T_C - R323_C003_T_SP_C)
+                     + R323_E002_Q_DES_KW)                            # kW available to boil 305
+R323_Q701_DES_KW  = (R323_M314_DES/3600.0*R323_CP_SOLN
+                     * (R323_C003_T_SP_C - R323_F004_T_SP_C))         # kW released by the 4.1->1.13 letdown
+R323_QEVAP_DES_KW = (R323_M319_DES/3600.0*R323_CP_SOLN*(R323_F004_T_SP_C - R323_F010_T_SP_C)
+                     + R323_E010_Q_DES_KW)                            # kW available to evaporate
+# 323F004 isenthalpic-flash saturation anchor.  T and P of a flashing drum are NOT independent:
+# the liquid sits at its bubble point.  The boiling-point elevation of the urea liquor is held at
+# its design value (same frozen-activity assumption `conc_infer_324` makes), so the live flash
+# temperature rides the water saturation curve offset by the plant's own design anchor:
+#     T_flash = 106 + [ Tsat(P_live) − Tsat(1.13) ]        -> exactly 106.0 at design (offset ≡ 0)
+_R323_TSAT_F004_DES = tsat_steam(R323_F004_P_BARA)                    # °C, design flash-drum Tsat
+
 # --- Design liquid holdups (kg) and level spans from residence times ---
 R323_C003_M_DES  = R323_M314_DES/3600.0 * R323_C003_M_TAU_S               # kg at design
 R323_C003_M_FULL = R323_C003_M_DES / (R323_C003_LVL_SP/100.0)             # kg at 100% level
@@ -1019,6 +1047,14 @@ R324_P1_DES    = R324_U_DES / R324_W_EV1          # Stage-1 melt @94.31 %
 R324_V1_DES    = R324_FEED_DES - R324_P1_DES      # Stage-1 vapour -> 324E002 condenser
 R324_P2_DES    = R324_U_DES / R324_W_EV2          # Stage-2 melt @97.71 % (final product)
 R324_V2_DES    = R324_P1_DES  - R324_P2_DES       # Stage-2 vapour -> 324E005 condenser
+# --- AUDIT F-4/F-5 ---------------------------------------------------------------------------
+# The two W_EV anchors above are the CONCENTRATION TARGET, not a law of nature.  Coded as
+# `p_m = urea_in / W_EV` they pinned the melt strength to a constant: cutting the Evap-I steam
+# could not dilute the product, and the whole latent deficit was absorbed by the temperature ODE.
+# Worse, the PY-324201 / AY-324701 soft sensors (`conc_infer_324`) DID move off design, so the
+# HMI showed a strength the mass balance refused to produce.  The water actually removed is now
+# min(concentration-limited, duty-limited) and the published strength follows the live melt.
+# The design latent loads R324_Q1_DES_KW / R324_Q2_DES_KW are defined with the λ constants below.
 
 # --- Stage 1 : Evaporator I  324E001 / 324F001  (0.33 bar a, hold 130 C) ------
 R324_F001_P_BARA = 0.33                           # bar a separator vacuum boundary (HARD)
@@ -1030,6 +1066,7 @@ R324_E001_PCHEST_DES = R324_E001_OP_DES/100.0 * R323_P_STEAM_SUP   # bar a steam
 R324_E001_Q_DES_KW = (R324_FEED_DES/3600.0*R324_CP_SOLN*(R324_E001_T_SP_C - R324_FEED_T_C)
                       + R324_V1_DES/3600.0*R324_LAM_V1)
 R324_E001_UA_KW  = R324_E001_Q_DES_KW / (tsat_steam(R324_E001_PCHEST_DES) - R324_E001_T_SP_C)
+R324_Q1_DES_KW   = R324_V1_DES/3600.0*R324_LAM_V1   # AUDIT F-4: design Stage-1 LATENT load (kW)
 R324_F001_M_TAU_S = 180.0                          # s melt residence -> separator holdup
 R324_F001_LVL_SP  = 55.0                           # % (LIC-free gravity leg, indicative)
 R324_F001_M_DES   = R324_P1_DES/3600.0 * R324_F001_M_TAU_S
@@ -1075,6 +1112,7 @@ R324_E003_PCHEST_DES = R324_E003_OP_DES/100.0 * R323_P_STEAM_SUP
 R324_E003_Q_DES_KW = (R324_P1_DES/3600.0*R324_CP_SOLN*(R324_E003_T_SP_C - R324_E001_T_SP_C)
                       + R324_V2_DES/3600.0*R324_LAM_V2)
 R324_E003_UA_KW  = R324_E003_Q_DES_KW / (tsat_steam(R324_E003_PCHEST_DES) - R324_E003_T_SP_C)
+R324_Q2_DES_KW   = R324_V2_DES/3600.0*R324_LAM_V2   # AUDIT F-5: design Stage-2 LATENT load (kW)
 R324_F003_M_TAU_S = 180.0
 R324_F003_LVL_SP  = 54.7                            # % LIC-324501 setpoint (tagged screenshot)
 R324_F003_M_DES   = R324_P2_DES/3600.0 * R324_F003_M_TAU_S
@@ -3758,8 +3796,22 @@ def step_sim(dt: float) -> dict:
     pic02_pv  = clamp(s.PIC_329202["op"] / 100.0 * R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)  # chest P from last stroke
     pic02_op  = _ctrl_ipd(s.PIC_329202, pic02_pv, dt, cas_sp=tic07_op)            # steam valve stroke (%)
     p_chest_e002 = clamp(pic02_op / 100.0 * R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
-    Q_e002_kw = R323_E002_UA_KW * (tsat_steam(p_chest_e002) - s.r323_c003_T)      # heater duty (kW)
-    m_305     = R323_PHI_V305 * m_feed_323                                        # top vapor -> 323E003 LPCC (305, kg/h)
+    # AUDIT F-10 — a CONDENSING-STEAM chest can only ADD heat.  Un-floored, shutting PV-329202
+    # clamps p_chest to 0.02 bar a (tsat ~17.5 C) and UA·(tsat − T) becomes a large NEGATIVE duty,
+    # i.e. the heater turns into a refrigerator and drags the column to ~14 C.  Physically the
+    # chest simply stops condensing and Q -> 0.  At design Q is strongly positive -> max() is the
+    # identity -> bit-exact.  Same floor applied to 323E010, 324E001, 324E003.
+    Q_e002_kw = max(R323_E002_UA_KW * (tsat_steam(p_chest_e002) - s.r323_c003_T), 0.0)  # heater duty (kW)
+    # AUDIT F-2 — boil-up is ENERGY-LIMITED, not a frozen split fraction.  q_avail is the latent
+    # duty actually left after the feed has been brought to the column temperature; the overhead
+    # cannot exceed what that duty can vaporise.  min() with the composition split keeps the
+    # design point bit-exact (both branches evaluate to R323_M305_DES) and makes the correct
+    # failure mode appear: PV-329202 shut -> Q_e002 -> 0 -> boil-up collapses instead of the
+    # temperature ODE absorbing an impossible latent load.
+    q305_avail_kw = (m_feed_323 / 3600.0 * cp323 * (T_feed_323 - s.r323_c003_T)
+                     + Q_e002_kw)                                                 # kW available as latent
+    m_305     = min(R323_PHI_V305 * m_feed_323,
+                    max(R323_M305_DES * (q305_avail_kw / R323_Q305_DES_KW), 0.0)) # top vapor -> 323E003 LPCC (305, kg/h)
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
     m_314     = max(R323_M314_DES * (lv501_op / R323_LV501_OP_DES), 0.0)          # bottom drain -> flash (kg/h)
@@ -3774,7 +3826,21 @@ def step_sim(dt: float) -> dict:
     s.r323_c003_P = clamp(s.r323_c003_P + (p_c003_tgt - s.r323_c003_P) / R323_C003_P_TAU_S * dt, 1.0, 12.0)
 
     # ---- Stage 2: Flash Tank 323F004  (adiabatic letdown 4.1 -> 1.13 bar, hold 106 C) --------
-    m_701     = R323_PHI_V701 * m_314                                             # flash vapor -> LPCC (701, kg/h)
+    # AUDIT F-1 — TRUE isenthalpic flash (was a frozen split fraction of m_314, so a ±30 °C swing
+    # in the Stage-1 outlet produced identical vapour).  Two coupled statements:
+    #   (a) saturation constraint  T_flash = Tsat(P_drum) anchored at the design bubble point;
+    #   (b) enthalpy balance       m_701·λ_701 = m_314·cp·(T_in − T_flash) − M·cp·(T_sat − T)/τ
+    #       i.e. the sensible surplus of the letdown flashes off, less whatever is needed to walk
+    #       the drum to its bubble point over its own liquid residence time.  Substituting (b) into
+    #       the energy ODE below yields exactly dT/dt = (T_sat − T)/τ, so energy stays conserved.
+    # Design: P == 1.13 -> T_sat == 106.0 -> relax term ≡ 0 and q701_avail_kw == R323_Q701_DES_KW
+    # bit-identically (same operand order) -> m_701 == R323_M701_DES exactly.
+    T_sat_f004 = R323_F004_T_SP_C + (tsat_steam(s.r323_f004_P) - _R323_TSAT_F004_DES)
+    q701_relax_kw = (s.r323_f004_M * cp323 * (T_sat_f004 - s.r323_f004_T)
+                     / R323_F004_M_TAU_S)                                         # kW retained to reach bubble point
+    q701_avail_kw = m_314 / 3600.0 * cp323 * (s.r323_c003_T - s.r323_f004_T)      # kW released by the letdown
+    m_701     = max(R323_M701_DES * ((q701_avail_kw - q701_relax_kw) / R323_Q701_DES_KW),
+                    0.0)                                                          # flash vapor -> LPCC (701, kg/h)
     lvl_f004  = clamp(s.r323_f004_M / R323_F004_M_FULL * 100.0, 0.0, 100.0)
     lv505_op  = _ctrl_ipd(s.LIC_323505, lvl_f004, dt)                            # LV-323505 stroke (%)
     m_319     = max(R323_M319_DES * (lv505_op / R323_LV505_OP_DES), 0.0)          # drain -> pre-evaporator (kg/h)
@@ -3795,8 +3861,13 @@ def step_sim(dt: float) -> dict:
     pic08_pv  = clamp(s.PIC_329208["op"] / 100.0 * R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)
     pic08_op  = _ctrl_ipd(s.PIC_329208, pic08_pv, dt, cas_sp=tic12_op)            # steam valve stroke (%)
     p_chest_e010 = clamp(pic08_op / 100.0 * R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
-    Q_e010_kw = R323_E010_UA_KW * (tsat_steam(p_chest_e010) - s.r323_f010_T)      # heater duty (kW)
-    m_evap    = R323_PHI_VEVAP * m_319                                            # evaporated water -> vac (kg/h)
+    Q_e010_kw = max(R323_E010_UA_KW * (tsat_steam(p_chest_e010) - s.r323_f010_T), 0.0)  # heater duty (kW, F-10 floored)
+    # AUDIT F-3 — same energy limit as Stage 1: the pre-evaporator cannot evaporate more water
+    # than its live LP-steam duty (plus the feed's sensible surplus) can supply.
+    qevap_avail_kw = (m_319 / 3600.0 * cp323 * (s.r323_f004_T - s.r323_f010_T)
+                      + Q_e010_kw)                                                # kW available as latent
+    m_evap    = min(R323_PHI_VEVAP * m_319,
+                    max(R323_MEVAP_DES * (qevap_avail_kw / R323_QEVAP_DES_KW), 0.0))  # evaporated water -> vac (kg/h)
     m_317     = max(m_319 - m_evap, 0.0)                                          # concentrated product -> tank (kg/h)
     P_f010    = (m_319 / 3600.0 * cp323 * (s.r323_f004_T - s.r323_f010_T)
                  + Q_e010_kw - m_evap / 3600.0 * R323_EVAP_LAMBDA)               # net kW on holdup
@@ -4152,14 +4223,24 @@ def step_sim(dt: float) -> dict:
 
     # ---- Stage 1 : Evaporator I 324E001 + separator 324F001 (0.33 bar a, 130 C) --
     feed1_m    = max(m_324, 0.0) + recyc_prev                                 # blended Stage-1 feed (kg/h)
-    urea1_in   = R324_W_IN*max(m_324, 0.0) + R324_W_EV2*recyc_prev            # urea into Stage 1 (kg/h)
+    recyc_w    = s.tlag.get("R324_recyc_w", R324_W_EV2)                       # LIVE recycle urea frac (1-tick tear)
+    urea1_in   = R324_W_IN*max(m_324, 0.0) + recyc_w*recyc_prev               # urea into Stage 1 (kg/h)
     tic1_op    = _ctrl_ipd(s.TIC_324001, s.r324_e001_T, dt)                   # steam chest-P demand (bar a)
     pic203_pv  = clamp(s.PIC_329203["op"]/100.0*R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)
     pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
     p_chest_e001 = clamp(pic203_op/100.0*R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
-    Q_e001_kw  = R324_E001_UA_KW*(tsat_steam(p_chest_e001) - s.r324_e001_T)   # Evap-I duty (kW)
-    p1_m       = urea1_in / R324_W_EV1                                        # melt @94.31% to hold conc (kg/h)
-    v1_m       = max(feed1_m - p1_m, 0.0)                                     # water vapour -> 324E002 (kg/h)
+    Q_e001_kw  = max(R324_E001_UA_KW*(tsat_steam(p_chest_e001) - s.r324_e001_T), 0.0)  # Evap-I duty (kW, F-10 floored)
+    # AUDIT F-4 — evaporation is DUTY-LIMITED, and the melt strength FOLLOWS it (was pinned at
+    # R324_W_EV1 by construction, so no operator action could dilute the product).  q1_avail is
+    # the latent duty left after the feed has been carried to the stage temperature; the water
+    # removed is whichever is smaller — the concentration target or what that duty can boil.
+    q1_avail_kw = (feed1_m/3600.0*cp324*(R324_FEED_T_C - s.r324_e001_T)
+                   + Q_e001_kw)                                               # kW available as latent
+    v1_conc    = max(feed1_m - urea1_in / R324_W_EV1, 0.0)                    # water removal to hit 94.31 %
+    v1_duty    = max(R324_V1_DES * (q1_avail_kw / R324_Q1_DES_KW), 0.0)       # water the live duty can boil
+    v1_m       = min(v1_conc, v1_duty)                                        # water vapour -> 324E002 (kg/h)
+    p1_m       = max(feed1_m - v1_m, 0.0)                                     # Stage-1 melt (kg/h)
+    w1_live    = clamp(urea1_in / max(p1_m, 1e-6), 0.0, 1.0)                  # LIVE Stage-1 urea mass frac
     P_e001     = (feed1_m/3600.0*cp324*(R324_FEED_T_C - s.r324_e001_T)
                   + Q_e001_kw - v1_m/3600.0*R324_LAM_V1)                      # net kW on holdup
     M_f001_pre = s.r324_f001_M
@@ -4187,15 +4268,21 @@ def step_sim(dt: float) -> dict:
 
     # ---- Stage 2 : Evaporator II 324E003 + separator 324F003 (0.131 bar a, 140 C) -
     feed2_m    = m_p1                                                         # Stage-1 melt (95%) -> Stage 2
-    urea2_in   = R324_W_EV1 * feed2_m                                         # urea into Stage 2 (kg/h)
+    urea2_in   = w1_live * feed2_m                                            # urea into Stage 2 (kg/h, LIVE frac)
     tic2_op    = _ctrl_ipd(s.TIC_324002, s.r324_e003_T, dt)                   # steam chest-P demand (bar a)
     pic212_pv  = clamp(s.PIC_329212["op"]/100.0*R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)
     pic212_op  = _ctrl_ipd(s.PIC_329212, pic212_pv, dt, cas_sp=tic2_op)       # steam valve stroke (%)
     p_chest_e003 = clamp(pic212_op/100.0*R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
-    Q_e003_kw  = R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T)   # Evap-II duty (kW)
-    p2_gen     = urea2_in / R324_W_EV2                                        # melt @97.71% produced (kg/h)
-    v2_m       = max(feed2_m - p2_gen, 0.0)                                   # water vapour -> 324E005 (kg/h)
-    P_e003     = (feed2_m/3600.0*cp324*(R324_E001_T_SP_C - s.r324_e003_T)
+    Q_e003_kw  = max(R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T), 0.0)  # Evap-II duty (kW, F-10 floored)
+    # AUDIT F-5 — same duty limit at Stage 2; final product strength is now live, not a constant.
+    q2_avail_kw = (feed2_m/3600.0*cp324*(s.r324_e001_T - s.r324_e003_T)
+                   + Q_e003_kw)                                               # kW available as latent
+    v2_conc    = max(feed2_m - urea2_in / R324_W_EV2, 0.0)                    # water removal to hit 97.71 %
+    v2_duty    = max(R324_V2_DES * (q2_avail_kw / R324_Q2_DES_KW), 0.0)       # water the live duty can boil
+    v2_m       = min(v2_conc, v2_duty)                                        # water vapour -> 324E005 (kg/h)
+    p2_gen     = max(feed2_m - v2_m, 0.0)                                     # Stage-2 melt produced (kg/h)
+    w2_live    = clamp(urea2_in / max(p2_gen, 1e-6), 0.0, 1.0)                # LIVE final-product urea mass frac
+    P_e003     = (feed2_m/3600.0*cp324*(s.r324_e001_T - s.r324_e003_T)
                   + Q_e003_kw - v2_m/3600.0*R324_LAM_V2)                      # net kW on holdup
     M_f003_pre = s.r324_f003_M
     s.r324_e003_T = s.r324_e003_T + P_e003*dt/max(M_f003_pre*cp324, 1e-6)
@@ -4234,7 +4321,8 @@ def step_sim(dt: float) -> dict:
     m_324_cond = v1_m + v2_m                                                  # total process condensate (kg/h)
     m_324_vent = fa202_m + fa203_m                                            # non-condensable vent (kg/h)
     # ---- recycle tear write (one-tick delay -> next step reads it) ---------------
-    s.tlag["R324_recyc"] = m_recyc
+    s.tlag["R324_recyc"]   = m_recyc
+    s.tlag["R324_recyc_w"] = w2_live                                          # AUDIT F-5: live recycle strength
 
     # ----- auxiliary faceplate trims (stepped for liveness; off the network)
     #   FIC-328405 / LIC-323503 dropped from here: both now step on the live 718A/718B/323D011 network.
@@ -4739,8 +4827,8 @@ def step_sim(dt: float) -> dict:
                 "feed_th":     round(feed1_m / 1000.0, 2),                    # blended Stage-1 feed (t/h)
                 "vapour_th":   round(v1_m / 1000.0, 2),                       # water vapour -> 324E002 (t/h)
                 "melt_th":     round(m_p1 / 1000.0, 2),                       # 95% melt -> Stage 2 (t/h)
-                "urea_pct":    round(R324_W_EV1 * 100.0, 1),                  # product conc (94.31 %, HARD)
-                "PY_324201":   round(conc_infer_324(R324_W_EV1, R324_E001_T_SP_C, R324_F001_P_BARA,
+                "urea_pct":    round(w1_live * 100.0, 1),                     # AUDIT F-4: LIVE melt conc (94.31 % @design)
+                "PY_324201":   round(conc_infer_324(w1_live, R324_E001_T_SP_C, R324_F001_P_BARA,
                                                     s.r324_e001_T, s.r324_f001_P), 1),   # live conc soft-sensor (wt %)
                 "p_chest_bara":round(p_chest_e001, 2),                        # steam chest press. (bar a)
                 "Q_kW":        round(Q_e001_kw, 0),                           # Evap-I duty (kW)
@@ -4770,8 +4858,8 @@ def step_sim(dt: float) -> dict:
                 "recyc_th":    round(m_recyc / 1000.0, 2),                    # recycle (0 under R2; kept for faceplate continuity)
                 "LV_324501A":  round(lva_stroke, 1),                          # LV-324501A forward-to-granulation stroke (parked 0 %)
                 "LV_324501B":  round(lvb_stroke, 1),                          # LV-324501B active melt-drain stroke (%)
-                "urea_pct":    round(R324_W_EV2 * 100.0, 1),                  # product conc (97.71 %, HARD)
-                "AY_324701":   round(conc_infer_324(R324_W_EV2, R324_E003_T_SP_C, R324_F003_P_BARA,
+                "urea_pct":    round(w2_live * 100.0, 1),                     # AUDIT F-5: LIVE product conc (97.71 % @design)
+                "AY_324701":   round(conc_infer_324(w2_live, R324_E003_T_SP_C, R324_F003_P_BARA,
                                                     s.r324_e003_T, s.r324_f003_P), 1),   # live conc soft-sensor (wt %)
                 "product_th":  round(m_product / 1000.0, 2),                  # final melt + UF85 -> 335 (t/h)
                 "uf85_kgh":    round(m_uf, 1),                                # UF85 injection (kg/h)
