@@ -10,7 +10,7 @@ tag: are the equations bound correctly, is the solver engine right, is hybrid va
 and what equations are missing. Deliverable mode is **audit + auto-fix**, one unit at a time.
 
 ## Current state of the code
-* Audit report: **`EQUATION_AUDIT.md`** — architecture verdicts, 11-item findings register (9 closed),
+* Audit report: **`EQUATION_AUDIT.md`** — architecture verdicts, 11-item findings register (all closed),
   per-tag tables for units 320/321/322/323/324/328/329, category coverage summary, applied fixes.
 * **Solver verdict: Sequential-Modular is CORRECT for all ~57 tags.** Recycles are torn with
   prior-step lags; the tear variables are real dynamic states, dt ≪ every process τ, and SM gives
