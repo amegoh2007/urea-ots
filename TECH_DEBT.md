@@ -7,7 +7,11 @@ Tracked, non-blocking discrepancies. Each item is asserted in the audit suite as
 
 ## TD-001 — `phi_sp` ejector-spindle helper encodes the SUPERSEDED positive law
 
-- **Status:** OPEN (tracked XFAIL)
+- **Status:** RESOLVED — verified 2026-07-22 by the "close all gaps" audit sweep. The helper at
+  `tests/audit_f001_ejector.py:60` already reads `EJ_SPINDLE_R ** ((EJ_OPEN_DES - opn)/100.0)`, the
+  NEGATIVE law, and the opening sweep is a real `chk` (not `xchk`): the run prints
+  `[PASS] m_suc scales by phi_sp == R^((74-open)/100) across opening sweep (helper==model)` plus
+  the bit-exact `phi_sp(74) == 1.0` and datasheet-ratio checks. Only this log entry was stale.
 - **Opened:** 2026-06-26 (Phase 2, Path B — Option 1 tear closure, `ov_CO2 = 458.358305`)
 - **Files:**
   - `backend/tests/audit_f001_ejector.py` — helper `phi_sp` (def) + sweep assertion (`xchk`, was `chk`)

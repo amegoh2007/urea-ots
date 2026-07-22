@@ -69,6 +69,27 @@ becomes the anchor of a real flash.
   (N/C disturbance) over the final five minutes — monotone convergence, no ringing.
 
 New tests: `backend/test_equation_audit_322e002.py` (8). Probe: `scratchpad/probe_322e002_flash.py`.
+
+### Remediation slot 3 — downstream species balance, 323 + 324 (F-8), commit `28c785f`
+Species tracking stopped dead at LV-322501. A six-species layer (Urea, Biuret, NH3, CO2, H2O, HCHO)
+now **rides on top of** the existing mass/energy ODEs — same flows, so C1 is untouched by
+construction and the design anchors cannot move. Two pieces of real physics fell out of the data:
+**biuret formation** (2 Urea -> Biuret + NH3, Arrhenius, extents back-solved from the PFD's
+0.24 % -> 0.85 % rise; 338 kg/h total vs the 322 kg/h the stream flows imply) and
+**relative-volatility vapour compositions** `y_i = a_i*w_i / sum(a_j*w_j)`, which IS the C6
+summation. Sum w reads exactly 100.0000 at every stage, every tick. Feed composition is the LIVE
+stripper bottoms, so strip efficiency now reaches the product.
+Closing it exposed **F-11 / TD-011** — see OPEN items.
+
+### Remediation slot 4 — 328C003 hydrolyser reaction extent (F-7), commit `b60ffa5`
+The hydrolyser had **no extent at all** — a frozen overhead split with the endotherm in a back-solved
+latent, and the rate law only inside a read-only soft sensor. It is a trayed column, so **plug flow,
+not a CSTR** — the only way the PFD's 0.82 % -> 1 ppm is reachable (CSTR at k.tau=10.14 gives 91 %;
+plug flow gives 99.996 %). `tau` scales inversely with throughput. The 812 kg/h overhead now
+decomposes into reaction (360.0) + strip (452.0), both exactly design at the seed.
+Operator-visible now: 200 °C -> 0.32 ppm slip, 180 °C -> 88 ppm, 160 °C -> 1252 ppm, 140 °C ->
+3994 ppm; 2× throughput -> 102 ppm, 3× -> 830 ppm. **Category C7 (kinetics) is now complete.**
+It did NOT need the full 328 species vector — hydrolysis is a flow-through conversion.
 Docs updated autonomously: As-Built gained **Revision Delta #16** and a rewritten §3.6 (the φ table
 now states it is the anchor, not the answer) and §1.4; `TECH_DEBT.md` TD-007 marked **CLOSED**;
 `EQUATION_AUDIT.md` §5 gained the 322E002 section and the C3/C4/C5/C6 category verdicts were
@@ -79,7 +100,7 @@ refreshed (they still described the pre-remediation state).
 set PY=%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe
 %PY% scratchpad\regress.py scratchpad\pin_now.json
 %PY% scratchpad\pindiff.py scratchpad\pin_now.json scratchpad\golden_pin.json   ->  25 / 15 / 0
-cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  123 passed
+cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  136 passed
 ```
 Use `-p no:cacheprovider` — `backend/.pytest_cache` holds stale dirs that raise `WinError 183`.
 **The suite takes 5–8 minutes and the pin settle takes ~2** — run them with a raised timeout or in
@@ -95,16 +116,25 @@ The bare `python` alias is a Microsoft Store stub that errors. **Python 3.14.6 I
 Never conclude an interpreter is absent from one alias. Never pipe a heredoc into the stub alias.
 
 ## OPEN items (in TECH_DEBT.md)
-* **TD-001** — `phi_sp` ejector-spindle test helper still encodes the superseded positive law
-  (model side correct; only the audit helper is stale). Directive was "leave phi_sp alone".
+
+Eight of the eleven audit findings are closed. What is left:
+
+* **TD-009 remainder** (audit F-8, unit 328) — the desorption train (328C002/C003/C004, 328D001/
+  D003, 322C001) is still lumped mass. The 323/324 half landed; the pattern is proven, so this is a
+  mechanical extension rather than an architectural one. **Largest remaining item.**
 * **TD-006** — G8 stripper duty is feed-PROPORTIONAL, not a rigorous per-species enthalpy balance,
-  and there is no steam-limited flood regime. Needs a species-enthalpy layer.
-* **TD-008** (audit F-7) — 328C003 hydrolyser has no reaction extent; the Arrhenius rate law
-  already exists but only inside the read-only `ppm_infer_328701` soft sensor. Depends on TD-009.
-* **TD-009** (audit F-8) — component species balance exists **only in unit 322**. Everything
-  downstream of LV-322501 is lumped mass, so there is no C2 balance and no C6 summation equation
-  downstream. Largest remaining architectural gap; needs its own project, not a fix slot.
-* ~~TD-007~~ — **CLOSED** this session (see remediation slot 2).
+  and there is no steam-limited flood regime. Now unblocked: the species layer gives it the
+  per-component basis it needed.
+* **TD-011** (audit F-11) — the PFD's stream-317 composition is **not reachable** from stream 319 by
+  evaporation: the tabulated percentages remove 10 163 kg/h against a tabulated 8 750 kg/h total, so
+  ~1.4 t/h of urea would have to appear across 323F010 and nothing feeds it there. Needs a licensor
+  data clarification, not a code change. Until then `sol_pin_strength` takes the urea/water pair
+  from the validated evaporation path and leaves 323F010 un-pinned so the gap stays visible.
+* **C10 constitutive properties** — densities and cp are still constants with no T-dependence
+  (`tsat_steam`, `psat_water_bara`, `psat_nh3_bara` are live). The last "~" in the category table
+  apart from C2/C6, which are the 328 remainder.
+* ~~TD-001~~ RESOLVED (log was stale — the helper already uses the negative law, real `chk`).
+* ~~TD-002..TD-005, TD-007, TD-008, TD-010~~ RESOLVED.
 
 ## Standing session commands (CLAUDE.md sections 6/7)
 * **Caveman mode ON** — invoke the `caveman` skill at session start; prose only, code/commits normal.
