@@ -2996,7 +2996,16 @@ class State:
                            "sp": R328_D001_OFFGAS_H2O_DES, "pv": R328_D001_OFFGAS_H2O_DES,
                            "pv1": R328_D001_OFFGAS_H2O_DES, "pv2": R328_D001_OFFGAS_H2O_DES,
                            "Kc": 120.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
-                           "op_lo": 0.0, "op_hi": 4000.0, "sp_lo": 0.0, "sp_hi": 100.0}
+                           # CP-4: the SP span is the loop's REACHABLE offgas-H2O band, measured at
+                           # design load by stroking FV-328404 rail-to-rail (44.86 mol% @100 % ->
+                           # 47.25 mol% @0 %, authority 2.385).  The old 0..100 span let the operator
+                           # (and TD-004's own flawed certification) command a setpoint the loop can
+                           # never reach, parking FV-328404 on a rail.  _ctrl_ipd is velocity-form, so
+                           # it is already anti-windup (op IS the integral state; the clamp discards
+                           # excess du and it leaves the rail on the first tick the error reverses --
+                           # verified in scratchpad/probe_tic8008_band.py); the only defect was the
+                           # unreachable span.  design sp 46.21 sits inside the band -> pin bit-exact.
+                           "op_lo": 0.0, "op_hi": 4000.0, "sp_lo": 44.9, "sp_hi": 47.2}
         # TIC-328012 differential temp controller: TT-328013 (bottom 200) - TT-328012 (3rd tray 190) = 10 C.
         self.TIC_328012 = {"mode": "AUTO", "op": 50.0,
                            "sp": R328_C003_DT_DES, "pv": R328_C003_DT_DES,
@@ -3701,7 +3710,13 @@ def step_sim(dt: float) -> dict:
     d_TT322004  = _lag1(s.tlag, "TT322004", T_bot_disp,                                STRIP_T_TAU_S,   dt)
     d_TT323001  = _lag1(s.tlag, "TT323001", TT_323001,                                 STRIP_T_TAU_S,   dt)
     d_TT322010  = _lag1(s.tlag, "TT322010", hpcc["T_prod"],                            HPCC_T_TAU_S,    dt)
-    d_HPCC_P    = _lag1(s.tlag, "HPCCP",    hpcc["P_bub"],                             HPCC_P_TAU_S,    dt)
+    # CP-5: the melt bubble-point can compute above the feed-supply head off-design (measured 221
+    # bar a at 40 % load), but the 322E002 vessel physically cannot be pressurised past what the
+    # CO2/HPCC/ejector feed delivers -- SYN_P_MAX_BARA (144.2), the ceiling main.py already declares
+    # and enforces on the PT-329201 loop state.  Cap the PUBLISHED HPCC pressure at that head (raw
+    # hpcc["P_bub"] is left untouched for any internal use).  At design P_bub == SYN_P_MAX_BARA
+    # exactly, so min() binds at equality and the value is byte-identical -> pin unaffected.
+    d_HPCC_P    = min(_lag1(s.tlag, "HPCCP", hpcc["P_bub"], HPCC_P_TAU_S, dt), SYN_P_MAX_BARA)
     d_TT322002  = _lag1(s.tlag, "TT322002", scrub["T_overflow"],                       SCRUB_T_TAU_S,   dt)
     d_TT322011  = _lag1(s.tlag, "TT322011", scrub["T_offgas"],                         OFFGAS_T_TAU_S,  dt)
     d_TT322011l = _lag1(s.tlag, "TT322011l", hv604["T_out"],                           OFFGAS_T_TAU_S,  dt)
