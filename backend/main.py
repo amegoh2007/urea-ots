@@ -3428,7 +3428,20 @@ def step_sim(dt: float) -> dict:
     # ----- Steam balance handshake (reverse pass): forward duties -> header mass draws -> Euler tick.
     #   Q [kJ/h] = duty_kW * 3600 ;  m [kg/s] = Q / lambda[kJ/kg] / 3600  ==  duty_kW / lambda.
     #   Stripper reboiler draws MP steam (fixed design duty); HPCC raises LP steam (live duty).
-    Q_strip_kjh = STRIP_DUTY_DES_KW   * 3600.0
+    # CP-7 (G8, minimum-viable): the stripper MP-steam duty was hardcoded at the design value, so
+    # m_strip was invariant to load -- 76.7 t/h of MP steam was still drawn at zero feed, and the
+    # MP header could never see a stripper flood.  Make the duty track the LIVE feed mass, which is
+    # normal temperature-controlled reboiler behaviour (more feed -> more strip duty to hold the
+    # bottom).  Anchored to STRIP_FEED_DES_KGH, which the live design feed equals BIT-EXACTLY
+    # (verified 280795.92149696 == 280795.92149696), so at design the ratio is exactly 1.0 and the
+    # duty is exactly STRIP_DUTY_DES_KW -- no pin-contract change, no boot capture.  Floored at 0 so
+    # a zero-feed stripper draws zero steam.  NOTE: this is the feed-proportional first increment;
+    # the full per-component enthalpy balance and the steam-limited flood regime (MP valve at 100 %)
+    # remain a documented follow-up (TECH_DEBT TD-006) -- the model has no per-species enthalpy
+    # vectors, only STRIP_CP_BOTTOM, so a rigorous balance is a larger, separately-gated effort.
+    m_feed_strip = sum(strip["feed_kmolh"][k] * MW_COMP[k] for k in MW_COMP)   # live stripper feed (kg/h)
+    strip_load   = max(m_feed_strip / STRIP_FEED_DES_KGH, 0.0)                 # 1.0 at design (bit-exact)
+    Q_strip_kjh = STRIP_DUTY_DES_KW * strip_load * 3600.0
     Q_hpcc_kjh  = hpcc["q_steam_kw"]  * 3600.0   # LP steam RAISED, not the full process duty (see below)
     m_strip = Q_strip_kjh / 1850.0          / 3600.0   # MP steam consumed (kg/s)
     m_hpcc  = Q_hpcc_kjh  / HPCC_LATENT_4BAR / 3600.0  # LP steam generated (kg/s)
@@ -4488,8 +4501,8 @@ def step_sim(dt: float) -> dict:
             "steam": {                            # shell side: 329D005 MP steam (live MP header)
                 "TI_shell": round(strip["T_steam"], 1),      # live sat-steam condensing temp (C)
                 "P_bara":   round(s.steam.P_MP, 1),          # live MP header pressure (bar a)
-                "kgh":      round(STRIP_STEAM_KGH_DES, 0),   # steam flow (kg/h)
-                "duty_kW":  round(STRIP_DUTY_DES_KW, 0),     # heat duty (kW)
+                "kgh":      round(m_strip * 3600.0, 0),      # LIVE MP steam flow (kg/h), tracks load (G8)
+                "duty_kW":  round(Q_strip_kjh / 3600.0, 0),  # LIVE strip duty (kW) = DES * feed-load ratio
             },
         },
         "RECIRC_323": {                          # Unit 323 - LP Recirculation & Pre-Evaporation

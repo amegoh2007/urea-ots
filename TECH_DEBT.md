@@ -345,3 +345,41 @@ but is normally closed at 100 % load, exactly like the 793 spare. So:
 At design `m_741 == 0`, so every term above is byte-identical to the pre-741 balance.
 
 Verified for both: pin gate `leaves: 25  keys: 15  diffs: 0`, suite **103 passed**.
+
+---
+
+## TD-006 — stripper duty is feed-proportional, not a full enthalpy balance
+
+- **Status:** OPEN (partial fix shipped as G8)
+- **Opened:** 2026-07-21
+- **Files:** `backend/main.py` step_sim steam-balance handshake (`Q_strip_kjh`), `stripper_322e001`
+
+### What G8 fixed
+
+`Q_strip_kjh` was hardcoded at `STRIP_DUTY_DES_KW` (39,400 kW), so the MP-steam draw was
+invariant to load: 76.7 t/h of steam was still consumed at zero feed and the MP header could
+never register a stripper flood (Red Team CP-7 / Agent A + D). It now tracks the live feed mass:
+
+    strip_load  = max(m_feed_strip / STRIP_FEED_DES_KGH, 0.0)   # 1.0 at design, bit-exact
+    Q_strip_kjh = STRIP_DUTY_DES_KW * strip_load * 3600.0
+
+`STRIP_FEED_DES_KGH` equals the live design feed BIT-EXACTLY (280795.92149696), so design duty is
+exactly 39,400 kW — no pin-contract change, no boot capture. `duty_kW` and `kgh` telemetry are now
+live, so specific steam consumption is trainable, and zero feed draws zero steam.
+
+### What remains
+
+1. **Feed-proportional is not the rigorous enthalpy balance.** Agent A showed that at a +30 % feed
+   spike the product enthalpies demand ~+12 %, not +30 % — extra feed leaves as hotter bottoms
+   carrying its own enthalpy out. The correct duty is `Σ product enthalpy − Σ feed enthalpy +
+   reaction`, but the model exposes only a single mean `STRIP_CP_BOTTOM` (2.93 kJ/kg·K), no
+   per-component cp/latent vectors, so a rigorous balance means adding a species-enthalpy layer.
+2. **No steam-limited flood regime.** When PIC-329204 drives the MP valve to 100 % the duty should
+   saturate (steam-limited) and the bottom should cool toward the crystallization floor rather than
+   the reboiler delivering unbounded heat. That is the abnormal-operation branch; the shipped
+   increment models the normal temperature-controlled regime only.
+3. `PIC-329204` / the MP header still behaves as a near-infinite steam sink (Agent A): the header
+   pressure barely moves under load, so the duty change does not yet feed back into a realistic MP
+   pressure excursion. Couple `m_strip` into the MP header dynamics once (1) lands.
+
+Both are larger, pin-sensitive efforts and were deferred deliberately rather than rushed.
