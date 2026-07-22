@@ -1562,6 +1562,30 @@ HPCC_STEAM_TSAT_C  = 146.3       # T_sat(4.4 bar a): shell condensing temp + BFW
 HPCC_DH_CARB_KJMOL = 160.0       # carbamate exotherm 2NH3+CO2->NH2COONH4 (kJ/mol CO2 absorbed)
 HPCC_CP_GAS        = 2.0         # mean strip-gas cp for sensible duty (kJ/kg.K)
 HPCC_LATENT_4BAR   = 2120.0      # latent heat of 4.4 bar a steam (kJ/kg)
+# ---- AUDIT F-6 / TD-007: the split fractions above are a calibration at ONE point --------------
+# HPCC_FRAC_GAS_DES was measured at 170 C / 144.2 bar a.  Frozen, it makes the condenser
+# thermodynamically INERT: raising the LP-steam pressure changes the shell duty and the NTU outlet
+# temperature but not one mole of condensate, and a synthesis-pressure excursion moves nothing at
+# all.  _hpcc_flash_split() below binds a real isothermal (T,P) flash on top of the calibration.
+#
+# Physics.  NH3/CO2 "condensation" here is not physical condensation -- it is the carbamate
+# equilibrium   NH2COONH4(l) <-> 2 NH3(g) + CO2(g),  Kp = p_NH3^2 * p_CO2,  whose dissociation
+# enthalpy is ~160 kJ/mol == HPCC_DH_CARB_KJMOL (already the exotherm constant).  Because Kp is a
+# THIRD-order product, the measured temperature coefficient of the dissociation PRESSURE is one
+# third of the reaction enthalpy -- ~12.8 kcal/mol == 53.5 kJ/mol (Bennett 1953; Ramachandran 1998).
+# With y_NH3 ~ 2*y_CO2 the gas mole fraction of each partner scales as y_i ~ Kp(T)^(1/3)/P, i.e.
+#       K_i(T,P) = K_i,des * exp[(dH/R)(1/T_des - 1/T)] * (P_des/P)
+# H2O is ordinary Raoult condensation (its own latent heat, same 1/P).  N2 is a permanent gas held
+# by Henry's law -> no temperature slope, still 1/P.  Components whose calibrated split is exactly
+# 1 (O2/CH4/H2 -- never condense) or exactly 0 (Urea/Biuret -- never boil) are structurally
+# non-distributing and stay OUT of the flash.
+HPCC_FLASH_DH = {                # J/mol, Clausius-Clapeyron slope of each distributing K-value
+    "CO2": HPCC_DH_CARB_KJMOL * 1000.0 / 3.0,   # carbamate cube-root slope (53 333 J/mol)
+    "NH3": HPCC_DH_CARB_KJMOL * 1000.0 / 3.0,
+    "H2O": 36900.0,              # 2049 kJ/kg * 18.015 g/mol -- water latent @170 C (steam tables)
+    "N2":  0.0,                  # permanent gas: Henry's law, no temperature slope
+}
+HPCC_FLASH_ITERS = 60            # bisection sweeps on the monotone Rachford-Rice residual (2^-60)
 
 # ===== FT-329403 / FT-329407 steam-transmitter PFD anchors (OEM 1750 MTPD 100% load) =========
 #   Refer: References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data (streams 901/902/903/
@@ -1945,8 +1969,64 @@ def _disturbance_gate(s) -> float:
     return clamp((dev - GATE_DEADBAND) / GATE_RAMP, 0.0, 1.0)
 
 
+def _hpcc_flash_split(feed: dict, T_c: float, p_loop: float) -> dict:
+    """AUDIT F-6 / TD-007 -- isothermal (T,P) flash of the 322E002 tube-side feed; returns phi_i.
+
+    The calibrated design split HPCC_FRAC_GAS_DES is NOT discarded: K_i,des is back-solved from it
+    against the LIVE feed composition every tick, so the activity coefficients of this strongly
+    non-ideal electrolyte melt stay baked into the K-values exactly as measured.  Only the DEVIATION
+    from the calibration point is model-driven, via the carbamate-equilibrium / Raoult / Henry
+    slopes in HPCC_FLASH_DH.  Non-distributing components (phi_des of exactly 0 or 1) are returned
+    untouched.  At the calibration point itself the routine short-circuits to the design vector, so
+    no Rachford-Rice tolerance can ever reach the boot pin.
+
+    Rachford-Rice is solved by BISECTION, not Newton: g(psi) is strictly decreasing on [0,1], so a
+    fixed 60-sweep bracket is exact to 2^-60 with bounded cost and no possible convergence failure.
+    An OTS tick must never miss its deadline -- this is the same argument that keeps the flowsheet
+    Sequential-Modular (EQUATION_AUDIT Q2)."""
+    p_rat = SYN_P_DES_BARA / max(p_loop, 1e-6)
+    T_k   = T_c + 273.15
+    if p_rat == 1.0 and T_k == _HPCC_BUB_T0_K:
+        return dict(HPCC_FRAC_GAS_DES)       # exactly at the calibration point -> phi IS the design
+    dist = [k for k in MW_COMP if 0.0 < HPCC_FRAC_GAS_DES.get(k, 0.0) < 1.0]
+    f_d  = sum(feed.get(k, 0.0) for k in dist)
+    if f_d <= 1e-12:
+        return dict(HPCC_FRAC_GAS_DES)       # no distributing feed -> nothing to flash
+    z = {k: feed.get(k, 0.0) / f_d for k in dist}
+    psi_des = sum(z[k] * HPCC_FRAC_GAS_DES[k] for k in dist)     # split the CALIBRATION would give
+    if not (1e-9 < psi_des < 1.0 - 1e-9):
+        return dict(HPCC_FRAC_GAS_DES)       # degenerate feed (single phase already) -> hold design
+    K = {}
+    for k in dist:
+        phi_d = HPCC_FRAC_GAS_DES[k]
+        k_des = phi_d * (1.0 - psi_des) / (psi_des * (1.0 - phi_d))   # K = (phi/psi)/((1-phi)/(1-psi))
+        # .get default 0.0 == Henry (no temperature slope): a distributing species with no listed
+        # slope still flashes on pressure rather than raising KeyError if the vector is ever edited.
+        K[k]  = max(k_des * math.exp((HPCC_FLASH_DH.get(k, 0.0) / reactor.R_GAS)
+                                     * (1.0 / _HPCC_BUB_T0_K - 1.0 / T_k)) * p_rat, 0.0)
+
+    def _g(p):                                # Rachford-Rice residual, strictly decreasing in p
+        return sum(z[k] * (K[k] - 1.0) / (1.0 + p * (K[k] - 1.0)) for k in dist)
+
+    lo, hi = 1e-12, 1.0 - 1e-12
+    if _g(hi) >= 0.0:      psi = hi           # above the dew point -> everything leaves as gas
+    elif _g(lo) <= 0.0:    psi = lo           # below the bubble point -> everything condenses
+    else:
+        for _ in range(HPCC_FLASH_ITERS):
+            mid = 0.5 * (lo + hi)
+            if _g(mid) > 0.0: lo = mid
+            else:             hi = mid
+        psi = 0.5 * (lo + hi)
+    out = dict(HPCC_FRAC_GAS_DES)
+    for k in dist:
+        out[k] = clamp(K[k] * psi / (1.0 + psi * (K[k] - 1.0)), 0.0, 1.0)
+    return out
+
+
 def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSAT_C,
-                 gate: float = 1.0) -> dict:
+                 gate: float = 1.0, t_prod_prev: float = HPCC_T_PROD_DES_C,
+                 p_loop: float = SYN_P_DES_BARA, phi_prev: dict = None,
+                 dt: float = 0.0) -> dict:
     """HP Carbamate Condenser 322E002 reduced model.
     gas_feed = stripper_322e001() return (top gas -> TT-322013); liq_feed = ejector_322f001()
     return (carbamate liquid -> TT-322012).  Combines both tube-side feeds and condenses NH3/CO2
@@ -1956,8 +2036,34 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSA
     # 1. combined tube-side feed (kmol/h per comp): strip gas (kmol/h) + ejector liq (kg/h -> kmol/h)
     feed = {k: gas_feed["top_kmolh"].get(k, 0.0)
                + liq_feed["comp"].get(k, 0.0) / MW_COMP[k] for k in MW_COMP}
-    # 2. calibrated phase split: phi_i -> gas product, (1-phi_i) -> liquid product
-    gas = {k: feed[k] * HPCC_FRAC_GAS_DES.get(k, 0.0) for k in MW_COMP}
+    # 2. phase split: phi_i -> gas product, (1-phi_i) -> liquid product.  AUDIT F-6/TD-007: phi is no
+    #    longer the frozen calibration -- it is an isothermal (T,P) flash anchored ON that calibration.
+    #    T_prod is an OUTPUT of step 4 below, so the split<->temperature algebraic loop is torn with
+    #    the PRIOR tick's product temperature (SM discipline; dt=0.25 s << HPCC_T_TAU_S=240 s, and the
+    #    coupling is negative-feedback: T^ -> K^ -> phi^ -> less CO2 absorbed -> q_carb v -> T v).
+    #    Blended through the Option-1 disturbance gate exactly like T_prod below, so gate==0 (no
+    #    operator/feed move) -> phi == HPCC_FRAC_GAS_DES BIT-EXACT and the design HMB is untouched.
+    #    The flash is the EQUILIBRIUM TARGET, not the answer.  A pure equilibrium split is far too
+    #    stiff for this vessel -- the K-values of the distributing set are tightly clustered, so a
+    #    common factor moves the whole mixture together and a +/-10 C excursion alone drives phi_CO2
+    #    from 0.001 to 1.0 (probe_322e002_flash.py Phase 0).  That is not how a falling-film
+    #    condenser behaves: the reference (References/HPCC description.md, Sections 5.2-5.3) is
+    #    explicit that 322E002 is INTERFACIAL MASS-TRANSFER limited -- the gas must diffuse to the
+    #    film, cross the interface and react, so the achievable split lags equilibrium by the film's
+    #    own residence time.  Relax phi toward the equilibrium target over the condenser holdup
+    #    constant HPCC_TAU_FILL_MIN (the same 6 min that sets the sump inventory), making the split a
+    #    genuine DYNAMIC STATE (s.hpcc_phi) instead of an instantaneous algebraic map.  This is the
+    #    audit's "missing equation" for this tag: the condenser had no composition dynamics at all.
+    #    dt == 0 (module-load / boot-pin calls) -> a_phi == 0 -> phi held at phi_prev, bit-exact.
+    phi_eq  = _hpcc_flash_split(feed, t_prod_prev, p_loop)
+    _base   = phi_prev if phi_prev is not None else HPCC_FRAC_GAS_DES
+    a_phi   = clamp(dt / (HPCC_TAU_FILL_MIN * 60.0), 0.0, 1.0)
+    phi_flm = {k: _base.get(k, HPCC_FRAC_GAS_DES.get(k, 0.0))
+                  + a_phi * (phi_eq[k] - _base.get(k, HPCC_FRAC_GAS_DES.get(k, 0.0)))
+               for k in MW_COMP}
+    phi_gas = {k: HPCC_FRAC_GAS_DES.get(k, 0.0)
+                  + gate * (phi_flm[k] - HPCC_FRAC_GAS_DES.get(k, 0.0)) for k in MW_COMP}
+    gas = {k: feed[k] * phi_gas[k] for k in MW_COMP}
     liq = {k: feed[k] - gas[k] for k in MW_COMP}
     gas_kgh = {k: gas[k] * MW_COMP[k] for k in MW_COMP}
     liq_kgh = {k: liq[k] * MW_COMP[k] for k in MW_COMP}
@@ -2024,8 +2130,14 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSA
               if _co2 > 1e-9 else reactor.L0_DES)
     W_hpcc = (clamp(feed.get("H2O", 0.0) / _co2, 0.5 * reactor.W0_DES, 2.0 * reactor.W0_DES)
               if _co2 > 1e-9 else reactor.W0_DES)
-    p_bub  = bubble_p_322e002(HPCC_T_PROD_DES_C, L_hpcc, W_hpcc)
+    # AUDIT F-6: the bubble point is evaluated at the LIVE melt temperature, not the frozen design
+    #   constant -- a bubble pressure taken at a fixed temperature is not a bubble pressure.  T_prod
+    #   is itself gated, so at design T_prod == HPCC_T_PROD_DES_C exactly -> cc == 1.0 -> 144.2 exact.
+    #   P_bub is telemetry only (PI-322E002 / scrub["P_bub_hpcc"]); it does NOT enter pt_target, so
+    #   this adds no loop.
+    p_bub  = bubble_p_322e002(T_prod, L_hpcc, W_hpcc)
     return {
+        "phi_gas": phi_gas, "phi_film": phi_flm, "phi_eq": phi_eq,
         "feed_kmolh": feed,
         "gas_kmolh": gas, "liq_kmolh": liq,
         "gas_kgh": gas_m, "liq_kgh": liq_m,
@@ -2603,6 +2715,9 @@ class State:
         self.ratio_PV   = 2.0231315310702604    # molar N/C PV
         self.ratio_bal  = 2.0231315310702604
         self.F_CO2_th   = 54.618   # t/h, actual CO2 feed to 322E001 (derived: raw - vent)
+        # AUDIT F-6/TD-007: 322E002 interfacial phase-split state.  Seeded at the calibrated design
+        # split, relaxed each tick toward the live (T,P) equilibrium flash over HPCC_TAU_FILL_MIN.
+        self.hpcc_phi   = dict(HPCC_FRAC_GAS_DES)
         # CO2 feed line (320K002 BL -> XV-322902 -> 322E001), vent via PV-322203
         self.F_CO2_raw_th = 54.618 # t/h, raw CO2 from 320K002 compressor (BL boundary)
         self.F_CO2_vent_th = 0.0   # t/h, CO2 vented via PV-322203 (design: vent shut -> 0)
@@ -3398,7 +3513,14 @@ def step_sim(dt: float) -> dict:
     #   on a genuine disturbance restores the full live shell-temp response.
     g_dist = _disturbance_gate(s)
     T_shell_lp = HPCC_STEAM_TSAT_C + g_dist * (tsat_steam(s.steam.P_LP) - tsat_steam(HPCC_STEAM_P_BARA))
-    hpcc = hpcc_322e002(strip, ej, t_shell=T_shell_lp, gate=g_dist)
+    #   AUDIT F-6/TD-007: the (T,P) phase split needs the product temperature it also produces and the
+    #   live synthesis pressure -> both entered as prior-step tears (s.tlag / s.p_syn_bara), the same
+    #   Sequential-Modular tearing every other recycle in this flowsheet uses.
+    hpcc = hpcc_322e002(strip, ej, t_shell=T_shell_lp, gate=g_dist,
+                        t_prod_prev=s.tlag.get("HPCC_TPROD", HPCC_T_PROD_DES_C),
+                        p_loop=s.p_syn_bara, phi_prev=s.hpcc_phi, dt=dt)
+    s.tlag["HPCC_TPROD"] = hpcc["T_prod"]        # tear for next tick's phase split
+    s.hpcc_phi           = hpcc["phi_film"]      # interfacial-composition state (relaxed, pre-gate)
 
     # 322R001 HP urea reactor: pinned products from hpcc feed, throughput s, valve φ.
     # f_L loop coupling: the reduced model pins the recycle overflow, so the endogenous feed N/C
@@ -4895,6 +5017,7 @@ def step_sim(dt: float) -> dict:
             "liq_th":      round(hpcc["liq_th"], 2),     # liquid product (t/h)
             "liq_MW":      round(hpcc["liq_MW"], 2),
             "liq_mass_pct":{k: round(hpcc["liq_mass_pct"][k], 3) for k in MW_COMP},  # mass %
+            "phi_gas":     {k: hpcc["phi_gas"][k] for k in MW_COMP},   # AUDIT F-6: live (T,P) flash split (unrounded — diag/gate)
             "LT_322E002":  round(s.hpcc_level_pct, 1),   # liquid level (%) — DYNAMIC inventory (swells on stall)
             "P_bara":      round(d_HPCC_P, 1),
             "steam": {                            # shell side: LP steam (live LP header, heat recovery)
