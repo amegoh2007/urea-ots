@@ -3,20 +3,34 @@
 ## The goal we're working toward
 Calibrate the `backend/main.py` state-space process engine against real DCS startup trend data
 without violating mass/energy conservation, and keep the HMI overlay registered on the baked DCS
-screenshots. The 328/329 loop-tag rename, the FFIC-329401 ratio basis, the volumetric-faceplate
-unit defect (TD-002), the FFIC master gain (TD-003), the TIC-328008 -> FIC-328404 cascade (TD-004)
-and the FIC-328406 / PFD-741 recycle (TD-005) are all now closed and gated. TD-001 remains the only
-open item, plus the stale `graphify` graph and `Master_PID_Tuning_Constants.md`.
+screenshots. A full Mixture-of-Experts Red Team (Expert_Interrogation_Log.md) then interrogated the
+engine; its consensus plan (Agent G, 8 items) is now fully implemented and gated. The 328/329
+rename, the FFIC-329401 ratio basis, TD-002..TD-005, and Red Team CP-1..CP-5 + CP-7 are all closed.
+Open: TD-001 (ejector helper), TD-006 (rigorous stripper enthalpy balance — G8 shipped the
+feed-proportional increment), the stale `graphify` graph, and `Master_PID_Tuning_Constants.md`.
 
 ## Current state of the code
-* HEAD `76b97b7` on `master`, **pushed** — `origin/master` is level at `76b97b7`.
-* Commits this session, oldest first:
-  * `37504eb` — 12 overlay frames registered on 328-1 / 324-1b; carried the pending 329xxx rename,
-    the FIC-328402 volumetric conversion, the CLAUDE.md rewrite and the handoff.md move to root.
-  * `fc82a78` — handoff notes.
-  * `26d35de` — FFIC-329401 ratio put on its T/M3 basis; `FV-326402` -> `FV-329402`.
-  * `76b97b7` — screens 321-1 and 323-1 registered (46 overlays); `RHO_735_KGM3` -> `RHO_744_KGM3`,
-    `S735_VOL_DES` -> `S744_VOL_DES`; `FV-328401` -> `FV-329401`.
+* HEAD `412c9d3` on `master`. `origin/master` is at `a6a88a6` — **G7 (`bf77691`) and G8 (`412c9d3`)
+  are committed locally but NOT yet pushed** (see Next steps).
+* Red Team consensus plan (Agent G) — ALL of it landed, each gated pin 25/15/0 + suite 110 passed:
+  * `40abe51` G1 — `STEP_CAP` 0.5 -> 0.25 (CP-1: FAST-mode integrator diverged above ~0.389 s).
+  * `40abe51` G3 — stream-741 recycle made a true 740-diversion, exotherm un-fabricated (CP-2/CP-3).
+  * `a4ed821` G4 — TIC-328008 SP constrained to its reachable band (CP-4). _ctrl_ipd is velocity
+    form, proven anti-windup, so no controller change was needed.
+  * `a4ed821` G5 — HPCC published pressure clamped to the feed-supply head (CP-5, 221 bar -> 144.2).
+  * `a6a88a6` G6 — new `backend/test_session_regression_gate.py` (7 tests) covering what the boot
+    pin structurally cannot: step-cap guard, step-invariance, runtime-loop-at-design, 740-node
+    conservation, HPCC ceiling, master fixed points. Suite 103 -> 110.
+  * `bf77691` G7 — routed the nine 324/335 faceplates (were silently discarding writes), extended
+    the crystallization banner into a general annunciator surfacing the 4 hidden process flags +
+    OOR rows, cas:true on FIC-328404, restored CAS_UNWIRED for TIC-323013/FIC-329402, LSK v3->v4.
+  * `412c9d3` G8 — stripper MP-steam duty now tracks feed load (CP-7); bit-exact at design against
+    STRIP_FEED_DES_KGH, no pin-contract change. Full enthalpy balance deferred as TD-006.
+* Earlier this session (pushed at `a6a88a6` and before): `37504eb` 12 frames + 329xxx rename +
+  FIC-328402 volumetric; `26d35de` FFIC T/M3 ratio + FV-326402->329402; `76b97b7` 321-1/323-1
+  registration + RHO_744 rename + FV-328401->329401.
+* `launch.bat` carries an unrelated uncommitted change (adds `pip install -r requirements.txt`).
+* Expert_Interrogation_Log.md (repo root) holds all 81 panel findings + Agent G's arbitration.
 * `launch.bat` carries an unrelated uncommitted change (adds `pip install -r requirements.txt`).
   Left unstaged deliberately. `backend/requirements.txt` exists and the path resolves.
 
