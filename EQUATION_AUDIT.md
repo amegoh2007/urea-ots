@@ -92,7 +92,7 @@ that limits training fidelity · **C** = cosmetic / documentation.
 | **F-4** | A | 324E001 / 324F001 | C1↔C3, C10 | `p1_m = urea1_in / R324_W_EV1` pins the Stage-1 melt at **94.31 % hard**. Water removed is fixed by a constant, not by `Q_e001_kw`. Cutting Evap-I steam cannot dilute the product. **CLOSED** — see §5. |
 | **F-5** | A | 324E003 / 324F003 | C1↔C3, C10 | Identical defect at Stage 2 (`R324_W_EV2` = 97.71 % hard). **CLOSED** — see §5. |
 | **F-6** | B | 322E002 | C5 EoS/activity | HPCC condensation split `φᵢ = HPCC_FRAC_GAS_DES` is **invariant to shell temperature and loop pressure**. Raising LP-steam pressure changes duty and `T_prod` (via NTU) but not one mole of condensate. **CLOSED** — see §5. |
-| **F-7** | B | 328C003 | C7 Kinetics | The hydrolyser carries **no reaction extent at all** — urea hydrolysis is lumped into the back-solved `R328_C003_LAM748`. Arrhenius hydrolysis kinetics exist only in the read-only `ppm_infer_328701` soft sensor, not in the mass balance. |
+| **F-7** | B | 328C003 | C7 Kinetics | The hydrolyser carries **no reaction extent at all** — urea hydrolysis is lumped into the back-solved `R328_C003_LAM748`. Arrhenius hydrolysis kinetics exist only in the read-only `ppm_infer_328701` soft sensor, not in the mass balance. **CLOSED** — see §5. |
 | **F-8** | B | 323/324/328/329 | C2 Component balance | Species tracking (`MW_COMP`, 9 components) exists **only in unit 322**. Everything downstream of LV-322501 is lumped-mass. No component balance, hence no C6 summation equations, downstream. **CLOSED for 323 + 324** — see §5; the 328 train remains (F-7 depends on it). |
 | **F-11** | B | 323F010 | C2 / source data | **The PFD's stream-317 composition is not reachable from stream 319 by evaporation.** Removing 319's water, NH₃ and CO₂ at the tabulated percentages takes out 10 163 kg/h against a tabulated 8 750 kg/h total, so ≈1.4 t/h of urea would have to *appear* across 323F010, and no stream feeds it there (331, the urea-recovery return, enters 323D002 downstream and is only 1 451 kg/h of urea). Found by closing F-8 — the rigorous component balance exposed it. Needs a licensor data clarification, not a code change. |
 | **F-9** | C | tooling | — | `scratchpad/regress.py` `os.chdir(BACKEND)` before writing `argv[1]`, so the relative gate command in CLAUDE.md §7 / handoff.md fails with `FileNotFoundError`. Gate must be invoked with an **absolute** output path. **CLOSED** — `regress.py` now resolves `argv[1]` before the chdir (TD-010). |
@@ -209,7 +209,7 @@ clamps `op`, so no integral state can wind). Instrument dynamics are available a
 | C4 Isenthalpic/isothermal flash | ✔ isenthalpic flash at 323F004 (F-1) and isothermal (T,P) Rachford-Rice at 322E002 (F-6). JT letdown elsewhere — appropriate |
 | C5 EoS & activity | ~ Antoine (NH₃, H₂O), Clausius–Clapeyron carbamate bubble-P, carbamate K_p = p²_NH₃·p_CO₂ / Raoult / Henry K-values at 322E002, back-solved activity coefficients baked into the anchored K_des. No cubic EoS — reduced-order by design |
 | C6 Summation equations | ✔ enforced explicitly where a phase split exists: the 322E002 Rachford-Rice root (Σy=1, Σx=1) and the 323/324 relative-volatility normalisation (Σw=1, Σy=1, asserted every tick in telemetry). Unit 328 outstanding |
-| C7 Kinetics & reaction | ✔ reactor (Inoue–Kanai), stripper (hydrolysis + Arrhenius biuret), **323/324 biuret formation** (2 Urea → Biuret + NH₃, Arrhenius, 5 stages); ✗ hydrolyser (F-7) |
+| C7 Kinetics & reaction | ✔ **complete** — reactor (Inoue–Kanai), stripper (hydrolysis + Arrhenius biuret), 323/324 biuret formation (2 Urea → Biuret + NH₃, Arrhenius, 5 stages), 328C003 plug-flow urea hydrolysis (Arrhenius + residence-time) |
 | C8 Transport phenomena | ✔ ε-NTU throughout, Damköhler axial profile, Kremser, O'Connell |
 | C9 Hydraulic & equipment | ✔ IEC 60534 equal-%, √ΔP, Francis weir, affinity laws, ejector momentum law |
 | C10 Constitutive & properties | ~ densities and cp are **constants** (no T-dependence); `tsat_steam`, `psat_water_bara`, `psat_nh3_bara` are live |
@@ -385,9 +385,52 @@ figures agree to the published resolution. The single off-anchor cell is 323F010
 
 Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `133 passed`.
 
+### 328C003 — hydrolyser reaction extent (F-7)
+
+`NH₂CONH₂ + H₂O → 2 NH₃ + CO₂` is the entire purpose of 328C003, and the engine modelled it as a
+frozen overhead split, `gen748 = R328_C003_PHI748 · in_c003`, with the endotherm buried in the
+back-solved latent `R328_C003_LAM748`. No extent, no rate, no residence-time dependence — raising
+the MP steam or overloading the column changed nothing about how much urea was destroyed, and the
+rate law existed only inside the **read-only** `ppm_infer_328701` soft sensor.
+
+328C003 is a **trayed column, so it is plug flow, not a CSTR** — and that is the only way the PFD's
+0.82 % inlet → 1 ppm outlet is reachable at all. A CSTR at k·τ = 10.14 converts 91 %; plug flow
+converts 1 − e^(−10.14) = 99.996 %. Residence time falls as throughput rises, so
+
+- τ = τ_des · (ṁ₇₄₆,des / ṁ₇₄₆)
+- X = 1 − exp[ −k(T)·τ ], with k(T) the same first-order Arrhenius (Eₐ = 72 kJ/mol) the soft sensor
+  already carried
+- ξ = ṁ₇₄₆·w_urea / M_urea · X
+
+The 812 kg/h overhead then **decomposes** into what the reaction actually makes and what the MP
+steam strips, instead of being one opaque split fraction:
+
+    gen748 = ξ·(2·M_NH3 + M_CO2)  +  ṁ_strip,des·(ṁ₉₁₁/ṁ₉₁₁,des)
+           =        360.0         +           452.0            = 812.0 kg/h
+
+Both terms are exactly their design value at the seed, so `gen748 == R328_C003_M748_DES` bit-exact
+and the 328C003 pressure ODE stays stationary. The unreacted urea slip published to AI-328701 is now
+a mass-balance result of the extent rather than an inferential running alongside an unrelated split.
+
+**Verification** — the two levers an operator actually has now work, and the numbers are the
+training lesson:
+
+| | 140 °C | 160 °C | 180 °C | 200 °C (design) | 220 °C |
+|---|---|---|---|---|---|
+| conversion | 50.87 % | 84.60 % | 98.91 % | **99.996 %** | 100.00 % |
+| urea slip | 3994 ppm | 1252 ppm | 88 ppm | **0.32 ppm** | 0.00 ppm |
+
+| throughput | 1.0× | 1.5× | 2.0× | 3.0× |
+|---|---|---|---|---|
+| conversion | 99.996 % | 99.884 % | 99.372 % | 96.595 % |
+| urea slip | 0.32 ppm | 14 ppm | 102 ppm | 830 ppm |
+
+Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `136 passed`.
+
 ### Still open
 
-F-7 (hydrolyser kinetics) and the **328 remainder of F-8** are not landed: the desorption/hydrolysis
-train is still lumped mass, and a reaction extent needs species to act on, so F-7 stays blocked on
-extending the same layer through 328. F-9 is closed in `regress.py` itself. F-11 needs a licensor
-data clarification rather than a code change.
+The **328 remainder of F-8** — the desorption train's own species vector (328C002/C003/C004,
+328D001/D003, 322C001) is still lumped mass. F-7 closed without it because hydrolysis is a
+flow-through conversion needing only the feed's urea content, but a full C2 balance across 328
+remains. F-9 is closed in `regress.py` itself. **F-11** needs a licensor data clarification rather
+than a code change.

@@ -163,3 +163,40 @@ def test_pin_strength_preserves_the_minor_species_and_the_sum():
     # identity at the anchor itself
     same = main.sol_pin_strength(w, w["Urea"])
     assert all(abs(same[k] - w[k]) < 1e-12 for k in main.SOL_SPECIES)
+
+
+# ------------------------------------------ F-7 / TD-008: 328C003 hydrolyser reaction extent
+def test_hydrolyser_design_anchor_is_exact():
+    """The overhead generation decomposes into reaction + strip, and both must be exactly their
+    design value at the seed, or the 328C003 pressure ODE stops being stationary."""
+    assert abs(main.R328_C003_GASHYD_DES + main.R328_C003_GASSTR_DES
+               - main.R328_C003_M748_DES) < 1e-9
+    assert main.hydrolysis_x_328c003(main.R328_C003_T, main.R328_C003_M746_DES) \
+        == main.R328_C003_X_DES
+    assert main.R328_C003_GASSTR_DES > 0.0            # the strip term must not go negative
+    # 2 Urea couple: NH2CONH2 + H2O -> 2 NH3 + CO2 conserves mass
+    assert abs(main.R328_HYD_GAS_MW - (main.MW_SOL["Urea"] + main.MW_SOL["H2O"])) < 1e-3
+
+
+def test_hydrolysis_conversion_is_arrhenius_and_residence_limited():
+    """C7.  Conversion must FALL when the column cools and when it is overloaded — the two levers an
+    operator actually has.  Before the fix the extent did not exist: the overhead was a frozen split
+    fraction of the inflow and the rate law lived only in a read-only soft sensor."""
+    md = main.R328_C003_M746_DES
+    xs = [main.hydrolysis_x_328c003(T, md) for T in (140.0, 160.0, 180.0, 200.0)]
+    assert xs[0] < xs[1] < xs[2] < xs[3], xs                    # hotter -> more conversion
+    assert xs[0] < 0.75, xs[0]                                  # 140 C really does break through
+    ov = [main.hydrolysis_x_328c003(200.0, md * r) for r in (1.0, 2.0, 3.0)]
+    assert ov[0] > ov[1] > ov[2], ov                            # overload -> less residence
+    assert main.hydrolysis_x_328c003(200.0, md * 3.0) < 0.99    # ... measurably
+
+
+def test_hydrolyser_publishes_a_mass_balance_urea_slip():
+    """AI-328701's urea slip is now a mass-balance result of the extent, not an inferential running
+    alongside an unrelated split fraction."""
+    t = _fresh(600.0)
+    c = t["DESORB_328"]["C003"]
+    assert abs(c["X_hydrolysis"] - main.R328_C003_X_DES * 100.0) < 1e-3
+    assert abs(c["gas_hyd_kgh"] + c["gas_strip_kgh"] - main.R328_C003_M748_DES) < 1.0
+    assert 0.0 <= c["urea_slip_ppm"] < 2.0, c["urea_slip_ppm"]   # design: ~0.32 ppm
+    assert c["urea_in_kgh"] > 0.0 and c["xi_urea_kmolh"] > 0.0

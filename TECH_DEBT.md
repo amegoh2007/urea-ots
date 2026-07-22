@@ -441,7 +441,7 @@ Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `123 passed`. Tests:
 
 ## TD-008 — 328C003 hydrolyser carries no reaction extent
 
-**Status: OPEN** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-7) · severity B
+**Status: CLOSED 2026-07-22** · raised 2026-07-22 (`EQUATION_AUDIT.md`, finding F-7) · severity B
 
 `NH2CONH2 + H2O ⇌ 2 NH3 + CO2` is the entire purpose of 328C003, and the engine models it as a
 frozen overhead split `gen748 = R328_C003_PHI748 * in_c003` with the reaction endotherm lumped into
@@ -454,7 +454,31 @@ hydrolysis (`R328_AI701_EA_UREA = 72000` J/mol, `R328_AI701_KEFF_UREA`, `R328_AI
 balance would make MP-steam rate and residence time actually govern urea destruction, which is what
 the loop is trained on.
 
-Depends on TD-009: an extent needs species, and the 328 train is lumped-mass.
+### How it was closed
+
+It turned out **not** to depend on the full TD-009 328 species vector. Hydrolysis is a flow-through
+conversion, so it needs only the urea content of the feed (PFD stream 746, 0.82 %) — not a species
+holdup in every 328 vessel.
+
+The key modelling call: **328C003 is a trayed column, so it is plug flow, not a CSTR**, and that is
+the only way the PFD's 0.82 % inlet → 1 ppm outlet is reachable at all. A CSTR at k·τ = 10.14
+converts 91 %; plug flow converts 1 − e^(−10.14) = 99.996 %. Residence time falls as throughput
+rises, so `τ = τ_des·(ṁ746_des/ṁ746)` and `X = 1 − exp(−k(T)·τ)` with the soft sensor's own
+first-order Arrhenius (Eₐ = 72 kJ/mol).
+
+The 812 kg/h overhead now decomposes into reaction plus strip —
+`gen748 = ξ·(2·M_NH3 + M_CO2) + ṁ_strip,des·(ṁ911/ṁ911,des) = 360.0 + 452.0` — with both terms
+exactly their design value at the seed, so `gen748 == R328_C003_M748_DES` bit-exact and the pressure
+ODE stays stationary. AI-328701's urea slip is now a mass-balance result of the extent.
+
+Operator-visible behaviour that did not exist before: 200 °C → 0.32 ppm slip, 180 °C → 88 ppm,
+160 °C → 1252 ppm, 140 °C → 3994 ppm; and at 2× throughput → 102 ppm, 3× → 830 ppm.
+
+Gates: pin `leaves 25 / keys 15 / diffs 0` · suite `136 passed`. Tests in
+`backend/test_equation_audit_species.py`.
+
+**Caveat carried forward:** the 328 train's own component balance (TD-009 remainder) is still
+outstanding — this closes the reaction, not the species accounting around it.
 
 ---
 

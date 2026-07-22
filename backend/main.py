@@ -1269,6 +1269,45 @@ def sol_advance(w: dict, M_pre: float, M_new: float, m_in: float, w_in: dict,
     return {k: out[k] / tot for k in SOL_SPECIES}      # C6: renormalise to Sum w == 1
 
 
+# ---- AUDIT F-7 / TD-008: 328C003 hydrolyser reaction extent -----------------------------------
+# NH2CONH2 + H2O -> 2 NH3 + CO2 is the entire purpose of 328C003, and the engine modelled it as a
+# frozen overhead split `gen748 = R328_C003_PHI748 * in_c003` with the endotherm buried in the
+# back-solved latent R328_C003_LAM748.  No extent, no rate, no residence-time dependence: raising
+# the MP steam or cutting the feed changed nothing about how much urea was actually destroyed, and
+# the only place the rate law existed was the READ-ONLY soft sensor ppm_infer_328701.
+#
+# 328C003 is a trayed column, so it is PLUG FLOW, not a CSTR -- which is the only way the PFD's
+# 0.82 % inlet -> 1 ppm outlet is reachable.  A CSTR at k.tau = 10.14 converts 91 %; plug flow
+# converts 1 - exp(-10.14) = 99.996 %.  Residence time scales inversely with throughput, so:
+#
+#     tau_live = tau_des * (m_746_des / m_746)
+#     X        = 1 - exp(-k(T) * tau_live)                     first-order in urea
+#     xi       = (m_746 * w_urea) / MW_urea * X                kmol/h destroyed
+#
+# The 812 kg/h overhead then decomposes into what the reaction actually makes and what the MP steam
+# strips, instead of being one opaque split fraction:
+#     gen748 = xi * (2*MW_NH3 + MW_CO2)  +  gas_strip_des * (m_911 / m_911_des)
+# Both terms are exactly their design value at the seed, so gen748 == R328_C003_M748_DES bit-exact
+# and the 328C003 pressure ODE stays stationary.
+R328_C003_W_UREA_746 = 0.0082        # PFD: urea mass fraction in the desorber-I bottoms (stream 746)
+R328_C003_UREA_DES   = R328_C003_M746_DES * R328_C003_W_UREA_746        # 276.9 kg/h urea to hydrolyse
+R328_C003_X_DES      = 1.0 - math.exp(-R328_AI701_KEFF_UREA * R328_AI701_TAU_S)   # 0.99996 plug flow
+R328_C003_XI_DES     = R328_C003_UREA_DES / MW_SOL["Urea"] * R328_C003_X_DES      # 4.611 kmol/h
+R328_HYD_GAS_MW      = 2.0 * MW_SOL["NH3"] + MW_SOL["CO2"]              # 78.0706 kg gas per kmol urea
+R328_C003_GASHYD_DES = R328_C003_XI_DES * R328_HYD_GAS_MW               # 360.0 kg/h from the reaction
+R328_C003_GASSTR_DES = R328_C003_M748_DES - R328_C003_GASHYD_DES        # 452.0 kg/h stripped by 911
+
+
+def hydrolysis_x_328c003(T_c: float, m_746: float) -> float:
+    """Plug-flow urea-hydrolysis conversion in 328C003.  Arrhenius in temperature, and the residence
+    time falls as throughput rises -- both written as ratios to their design value, so X is exactly
+    R328_C003_X_DES at the design seed."""
+    k_live = R328_AI701_KEFF_UREA * math.exp(
+        (R328_AI701_EA_UREA / 8.314) * (1.0 / (R328_C003_T + 273.15) - 1.0 / (T_c + 273.15)))
+    tau_live = R328_AI701_TAU_S * (R328_C003_M746_DES / max(m_746, 1e-6))
+    return clamp(1.0 - math.exp(-max(k_live, 0.0) * tau_live), 0.0, 1.0)
+
+
 def sol_pin_strength(w: dict, w_urea_auth: float) -> dict:
     """Reconcile a species vector onto the AUTHORITATIVE urea strength (CLAUDE.md §0 -- PFD values
     override derived ones), keeping the rigorously-balanced minor species untouched.
@@ -4335,10 +4374,22 @@ def step_sim(dt: float) -> dict:
     in_c003  = m_746 + m_911
     pic203b_op = _ctrl_ipd(s.PIC_328203, s.a328_c003_P, dt)
     m_748    = R328_C003_M748_DES * (pic203b_op / R328_C003_PV_OP_DES)    # OVHD relief -> 328C002
-    gen748   = R328_C003_PHI748 * in_c003
+    # AUDIT F-7/TD-008 — the overhead generation is now the REACTION plus the strip, not a frozen
+    # split fraction of the inflow.  gas_hyd is what urea hydrolysis actually makes; gas_str is what
+    # the MP steam carries over and scales with the live 911 flow.  Both == design at the seed, so
+    # gen748 == R328_C003_M748_DES bit-exact and the pressure ODE below stays stationary.
+    x_hyd_328  = hydrolysis_x_328c003(Tc003, m_746)
+    urea_in_328 = m_746 * R328_C003_W_UREA_746
+    xi_hyd_328 = urea_in_328 / MW_SOL["Urea"] * x_hyd_328                 # kmol/h urea destroyed
+    gas_hyd    = xi_hyd_328 * R328_HYD_GAS_MW                             # kg/h NH3 + CO2 produced
+    gas_str    = R328_C003_GASSTR_DES * (m_911 / R328_C003_M911_DES)      # kg/h stripped by MP steam
+    gen748   = gas_hyd + gas_str
     lvl_c003 = s.a328_c003_M / R328_C003_M_DES * 50.0
     lic505_op= _ctrl_ipd(s.LIC_328505, lvl_c003, dt)
     m_747    = R328_C003_M747_DES * (lic505_op / 50.0)                    # bottoms -> desorber-II
+    # AUDIT F-7: urea slipping through unreacted -> AI-328701.  A MASS-BALANCE result now, not the
+    # read-only ppm_infer_328701 soft sensor running alongside an unrelated split fraction.
+    ppm_urea_747 = urea_in_328 * (1.0 - x_hyd_328) / max(m_747, 1e-6) * 1e6
     sens_c003= m_746/3600.0*R328_CP*(T_746 - Tc003)
     P_c003   = sens_c003 + m_911/3600.0*R328_C003_M911_DH - m_748/3600.0*R328_C003_LAM748
     s.a328_c003_P = max(s.a328_c003_P + R328_C003_P_KP*(gen748 - m_748)/3600.0*dt, 0.1)
@@ -5073,6 +5124,13 @@ def step_sim(dt: float) -> dict:
                 "steam911_th":round(m_911 / 1000.0, 2),                    # FIC-329402 MP steam (t/h)
                 "ovhd748_th": round(m_748 / 1000.0, 2),                    # relief -> 328C002 (t/h)
                 "bot747_th":  round(m_747 / 1000.0, 2),                    # bottoms -> 328C004 (t/h)
+                # AUDIT F-7/TD-008: the hydrolysis reaction is now IN the mass balance
+                "X_hydrolysis": round(x_hyd_328 * 100.0, 4),               # urea conversion (%)
+                "xi_urea_kmolh": round(xi_hyd_328, 4),                     # extent (kmol/h destroyed)
+                "urea_in_kgh":  round(urea_in_328, 1),                     # urea fed with stream 746
+                "urea_slip_ppm":round(ppm_urea_747, 3),                    # unreacted urea -> 328C004
+                "gas_hyd_kgh":  round(gas_hyd, 1),                         # NH3+CO2 made by reaction
+                "gas_strip_kgh":round(gas_str, 1),                         # carried over by MP steam
                 "PIC_328203": {"pv": round(s.PIC_328203["pv"], 2), "sp": round(s.PIC_328203["sp"], 2),
                                "op": round(s.PIC_328203["op"], 1), "mode": s.PIC_328203["mode"]},
                 "LIC_328505": {"pv": round(s.LIC_328505["pv"], 1), "sp": round(s.LIC_328505["sp"], 1),
