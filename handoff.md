@@ -112,7 +112,7 @@ unit-324 constant stays byte-identical. `_sol_stage_anchor` / `sol_advance` gain
 second inlet (adds 0.0 when absent, so the other four stages are bit-identical).
 New tests: 3 in `backend/test_equation_audit_species.py`. Probe: `scratchpad/probe_f11_331.py`.
 
-### Remediation slot 6 — unit 328 desorption train species layer (F-8 remainder / TD-009)
+### Remediation slot 6 — unit 328 desorption train species layer (F-8 remainder / TD-009), commit `1271276`
 
 The last lumped-mass island. 328C002 and 328C004 moved material with **frozen overhead split
 constants** (`R328_C002_PHI737`, `R328_C004_PHI750`) and no composition existed anywhere in unit 328.
@@ -150,7 +150,7 @@ New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_
 set PY=%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe
 %PY% scratchpad\regress.py scratchpad\pin_now.json
 %PY% scratchpad\pindiff.py scratchpad\pin_now.json scratchpad\golden_pin.json   ->  25 / 15 / 0
-cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  139 passed
+cd backend && %PY% -m pytest -q -p no:cacheprovider                             ->  149 passed
 ```
 Use `-p no:cacheprovider` — `backend/.pytest_cache` holds stale dirs that raise `WinError 183`.
 **The suite takes 5–8 minutes and the pin settle takes ~2** — run them with a raised timeout or in
