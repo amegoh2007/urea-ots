@@ -716,8 +716,11 @@ But it also walked D002's urea fraction to **76.515 %** against the PFD stream-3
 **RETRACTION.** The first write-up read that as "the 323 balance genuinely misses 80.00 by 3.5
 points, and the pin has been masking it". **That was wrong, and it was my own bug.** Measurements:
 
-* `w_f010` — 323F010's outlet, and 323D002 Comp-I's *only* inlet — is **80.0014 % urea**, on the
-  PFD anchor. One inlet, one outlet, no reaction, no vapour ⇒ the tank must converge to it.
+* `w_f010` — 323F010's outlet, and 323D002 Comp-I's *only* inlet — reads **80.0014 % urea** at
+  60 s. **That is a transient, not a steady state** (adversarial review; see R-4). The tank
+  structure is confirmed single-inlet / single-outlet / no reaction / no vapour, and `w = w_in` is
+  an exact fixed point of `sol_advance`, so the tank tracks its inlet — but the inlet never
+  settles, so "it must converge to 80.00" does not follow.
 * Comp-I holds 67 600 kg against a 92 749 kg/h draw, so it turns over only **α = 9.5 × 10⁻⁵ per
   tick**. The patch measured its deviation against a reference captured once and then fed the
   result back into the state that produced it. That recursion has fixed point
@@ -731,6 +734,21 @@ out every additive or multiplicative in-loop correction, leaving only a non-recu
 from an upstream variable (stable, but the tank then tracks its inlet with no lag) or dropping the
 pin entirely (correct dynamics and lag, but D002 inherits whatever `w_f010` does). Choosing between
 those is a modelling decision, not a bug fix.
+
+## R-4 — the 323 urea ramp (new, 2026-07-23) — **OPEN, see TECH_DEBT TD-014**
+
+Asking "does D002's inlet actually settle?" — which R-1's first write-up did not — found that it
+does not. `w_f010` falls on a **perfectly linear −0.0067 pp/h ramp**: 80.0013 % at 60 s, 79.9239 %
+at 6 h, 79.8704 % at 14 h. Slope constant to 0.12 % over 12 h and tick-invariant to 0.4 %, so it is
+a model property rather than an integration artefact.
+
+It breaks `test_equation_audit_species.py:85` (`|w_f010 − 80.00| < 0.10` pp) at **≈ 9.5 h**, which
+no test reaches. Urea is displaced predominantly by **water** (over 14 h: urea −0.131 pp; H₂O
++0.118, Biuret +0.010, NH₃ +0.003, CO₂ +0.001, summing to +0.131). `w_f004` drifts too, so the
+origin is at or upstream of **323F004**.
+
+This is the deciding constraint on R-1: dropping the D002 pin gives correct tank dynamics but makes
+the tank track this ramp (0.071 pp low at 6 h, 0.131 pp at 14 h). The ramp comes first.
 
 ## R-2 — what already rippled correctly
 

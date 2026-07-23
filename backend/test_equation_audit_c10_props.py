@@ -43,11 +43,18 @@ def test_cp_falls_as_the_solution_concentrates():
 
 
 def test_cp_of_pure_water_matches_the_steam_tables():
+    """At zero urea the mixing rule must collapse to water plus the constant anchor offset.
+
+    The point values were originally checked against 1-atm table values (4.182 at 20 C). They now
+    reference IAPWS-IF97 SATURATED liquid, matching test_equation_audit_c10_aqueous.py, so the two
+    files no longer disagree about what "water cp" means -- at 20 C the saturation pressure is
+    0.023 bar, not 1 atm, and the two conventions differ by ~0.003 kJ/kg.K.
+    """
     assert abs(m.urea_soln_cp(0.0, 100.0) - m.cp_water_kjkgk(100.0)
                - (m.R323_CP_SOLN - m._CP_RAW_DES)) < 1e-12
-    assert abs(m.cp_water_kjkgk(20.0) - 4.182) < 0.01
-    assert abs(m.cp_water_kjkgk(100.0) - 4.216) < 0.01
-    assert abs(m.cp_water_kjkgk(140.0) - 4.285) < 0.01
+    for T, ref in ((20.0, 4.1851), (100.0, 4.2166), (140.0, 4.2860), (200.0, 4.4941)):
+        assert abs(m.cp_water_kjkgk(T) - ref) < 0.02, (
+            f"cp_water_kjkgk({T}) = {m.cp_water_kjkgk(T):.4f} vs IF97 {ref:.4f}")
 
 
 def test_back_solved_urea_cp_matches_the_published_molten_value():

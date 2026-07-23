@@ -293,11 +293,32 @@ loop was amplified by **1/alpha ~ 10 495**; replaying that recursion with a 0.00
 error lands on 76.5150 %, the observed value to four decimals. Arithmetic in
 `scratchpad/probe_td013.py` and `probe_td013_recursion.py`.
 
-**The ripple break is real and still open — only my explanation was wrong.** The amplification is
-the actual constraint: it rules out every additive or multiplicative in-loop correction, leaving
-(b) a non-recursive assignment from an upstream variable (stable and bit-exact, but the tank then
-tracks its inlet with no lag) or (c) dropping the pin (correct dynamics AND the 44-min lag, but
-D002 then inherits whatever w_f010 does). That is a modelling decision, not a bug fix — TD-013.
+**The ripple break is real and still open — only my explanation was wrong.** Adversarial review
+then corrected the retraction too, on three points worth carrying:
+
+* **"w_f010 delivers 80.00 %" was a 60-SECOND reading.** probe_td013.py settles only 240 ticks.
+  The real trajectory is 80.0013 % at 60 s, 79.9239 % at 6 h, 79.8704 % at 14 h.
+* **"positive feedback runaway" is the wrong mechanism.** The recursion is a STABLE contraction
+  (lambda = 0.999905 < 1); nothing diverges. It is DC-gain amplification of a frozen constant,
+  w* = w_f010 + (A-ref)/mu with 1/mu = tau/dt. Because mu = dt/tau, HALVING THE TICK DOUBLES THE
+  ERROR — which is itself the proof the construction was numerical, not physical.
+* **My "0.0003 pp capture error" was back-solved to match, so it was circular.** The sourced value
+  is the _w_norm residue on the PFD-317 row: that row sums to 99.99797, so _w_norm lifts 80.00 to
+  W_S317['Urea'] = 0.8000162403296788 against R324_W_IN = 0.80 exactly. A-ref = -1.624e-05
+  reproduces 76.5137 % vs the reported 76.515 — independently derived, not fitted.
+* **And a defect in my own evidence:** the "unpinned" column of scratchpad/probe_td013.py is INERT.
+  It drives its shadow tank with m_in = s.tlag.get("R323_m317", 0.0) and no such key exists, so
+  sol_advance returns its input unchanged. That probe was cited in three documents.
+
+**TD-014 is the finding that actually governs TD-013.** w_f010 is on a perfectly linear
+-0.0067 pp/h ramp that never arrests (slope constant to 0.12 % over 12 h, tick-invariant to 0.4 %).
+It breaks test_equation_audit_species.py:85 at ~9.5 h, which no test reaches. Urea is displaced
+predominantly by WATER, and w_f004 drifts too, so the origin is at or upstream of 323F004.
+
+So the pin CANNOT come out yet, even though dropping it is the agreed target: the tank would then
+track that ramp (0.071 pp low at 6 h, 0.131 pp at 14 h). Fix TD-014 first, then drop the pin.
+Separately, sol_pin_strength is itself a C2 violation — it fabricates +0.600 kg urea per 1000 kg
+of holdup per call — but that was tested as the ramp's cause and REFUTED.
 
 **Durable lesson (slots 8-9), and it is the same one three times:**
 1. **A dead term passes every gate.** `eta_P` was recomputed each tick from an argument every caller

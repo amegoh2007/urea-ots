@@ -917,9 +917,12 @@ with the constant 0.80 every tick. Two consequences, and the second is the serio
 The first write-up of this item claimed the 323 balance misses the PFD anchor by 3.5 points and
 that the pin had been masking it. **That is false.** Three measurements settle it:
 
-* `w_f010` — the 323F010 outlet, which is 323D002 Comp-I's **only** inlet — measures
-  **80.0014 % urea**, i.e. on the PFD stream-317 anchor of 80.00. The tank has one inlet, one
-  outlet, no reaction and no vapour, so at steady state it *must* equal that inlet.
+* `w_f010` — the 323F010 outlet, which is 323D002 Comp-I's **only** inlet — reads
+  **80.0014 % urea** after 60 s. **Caveat, added after adversarial review: that is a transient
+  reading, not a steady state** (see "Second correction" below). The tank structure is confirmed
+  exactly single-inlet / single-outlet / no reaction / no vapour, and `w = w_in` is an exact fixed
+  point of `sol_advance` for every holdup, flow and `dt` — so the tank tracks its inlet. What it
+  does *not* do is converge to 80.00, because the inlet itself never settles.
 * Comp-I holds 67 600 kg against a 92 749 kg/h draw, so it exchanges only
   **α = 9.5 × 10⁻⁵ of its holdup per tick**. The reverted patch measured its deviation against a
   reference captured *once*, then fed the result back into the state that produced it — a linear
@@ -943,11 +946,76 @@ The amplification is the real constraint on any fix, and it eliminates a whole c
 | `auth = A + (w_f010 − W_F010_DES)` | `A` at design, tracks inlet | stable, but no tank lag |
 | no pin at all | `w_f010` | stable, correct lag |
 
-Only the last two survive. Choosing between them is a modelling decision, not a bug fix — see
-"Open question" below.
+Only the last two survive. Choosing between them is a modelling decision, not a bug fix.
+
+### Second correction — the mechanism, and the drift that was missed
+
+Adversarial verification confirmed the headline (no 3.5-point gap) but refuted three details:
+
+1. **"positive feedback runaway" is the wrong mechanism.** The recursion is a *stable contraction*
+   — λ = 0.999905 < 1 for every `dt` > 0, so nothing diverges. The right description is **DC-gain
+   amplification of a frozen constant**: `w* = w_f010 + (A − ref)/μ` with `1/μ = τ/dt`. Because
+   μ = dt/τ, **halving the tick doubles the error** (1/μ = 10 495 at dt = 0.25, 5 248 at 0.5,
+   2 624 at 1.0) — which is itself the proof that the construction was numerical, not physical.
+2. **The capture error is properly sourced, not back-solved.** My "0.0003 pp" was fitted to match
+   the observed value, so its agreement was circular. The real figure is the `_w_norm` residue on
+   the PFD-317 row: that row sums to 99.99797, so `_w_norm` lifts 80.00 to
+   `W_S317['Urea'] = 0.8000162403296788` while `R324_W_IN` is exactly 0.80. A − ref = −1.624e-05,
+   which replayed reproduces **76.5137 %** against the reported 76.515 — 0.0013 pp, derived
+   independently.
+3. **`scratchpad/probe_td013.py`'s "unpinned" column is inert and proved nothing.** It drives its
+   shadow tank with `m_in = s.tlag.get("R323_m317", 0.0)`; no such key exists, so m_in = 0 and
+   `sol_advance` returns its input unchanged. That probe was cited as evidence in three documents.
+
+**And the finding that was missed — see TD-014.** `w_f010` is on a perfectly linear ramp of
+**−0.0067 pp/h that never arrests**. That is what actually governs the choice above.
 
 Why the ripple break stayed hidden: Comp-I's time constant is ~44 min and no test runs long enough
 to watch the tank converge.
+
+## TD-014 — the 323 train's urea fraction is on a linear ramp that never arrests
+
+- **Status:** OPEN — measured and characterised 2026-07-23, origin not yet located
+- **Severity:** B (limits fidelity on long runs; no operator action triggers it)
+- **Found by:** adversarial verification of TD-013, which asked the question TD-013 itself had not:
+  *does the inlet actually settle?*
+
+`w_f010` (PFD stream 317, the 323F010 outlet feeding 323D002) does not converge. It falls on a
+**perfectly linear ramp of −0.0067 pp/h** and shows no sign of stopping:
+
+| t | w_f010 |
+|---|---|
+| 60 s | 80.0013 % |
+| 600 s | 79.9759 % |
+| 6 h | 79.9239 % |
+| 9.5 h | 79.9008 % |
+| 14 h | 79.8704 % |
+
+It is a **model property, not an integration artefact**. The least-squares slope is constant to
+0.12 % across 12 h (−0.006694 pp/h in the 1.5–2.5 h window, −0.006686 in the 10.5–13.9 h window),
+and it is tick-invariant to 0.4 % (dt = 1.0 → −0.006775; dt = 0.5 → −0.006792; dt = 0.25 →
+−0.006801). An exponential fitted to the residual decay implies τ ≈ 8500 h (about a year), i.e.
+not a settling transient on any operational timescale.
+
+**It breaks a live assertion, just beyond every test's horizon.** `test_equation_audit_species.py:85`
+asserts `|w_f010 − 80.00| < 0.10` pp but settles only 600 s. The real trajectory crosses 0.10 pp at
+**≈ 9.5 h** of simulated time. Nothing in the suite runs that long, which is why it has never fired.
+
+**Where the urea goes.** Over 14 h urea falls 0.131 pp while H₂O rises 0.118, Biuret 0.010,
+NH₃ 0.003 and CO₂ 0.001 — the four gains sum to 0.131, so the vector is internally consistent and
+urea is being displaced **predominantly by water**, not by biuret. The inlet to 323F010 drifts too
+(`w_f004`, PFD stream 319, at −0.0044 pp/h), so **the origin is at or upstream of 323F004** and was
+not traced further.
+
+**Why it matters now.** It is the deciding constraint on TD-013. Dropping the D002 strength pin
+gives the tank correct dynamics, but the tank then tracks this ramp: unpinned D002 sits 0.071 pp
+low at 6 h and ~0.131 pp low at 14 h. So the drift must be understood before the pin comes out,
+or the OTS acquires a slowly-wandering product spec.
+
+**Separately — the pin is itself a component-mass source.** `sol_pin_strength` rewrites the
+urea/water pair at constant total mass, so it fabricates **+0.600 kg of urea per 1000 kg of holdup
+per call**, violating C2. Tested as a cause of the ramp and **refuted** (−0.00199 pp/15 min pinned
+vs −0.00168 unpinned — comparable), so it is a separate, smaller defect, not this one.
 
 ### Dead constants found while auditing (2026-07-23)
 

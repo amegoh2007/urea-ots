@@ -698,11 +698,16 @@ C10_T_DES        = 99.0           # design anchor temperature (C)
 
 
 def cp_water_kjkgk(T_C: float) -> float:
-    """Saturated-liquid water cp, kJ/kg.K.  Least squares over the standard steam-table values at
-    20-200 C in 20 C steps (4.182, 4.179, 4.185, 4.197, 4.216, 4.245, 4.285, 4.339, 4.408, 4.497).
-    Worst residual 0.0085 kJ/kg.K (0.2 %).  The curve genuinely has a minimum near 40 C, which is
-    why a quadratic is used rather than a line."""
-    return 4.209433 - 0.001320530 * T_C + 0.0000135795 * T_C * T_C
+    """Saturated-liquid water cp, kJ/kg.K.  Least squares against IAPWS-IF97 at 19 points spanning
+    0-212 C, which is the full range this engine's aqueous streams occupy (40 C absorber liquor to
+    200 C hydrolyser).  Worst residual 0.0090 kJ/kg.K (0.21 %).
+
+    CUBIC, not quadratic.  cp(T) has a minimum near 35 C and then curves upward increasingly
+    steeply -- 4.18 at 40 C but 4.56 at 212 C -- and a quadratic fitted over 20-200 C could not
+    hold 0.02 kJ/kg.K at both ends of the wider range (it missed IF97 by 0.021 at 212 C).
+    test_water_cp_tracks_if97 pins this against the reference table."""
+    return (4.21143048 - 0.0010464288 * T_C
+            + 0.000008708461 * T_C * T_C + 0.00000001809921 * T_C ** 3)
 
 
 # cp of molten urea, BACK-SOLVED rather than hardcoded, so it can never drift out of step with
@@ -738,6 +743,89 @@ def urea_soln_rho(w_urea: float, T_C: float, anchor: float) -> float:
     """Density of a urea solution, kg/m3, as a DEPARTURE from the caller's own design anchor.
     Each call site keeps its PFD-published design density and gains the correct slopes around it."""
     return anchor + (_urea_rho_raw(w_urea, T_C) - _RHO_RAW_DES)
+
+
+# ==============================================================================================
+#  AUDIT C10, aqueous half -- water properties from IAPWS, and why that does not violate §0
+#
+#  §0 makes the PFD the strict source, so departing from its tabulated density needs a reason
+#  stronger than "the number looks wrong".  Here is the reason, and it is specific rather than
+#  general: the PFD's density row is RIGHT almost everywhere and wrong for exactly two streams.
+#
+#    * The utility sheet's seven steam condensates, 142-212 C, match IAPWS-IF97 to a mean 0.04 %.
+#    * The desorption sheet's OWN pure-water streams match to 0.02 % (742G 88 C, 740 89 C,
+#      739 143 C).  So this is not one sheet being sloppy.
+#    * Only the "Amm. Water" mixture-model family is off, and only above 150 C: stream 746
+#      (190 C) tabulates 908.5 against 876.08, and 747 (200 C) tabulates 897.7 against 864.67
+#      -- +3.70 % and +3.82 %.
+#
+#  Those two are not merely improbable, they are IMPOSSIBLE, and three independent checks say so:
+#    1. Compressed liquid explains almost none of it.  At their tabulated pressures the density
+#       gain over the saturation line is +0.009 % and +0.018 %, i.e. 0.24 % and 0.47 % of the gap.
+#    2. Dissolved solids would need NEGATIVE volume.  Solving 1/rho = (1-ws)/rho_w + ws/rho_app,
+#       the water alone already occupies more than the tabulated total volume, giving apparent
+#       solute densities of -308 and -12 507 kg/m3.  Even if every solute were as dense as SOLID
+#       urea (1335), the maxima are 867.6 and 886.2 -- still below the tabulated values.
+#    3. Composition cannot be the variable at all: 743->746 and 749->747 are the same streams
+#       heated, at identical composition and identical mass flow, yet the excess grows by +3.06
+#       and +3.25 points over ~51 K.
+#
+#  The artefact is identified.  Solving rho(T2)/rho(T1) = exp(-beta*(T2-T1)) across three
+#  independent composition families gives beta = 5.22, 5.57 and 5.74e-4 /K -- water's true
+#  expansivity at 60-68 C, i.e. the desorption section's own 56-60 C reference temperature.  Water's
+#  actual beta at 190 C is 1.27e-3, more than double.  The licensor's mixture model carried a
+#  CONSTANT thermal-expansion coefficient frozen near the section reference; a single beta = 5.5e-4
+#  reproduces every high-T entry from its low-T partner to within 0.14 %.  The identical pattern
+#  appears in the 1925 MTPD PFD, so it is systematic behaviour, not a transcription slip.
+#
+#  Crucially, NEITHER impossible value is used as a constant anywhere in this engine (grep: 908.5
+#  matches nothing; 897.7 matches only a kmol/h figure).  The 328 anchors are R328_C002_RHO = 933.0
+#  at 139 C and R328_C004_RHO = 923.28 at 143 C, which sit +0.64 % and -0.02 % from real water.
+#  So the fix never has to anchor on a bad number: §0 is honoured where the PFD is sound, and the
+#  DERIVATIVE comes from physics.
+WATER_TC_K   = 647.096      # K, critical temperature of ordinary water (IAPWS)
+WATER_RHOC   = 322.0        # kg/m3, critical density
+#  Wagner & Pruss, J. Phys. Chem. Ref. Data 22 (1993) 783, Eq. 2.6; reproduced as the auxiliary
+#  saturated-liquid equation in IAPWS R7-97 §8.1.  Six PUBLISHED coefficients -- nothing is fitted
+#  here, so §1 is satisfied without any regression at all.  Verified against an independent IF97
+#  implementation: worst deviation 0.0047 % over 0-220 C, 0.043 % out to 250 C.
+_WP_B = (1.99274064, 1.09965342, -0.510839303, -1.75493479, -45.5170352, -6.74694450e5)
+_WP_E = (1.0 / 3.0, 2.0 / 3.0, 5.0 / 3.0, 16.0 / 3.0, 43.0 / 3.0, 110.0 / 3.0)
+
+
+def water_rho_sat(T_C: float) -> float:
+    """Saturated-liquid density of ordinary water, kg/m3.  Wagner & Pruss (1993) Eq. 2.6."""
+    tau = 1.0 - (T_C + 273.15) / WATER_TC_K
+    if tau <= 0.0:
+        return WATER_RHOC
+    return WATER_RHOC * (1.0 + sum(b * tau ** e for b, e in zip(_WP_B, _WP_E)))
+
+
+def aqueous_rho(anchor: float, T_des_C: float, T_C: float) -> float:
+    """Density of an aqueous stream, kg/m3, as a MULTIPLICATIVE departure from its own design
+    anchor: the absolute value stays the PFD's (§0), only the temperature slope comes from IAPWS.
+
+    Multiplicative rather than additive because these anchors sit 0-1.3 % above pure water and a
+    solution's expansivity tracks water's FRACTIONALLY, not absolutely.  Across the full 44->200 C
+    span the two forms differ by at most 1.5 kg/m3, so this is a refinement, not a reversal.
+
+    The parentheses around the ratio are LOAD-BEARING and not cosmetic.  `anchor * (r/r)` returns
+    anchor bit-exactly for every operand; `anchor * r / r`, evaluated left to right, does not --
+    measured at ~10 % of random operand pairs.  Test test_ratio_must_be_parenthesised guards it.
+    """
+    return anchor * (water_rho_sat(T_C) / water_rho_sat(T_des_C))
+
+
+def aqueous_cp(anchor: float, T_des_C: float, T_C: float) -> float:
+    """cp of an aqueous stream, kJ/kg.K, as an additive departure from its own design anchor.
+
+    Note that §0 does not bind here at all: the PFD has NO cp row anywhere (its rows are flows,
+    molar weight, density, temperature and pressure), so steam tables are the only admissible
+    source rather than merely the better one.  Additive rather than multiplicative because these
+    anchors are LUMPED values well below pure water (4.0 and 3.0 against water's 4.18-4.49), so
+    they carry solute content whose own cp should not be scaled by water's temperature slope.
+    """
+    return anchor + (cp_water_kjkgk(T_C) - cp_water_kjkgk(T_des_C))
 
 R323_P_STEAM_SUP = 4.4            # bar a, LP steam header feeding 323E002/323E010
 
