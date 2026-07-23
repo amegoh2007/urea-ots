@@ -1049,10 +1049,10 @@ $$Q_{sp} = \frac{\dot m_{NH_3,sp}\times 1000}{\rho_{NH_3}}, \qquad N_{req} = \fr
 | $\dot m_{CO_2,des}$ | CO2_DES_KGH | 54,618 | kg/h |
 | $\dot n_{CO_2,des}$ | CO2_DES_KMOLH | 1,264 | kmol/h |
 | MW (stream) | CO2_FEED_MW | 43.21 | g/mol |
-| $\rho$ | CO2_RHO | 242.70 | kg/m³ |
 | $T_{feed}$ | CO2_T_FEED_C | 120 | °C |
 | $P_{des}$ | CO2_P_DES_BARA | 144.2 | bar a |
-| Max vent fraction | CO2_VENT_MAX_FRAC | 0.15 | — |
+| PV-322203 vent conductance | CO2_VENT_COND | 0.50 | — |
+| PV-322203 backpressure | CO2_VENT_P_BARA | 5.0 | bar a |
 | PV ΔP gain | CO2_PV_DP_GAIN | 0.25 | bar/% |
 | Nm³/kmol | NM3_PER_KMOL | 22.414 | Nm³/kmol |
 
@@ -1439,6 +1439,10 @@ evidence that the residual is controller-driven, not a plant instability. The co
 **Residual, recorded not hidden.** That limit cycle remains — 0.25 °C and 0.88 °C over 16 h, against
 valves that used to walk without limit. Removing it means replacing the concentration cap with a
 smooth equilibrium relation rather than deleting it, which is a modelling change of its own.
+
+The constants of record for these four loops (both masters and both chest-pressure slaves) are
+**Appendix B of `Master_PID_Tuning_Constants.md`**. The plant DCS rows in that document — Kc 1.50
+and 2.00 — are *not* what the simulator runs and must not be copied into it.
 
 ### 22.5 323D002 — the pin dropped, and the vessel rebuilt
 

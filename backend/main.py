@@ -393,7 +393,6 @@ CO2_DES_KGH       = 54618.0      # kg/h design total CO2-feed mass (54.618 t/h =
 CO2_DES_KMOLH     = 1264.0       # kmol/h design total molar flow
 CO2_T_FEED_C      = 120.0        # C, TI-322017 feed temperature (design)
 CO2_P_DES_BARA    = 144.2        # bar a, design CO2 feed-line pressure (PIC-322203 PV)
-CO2_RHO           = 242.70       # kg/m3, eff. density @ 120 C, 144.2 bar a
 NM3_PER_KMOL      = 22.414       # Nm3/kmol at 0 C, 1 atm (FT-322403 normal-volume basis)
 CO2_VENT_COND     = 0.50         # PV-322203 vent conductance (sqrt-dP orifice coeff, rel. HP path)
 CO2_VENT_P_BARA   = 5.0          # bar a, PV-322203 discharge backpressure (LP safe header)
@@ -842,7 +841,6 @@ R323_E002_OP_DES    = 90.0                      # %, PV-329202 design stroke
 R323_E002_PCHEST_DES = R323_E002_OP_DES / 100.0 * R323_P_STEAM_SUP   # 3.96 bar a
 R323_C003_M_TAU_S   = 120.0                     # s, liquid residence -> holdup sizing
 R323_C003_LVL_SP    = 60.0                      # %, LIC-323501 level setpoint
-R323_C003_RHO       = 1250.0                    # kg/m3, ~135 C bottom liquor
 R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
 # Dynamic column pressure PT-323201 (hydraulic coupling to LV-322501 via top-vapour flow 305).
 #   First-order relaxation of P_C003 toward a flow-scaled target so opening LV-322501 (drain_kgh up
@@ -859,7 +857,6 @@ R323_F004_T_SP_C    = 106.0                     # C, flash-liquid boundary (stre
 R323_PHI_V701       = 4430.0 / 106000.0         # 0.041792 flash-vapor split (stream 701)
 R323_F004_M_TAU_S   = 180.0                     # s, liquid residence
 R323_F004_LVL_SP    = 60.0                      # %
-R323_F004_RHO       = 1180.0                    # kg/m3, ~106 C liquor
 R323_LV505_OP_DES   = 50.0                      # %, LV-323505 design stroke
 # Dynamic flash pressure 323F004 (hydraulic coupling to LV-323501 via bottom-drain / flash-vapour 701).
 #   Opening LV-323501 (m_314 up) raises flash-vapour m_701 into the LP node read by PIC-323203:
@@ -889,7 +886,6 @@ R323_E010_OP_DES    = 40.0                      # %, PV-329208 design stroke
 R323_E010_PCHEST_DES = R323_E010_OP_DES / 100.0 * R323_P_STEAM_SUP   # 1.76 bar a
 R323_F010_M_TAU_S   = 240.0                     # s, liquid residence
 R323_F010_LVL_SP    = 60.0                      # %
-R323_F010_RHO       = 1300.0                    # kg/m3, 80% urea @ 99 C
 
 # --- Stage 4: Urea Solution Tank 323D002 (atmospheric, two-compartment buffer)
 R323_D002_VOL_I_M3  = 80.0                      # m3, Compartment I (active flow-through)
@@ -2827,7 +2823,6 @@ SCRUB_HOLDUP_NLL_KG  = EJ_SUC_TOT_DES * SCRUB_TAU_HOLDUP_MIN / 60.0   # kg liqui
 SCRUB_HOLDUP_MAX_KG  = SCRUB_HOLDUP_NLL_KG * 100.0 / SCRUB_LEVEL_NLL_PCT  # kg at 100% (sump full)
 SCRUB_CARB_T_C       = 74.0      # C, weak-carbamate wash inlet (323P001 A/B)
 SCRUB_CARB_P_BARA    = 140.7     # bar a, carbamate feed line
-SCRUB_CARB_RHO       = 1226.0    # kg/m³, carbamate density (74 C)
 SCRUB_OFFGAS_T_C     = 114.0     # C, TT-322011 off-gas vent-top temp -> HV-322604 (DESIGN PIN)
 SCRUB_OFFGAS_T_GAIN  = 120.0     # C / (N/C unit), TT-322011 rise w/ excess-NH3 loop slip: k*(AT-322701 - N/C_des)
 SCRUB_OFFGAS_T_VENT_GAIN  = 20.0 # C / (theta/theta_des - 1), TT-322011 rise w/ HV-322604 opening (more uncondensed vent overhead)

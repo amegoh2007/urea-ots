@@ -1272,13 +1272,29 @@ T_bub down and landing on it (56.71 against 56.64 at 26 min). That convergence i
 that the closure does what it claims. The assertion now bounds the collapse instead of demanding a
 zero the physics does not produce.
 
-### Dead constants found while auditing (2026-07-23)
+### Dead constants found while auditing — DELETED 2026-07-23
 
-Five density constants are **defined and never referenced** — they read as though density is
-modelled at those points when nothing uses them: `CO2_RHO` (line 396), `SCRUB_CARB_RHO`,
-`R323_C003_RHO`, `R323_F004_RHO`, `R323_F010_RHO`. Harmless at runtime, actively misleading to a
-reader. Left in place deliberately for now (deleting them is a separate, trivially-reviewable
-change) but they should not be mistaken for live property handling.
+Five density constants were **defined and never referenced** — they read as though density were
+modelled at those points when nothing used them: `CO2_RHO` (242.70), `SCRUB_CARB_RHO` (1226.0),
+`R323_C003_RHO` (1250.0), `R323_F004_RHO` (1180.0), `R323_F010_RHO` (1300.0). Harmless at runtime,
+actively misleading to a reader — a constant named `R323_F010_RHO` asserts that 323F010 has a
+density model, and it did not.
+
+**All five are now removed from `backend/main.py`.** Each was verified dead first — a repo-wide
+search over `*.py`, `*.js`, `*.html`, `*.json` and the live docs found exactly one hit apiece, the
+definition itself. The pin is unmoved (`leaves 25 / keys 15 / diffs 0`), which is the expected
+result and not evidence of much: a name nothing reads cannot change a number. The real check is the
+search, and the values remain recoverable from git and from the PFD, which is their source.
+
+Two doc rows fell with them. `Urea OTS — As-Built ... Reference.md` §6.7 listed `CO2_RHO` in its
+Code Name column, so that row went too; the same table also named **`CO2_VENT_MAX_FRAC`, which does
+not exist in `main.py` at all** — the vent model is `CO2_VENT_COND` / `CO2_VENT_P_BARA` — so that
+row is replaced by the two constants the code actually uses. A Code-Name column that names a symbol
+the engine does not define is the same defect as a constant nothing reads, pointing the other way.
+
+**This does not close the density gap**, it only stops the codebase overstating it. The live
+density work is the entry below: `RHO_744_KGM3`, `RHO_741_KGM3`, `R328_C002_RHO`, `R328_C004_RHO`
+and the FIC anchors are all still constant, and still real.
 - **Files:** `backend/main.py` — `R323_CP_SOLN`, `R328_CP`, `A328_CP`, `R3232_CP`, `RHO_744_KGM3`,
   `R328_C002_RHO`, `R328_C004_RHO` and the rest of the density/cp constants
 

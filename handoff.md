@@ -145,6 +145,50 @@ matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" predi
 New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
 `probe_f8_328.py`.
 
+### Remediation slot 11 — three housekeeping gaps closed (dead constants, PID doc, launcher)
+
+Small, deliberately separate from slot 10. Pin unmoved: **`leaves 25 / keys 15 / diffs 0`**.
+
+1. **Five dead density constants deleted** from `backend/main.py`: `CO2_RHO`, `SCRUB_CARB_RHO`,
+   `R323_C003_RHO`, `R323_F004_RHO`, `R323_F010_RHO`. Each verified dead first — one hit apiece
+   repo-wide, the definition itself. Two stale rows in the As-Built §6.7 table fell with them:
+   `CO2_RHO`, and **`CO2_VENT_MAX_FRAC`, which never existed in `main.py` at all** (the vent model
+   is `CO2_VENT_COND` / `CO2_VENT_P_BARA`) — replaced by the constants the engine actually reads.
+   This does **not** close the density gap; it stops the codebase overstating it.
+2. **`Master_PID_Tuning_Constants.md` — new Appendix B** for the unit-324 evaporator masters, with
+   the measured K_p table (+8.32 / +8.35 °C/bar, central difference over 1 h means), the lambda
+   derivation, the halving and why, the residual limit cycle, and the two do-not-repeat warnings
+   (the contaminated −17.5 °C/bar step test; the `v_conc` cap cannot be deleted). The plant DCS rows
+   are **unchanged** — they are correct for the plant — but now carry a `†` and a footnote saying
+   the simulator does not use them. Found while writing it: **33 of 46 sim controllers differ from
+   their plant row**, all intentionally, and Appendix A's `_fic_flow` Kc column is on the **mass**
+   basis while those loops are now **volumetric** (`Kc_engine = Kc_doc · ρ`, so `Kc·g` and every
+   stability conclusion are unchanged). Noted in Appendix A so nobody "corrects" the engine to it.
+3. **`launch.bat` / `.claude/launch.json` pinned to a resolved interpreter.** launch.bat now tries
+   pythoncore-3.14-64 → any `pythoncore-*` → `py -3` → `python`, each through a `:try` subroutine,
+   and a rejected candidate **falls through to the next** so a stale `pythoncore-*` left by a version
+   upgrade cannot dead-end the launcher. Failure lands on `:nopython`, which prints the actual
+   Settings path for fixing an alias. Every use of the interpreter (`pip`, `main.py`) goes through
+   the resolved `%PY%`.
+
+   **The guard demands a printed token, not an exit code — and that came from a failed test.** The
+   first version ran `-c "... raise SystemExit(...)"` and checked `errorlevel`. Probing it with a
+   copy of `cmd.exe` renamed `python.exe` — which is exactly what the Store stub is, a thing that
+   exists at that path and is not an interpreter — showed it **exits 0 and the guard accepted it**.
+   So the check is now `... print('PY_OK' if ...) | find "PY_OK"`: only a process that really
+   evaluated the expression can produce the token. (`range(310,600)` rather than `>=`, because `<`
+   and `>` are redirection operators inside a `.bat`.)
+
+   Verified: `scratchpad/probe_launch_resolve.bat` → `REJECT-OK / FALLTHROUGH-OK / NOPYTHON-OK`;
+   `scratchpad/probe_launch_quoting.bat` → the `start … cmd /k ""%PY%" main.py"` form survives a
+   path containing a space. The whole file was then dry-run with only the server/browser lines
+   neutered, and reached the wait loop on the resolved interpreter.
+
+   **See the correction under "Python on this machine": the alias is NOT currently broken.** The
+   earlier claim that the launcher "may fail from this environment" was asserted without ever
+   running it, and was wrong. The fix is still right — but for robustness against a Windows setting
+   that lives outside this repo, not for a live defect.
+
 ### Remediation slot 10 — TD-013 / TD-014 / TD-015 closed, cp made a property, commit `7a2cb67`
 
 **TD-014 was an open-loop temperature integrator, and the operator's stream map is what found it.**
@@ -259,12 +303,38 @@ the background; the default 2-minute Bash timeout kills both before they print a
 buffers, so a background output file stays EMPTY until the run finishes — that is not a hang.
 
 ## Python on this machine (do NOT re-derive — this cost an earlier session dearly)
-The bare `python` alias is a Microsoft Store stub that errors. **Python 3.14.6 IS installed:**
+**Python 3.14.6 IS installed:**
 ```
-%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe      # MSIX alias
-%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe   # real binary
+%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe      # MSIX / App Execution Alias
+%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe   # real binary  <- always safe
 ```
-Never conclude an interpreter is absent from one alias. Never pipe a heredoc into the stub alias.
+Never conclude an interpreter is absent from one alias. Never pipe a heredoc into an alias.
+
+### Correction, measured 2026-07-23 — the alias is NOT currently broken
+
+CLAUDE.md §7 and this section said "the bare `python` alias is a Microsoft Store stub that errors."
+**That is no longer true on this machine and should not be repeated as fact.** Measured under
+`cmd.exe`, PowerShell and the Bash tool:
+
+```
+where python  -> %LOCALAPPDATA%\Microsoft\WindowsApps\python.exe     (wins the PATH race)
+                 %LOCALAPPDATA%\Python\bin\python.exe
+python -V     -> Python 3.14.6                            exit 0
+sys.executable-> %LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe
+python -m pip -> pip 26.1.2                               exit 0
+```
+
+The WindowsApps entry is now the **PyManager app-execution alias forwarding to the real 3.14.6
+install**, not the Store stub. It was a stub once — that is why the warning exists — but repeating
+the warning as present-tense fact cost this session a **fabricated bug report**: the launcher was
+reported as "may fail from this environment" without ever being run.
+
+The advice still stands for a different reason. Which of the two `python.exe` wins is decided by
+PATH order plus a per-user **Settings ▸ Apps ▸ Advanced app settings ▸ App execution aliases**
+toggle that lives outside this repo. Flip it, or uninstall PyManager, and the same command becomes
+the Store stub again. So keep using `%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe` — because
+it is *pinned*, not because the alias is *broken*. `launch.bat` now resolves it that way explicitly
+and proves the interpreter runs before using it (see slot 11).
 
 ## OPEN items (in TECH_DEBT.md)
 
@@ -478,18 +548,23 @@ of holdup per call — but that was tested as the ramp's cause and REFUTED.
    328 and at 322C001 is now a per-stream / per-vessel departure. Still open: the **density** work —
    the PFD's >150 °C row runs ~4 % above physical water (analysed in TD-012, unchanged), the
    volumetric-controller densities (`RHO_744_KGM3`, `RHO_741_KGM3`, `R328_C002_RHO`,
-   `R328_C004_RHO`), the four remaining dead density constants, and `R3232_CP`, which needs a
-   *sourced carbamate* cp rather than water's. `urea_soln_rho` / `aqueous_rho` are the vehicles.
+   `R328_C004_RHO`) and `R3232_CP`, which needs a *sourced carbamate* cp rather than water's.
+   `urea_soln_rho` / `aqueous_rho` are the vehicles. The five **dead** density constants that used
+   to be listed here are **deleted** (slot 11) — they were never part of this gap, only noise in it.
 3b. **TD-015 — CLOSED 2026-07-23** with TD-013/TD-014; it was TD-013's blocker, not a follow-up.
    324E001/324E003 got the same bubble-point closure plus a measured retune (K_p = +8.3 C/bar on
    both, Kc 2.0 -> 0.02, Ti 120 -> 360 s). Residual: a bounded limit cycle, 16 h envelope 0.25 C on
    E001 and 0.88 C on E003, from the `min(v_conc, v_duty)` branch switching. Removing THAT means
    replacing the concentration cap with a smooth equilibrium relation — deleting the cap outright was
    tested and the stage diverges. Not attempted; it is a modelling change of its own.
-3c. **`Master_PID_Tuning_Constants.md` needs the TIC-324001 / TIC-324002 retune written into it.**
-   The engine is the authority now and the file is stale on these two loops.
+3c. **`Master_PID_Tuning_Constants.md` — DONE 2026-07-23 (slot 11).** The TIC-324001 / TIC-324002
+   retune is now **Appendix B**, with the measured gains and the derivation; the plant rows carry a
+   `†` pointing at it.
 4. Refresh the graphify graph once semantic extraction is available (do not AST-only-merge).
 5. `Master_PID_Tuning_Constants.md` still names loops by pre-rename tags / the retired ratio basis.
+   Still open, and now scoped by measurement: **33 of 46 sim controllers differ from their plant
+   row** (all intentional), and Appendix A's `_fic_flow` Kc column is on the mass basis while the
+   engine runs those loops volumetrically. Neither is a tuning error — both are documentation drift.
 6. Confirm the 321-1 / 323-1 registration on the RUNNING HMI (LSK was bumped v3 -> v4).
 7. `FFIC-329401` / `TIC-328012` sit on two-box SP/MV ratio panels; which row the live PV covers is a
    design decision, left alone.
