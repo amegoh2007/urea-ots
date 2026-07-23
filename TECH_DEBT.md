@@ -910,17 +910,44 @@ with the constant 0.80 every tick. Two consequences, and the second is the serio
 
 1. **No upstream composition disturbance reaches unit 324** — measured 0 of its 66 telemetry leaves
    (`EQUATION_AUDIT.md` audit section R).
-2. **The 323 mass balance does not actually land on 80.00.** Carrying the live deviation instead of
-   overwriting drives D002 to **76.515 %**, a 3.5-point miss against PFD stream 317. The pin's
-   docstring calls it a guard against "residual percentage rounding"; 3.5 points is not rounding.
+2. ~~The 323 mass balance does not land on 80.00 — a 3.5-point gap.~~ **RETRACTED 2026-07-23.**
 
-The attempted fix (design anchor + live deviation, bit-exact at the seed) restored the ripple
-correctly but failed four design-point tests on that anchor, and was **reverted** — breaking the §0
-PFD anchor is worse than the ripple break it cures. The order of work matters: reconcile the 323
-balance first, then un-freeze the pin.
+### Retraction — the "3.5-point gap" was my own bug, not a plant defect
 
-Why it stayed hidden: Comp-I holdup is ~92 t against ~93 t/h throughput, so tau is about an hour and
-no test runs long enough to see the tank converge.
+The first write-up of this item claimed the 323 balance misses the PFD anchor by 3.5 points and
+that the pin had been masking it. **That is false.** Three measurements settle it:
+
+* `w_f010` — the 323F010 outlet, which is 323D002 Comp-I's **only** inlet — measures
+  **80.0014 % urea**, i.e. on the PFD stream-317 anchor of 80.00. The tank has one inlet, one
+  outlet, no reaction and no vapour, so at steady state it *must* equal that inlet.
+* Comp-I holds 67 600 kg against a 92 749 kg/h draw, so it exchanges only
+  **α = 9.5 × 10⁻⁵ of its holdup per tick**. The reverted patch measured its deviation against a
+  reference captured *once*, then fed the result back into the state that produced it — a linear
+  recursion whose fixed point is `w* = (A − ref)/α + w_f010`. **Any** constant inside that loop is
+  amplified by **1/α ≈ 10 495**.
+* Replaying that recursion with a capture error of **0.0003 percentage points** converges to
+  **76.5150 %** — the observed failure value, to four decimals.
+
+So the 3.5 points were manufactured by the patch. `scratchpad/probe_td013.py` and
+`probe_td013_recursion.py` carry the arithmetic.
+
+### What this rules out
+
+The amplification is the real constraint on any fix, and it eliminates a whole class:
+
+| form | fixed point | verdict |
+|---|---|---|
+| `auth = w_bal + (A − ref)` (the reverted patch) | `w_f010 + (A−ref)/α` | **amplified ×10 495** |
+| `auth = w_bal + constant_offset` | `w_f010 + offset/α` | **amplified** |
+| `auth = w_bal · constant_ratio` | badly offset | **amplified** |
+| `auth = A + (w_f010 − W_F010_DES)` | `A` at design, tracks inlet | stable, but no tank lag |
+| no pin at all | `w_f010` | stable, correct lag |
+
+Only the last two survive. Choosing between them is a modelling decision, not a bug fix — see
+"Open question" below.
+
+Why the ripple break stayed hidden: Comp-I's time constant is ~44 min and no test runs long enough
+to watch the tank converge.
 
 ### Dead constants found while auditing (2026-07-23)
 

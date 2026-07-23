@@ -4966,18 +4966,28 @@ def step_sim(dt: float) -> dict:
     # test_design_compositions_sit_on_their_pfd_anchors, and
     # test_species_layer_does_not_perturb_the_mass_or_energy_balance.
     #
-    # That 3.5-point gap is the real discovery.  This pin is documented as a guard against
-    # "residual percentage rounding" -- but 3.5 points is not rounding.  The 323 train's own mass
-    # balance does NOT land on the PFD's 80.00 here, and the pin has been silently absorbing the
-    # difference.  So the ripple break is a SYMPTOM: un-freezing the pin without first reconciling
-    # the upstream balance just trades a hidden composition error for a visible one, and breaking
-    # the §0 PFD anchor is the worse of the two.
+    # RETRACTION.  That was first written up as "the 323 balance misses 80.00 by 3.5 points and the
+    # pin has been masking it".  FALSE -- it was the patch's own bug, and the correction matters
+    # because it changes what a future fix is allowed to look like:
+    #   * w_f010 (323F010's outlet, and this tank's ONLY inlet) measures 80.0014 % urea, i.e. ON the
+    #     anchor.  One inlet, one outlet, no reaction, no vapour => the tank MUST converge to it.
+    #   * Comp-I holds 67 600 kg against a 92 749 kg/h draw, so it exchanges only
+    #     alpha = m*dt/M = 9.5e-5 of its holdup per tick.
+    #   * The patch measured its deviation against a reference captured ONCE, then fed the result
+    #     back into the state that produced it.  That recursion is
+    #         w_n = (A - ref) + w_{n-1}(1 - alpha) + alpha*w_f010
+    #     whose fixed point is  w* = (A - ref)/alpha + w_f010.  Any constant inside the loop is
+    #     amplified by 1/alpha ~ 10 495; a capture error of 0.0003 percentage points reproduces the
+    #     observed 76.5150 % to four decimals (scratchpad/probe_td013_recursion.py).
     #
-    # Reverted to the hard pin deliberately, NOT because the fix was wrong in principle.  The real
-    # work is to find why the 323 balance misses 80.00 by 3.5 points -- Comp-I holdup is ~92 t
-    # against ~93 t/h throughput, so the tank's tau is about an hour and nothing in the suite runs
-    # long enough to see it converge, which is likely why this never surfaced.  Logged in
-    # EQUATION_AUDIT.md audit section R and TECH_DEBT; it needs its own slot, not a one-line change.
+    # So the amplification -- not a balance error -- is the real constraint, and it rules out EVERY
+    # additive or multiplicative correction applied inside this loop.  Only two forms survive:
+    #   (b) a non-recursive assignment from upstream, auth = R324_W_IN + (w_f010 - W_F010_DES):
+    #       stable and bit-exact at design, but the tank then tracks its inlet with no lag;
+    #   (c) no pin at all: correct dynamics AND the 44-min holdup lag, but w_d002 then follows
+    #       whatever w_f010 does, including its slow drift.
+    # Choosing between them is a modelling decision, not a bug fix, so the hard pin stays for now.
+    # Logged in EQUATION_AUDIT.md audit section R and TECH_DEBT TD-013.
     s.w_d002 = sol_pin_strength(
         sol_advance(s.w_d002, M_I_pre, s.r323_d002_M_I, m_317, s.w_f010,
                     0.0, s.w_d002, m_324, 0.0, dt), R324_W_IN)

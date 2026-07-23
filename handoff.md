@@ -282,13 +282,22 @@ composition step in **0 of its 66 leaves**: `s.w_d002 = sol_pin_strength(..., R3
 tank strength to a CONSTANT, so every upstream disturbance dies in the buffer tank. The block's own
 comment claims the opposite.
 
-Carrying the live deviation instead **did** restore the ripple (324 → 13 of 66, first at tick 39,
-the 80 m³ tank lag) — but it also walked D002 to **76.515 % urea against the PFD stream-317 anchor
-of 80.00**, failing four design-point tests. **That 3.5-point gap is the real finding**: the pin is
-documented as a rounding guard, and 3.5 points is not rounding — the 323 balance genuinely does not
-land on 80.00 and the pin has been absorbing the difference. **Reverted**, because breaking the §0
-PFD anchor is worse than the ripple break. Now TD-013; reconcile the 323 balance first, then
-un-freeze the pin. It stayed hidden because Comp-I tau is ~1 h and no test runs that long.
+Carrying the live deviation instead **did** restore the ripple (324 -> 13 of 66) — but it walked
+D002 to 76.515 % urea against the PFD anchor of 80.00 and was reverted.
+
+**RETRACTED: I first read that as "the 323 balance misses 80.00 by 3.5 points". It was my own bug.**
+`w_f010` (323F010's outlet, and D002 Comp-I's ONLY inlet) measures **80.0014 %** — on the anchor —
+and a one-in / one-out tank with no reaction must converge to its inlet. Comp-I turns over only
+**alpha = 9.5e-5 of its holdup per tick**, so the patch's fixed reference inside its own feedback
+loop was amplified by **1/alpha ~ 10 495**; replaying that recursion with a 0.0003-point capture
+error lands on 76.5150 %, the observed value to four decimals. Arithmetic in
+`scratchpad/probe_td013.py` and `probe_td013_recursion.py`.
+
+**The ripple break is real and still open — only my explanation was wrong.** The amplification is
+the actual constraint: it rules out every additive or multiplicative in-loop correction, leaving
+(b) a non-recursive assignment from an upstream variable (stable and bit-exact, but the tank then
+tracks its inlet with no lag) or (c) dropping the pin (correct dynamics AND the 44-min lag, but
+D002 then inherits whatever w_f010 does). That is a modelling decision, not a bug fix — TD-013.
 
 **Durable lesson (slots 8-9), and it is the same one three times:**
 1. **A dead term passes every gate.** `eta_P` was recomputed each tick from an argument every caller
