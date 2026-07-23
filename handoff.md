@@ -145,7 +145,7 @@ matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" predi
 New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
 `probe_f8_328.py`.
 
-### Remediation slot 10 — TD-014 root cause, TD-013 closed, cp made a property (this session)
+### Remediation slot 10 — TD-013 / TD-014 / TD-015 closed, cp made a property, commit `7a2cb67`
 
 **TD-014 was an open-loop temperature integrator, and the operator's stream map is what found it.**
 Walking 207 -> 208 -> 301/311 -> 313 -> 302/314 -> 319 -> 317 with every node instrumented
