@@ -242,7 +242,14 @@
       { k: 'pv08',  t: 'avalve', x: 1143, y: 364, tag: 'PV-329208', bind: 'RECIRC_323.F010.PIC_329208.op', u: '%', dec: 1 },
       // ---- 323D002 urea solution tank : atmospheric, two-compartment (I active 80 m3 / II passive 300 m3) ----
       { k: 'tt103', t: 'ind', x: 768, y: 684, tag: 'TT-323103', bind: 'RECIRC_323.D002.T_C',      u: 'C', dec: 1 },
-      { k: 'lt504', t: 'ind', x: 822, y: 650, tag: 'LT-323504', bind: 'RECIRC_323.D002.LI_comp2', u: '%', dec: 1 },   // passive compartment II
+      { k: 'ti008', t: 'ind', x: 700, y: 684, tag: 'TI-323008', bind: 'RECIRC_323.D002.TI_323008', u: 'C', dec: 1, note: 'Comp-I bulk temperature (TAL: a falling tank walks the 80 % liquor toward crystallisation and blocks the 323P003 suction)' },
+      { k: 'lt504', t: 'ind', x: 822, y: 650, tag: 'LI-323504', bind: 'RECIRC_323.D002.LI_323504', u: '%', dec: 1, note: 'passive compartment II — indication and alarms only, no control action; normally 0 %' },
+      // Field tie-in spool between Comp I and Comp II.  A hand valve, not a DCS device, so it has no
+      // licensor loop number.  CLOSED by default: the two compartments are independent and anything
+      // that spilled over the baffle into Comp II is stranded.  OPEN: connected vessels — the levels
+      // equalise and 323P003 draws the pooled inventory.  Opening it against a dry Comp II spreads
+      // the head over 380 m3 instead of 80 and collapses LIC-323507 toward the cavitation limit.
+      { k: 'tie02', t: 'xv', x: 815, y: 702, tag: 'HV-323D002 TIE-IN', bind: 'RECIRC_323.D002.HV_tie', cmd: '323D002TIE' },
       { k: 'lic07', t: 'ind', x: 1090, y: 644, tag: 'LIC-323507', bind: 'RECIRC_323.D002.LIC_323507.pv', mode: 'RECIRC_323.D002.LIC_323507.mode', u: '%', dec: 1, note: 'master: active compartment I level cascades FIC-324401 product flow' },
       { k: 'fic01', t: 'ind', x: 1274, y: 658, tag: 'FIC-324401', bind: 'RECIRC_323.D002.FIC_324401.pv', mode: 'RECIRC_323.D002.FIC_324401.mode', u: 'T/H', dec: 2, cas: true, note: 'slave: CAS follows LIC-323507; product to 324 evap via 323P003 A/B' },
       { k: 'pic203',  t: 'ind', x: 604,  y: 101, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,

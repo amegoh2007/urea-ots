@@ -78,9 +78,25 @@ def test_design_compositions_sit_on_their_pfd_anchors():
     liq = t["SPECIES_323_324"]["liq"]
     assert abs(liq["C003"]["Urea"] - 68.74) < 0.10, liq["C003"]["Urea"]     # PFD stream 314
     assert abs(liq["F004"]["Urea"] - 71.74) < 0.10, liq["F004"]["Urea"]     # PFD stream 319
-    assert abs(liq["D002"]["Urea"] - 80.00) < 1e-6, liq["D002"]["Urea"]     # PFD stream 317 anchor
-    assert abs(liq["E001"]["Urea"] - 94.31) < 0.02, liq["E001"]["Urea"]     # PFD stream 401
-    assert abs(liq["E003"]["Urea"] - 97.71) < 0.02, liq["E003"]["Urea"]     # PFD stream 402
+    # TD-013 CLOSED: the 1e-6 band here used to be the STRENGTH PIN asserting itself, not physics --
+    # sol_pin_strength rewrote this vector to exactly R324_W_IN on every tick.  The pin is gone, so
+    # 323D002 now tracks its single inlet (323F010) with its own residence-time lag and lands where
+    # the live balance puts it.  Same 0.10 pp band as that inlet, for the same reason.
+    assert abs(liq["D002"]["Urea"] - 80.00) < 0.10, liq["D002"]["Urea"]     # PFD stream 317 anchor
+    # ...and it TRACKS that inlet, with a real lag: Comp I holds 8 m3 against an 80.6 m3/h draw, so
+    # its residence is under 6 min and at the 600 s mark the tank is still a hair behind 323F010.
+    # The band here is that lag, not an offset -- convergence to 1e-4 is asserted over a longer run
+    # in test_equation_audit_td013_d002.py::test_the_tank_tracks_its_single_inlet.
+    assert abs(liq["D002"]["Urea"] - liq["F010"]["Urea"]) < 0.05, (
+        liq["D002"]["Urea"], liq["F010"]["Urea"])
+    # The evaporators inherit the tank's offset, because they are now fed by it rather than by a
+    # constant.  The chain is one number all the way down: the LIVE stripper bottoms are 55.838 %
+    # urea against the PFD row's 55.867, 323F010 lands 0.037 pp under its anchor, 323D002 tracks
+    # 323F010, and the two melts carry the same relative offset forward (0.02 pp here). Widened from
+    # 0.02 when TD-013 dropped the D002 strength pin -- before that these two were downstream of a
+    # hard 80.00 %, so they could not see the deviation at all.
+    assert abs(liq["E001"]["Urea"] - 94.31) < 0.05, liq["E001"]["Urea"]     # PFD stream 401
+    assert abs(liq["E003"]["Urea"] - 97.71) < 0.05, liq["E003"]["Urea"]     # PFD stream 402
     # F-11 CLOSED: un-pinned and still on anchor (79.96 vs 80.00).  It used to sit at 78.44.
     assert abs(liq["F010"]["Urea"] - 80.00) < 0.10, liq["F010"]["Urea"]     # PFD stream 315
 

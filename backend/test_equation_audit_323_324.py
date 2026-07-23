@@ -92,10 +92,21 @@ def test_evap1_steam_cut_dilutes_product_and_never_cools():
         q_min = q if q_min is None else min(q_min, q)
     e1 = t["EVAP_324"]["E001"]
 
-    assert e1["vapour_th"] == 0.0, e1["vapour_th"]              # F-4: no duty -> no boil-up
+    # TD-015 changed what "no duty" means here, and the new answer is the physical one.  This used
+    # to assert `vapour_th == 0.0`, which encoded the old model's belief that a stage with no steam
+    # cannot boil.  It can: with the chest shut, 324E001 becomes an ADIABATIC FLASH on its own
+    # 99 °C feed, and as the melt dilutes its bubble point collapses (130 -> ~57 °C over 20 min),
+    # so the feed's sensible surplus keeps flashing water off.  Measured: the boil-up falls from
+    # 14.07 t/h of design to ~3.5 t/h at 8 min and settles near 4.5 t/h, while T tracks T_bub down
+    # and lands on it (56.71 against 56.64 at 26 min) -- which is itself the check that the
+    # bubble-point closure is doing what it claims.
+    assert e1["vapour_th"] < 0.40 * main.R324_V1_DES / 1000.0, e1["vapour_th"]  # boil-up collapses
     assert e1["urea_pct"] < base - 5.0, (e1["urea_pct"], base)  # F-4: product really dilutes
     assert q_min >= 0.0, q_min                                  # F-10: chest cannot refrigerate
-    assert e1["TT_324001"] > 90.0, e1["TT_324001"]              # F-10: coasts to feed T, not ~22 C
+    # F-10: it coasts DOWN to its own bubble point, not to ambient.  The band is the physics: below
+    # the feed temperature (it is losing heat to evaporation) but nowhere near the ~22 °C an
+    # unfloored condensing-steam chest used to produce.
+    assert 40.0 < e1["TT_324001"] < main.R324_FEED_T_C, e1["TT_324001"]
 
 
 # ------------------------------------------------------------------------ F-2 / F-1 / F-10

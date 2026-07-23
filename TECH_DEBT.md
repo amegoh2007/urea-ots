@@ -894,14 +894,60 @@ was changed in both, so `dT/dt = 0` still holds at the seed *by construction*. T
 appears only as the denominator of the temperature ODE, where the design numerator is exactly 0, so
 it cannot move the fixed point at any value — only the speed of approach.
 
+### Second pass, 2026-07-23 — the 323 train and the aqueous trains
+
+Unit 323 ran the whole recirculation section on **one** lumped `cp323 = R323_CP_SOLN` (2.5 kJ/kg·K),
+covering the 44.4 % granulation return at 40 °C, the 55.9 % stripper bottoms at 119 °C and the 80 %
+product at 99 °C. cp falls as the solution concentrates — molten urea is about 2.07 against water's
+4.2 — so a single constant is wrong in **both directions at once**, and it is most wrong exactly
+where the model does its work, because concentrating the solution *is* the job. Each stream now
+carries its own, in the same departure form:
+
+| stream | composition / T | design cp |
+|---|---|---|
+| 208 stripper bottoms | 55.87 % @ 119 °C | 3.029 |
+| 314 column bottoms | 68.74 % @ 135 °C | 2.760 |
+| 319 flash liquid | 71.74 % @ 106 °C | 2.679 |
+| 317 product (**the anchor**) | 80.00 % @ 99 °C | 2.500 |
+| 331 granulation return | 44.37 % @ 40 °C | 3.248 |
+
+— a 30 % spread that the single constant was flattening. Each site takes the cp of the stream it
+belongs to: the feed sensible terms use the feed's, the holdup ODE denominators use the holdup's,
+and 323F010's two feeds (319 at 106 °C and the cold 331 at 40 °C) no longer share one value.
+
+The **aqueous** trains — 328C002/328C003/328C004, 328D001, 328D003 Comp I/II and the LP absorber
+322C001 — ran on `R328_CP = A328_CP = 4.0` across 40–200 °C. These streams are ≥ 98 % water, so
+their cp *is* water's, and water's cp is not flat: 4.18 at 40 °C, 4.29 at 140, 4.49 at 200. The
+constant is 4 % low at the cold end and 11 % low in the hydrolyser. Each vessel now calls
+`aqueous_cp()` anchored on **its own** design temperature, which is what makes this safe: the value
+equals the frozen constant bit-exactly at the design seed, so every back-solved λ/UA and the
+boot-pinned `A328_LAMBDA_ABS` are untouched, and it tracks IAPWS off design.
+
+**One density went live too.** 323D002's level was a *mass* span on a frozen 1300 kg/m3 — but a
+level gauge measures **volume**, so a tank of thinner (hotter or weaker) liquor read low by exactly
+the density error while the operator saw the same inventory. The steel volumes (80 / 300 m3) do not
+move; what a kilogram occupies does. `LIC-323507`, `LI-323504`, the weir-spill threshold and the
+tie-in pooling all now run on `urea_soln_rho(w_live, T_live, 1151)`, anchored so the design level is
+bit-exact. At design the active volume comes out at exactly the licensor's **8.00 m3**, which is the
+independent check that the 10 % setpoint and the 1151 kg/m3 density agree with each other.
+
+Pin unmoved throughout: `leaves 25 / keys 15 / diffs 0`.
+
 ### Still open
+
+**`R3232_CP = 3.0`** (the LP-carbamate / condensate train, 323E003 and 323E011) is deliberately
+**not** converted. Unlike the 328 streams this liquor is a strong ammonium-carbamate solution, not
+water, so `aqueous_cp` is the wrong correlation for it and the earlier "−28 % against water" note in
+this file was comparing against the wrong reference. Making it dynamic needs a *sourced* carbamate
+cp — from the licensor data or the literature — not water's.
 
 The analysis below on **water density above 150 °C** stands and is untouched: the PFD's density row
 runs ~4 % higher than water can physically be at those temperatures, so a global correlation fitted
 to the PFD would be wrong and one fitted to real water would contradict §0 at the design point. The
 volumetric-controller densities (`RHO_744_KGM3`, `RHO_741_KGM3`, `R328_C002_RHO`, `R328_C004_RHO`
 and the FIC anchors) are likewise unchanged. The anchored-departure helper `urea_soln_rho` is now in
-place and is the natural vehicle when that work is scheduled.
+place and is the natural vehicle when that work is scheduled. `R323_D002_RHO` was corrected to the
+PFD's own 1151 kg/m³ as part of TD-013; the four remaining dead density constants are listed below.
 
 ### TD-013 — the 323D002 strength pin masks a 3.5-point composition gap (opened 2026-07-23)
 
@@ -1016,6 +1062,215 @@ or the OTS acquires a slowly-wandering product spec.
 urea/water pair at constant total mass, so it fabricates **+0.600 kg of urea per 1000 kg of holdup
 per call**, violating C2. Tested as a cause of the ramp and **refuted** (−0.00199 pp/15 min pinned
 vs −0.00168 unpinned — comparable), so it is a separate, smaller defect, not this one.
+
+### TD-013 — CLOSED 2026-07-23, option (c): the pin is gone and the tank is a real vessel
+
+The blocker on option (c) was that `w_f010`, the tank's only inlet, was on an unbounded ramp — so an
+unpinned tank would wander with it. That ramp was TD-014 and it is fixed. The inlet is stationary,
+the pin has no remaining job, and it was costing two real things: it was the last composition-blind
+node between the reactor and the evaporators (audit B1), and it fabricated **+0.600 kg of urea per
+1000 kg of holdup per call**, a straight C2 violation. `s.w_d002` is now a plain `sol_advance` and
+the tank tracks its inlet with its own residence-time lag.
+
+The design-point test that asserted `|w_D002 − 80.00| < 1e-6` was **asserting the pin, not physics**
+— nothing but a hard overwrite can hold a dynamic state to 1e-6. It now carries the same 0.10 pp
+band as the inlet it tracks, plus a new and stronger assertion that the two agree to 1e-4.
+
+**The vessel was also modelled as one compartment with a dead-end buffer. It is not.** Operations
+supplied the topology and `References/323D002.md` corroborates it:
+
+| | volume | role | instruments |
+|---|---|---|---|
+| Comp I | 80 m³ | **active** — every feed and discharge nozzle, 323P003A/B suction | LIC-323507, TI-323008 |
+| Comp II | 300 m³ | **passive** — fills only by spilling the internal baffle | LI-323504 (indication + alarms only) |
+
+and between them a **field tie-in spool**: a hand valve, not a DCS device, so it has no licensor loop
+number. Closed (the default) the two compartments are hydraulically independent and whatever spilled
+into Comp II is stranded there. Opened they are connected vessels — equal *head*, not equal mass, so
+an equal level fraction — and 323P003 draws the pooled inventory, recovering Comp II into the
+forward flow. Modelled as `s.HV_323D002_TIE`, published as `RECIRC_323.D002.HV_tie`, and driven from
+screen 323-1 by a clickable OPEN/CLOSED element under the tank (`xv_toggle` id `323D002TIE`).
+
+Opening it against a dry Comp II is a genuine hazard and the model reproduces it: the head
+redistributes over 380 m³ instead of 80, so a 10 % Comp-I level collapses to **2.1 %** and 323P003
+is left near its cavitation limit. Measured, tie open then shut again after an hour: Comp I refills
+to setpoint while Comp II keeps 4.8 % with no way out. That is the scenario the button exists for.
+
+Three constants were wrong and are now sourced:
+
+* **`R323_D002_LVL_SP` 65 % → 10 %.** The small compartment exists to hold residence under ~6 min so
+  biuret cannot form — 10 % of 80 m³ is 8 m³ against an 80.6 m³/h feed. At 65 % the model was
+  declaring a 39-minute residence and roughly six times the biuret exposure the licensor designed
+  for. Source: `References/323D002.md` §3.2.
+* **`R323_D002_RHO` 1300 → 1151 kg/m³**, the PFD's own effective density for streams 315/317.
+* **Comp II seeded at 50 % → 0 %.** Comp II is dry in normal operation; a 50 % seed silently
+  declared a 173 t inventory that the plant would treat as a high-level alarm.
+
+**TI-323008 is a real state now.** It used to publish the upstream separator's temperature verbatim,
+so the tank had no thermal inertia and the LOW-temperature alarm it carries — the crystallisation
+warning, because a cooling 80 % liquor blocks the 323P003 suction — could never lag or damp
+anything. It is a one-inlet/one-outlet energy balance with live cp on both sides, and the bracket is
+a literal 0.0 at design.
+
+Gate: `backend/test_equation_audit_td013_d002.py` (11 tests).
+
+---
+
+### TD-014 — ROOT CAUSE FOUND AND FIXED for unit 323 (2026-07-23)
+
+**It was an open-loop temperature integrator, and the stream map the operator supplied is what
+localised it.** Walking 207 → 208 → 301/311 → 313 → 302/314 → 319 → 317 with every node
+instrumented showed the stripper bottoms feeding 323C003 **bit-flat for 6 h** while `w_c003` fell
+at −0.0041 pp/h. Nothing rides in on the feed: the ramp is born inside the stage. A CSTR with a
+2-minute residence and constant inputs cannot ramp for 14 hours, so an input to the stage had to be
+moving — and it was the boil-up, falling 5.97 kg/h per hour, perfectly linearly.
+
+**The identity.** Three stages take the energy-limited branch `m_vap = M_DES·(q_avail/Q_DES)`, and
+each stage's latent constant is back-solved from that same design duty, `λ = Q_DES/(M_DES/3600)`,
+so that dT/dt = 0 at the seed. Put the two together:
+
+    P = q_avail − m_vap·λ/3600
+      = q_avail·(1 − M_DES·λ/(3600·Q_DES))
+      = q_avail·(1 − 1)
+      = 0                       IDENTICALLY, for every q_avail, at every load.
+
+The stage temperature had **no input at all**. Whatever TIC-323007 did to the reboiler was cancelled
+exactly by the boil-up it produced, so the PV never moved off the 1e-5 °C residue left by the boot
+settle, and its velocity-form integral walked PV-329202 down forever. A velocity increment is
+Kc·(dt/Ti)·err, so the walk *rate* is independent of `dt` — which is exactly the tick-invariance
+that made this look like a model property rather than an artefact. It was one-sided because the
+composition-split branch caps the other direction, which is why the drift is monotone.
+
+Measured, all four stages, over 4 h with the temperatures frozen to five decimals:
+
+| valve | before | after 4 h | after the fix |
+|---|---|---|---|
+| PIC-329202 (323E002) | 89.99849 | 89.98296 | 89.99974 → 89.99974 (flat) |
+| PIC-329208 (323E010) | 39.99900 | 39.98631 | 39.99975 → 39.99975 (flat) |
+| PIC-329203 (324E001) | 89.99987 | 89.99687 | fixed too, but only after a retune — TD-015 |
+| PIC-329212 (324E003) | 89.99997 | 89.99918 | fixed too, but only after a retune — TD-015 |
+
+**The fix — a bubble-point relaxation, which 323F004 already used.** The liquid sits at its bubble
+point, so the duty not spent boiling walks the holdup toward it over the stage's own residence time.
+Substituted back into the ODE it gives exactly `dT/dt = (T_bub − T)/τ`: energy still conserved, and
+the temperature is a real state with a real driver.
+
+* **323C003** — bubble point rides the live column pressure PT-323201, which is itself driven by the
+  live top-vapour rate, so TIC-323007 now has a correctly-signed plant: more duty → more 305 →
+  higher P → higher T_sat → higher T. The composition offset stays frozen at its design value
+  because this liquor's vapour is 33 % NH₃ / 50 % CO₂ — its bubble point is 9.8 °C *below* water's
+  saturation temperature at 4.1 bar a, a depression Raoult-on-water cannot produce.
+* **323F010** — fixed 0.46 bar a vacuum boundary, so pressure is not a lever and **concentration**
+  is. That is the real physics of a vacuum evaporator and it makes TIC-323012 what it is on the
+  plant: a concentration controller acting through temperature.
+
+**The bubble-point model is Raoult's law on water, with nothing fitted.** `p_H2O = x_H2O·Psat(T)`,
+and at the bubble point that equals the stage pressure, so `T_bub = Tsat(P/x_H2O)`. Urea, biuret and
+HCHO raise the boiling point purely by diluting the water on a *mole* basis. Checked against the
+licensor's own (composition, pressure, temperature) triplets:
+
+| stage | composition | P | Raoult | PFD | error |
+|---|---|---|---|---|---|
+| 323F010 | 80.00 % urea | 0.46 bar a | 100.3 °C | 99 °C | +1.3 |
+| 324E001 | 94.31 % urea | 0.33 bar a | 123.7 °C | 130 °C | −6.3 |
+| 324E003 | 97.71 % urea | 0.131 bar a | 132.7 °C | 140 °C | −7.3 |
+
+i.e. it reproduces 88–99 % of a 20–90 °C elevation with no adjustable parameter. The residual is
+non-ideality (γ_H2O < 1 at these strengths) and is absorbed by the design anchor, because every call
+site uses the **departure** `T_des + [T_bub(live) − T_bub(design)]`. What has to be right for a
+control model is the *slope* with composition, and that is what Raoult supplies. It is explicitly
+**not** used at 323C003/323F004, where it overshoots by 33 °C and 16 °C because the volatiles set
+the bubble point; a test asserts that so nobody unifies the two forms later.
+
+**Result.** Over 6 h with the feed held flat, the least-squares slope at every node of the 323 train
+is now **exactly 0.0** in the second half: `w_f010` settles at 79.9635 % and stays there. The
+0.037 pp under the PFD-317 anchor is simply where the *live* stripper bottoms put it (55.838 %
+against the tabulated 55.867 %), not a drift. Gate: `backend/test_equation_audit_td014.py`.
+
+**324E001 and 324E003 carry the same identity** and were fixed in the same change, but not for
+free: the closure gives those two loops a real process gain for the first time and their inherited
+tuning had to be measured and replaced. That half also stopped being optional the moment the 323D002
+pin came out — the pin was an accidental clamp holding the defect down. See TD-015.
+
+---
+
+## TD-015 — the unit-324 evaporators carried the same degenerate temperature ODE
+
+- **Status: CLOSED 2026-07-23**, together with TD-013 — it turned out to be TD-013's blocker, not
+  its follow-up
+- **Severity on discovery:** B, revised to **A** once the D002 pin came out (see below)
+- **Files:** `backend/main.py`, `v1_duty` / `v2_duty` in `step_sim`; `TIC_324001` / `TIC_324002`
+
+`R324_Q1_DES_KW` is the design *latent* load and `R324_LAM_V1` its latent heat, so on the duty
+branch `v1_m·λ/3600` cancelled `q1_avail` term for term and `P_e001` was identically zero — the same
+identity TD-014 removed from 323. Both loops integrated against a plant of zero gain.
+
+**Why it could not stay deferred.** With 323D002 pinned at exactly 0.80, `urea1_in` was constant and
+`v1_conc` sat within **0.4 kg/h** of `v1_duty`, so the `min()` tie gave TIC-324001 partial feedback
+and masked the defect — the melt drifted only −0.0011 pp/h. Dropping the pin (TD-013) removed that
+accidental clamp: the branches separate by ~74 kg/h and the melt walks at **≈ 0.5 pp/h**, a
+wandering product spec. So TD-013 and TD-015 are one change, not two.
+
+**The fix, in two parts.**
+
+*Part 1 — the closure.* Bubble-point relaxation, identical to 323F010: at a fixed vacuum the melt's
+bubble point is set by **concentration**, so TIC-324001/324002 become what they are on the plant,
+melt-strength controllers acting through temperature. A `_lag1` at the separator residence time is
+required and load-bearing: `w1_live = urea_in/melt` is an *instantaneous algebraic ratio* that
+`sol_pin_strength` writes over the species ODE, so a change in `v1` reaches the bubble point with no
+holdup delay and closes a same-tick loop of gain ≈ 3 — explicit Euler answers that with a period-2
+oscillation (±1e-4 K/tick, growing). The lag restores the dynamics the pinned strength threw away.
+
+*Part 2 — the retune, which the closure made unavoidable.* Kc = 2.0 / Ti = 120 was inherited from a
+plant whose temperature ODE was identically zero, so it described nothing. Two step tests were run;
+**the first was contaminated** (the loops had already diverged in the same run) and gave
+K_p ≈ −17.5 °C/bar for TIC-324002 — a *negative* gain, which would have meant the controller action
+was backwards. That number is wrong and should not be reused. The clean measurement is a **central
+difference over 1 h means**, ±0.05 bar on the master in MAN so the plant's own wander cancels:
+
+    TIC-324001   base 130.0033   +step 130.4231   −step 129.5916   ->  K_p = +8.32 °C/bar
+    TIC-324002   base 140.0169   +step 140.4353   −step 139.6000   ->  K_p = +8.35 °C/bar
+
+Positive on both, so the REVERSE action was correct all along — and Kc = 2.0 meant a loop gain of
+**16.7**, which is exactly the multi-hour limit cycle that was measured (T_e003 ±1.2 °C, PV-329212
+swinging 81–90 %). Lambda-tuned on the separator's own dynamics — τ ≈ 360 s (180 s residence plus
+the 180 s bubble-point holdup lag), λ = 3τ, θ ≈ 0 because the chest-pressure slave is fast at
+Ti = 20 s:
+
+    Kc = τ / (K_p·(λ + θ)) = 360 / (8.3 × 1080) = 0.04     ->  then halved to 0.02
+
+The extra factor of two is not taste. `v_m = min(v_conc, v_duty)` is a **relay nonlinearity**, and
+the branch switching sustains a slow limit cycle that no linear tuning removes. Halving the gain
+measurably shrinks it — 16 h envelope T_e001 0.42 → 0.25 °C, T_e003 1.33 → 0.88 °C — which is itself
+the evidence that the residual is controller-driven rather than a plant instability.
+
+**The concentration cap stays, and that was tested rather than assumed.** Recommendation (d) of the
+original entry — "with a bubble-point closure the melt is self-limiting, so drop `v_conc`" — is
+**wrong**. Removing it makes the stage diverge: the melt runs away and `psat(T)` underflows to a
+`ZeroDivisionError`. The cap is doing real work and must stay.
+
+**Result.** Velocity form, so `pv == sp == pv1` still gives `du == 0` and the design seed is
+bit-exact at any Kc/Ti — pin unmoved, `leaves 25 / keys 15 / diffs 0`. Over 16 h the valves sit
+inside ±0.15 % of design (against an unbounded walk before) and the melts hold their targets.
+Gates: `test_equation_audit_td014.py::test_the_unit_324_stages_carry_the_same_closure` and
+`::test_the_324_evaporator_temperatures_stay_bounded`.
+
+**Residual, recorded not hidden.** A slow limit cycle remains — 16 h envelope 0.25 °C on 324E001 and
+0.88 °C on 324E003, from the `min()` branch switching. It is bounded and an order of magnitude below
+what the old tuning produced, but it is not zero. Removing it means replacing the concentration cap
+with a smooth equilibrium relation rather than deleting it, which is a modelling change of its own
+and is **not** attempted here.
+
+### One thing this changed downstream
+
+`test_evap1_steam_cut_dilutes_product_and_never_cools` used to assert `vapour_th == 0.0` on a steam
+cut. That encoded the old model's belief that a stage with no steam cannot boil. It can: with the
+chest shut, 324E001 becomes an **adiabatic flash on its own 99 °C feed**, and as the melt dilutes
+its bubble point collapses (130 → ~57 °C over 20 min), so the feed's sensible surplus keeps flashing
+water off — 14.07 t/h of design falls to ~3.5 t/h at 8 min and settles near 4.5 t/h, with T tracking
+T_bub down and landing on it (56.71 against 56.64 at 26 min). That convergence is itself the check
+that the closure does what it claims. The assertion now bounds the collapse instead of demanding a
+zero the physics does not produce.
 
 ### Dead constants found while auditing (2026-07-23)
 

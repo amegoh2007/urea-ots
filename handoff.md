@@ -145,6 +145,107 @@ matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" predi
 New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
 `probe_f8_328.py`.
 
+### Remediation slot 10 — TD-014 root cause, TD-013 closed, cp made a property (this session)
+
+**TD-014 was an open-loop temperature integrator, and the operator's stream map is what found it.**
+Walking 207 -> 208 -> 301/311 -> 313 -> 302/314 -> 319 -> 317 with every node instrumented
+(`scratchpad/probe_td014_trace.py`) showed the stripper bottoms **bit-flat for 6 h** while `w_c003`
+fell -0.0041 pp/h. So nothing rides in on the feed -- the ramp is born in the stage. A CSTR with a
+2-minute residence and constant inputs cannot ramp for 14 h, so an input had to be moving: the
+boil-up, falling 5.97 kg/h per hour, perfectly linearly (`probe_td014_c003.py`).
+
+The identity (`probe_td014_ops.py` asserts it, and `test_equation_audit_td014.py` keeps it asserted):
+
+    m_vap = M_DES*(q_avail/Q_DES)   and   lambda = Q_DES/(M_DES/3600)
+    =>  P = q_avail - m_vap*lambda/3600 = q_avail*(1 - 1) = 0   IDENTICALLY, at every load
+
+The stage temperature had **no input**. TIC-323007 was integrating against zero gain and walked
+PV-329202 down forever; because a velocity increment is Kc*(dt/Ti)*err the walk RATE is
+dt-independent, which is exactly the "tick-invariance" that made this look like physics. It is
+one-sided (hence monotone) because the composition-split branch of the `min()` caps the other way.
+
+**Fix:** the bubble-point relaxation 323F004 already used, giving `dT/dt = (T_bub - T)/tau`.
+323C003's bubble point rides the live column pressure; 323F010's rides **composition** via Raoult on
+water -- the real physics of a fixed-vacuum evaporator, and it makes TIC-323012 the concentration
+controller it is on the plant. Raoult is quoted, not fitted, and captures 89-107 % of a 20-90 C
+elevation against the licensor's own (w, P, T) triplets. It is **excluded** at 323C003/323F004,
+whose NH3/CO2-bearing liquors it overshoots by 33 C and 16 C -- a test asserts that overshoot so
+nobody unifies the two forms later.
+
+**Result:** every 323 node's least-squares slope is now **exactly 0.0** over the second half of a
+6 h run; PIC-329202 and PIC-329208 are flat to five decimals. `w_f010` settles at 79.9635 % -- the
+0.037 pp under the PFD-317 anchor is where the LIVE stripper bottoms put it (55.838 % against a
+tabulated 55.867 %), not a drift.
+
+**324E001 / 324E003 -- TD-015, also CLOSED, and it turned out to be TD-013's blocker not its
+follow-up.** The D002 pin was an ACCIDENTAL CLAMP on it: pinned, urea1_in is constant and v1_conc
+sits within 0.4 kg/h of v1_duty, so the min() tie gave TIC-324001 partial feedback and the melt
+drifted only -0.0011 pp/h. Unpinned, the branches separate by ~74 kg/h and the melt walks at
+**~0.5 pp/h** -- a wandering product spec, worse than anything TD-014 fixed. Same closure applied,
+plus the retune it forced. **The first step test was contaminated** (the loops had already diverged
+in the same run) and reported K_p = -17.5 C/bar for TIC-324002, a NEGATIVE gain that would have
+meant the controller action was backwards -- do not reuse that number. The clean measurement is a
+central difference over 1 h means, +-0.05 bar with the master in MAN so the plant's wander cancels:
+**K_p = +8.32 and +8.35 C/bar**, positive on both. So Kc = 2.0 was a loop gain of 16.7, which is
+exactly the multi-hour limit cycle observed. Lambda-tuned to 0.04 (tau ~ 360 s, lambda = 3 tau) then
+**halved to 0.02** against the min(v_conc, v_duty) relay nonlinearity -- halving measurably shrinks
+the residual cycle (16 h envelope 0.42 -> 0.25 C and 1.33 -> 0.88 C), which is the evidence it is
+controller-driven. Ti 120 -> 360 s. Velocity form, so the seed stays bit-exact at any Kc/Ti.
+**Do NOT delete the v_conc cap** -- tested, and the stage diverges without it (psat underflows).
+Residual: a bounded ~0.25 / 0.88 C limit cycle, recorded in TD-015 rather than hidden.
+
+**TD-013 CLOSED, option (c).** With the inlet stationary the only argument for the 323D002 strength
+pin was gone. `s.w_d002` is a plain `sol_advance` now: the tank tracks 323F010 with its own
+residence-time lag, the last composition-blind node between reactor and evaporators is open, and a
+C2 violation goes with it (`sol_pin_strength` fabricated +0.600 kg urea per 1000 kg holdup per call).
+The design-point test that asserted `|w_D002 - 80.00| < 1e-6` was **asserting the pin, not physics**
+-- it now carries the inlet's 0.10 pp band plus a stronger assertion that the two agree to 1e-4.
+
+**323D002 rebuilt to its real topology** (operator brief + `References/323D002.md`): Comp I 80 m3
+active (every nozzle, LIC-323507, TI-323008, 323P003 suction), Comp II 300 m3 passive (LI-323504,
+indication only, dry in normal operation), and the **field tie-in spool** between them as an
+operator boolean -- `s.HV_323D002_TIE`, `xv_toggle` id `323D002TIE`, clickable on screen 323-1 under
+the tank. Shut: independent, Comp II stranded. Open: connected vessels sharing a *head*, so an equal
+level fraction, and 323P003 draws the pool. Opening against a dry Comp II collapses a 10 % head from
+80 m3 into 380 m3 -- **10 % -> 2.1 %**, near the pump's cavitation limit. That is the scenario the
+button exists for. Three constants corrected from source: LIC-323507 SP **65 % -> 10 %** (the
+compartment exists to hold residence under ~6 min so biuret cannot form; 65 % declared a 39-minute
+residence), rho **1300 -> 1151 kg/m3** (PFD stream 315/317), Comp II seed **50 % -> 0 %**.
+TI-323008 became a real state instead of an echo of the upstream separator.
+
+**cp is a property now, not a section constant.** One lumped 2.5 kJ/kg.K covered the whole 323 train
+(44 % @ 40 C to 80 % @ 99 C -- design values 3.029 / 2.760 / 2.679 / 2.500 / 3.248, a 30 % spread)
+and one 4.0 covered every aqueous vessel from 40 to 200 C. Both replaced by departures anchored on
+their own design point, so each returns the licensor's constant **bit-exactly** at the seed and every
+back-solved lambda/UA and the boot-pinned `A328_LAMBDA_ABS` are untouched. `R3232_CP = 3.0` is
+deliberately **left alone**: 323E003/323E011 carry a strong ammonium-carbamate liquor, not water, so
+`aqueous_cp` is the wrong correlation and converting it would be a fabrication.
+
+**One density went live too.** 323D002's level was a MASS span on a frozen 1300 kg/m3, but a level
+gauge measures VOLUME -- a tank of thinner liquor read low by exactly the density error while the
+operator saw the same inventory. LIC-323507, LI-323504, the weir threshold and the tie-in pooling now
+run on `urea_soln_rho(w_live, T_live, 1151)`. At design the active volume comes out at exactly the
+licensor's **8.00 m3**, an independent check that the 10 % setpoint and the 1151 kg/m3 agree.
+
+**Equipment tags verified, and the brief had two digit slips.** The references are unambiguous:
+**322**E003 is the HP Scrubber (`References/322E003 HP Scrubber Describtion.md`;
+`Urea_Operating_Manual_Helwan.md`), **323**E003 is the LP Carbamate Condenser
+(`References/323E003 323D001 323P001 Datasheets.md`; `328E021 ...` table), and **322**C001 is the LP
+Absorber (`References/322P002 322E006 322C001 Datasheets.md`). There is no 323C001 anywhere in the
+reference set. The code already matches the references -- nothing was changed.
+
+**Verified on the RUNNING HMI**, not just structurally. Backend started with the real interpreter
+(`%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe main.py` -- note `.claude/launch.json` and
+`launch.bat` both invoke the bare `python` alias, which is the MS Store stub, CLAUDE.md sec 7).
+Screen 323-1, element at (815, 702), 34x34, no clipping and no overlap with TT-323103 / TI-323008 /
+LI-323504. Clicking it: CLOSED (red) -> OPEN (green), LIC-323507 **10 % -> 2.1 %** with LI-323504
+reading the same 2.1 %, and the 8.00 m3 active inventory redistributing to 1.7 + 6.3 m3 -- **8.0 m3
+conserved across the pooling**. Clicking again: shut, and Comp II's 6.3 m3 is stranded exactly as
+the plant would leave it.
+
+**New gates:** `test_equation_audit_td014.py` (9), `test_equation_audit_td013_d002.py` (12),
+`test_equation_audit_c10_live_cp.py` (7). Pin unmoved throughout: `leaves 25 / keys 15 / diffs 0`.
+
 ## How to gate
 ```
 set PY=%LOCALAPPDATA%\Microsoft\WindowsApps\python3.exe
@@ -373,10 +474,20 @@ of holdup per call — but that was tested as the ramp's cause and REFUTED.
 2. **TD-008** — real 328C003 hydrolyser kinetics, once TD-009 gives it species to work on.
 3. **TD-006 — CLOSED 2026-07-23** (`1da9280`), both halves. So is the `eta_P` dead lever, and so
    is the unsourced `STRIP_FLOOD_ETA_K`. See "Remediation slot 8" above.
-3a. **TD-012 / C10 — PARTIALLY closed 2026-07-23.** Urea-solution cp and density are live
-   correlations and unit 324 uses them per-location. Still open: the **aqueous/water** side (the
-   PFD's >150 °C density row runs ~4 % above physical water — analysed in TD-012, unchanged) and
-   the volumetric-controller densities. `urea_soln_rho` is in place as the vehicle for that work.
+3a. **TD-012 / C10 — cp side CLOSED, density side still open.** Every cp in units 323, 324 and
+   328 and at 322C001 is now a per-stream / per-vessel departure. Still open: the **density** work —
+   the PFD's >150 °C row runs ~4 % above physical water (analysed in TD-012, unchanged), the
+   volumetric-controller densities (`RHO_744_KGM3`, `RHO_741_KGM3`, `R328_C002_RHO`,
+   `R328_C004_RHO`), the four remaining dead density constants, and `R3232_CP`, which needs a
+   *sourced carbamate* cp rather than water's. `urea_soln_rho` / `aqueous_rho` are the vehicles.
+3b. **TD-015 — CLOSED 2026-07-23** with TD-013/TD-014; it was TD-013's blocker, not a follow-up.
+   324E001/324E003 got the same bubble-point closure plus a measured retune (K_p = +8.3 C/bar on
+   both, Kc 2.0 -> 0.02, Ti 120 -> 360 s). Residual: a bounded limit cycle, 16 h envelope 0.25 C on
+   E001 and 0.88 C on E003, from the `min(v_conc, v_duty)` branch switching. Removing THAT means
+   replacing the concentration cap with a smooth equilibrium relation — deleting the cap outright was
+   tested and the stage diverges. Not attempted; it is a modelling change of its own.
+3c. **`Master_PID_Tuning_Constants.md` needs the TIC-324001 / TIC-324002 retune written into it.**
+   The engine is the authority now and the file is stale on these two loops.
 4. Refresh the graphify graph once semantic extraction is available (do not AST-only-merge).
 5. `Master_PID_Tuning_Constants.md` still names loops by pre-rename tags / the retired ratio basis.
 6. Confirm the 321-1 / 323-1 registration on the RUNNING HMI (LSK was bumped v3 -> v4).
