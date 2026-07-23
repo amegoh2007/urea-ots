@@ -354,9 +354,67 @@ Verified for both: pin gate `leaves: 25  keys: 15  diffs: 0`, suite **103 passed
 
 ## TD-006 — stripper duty is feed-proportional, not a full enthalpy balance
 
-- **Status:** **HALF CLOSED 2026-07-23** — the hydrodynamic flooding limit is coded, gated and
-  pushed. The per-species enthalpy half remains OPEN.
+- **Status:** **CLOSED 2026-07-23** (commit `1da9280`) — both halves done. The hydrodynamic
+  flooding limit landed in `6fb4c09`; the per-species enthalpy balance closed the same day.
 - **Opened:** 2026-07-21
+
+### Enthalpy half — CLOSED 2026-07-23
+
+The duty was `STRIP_DUTY_DES_KW · (ṁ_feed/ṁ_feed,des) · 3600` — proportional to feed **mass**, so
+composition never entered. The same tonnage of pure water and of carbamate-rich reactor liquor
+demanded identical steam, and the single largest heat sink in the unit — carbamate dissociation —
+was invisible to the MP header.
+
+**The blocker turned out not to exist.** The previous session recorded this as blocked on sourcing
+a carbamate dissociation enthalpy, "none exist in the codebase". That was wrong twice over:
+`HPCC_DH_CARB_KJMOL = 160.0` was already at `main.py:2187` with its own provenance, and the better
+value was one search away. Frejacques, quoted in **Brouwer, "Thermodynamics of the Urea Process",
+UreaKnowHow Process Paper June 2009, p.12**, gives both reactions at *process* conditions:
+
+| reaction | ΔH | conditions |
+|---|---|---|
+| `CO2(G) + 2 NH3(G) → NH2COONH4(L)` | −117 kJ/mol | 110 atm, 160 °C |
+| `NH2COONH4(L) → NH2CONH2(L) + H2O(L)` | +15.5 kJ/mol | 160–180 °C |
+
+Those conditions sit close to this stripper's 144 bar / 172–183 °C, so **117** is used rather than
+the 159–160 kJ/mol universally quoted for *solid* carbamate at 1 atm / 25 °C. NH3 is supercritical
+at stripper temperature (Tc = 132.4 °C) so it has no latent heat at all; what the duty pays is the
+desorption enthalpy, taken as the loop's own `HPCC_BUB_DHVAP_JMOL`.
+
+**Validation — this is the part that matters.** Summed over the design streams with nothing fitted
+and no free parameter, the balance gives **37 831 kW against the licensor's 39 400 kW — 96.0 %**.
+The 4 % residue is shell/ambient loss, biuret (no published enthalpy, and 0.667 kmol/h against 88.1
+for hydrolysis), and the mean-cp approximation. Term breakdown:
+
+| term | kW | share |
+|---|---:|---:|
+| carbamate dissociation | 22 118 | 58 % |
+| free-NH3 desorption | 14 123 | 37 % |
+| water latent | 2 803 | 7 % |
+| urea hydrolysis (liquid step) | −379 | — |
+| sensible, both products | −834 | — |
+
+Only the **ratio** to its own design value is applied, so `STRIP_DUTY_DES_KW` stays the licensor
+anchor, the 4 % offset cancels and never reaches the header, and at design the ratio is `X/X == 1.0`
+— bit-identical to the feed-proportional form it replaces.
+
+### The unsourced constant — RETIRED 2026-07-23
+
+`STRIP_FLOOD_ETA_K = 1.50`, flagged in the flooding half as "the one number to replace", is gone.
+It was wrong twice: **~10× too aggressive** (15 % efficiency loss at 1.5× load against ~1–3 %), and
+**double-counting**, since `g_T` already collapses `eta_T` on a feed spike through the thermal path.
+
+It needed no replacement constant, because the bottom-temperature rise and the efficiency loss are
+the same event measured two ways — the bottom runs hotter *precisely because* the dissociation
+endotherm did not happen:
+
+    g_flood = 1 − (ṁ_feed · cp · ΔT_flood) / (n_carbamate_CO2 · ΔH_carb)
+
+Every term was already sourced. `ΔT_flood` is exactly 0.0 below the limit, so `g_flood` is exactly
+1.0 at design — a structural identity, not a float-ordering trick. Three independent cross-checks
+agree on a few percent: this balance **2.9 %**, Brouwer's Shangdong Hualu Hengsheng case (a 3 °C
+bottom shift alongside 79 % → 81 % efficiency) **2.5 %**, and the licensor length correlation from
+the same paper (6 m eff. → 80 %, 8 m → 82 %) **0.8 %**.
 
 ### Flooding half — CLOSED 2026-07-23
 
@@ -790,8 +848,87 @@ since a species with exactly one source in the plant cannot be explained away by
 
 ## TD-012 — C10 constitutive properties: densities and cp are compile-time constants
 
-- **Status:** OPEN — **design research complete 2026-07-22, not yet coded**
+- **Status:** **PARTIALLY CLOSED 2026-07-23** — urea-solution cp and density are now live
+  correlations and unit 324 uses them per-location. The **aqueous/water** side (the >150 °C
+  discrepancy analysed below) and the volumetric-controller densities remain OPEN.
 - **Opened:** 2026-07-22 (`EQUATION_AUDIT.md`, category C10)
+
+### Urea-solution cp and rho — CLOSED 2026-07-23
+
+One cp (2.5 kJ/kg·K) and a set of frozen densities covered every urea solution in the plant, from
+44 % urea in LP recirculation to 97.71 % melt leaving Evaporator II. The error is largest exactly
+where the model does its most important work, because the evaporation train's whole *purpose* is to
+change the composition:
+
+| stream | urea | T | true cp | constant 2.5 |
+|---|---:|---:|---:|---:|
+| 331 | 44.4 % | 40 °C | 3.25 | **23 % low** |
+| 315/317 | 80.0 % | 99 °C | 2.50 | anchor |
+| 401 | 94.3 % | 130 °C | 2.20 | **14 % high** |
+| 402 | 97.7 % | 140 °C | 2.12 | **18 % high** |
+
+**cp is back-solved, not guessed** (CLAUDE.md §1 permits sourced or back-solved): take `cp_water`
+from steam tables, require the mass-weighted mixing rule to reproduce the model's own
+`R323_CP_SOLN` at the design composition, and solve for the urea term. It yields **2.072 kJ/kg·K**,
+and the published value for molten urea is ~2.0–2.1 — an *independent* corroboration, since nothing
+in the derivation forced the answer to be physical. It is written as an expression rather than a
+literal so it cannot drift out of step with `cp_water`, and a test asserts it stays in band.
+
+**rho is regressed from the PFD**, which §0 makes the strict source: 12 urea-solution streams,
+34–98 % urea, 40–183 °C →
+
+    rho = 972.08 + 255.95·w_urea − 0.4659·(T − 100)     kg/m³
+
+Both signs came *out* of the regression rather than being imposed — denser with urea, thinner when
+hot — which makes the fit its own evidence. Worst residual 6.2 %, on the two HP synthesis streams
+(207/208) that carry dissolved NH3/CO2 and so are not urea/water binaries at all.
+
+**Bit-exactness.** Both are applied as a *departure* from the existing anchor,
+`prop = ANCHOR + [raw(w,T) − raw(w_des,T_des)]`. At design the bracket is a literal `0.0` and
+`ANCHOR + 0.0 == ANCHOR` in IEEE-754, so every licensor-published design value survives to the bit
+and only the off-design response changes. Pin unmoved: `leaves 25 / keys 15 / diffs 0`.
+
+Unit 324 now takes cp at each location's own composition: feed (80 %), Stage-1 melt (94.31 %),
+Stage-2 melt (97.71 %). The **feed** cp appears in both the back-solved design duty and the tick and
+was changed in both, so `dT/dt = 0` still holds at the seed *by construction*. The **holdup** cp
+appears only as the denominator of the temperature ODE, where the design numerator is exactly 0, so
+it cannot move the fixed point at any value — only the speed of approach.
+
+### Still open
+
+The analysis below on **water density above 150 °C** stands and is untouched: the PFD's density row
+runs ~4 % higher than water can physically be at those temperatures, so a global correlation fitted
+to the PFD would be wrong and one fitted to real water would contradict §0 at the design point. The
+volumetric-controller densities (`RHO_744_KGM3`, `RHO_741_KGM3`, `R328_C002_RHO`, `R328_C004_RHO`
+and the FIC anchors) are likewise unchanged. The anchored-departure helper `urea_soln_rho` is now in
+place and is the natural vehicle when that work is scheduled.
+
+### TD-013 — the 323D002 strength pin masks a 3.5-point composition gap (opened 2026-07-23)
+
+`s.w_d002 = sol_pin_strength(sol_advance(...), R324_W_IN)` overwrites the 323D002 urea/water pair
+with the constant 0.80 every tick. Two consequences, and the second is the serious one:
+
+1. **No upstream composition disturbance reaches unit 324** — measured 0 of its 66 telemetry leaves
+   (`EQUATION_AUDIT.md` audit section R).
+2. **The 323 mass balance does not actually land on 80.00.** Carrying the live deviation instead of
+   overwriting drives D002 to **76.515 %**, a 3.5-point miss against PFD stream 317. The pin's
+   docstring calls it a guard against "residual percentage rounding"; 3.5 points is not rounding.
+
+The attempted fix (design anchor + live deviation, bit-exact at the seed) restored the ripple
+correctly but failed four design-point tests on that anchor, and was **reverted** — breaking the §0
+PFD anchor is worse than the ripple break it cures. The order of work matters: reconcile the 323
+balance first, then un-freeze the pin.
+
+Why it stayed hidden: Comp-I holdup is ~92 t against ~93 t/h throughput, so tau is about an hour and
+no test runs long enough to see the tank converge.
+
+### Dead constants found while auditing (2026-07-23)
+
+Five density constants are **defined and never referenced** — they read as though density is
+modelled at those points when nothing uses them: `CO2_RHO` (line 396), `SCRUB_CARB_RHO`,
+`R323_C003_RHO`, `R323_F004_RHO`, `R323_F010_RHO`. Harmless at runtime, actively misleading to a
+reader. Left in place deliberately for now (deleting them is a separate, trivially-reviewable
+change) but they should not be mistaken for live property handling.
 - **Files:** `backend/main.py` — `R323_CP_SOLN`, `R328_CP`, `A328_CP`, `R3232_CP`, `RHO_744_KGM3`,
   `R328_C002_RHO`, `R328_C004_RHO` and the rest of the density/cp constants
 

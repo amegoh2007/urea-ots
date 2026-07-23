@@ -652,6 +652,93 @@ LV322501_P_DOWN_BARA = 4.0        # bar a, L3-1 LP-loop downstream ref for live-
 #  the numbers below only seed dm/dt = dT/dt = 0 at the design fixed point.
 # ==========================================================================
 R323_CP_SOLN     = 2.5            # kJ/kg.K, lumped urea-solution specific heat
+#                                   (design-point anchor; see urea_soln_cp below -- this stays the
+#                                    authoritative value AT the design composition, and the
+#                                    correlation carries the departure from it)
+
+# ==============================================================================================
+#  AUDIT C10 -- urea-solution properties are NOT constants
+#
+#  A single cp of 2.5 kJ/kg.K and a set of fixed densities were used everywhere a urea solution
+#  appears, from 44 % urea in the LP recirculation to 97.7 % melt leaving Evaporator II.  That is
+#  wrong where it matters most: the evaporation train exists precisely to change the composition,
+#  so the property is most in error exactly where the model does its most important work.
+#
+#  Measured error of the single 2.5 constant against the mixing rule below (probe_c10_props.py):
+#      44 % urea, 40 C  ->  cp 3.23   constant is 23 % LOW
+#      80 % urea, 99 C  ->  cp 2.50   constant is right (this IS the anchor)
+#      94 % urea, 130 C ->  cp 2.16   constant is 16 % HIGH
+#      98 % urea, 140 C ->  cp 2.08   constant is 20 % HIGH
+#
+#  cp -- BACK-SOLVED, not guessed (CLAUDE.md §1 allows sourced or back-solved).  Take cp_water
+#  from steam tables, require the mass-weighted mixing rule to reproduce the model's own
+#  R323_CP_SOLN at the design composition, and read off cp_urea:
+#      cp_urea = (2.5 - 0.20 * 4.2183) / 0.80 = 2.0704 kJ/kg.K
+#  The published value for molten urea is ~2.0-2.1 kJ/kg.K, so the number that falls out of the
+#  back-solve matches the literature independently.  That is the corroboration.
+#
+#  rho -- REGRESSED FROM THE PFD, which CLAUDE.md §0 makes the strict source and which tabulates
+#  urea %, water %, temperature and effective density for every urea-solution stream in the plant
+#  (12 streams, 34-98 % urea, 40-183 C; probe_c10_rho.py).  Least squares gives
+#      rho = 972.08 + 255.95 * w_urea - 0.4659 * (T - 100)      kg/m3
+#  Both signs are physically right -- denser with urea, thinner when hot -- and the fit is its own
+#  evidence: it was NOT imposed.  Worst residual 6.2 %, on the two HP synthesis streams (207/208)
+#  that carry dissolved NH3/CO2 and so are not urea/water binaries at all.
+#
+#  BIT-EXACTNESS.  Both functions are used as a DEPARTURE from the existing design anchor, never
+#  as an absolute:  prop(w,T) = ANCHOR + [raw(w,T) - raw(w_des,T_des)].  At design the bracket is
+#  a literal 0.0 (same function, same inputs), and ANCHOR + 0.0 == ANCHOR bit-exactly in IEEE-754.
+#  So every design value the licensor published is preserved to the bit, and only the off-design
+#  response changes -- the same structural argument the stripper flooding term uses.
+C10_RHO_A        = 972.0821       # kg/m3   PFD regression intercept
+C10_RHO_B        = 255.9536       # kg/m3   per unit urea mass fraction
+C10_RHO_C        = -0.465942      # kg/m3.K temperature slope
+C10_W_DES        = 0.80           # design anchor composition (stream 315/317, ex 323D002)
+C10_T_DES        = 99.0           # design anchor temperature (C)
+
+
+def cp_water_kjkgk(T_C: float) -> float:
+    """Saturated-liquid water cp, kJ/kg.K.  Least squares over the standard steam-table values at
+    20-200 C in 20 C steps (4.182, 4.179, 4.185, 4.197, 4.216, 4.245, 4.285, 4.339, 4.408, 4.497).
+    Worst residual 0.0085 kJ/kg.K (0.2 %).  The curve genuinely has a minimum near 40 C, which is
+    why a quadratic is used rather than a line."""
+    return 4.209433 - 0.001320530 * T_C + 0.0000135795 * T_C * T_C
+
+
+# cp of molten urea, BACK-SOLVED rather than hardcoded, so it can never drift out of step with
+# cp_water or with the anchor it was derived from: require the mixing rule to reproduce the model's
+# own R323_CP_SOLN at the design composition and solve for the urea term.  The result is ~2.072,
+# and the published value for molten urea is ~2.0-2.1 -- an independent corroboration, asserted in
+# test_equation_audit_c10_props.py so a future edit cannot quietly push it out of the physical band.
+CP_UREA_MELT = ((R323_CP_SOLN - (1.0 - C10_W_DES) * cp_water_kjkgk(C10_T_DES)) / C10_W_DES)
+
+
+def _urea_cp_raw(w_urea: float, T_C: float) -> float:
+    # min/max rather than clamp(): this block is defined well above clamp's definition.
+    w = min(max(w_urea, 0.0), 1.0)
+    return w * CP_UREA_MELT + (1.0 - w) * cp_water_kjkgk(T_C)
+
+
+def _urea_rho_raw(w_urea: float, T_C: float) -> float:
+    w = min(max(w_urea, 0.0), 1.0)
+    return C10_RHO_A + C10_RHO_B * w + C10_RHO_C * (T_C - 100.0)
+
+
+_CP_RAW_DES  = _urea_cp_raw(C10_W_DES, C10_T_DES)
+_RHO_RAW_DES = _urea_rho_raw(C10_W_DES, C10_T_DES)
+
+
+def urea_soln_cp(w_urea: float, T_C: float, anchor: float = R323_CP_SOLN) -> float:
+    """Specific heat of a urea solution, kJ/kg.K, as a DEPARTURE from the design anchor.
+    Returns `anchor` bit-exactly at the design composition and temperature."""
+    return anchor + (_urea_cp_raw(w_urea, T_C) - _CP_RAW_DES)
+
+
+def urea_soln_rho(w_urea: float, T_C: float, anchor: float) -> float:
+    """Density of a urea solution, kg/m3, as a DEPARTURE from the caller's own design anchor.
+    Each call site keeps its PFD-published design density and gains the correct slopes around it."""
+    return anchor + (_urea_rho_raw(w_urea, T_C) - _RHO_RAW_DES)
+
 R323_P_STEAM_SUP = 4.4            # bar a, LP steam header feeding 323E002/323E010
 
 # --- Stage 1: Rectifying Column 323C003 + Recirc Heater 323E002 (4.1 bar a, hold 135 C)
@@ -1239,7 +1326,18 @@ R328_D001_OFFGAS_H2O_DES = 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C
 #  at the 130/140 C fixed points; each vacuum is held by a PIC-324202/324203
 #  false-air bleed balanced against a fixed-capacity ejector pull.
 # ==========================================================================
-R324_CP_SOLN   = R323_CP_SOLN                     # 2.5 kJ/kg.K lumped urea-melt cp
+R324_CP_SOLN   = R323_CP_SOLN                     # 2.5 kJ/kg.K lumped urea-melt cp (design anchor)
+# AUDIT C10.  The evaporation train is where the single lumped cp is most wrong, because it is the
+# one place whose PURPOSE is to change the composition: the feed enters at 80 % urea and Stage 2
+# leaves at 97.71 %, over which the true cp falls 2.50 -> 2.12 (the constant runs 18 % high at the
+# Stage-2 end).  Each stage now takes cp at its OWN local composition and temperature.
+#   * FEED cp appears in both the design duty derivation and the tick, and is changed in BOTH, so
+#     the back-solved UA still gives dT/dt = 0 at the seed -- the fixed point is preserved by
+#     construction, not by luck.
+#   * HOLDUP cp appears only as the denominator of the temperature ODE.  At design the numerator
+#     P_e001 is exactly 0, so 0/(M*cp) = 0 for ANY cp: the holdup value cannot move the fixed
+#     point at all, only the speed of the approach to it.
+# The three per-location values are defined below, each next to the anchors it needs.
 R324_W_IN      = 0.80                             # feed urea mass fraction (ex 323D002)
 R324_W_EV1     = 0.9431                           # Evaporator-I product frac (HARD; HMB 324, was 0.95)
 R324_W_EV2     = 0.9771                           # Evaporator-II product frac (HARD; HMB 324, was 0.986)
@@ -1268,7 +1366,9 @@ R324_LAM_V1      = 2174.0                          # kJ/kg water latent @130 C
 R324_E001_OP_DES = 90.0                           # % PIC-329203 design steam-valve stroke
 R324_E001_PCHEST_DES = R324_E001_OP_DES/100.0 * R323_P_STEAM_SUP   # bar a steam-chest press.
 # Q_E001 = feed sensible (99->130) + latent(V1) ; kW
-R324_E001_Q_DES_KW = (R324_FEED_DES/3600.0*R324_CP_SOLN*(R324_E001_T_SP_C - R324_FEED_T_C)
+R324_CP_FEED1 = urea_soln_cp(R324_W_IN,  R324_FEED_T_C)      # 80 % urea @ 99 C -> 2.5 BIT-EXACTLY
+R324_CP_HOLD1 = urea_soln_cp(R324_W_EV1, R324_E001_T_SP_C)   # 94.31 % @ 130 C  -> ~2.19
+R324_E001_Q_DES_KW = (R324_FEED_DES/3600.0*R324_CP_FEED1*(R324_E001_T_SP_C - R324_FEED_T_C)
                       + R324_V1_DES/3600.0*R324_LAM_V1)
 R324_E001_UA_KW  = R324_E001_Q_DES_KW / (tsat_steam(R324_E001_PCHEST_DES) - R324_E001_T_SP_C)
 R324_Q1_DES_KW   = R324_V1_DES/3600.0*R324_LAM_V1   # AUDIT F-4: design Stage-1 LATENT load (kW)
@@ -1314,7 +1414,11 @@ R324_LAM_V2      = 2144.0                           # kJ/kg water latent @140 C
 R324_E003_OP_DES = 90.0                             # % PIC-329212 design steam-valve stroke
 R324_E003_PCHEST_DES = R324_E003_OP_DES/100.0 * R323_P_STEAM_SUP
 # Q_E003 = P1 sensible (130->140) + latent(V2) ; kW
-R324_E003_Q_DES_KW = (R324_P1_DES/3600.0*R324_CP_SOLN*(R324_E003_T_SP_C - R324_E001_T_SP_C)
+# Stage 2's feed IS the Stage-1 melt, so its cp is the Stage-1 melt cp -- same composition, same
+# temperature.  Naming it separately keeps the two roles readable at the call sites below.
+R324_CP_FEED2 = R324_CP_HOLD1                                # 94.31 % @ 130 C, the Stage-1 melt
+R324_CP_HOLD2 = urea_soln_cp(R324_W_EV2, R324_E003_T_SP_C)   # 97.71 % @ 140 C -> ~2.12
+R324_E003_Q_DES_KW = (R324_P1_DES/3600.0*R324_CP_FEED2*(R324_E003_T_SP_C - R324_E001_T_SP_C)
                       + R324_V2_DES/3600.0*R324_LAM_V2)
 R324_E003_UA_KW  = R324_E003_Q_DES_KW / (tsat_steam(R324_E003_PCHEST_DES) - R324_E003_T_SP_C)
 R324_Q2_DES_KW   = R324_V2_DES/3600.0*R324_LAM_V2   # AUDIT F-5: design Stage-2 LATENT load (kW)
@@ -4846,6 +4950,34 @@ def step_sim(dt: float) -> dict:
     s.r323_d002_M_II = clamp(s.r323_d002_M_II + d002_overflow, 0.0, R323_D002_M_II_FULL)
     # AUDIT F-8: the buffer tank is a well-mixed species blender -- no vapour, no reaction (99 C,
     # atmospheric).  This is what gives the 324 feed a real composition instead of a constant.
+    #
+    # AUDIT B1 (ripple) -- and until now the line below defeated exactly that claim.  The strength
+    # was pinned to the CONSTANT R324_W_IN, so sol_pin_strength overwrote the urea/water pair with
+    # 0.80 on every tick and every upstream composition disturbance died here.  Measured: a +4 %
+    # NH3 step on the live reactor overflow moved 222 of 1162 telemetry leaves, but 0 of the 66
+    # belonging to unit 324 -- the evaporators were composition-blind.  (w_e001 / w_e003 below are
+    # pinned to w1_live / w2_live, which are live, so this was the only frozen one of the three.)
+    #
+    # ATTEMPTED FIX, REVERTED 2026-07-23 -- and the reason is a finding in its own right.
+    # Replacing the constant authority with "design anchor + live deviation" DID restore the ripple
+    # (unit 324 went from 0 to 13 of 66 responding leaves).  But it also walked D002's urea fraction
+    # to 76.515 % against the PFD stream-317 anchor of 80.00, failing four design-point tests:
+    # test_design_fixed_point_holds, test_design_point_does_not_drift,
+    # test_design_compositions_sit_on_their_pfd_anchors, and
+    # test_species_layer_does_not_perturb_the_mass_or_energy_balance.
+    #
+    # That 3.5-point gap is the real discovery.  This pin is documented as a guard against
+    # "residual percentage rounding" -- but 3.5 points is not rounding.  The 323 train's own mass
+    # balance does NOT land on the PFD's 80.00 here, and the pin has been silently absorbing the
+    # difference.  So the ripple break is a SYMPTOM: un-freezing the pin without first reconciling
+    # the upstream balance just trades a hidden composition error for a visible one, and breaking
+    # the §0 PFD anchor is the worse of the two.
+    #
+    # Reverted to the hard pin deliberately, NOT because the fix was wrong in principle.  The real
+    # work is to find why the 323 balance misses 80.00 by 3.5 points -- Comp-I holdup is ~92 t
+    # against ~93 t/h throughput, so the tank's tau is about an hour and nothing in the suite runs
+    # long enough to see it converge, which is likely why this never surfaced.  Logged in
+    # EQUATION_AUDIT.md audit section R and TECH_DEBT; it needs its own slot, not a one-line change.
     s.w_d002 = sol_pin_strength(
         sol_advance(s.w_d002, M_I_pre, s.r323_d002_M_I, m_317, s.w_f010,
                     0.0, s.w_d002, m_324, 0.0, dt), R324_W_IN)
@@ -5218,13 +5350,26 @@ def step_sim(dt: float) -> dict:
     #      HARD anchors: Stage 1 0.33 bar a / 130 C / 80->95 % ;
     #                    Stage 2 0.131 bar a / 140 C / 95->98.6 %.
     # ======================================================================
-    cp324      = R324_CP_SOLN
+    # AUDIT C10.  cp324 was one constant (2.5) for the feed AND both melts, across a train that
+    # takes the solution from 80 % urea to 97.71 %.  Each use below now takes cp at its own local
+    # composition and temperature; urea_soln_cp returns the design anchor bit-exactly at the design
+    # composition, so the seed is untouched and only the off-design response changes.
     recyc_prev = s.tlag.get("R324_recyc", 0.0)                                # LV-B recycle (kg/h, 98.6%)
 
     # ---- Stage 1 : Evaporator I 324E001 + separator 324F001 (0.33 bar a, 130 C) --
     feed1_m    = max(m_324, 0.0) + recyc_prev                                 # blended Stage-1 feed (kg/h)
     recyc_w    = s.tlag.get("R324_recyc_w", R324_W_EV2)                       # LIVE recycle urea frac (1-tick tear)
-    urea1_in   = R324_W_IN*max(m_324, 0.0) + recyc_w*recyc_prev               # urea into Stage 1 (kg/h)
+    # AUDIT B1 (ripple).  This read the FROZEN R324_W_IN, so no composition change anywhere
+    # upstream could reach the evaporators -- a measured 0 of 66 unit-324 telemetry leaves
+    # responded to a reactor-overflow composition step.  It now reads the live 323D002 tank
+    # vector.  (That vector is itself held at the design strength by sol_pin_strength; see the
+    # note there -- both had to change for the ripple to actually flow.)
+    w_tank     = s.w_d002.get("Urea", R324_W_IN)
+    urea1_in   = w_tank*max(m_324, 0.0) + recyc_w*recyc_prev                 # urea into Stage 1 (kg/h)
+    # LIVE cp of the blended Stage-1 feed and of the Stage-1 melt holdup.
+    w_feed1    = clamp(urea1_in / max(feed1_m, 1e-6), 0.0, 1.0)               # blended feed urea frac
+    cp_feed1   = urea_soln_cp(w_feed1, R324_FEED_T_C)
+    cp_hold1   = urea_soln_cp(s.w_e001.get("Urea", R324_W_EV1), s.r324_e001_T)
     tic1_op    = _ctrl_ipd(s.TIC_324001, s.r324_e001_T, dt)                   # steam chest-P demand (bar a)
     pic203_pv  = clamp(s.PIC_329203["op"]/100.0*R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)
     pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
@@ -5234,17 +5379,17 @@ def step_sim(dt: float) -> dict:
     # R324_W_EV1 by construction, so no operator action could dilute the product).  q1_avail is
     # the latent duty left after the feed has been carried to the stage temperature; the water
     # removed is whichever is smaller — the concentration target or what that duty can boil.
-    q1_avail_kw = (feed1_m/3600.0*cp324*(R324_FEED_T_C - s.r324_e001_T)
+    q1_avail_kw = (feed1_m/3600.0*cp_feed1*(R324_FEED_T_C - s.r324_e001_T)
                    + Q_e001_kw)                                               # kW available as latent
     v1_conc    = max(feed1_m - urea1_in / R324_W_EV1, 0.0)                    # water removal to hit 94.31 %
     v1_duty    = max(R324_V1_DES * (q1_avail_kw / R324_Q1_DES_KW), 0.0)       # water the live duty can boil
     v1_m       = min(v1_conc, v1_duty)                                        # water vapour -> 324E002 (kg/h)
     p1_m       = max(feed1_m - v1_m, 0.0)                                     # Stage-1 melt (kg/h)
     w1_live    = clamp(urea1_in / max(p1_m, 1e-6), 0.0, 1.0)                  # LIVE Stage-1 urea mass frac
-    P_e001     = (feed1_m/3600.0*cp324*(R324_FEED_T_C - s.r324_e001_T)
+    P_e001     = (feed1_m/3600.0*cp_feed1*(R324_FEED_T_C - s.r324_e001_T)
                   + Q_e001_kw - v1_m/3600.0*R324_LAM_V1)                      # net kW on holdup
     M_f001_pre = s.r324_f001_M
-    s.r324_e001_T = s.r324_e001_T + P_e001*dt/max(M_f001_pre*cp324, 1e-6)
+    s.r324_e001_T = s.r324_e001_T + P_e001*dt/max(M_f001_pre*cp_hold1, 1e-6)
     m_p1       = p1_m                                                         # barometric leg -> Stage 2 (kg/h)
     s.r324_f001_M = max(M_f001_pre + (feed1_m - v1_m - m_p1)/3600.0*dt, 1.0)
     # AUDIT F-8/TD-009: Stage-1 species balance.  The blended feed is the live tank composition plus
@@ -5280,6 +5425,8 @@ def step_sim(dt: float) -> dict:
 
     # ---- Stage 2 : Evaporator II 324E003 + separator 324F003 (0.131 bar a, 140 C) -
     feed2_m    = m_p1                                                         # Stage-1 melt (95%) -> Stage 2
+    cp_feed2   = urea_soln_cp(w1_live, s.r324_e001_T)                         # LIVE Stage-1 melt cp
+    cp_hold2   = urea_soln_cp(s.w_e003.get('Urea', R324_W_EV2), s.r324_e003_T)
     urea2_in   = w1_live * feed2_m                                            # urea into Stage 2 (kg/h, LIVE frac)
     tic2_op    = _ctrl_ipd(s.TIC_324002, s.r324_e003_T, dt)                   # steam chest-P demand (bar a)
     pic212_pv  = clamp(s.PIC_329212["op"]/100.0*R323_P_STEAM_SUP, 0.0, R323_P_STEAM_SUP)
@@ -5287,17 +5434,17 @@ def step_sim(dt: float) -> dict:
     p_chest_e003 = clamp(pic212_op/100.0*R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
     Q_e003_kw  = max(R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T), 0.0)  # Evap-II duty (kW, F-10 floored)
     # AUDIT F-5 — same duty limit at Stage 2; final product strength is now live, not a constant.
-    q2_avail_kw = (feed2_m/3600.0*cp324*(s.r324_e001_T - s.r324_e003_T)
+    q2_avail_kw = (feed2_m/3600.0*cp_feed2*(s.r324_e001_T - s.r324_e003_T)
                    + Q_e003_kw)                                               # kW available as latent
     v2_conc    = max(feed2_m - urea2_in / R324_W_EV2, 0.0)                    # water removal to hit 97.71 %
     v2_duty    = max(R324_V2_DES * (q2_avail_kw / R324_Q2_DES_KW), 0.0)       # water the live duty can boil
     v2_m       = min(v2_conc, v2_duty)                                        # water vapour -> 324E005 (kg/h)
     p2_gen     = max(feed2_m - v2_m, 0.0)                                     # Stage-2 melt produced (kg/h)
     w2_live    = clamp(urea2_in / max(p2_gen, 1e-6), 0.0, 1.0)                # LIVE final-product urea mass frac
-    P_e003     = (feed2_m/3600.0*cp324*(s.r324_e001_T - s.r324_e003_T)
+    P_e003     = (feed2_m/3600.0*cp_feed2*(s.r324_e001_T - s.r324_e003_T)
                   + Q_e003_kw - v2_m/3600.0*R324_LAM_V2)                      # net kW on holdup
     M_f003_pre = s.r324_f003_M
-    s.r324_e003_T = s.r324_e003_T + P_e003*dt/max(M_f003_pre*cp324, 1e-6)
+    s.r324_e003_T = s.r324_e003_T + P_e003*dt/max(M_f003_pre*cp_hold2, 1e-6)
     # LIC-324501 melt drain (R2): LV-B active -> 335 boundary; LV-A parked at 0 %.
     lvl_f003   = clamp(s.r324_f003_M / R324_F003_M_FULL * 100.0, 0.0, 100.0)
     lic501_op  = _ctrl_ipd(s.LIC_324501, lvl_f003, dt)                       # LV-B drain command (%)

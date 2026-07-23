@@ -27,6 +27,8 @@
 | 13 | 2026-07-22 | branch `master` | Equation audit remediation, slot 5 — 323E010 / 323F010 (finding F-11 / TD-011). The pre-evaporator was modelled with **one feed** when it has two: PFD stream 331, the granulation-scrubber urea-recovery return (3270 kg/h, 44.37 % urea, 40 °C), joins stream 319 ahead of 323E010 and flashes with it in 323F010 under vacuum (gas 790, solution 315 ≡ 317 after the pump). The engine had 331 entering at 323D002, downstream of the balance it closes, which is why stream 317's composition was unreachable from 319 and ≈1.4 t/h of urea had to appear from nowhere. Raised as a suspected source-data error; confirmed instead as a model topology error — the total mass balance closes to 0.019 % on the licensor's own flows, and the formaldehyde tracer (331 is its only source in the plant) closes to 1.7 %. Severity raised B → A: it was a missing term in C1 and C3, not just C2. Design duty 5048 → 7249 kW for the 40 °C feed's sensible load; unit-324 constants deliberately left byte-identical. See Revision Delta #17. |
 | 14 | 2026-07-22 | branch `master` | Equation audit remediation, slot 6 — unit 328 desorption train (finding F-8 remainder / TD-009). The last lumped-mass island: 328C002 and 328C004 moved material with **frozen overhead split constants** and no composition existed anywhere in the unit. Closing it required first settling the PFD's composition-unit convention — **liquid rows are mass %, vapour rows are mole %** — without which the licensor's table appears to destroy 800 kg/h of carbon across 328C002; the tabulated `Average Molar Weight` row is the discriminator, verified across ~90 streams. Read correctly, all three columns close per component to under 2 kg/h in 34–40 t/h. The Uhde mechanical datasheet UD-AU-328-EC-0001 supplied the geometry (328C002 and 328C004 are ONE 25.5 m stacked tower; 15 and 22 executed trays; ID 1250 mm; 40 mm weir; 3125 × ⌀6 mm holes), replacing a 900 s residence-time guess with real holdup and making the tray count load-bearing through a Kremser stage correction. Two defects surfaced: the hydrolyser was fed **stream 738's urea fraction instead of stream 746's** (+7.9 %), and the trace-species ODE is stiff enough (1.4 g of NH₃ inventory against 330 kg/h throughput) that explicit Euler walked the train off its design point — `des_advance` is implicit. The same units finding retired the stream-790 "accepted variance" recorded under Delta #17. See Revision Delta #18. |
 | 15 | 2026-07-23 | branch `master` | Equation audit remediation, slot 7 — 322E001 HP stripper, hydrodynamic flooding (TD-006, first half). The unit carried **no tube geometry whatsoever**; every term whose comment read "flood" was a *thermal* metaphor for the steam-dilution branch, which asks only whether the shell steam keeps up with the liquid. A falling-film stripper's real ceiling is the independent question of whether the tube can physically carry the film — a liquid-load limit. Licensor DDS UD-AU-322-DZ-0003-003 p.3 supplies 2600 tubes, 31 × 3.0 mm (ID 25.0 mm), 6000 mm effective, and is self-consistent: N·π·d_o·L = 1519.27 m² against its own tabulated 1519.00 (+0.018 %), so the tube count is confirmed rather than trusted. Three documents then agree — the bore is 0.984″ so the IFS-166 "145 kg/h per 1-inch tube" limit applies unscaled; the 6.000 m effective length is exactly what Brouwer ties to 80 % design efficiency; and the quoted 183 °C reference *is* `STRIP_FEED207_T_C`. The design point computes to **74.5 % of the limit** (108.0 of 145 kg/h per tube, onset at 134 % load), so the constraint is one-sided and **does not bind at the seed** — no anchored ratio was required, and the pin guarantee rests on a physical fact rather than float operand ordering. See Revision Delta #19. |
+| 16 | 2026-07-23 | branch `master` | Equation audit remediation, slot 8 — 322E001 per-species enthalpy balance (TD-006 second half, **closing TD-006**), the retirement of its last unsourced constant, and the `eta_P` dead lever. The MP-steam duty was proportional to feed **mass**, so composition never entered: the same tonnage of pure water and of carbamate-rich reactor liquor demanded identical steam, and the unit's largest heat sink — carbamate dissociation — was invisible to the header. The previous session recorded this as *blocked* on sourcing a carbamate enthalpy; that was wrong twice over — `HPCC_DH_CARB_KJMOL` was already in the module, and Frejacques (via Brouwer, UreaKnowHow June 2009 p.12) publishes both reactions at **process** conditions: −117 kJ/mol at 110 atm / 160 °C for carbamate, +15.5 kJ/mol at 160–180 °C for urea. Those sit close to this stripper's 144 bar / 172–183 °C, so 117 is used, not the 159–160 quoted for *solid* carbamate at 25 °C. NH₃ is supercritical here (Tc = 132.4 °C) so there is no latent heat to look up at all. **Validation: the five terms summed over the design streams, with nothing fitted, give 37 831 kW against the licensor's 39 400 — 96.0 %**; only the ratio is applied, so the 4 % offset cancels and the PFD duty stays the anchor. The same balance then *retired* `STRIP_FLOOD_ETA_K = 1.50`, flagged in Delta #19 as the one number to replace: the bottom-temperature rise and the efficiency loss are the same event measured twice, so `g_flood` is now derived from ΔT_flood with **no new constant**, and the old fit proves ~10× too aggressive and double-counting against `g_T`. Finally `eta_P`, dead because every call site passed the frozen design pressure, now rides PT-329201 — gated on `_STEAM_READY` exactly as `step_steam` is, since the new feedback path would otherwise have the boot settle capture `HPCC_UA`/`HPCC_LIQ_DES_LIVE` off a different transient (+305 kg/h, 0.16 %). See Revision Delta #20. |
+| 17 | 2026-07-23 | branch `master` | Equation audit remediation, slot 9 — **C10 urea-solution properties** (TD-012, partial) and the **ripple break** it shared a root cause with (new audit section R). One cp of 2.5 kJ/kg·K covered every urea solution from 44 % urea to 97.71 % melt, which is most wrong exactly where the model does its most important work, since the evaporation train's purpose *is* to change composition (14–18 % high at the Evaporator ends, 23 % low at the LP end). cp is **back-solved** — cp_water from steam tables, cp_urea fixed by requiring the mixing rule to reproduce the model's own design anchor — and yields 2.072 kJ/kg·K against a published molten-urea 2.0–2.1, an independent corroboration since nothing forced the answer to be physical. Density is **regressed from the PFD** (§0 strict source; 12 urea streams, 34–98 % urea, 40–183 °C) to ρ = 972.08 + 255.95·w − 0.4659·(T−100); both signs came *out* of the fit rather than being imposed. Both are applied as a departure from the existing anchor, so `ANCHOR + 0.0 == ANCHOR` holds to the bit. Separately, a **measured** ripple audit (perturb live state, count moving telemetry leaves) found unit 324 responding to an upstream composition step in **0 of its 66 leaves**: 323D002's strength was pinned to the constant `R324_W_IN`, so `sol_pin_strength` erased every upstream disturbance in the buffer tank — the block's own comment claimed the opposite. The attempted fix carried the live deviation and did restore the ripple (324 -> 13 of 66, first at tick 39, the 80 m³ tank lag) — but it drove D002 to 76.515 % urea against the PFD stream-317 anchor of 80.00 and was **reverted**: the pin's "rounding guard" docstring is masking a real 3.5-point gap in the 323 balance, and breaking §0 is the worse trade. Carried as TD-013. See Revision Delta #21. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -1136,6 +1138,155 @@ PT-329201 = 141.5 bar a @100 % → mild rise at turndown (less CO₂ consumption
 
 ### F.6 Verdict
 **ENVELOPE CLOSED.** Loop converges smoothly 100 % → 70 %; global mass conserved (clos_abs flat at the standing design-pin residual, zero new loss); no un-gated thermal runaway; no vanishing mass; reactor N/C locked at design 3.0000 (true proportional turndown). No new model defect surfaced. The previously verified Phase A (off-gas liquid carryover) and Phase B (ejector hydraulic-capacity ceiling) couplings were exercised in the full loop without regression.
+
+---
+
+## Revision Delta #20 — 322E001 per-species enthalpy balance, derived flooding knockdown, live $\eta_P$ (2026-07-23)
+
+### 20.1 The duty was blind to composition
+
+Superseded form — duty proportional to feed **mass**:
+
+$$Q_{strip} = Q_{des}\cdot\frac{\dot m_{feed}}{\dot m_{feed,des}}$$
+
+Identical tonnages of pure water and of carbamate-rich reactor liquor therefore demanded identical
+steam, and the largest heat sink in the unit was invisible to the MP header. Replaced by a
+five-term balance, every constant sourced:
+
+$$Q_{raw} = \underbrace{n_{CO_2}^{des}\,\Delta H_{carb}}_{\text{dissociation}}
+          + \underbrace{n_{NH_3}^{free}\,\Delta H_{NH_3}}_{\text{desorption}}
+          + \underbrace{n_{H_2O}^{top}\,\lambda_{H_2O}}_{\text{latent}}
+          + \underbrace{\xi_{hyd}\,\Delta H_{hyd}}_{\text{hydrolysis}}
+          + \underbrace{\dot m_{bot}c_{p,b}(T_b-T_f)+\dot m_{top}c_{p,g}(T_t-T_f)}_{\text{sensible}}$$
+
+with $n_{CO_2}^{des}=y_{CO_2}^{top}-y_{CO_2}^{sweep}$ — the CO₂ sweep enters already as gas and
+needs no dissociation heat — and $n_{NH_3}^{free}=y_{NH_3}^{top}-y_{NH_3}^{sweep}-2\,n_{CO_2}^{des}$
+from the 2:1 carbamate stoichiometry.
+
+**Constants.** Frejacques, quoted in Brouwer, *Thermodynamics of the Urea Process*, UreaKnowHow
+Process Paper June 2009 p.12, at **process** conditions rather than the 25 °C standard state:
+$\Delta H_{carb}=+117$ kJ/mol (110 atm, 160 °C) and $\Delta H_{hyd}=-15.5$ kJ/mol (160–180 °C).
+NH₃ is supercritical at stripper temperature ($T_c=132.4$ °C), so $\Delta H_{NH_3}$ is a
+*desorption* enthalpy — the loop's own `HPCC_BUB_DHVAP_JMOL` — and not a latent heat at all.
+
+**Validation.** The five terms summed over the design streams, with nothing fitted and no free
+parameter, give $37\,831$ kW against the licensor's $Q_{des}=39\,400$ kW — **96.0 %**. Only the
+ratio is applied:
+
+$$Q_{strip} = Q_{des}\cdot\frac{Q_{raw}}{Q_{raw,des}},\qquad
+\left.\frac{Q_{raw}}{Q_{raw,des}}\right|_{des} = \frac{X}{X} = 1.0\ \text{(bit-exact)}$$
+
+so the 4 % absolute offset cancels, never reaches the steam header, and the PFD duty remains the
+anchor rather than a computed quantity.
+
+| term | kW | share |
+|---|---:|---:|
+| carbamate dissociation | 22 118 | 58 % |
+| free-NH₃ desorption | 14 123 | 37 % |
+| water latent | 2 803 | 7 % |
+| urea hydrolysis (liquid step) | −379 | — |
+| sensible, both products | −834 | — |
+
+### 20.2 The unsourced constant, retired
+
+Delta #19 flagged `STRIP_FLOOD_ETA_K = 1.50` as the single number in the unit without a source. It
+required no replacement constant, because $\Delta T_{flood}$ and the efficiency loss are the same
+event measured two ways — the bottom runs hotter *precisely because* the dissociation endotherm did
+not happen:
+
+$$g_{flood} = 1 - \frac{\dot m_{feed}\,c_p\,\Delta T_{flood}}{n_{carb}\,\Delta H_{carb}}$$
+
+$\Delta T_{flood}\equiv 0.0$ below the flooding limit, so $g_{flood}\equiv 1.0$ at design — a
+structural identity, not a float-operand-ordering argument. Cross-checks at 10 % over the limit:
+this energy balance **2.9 %**, Brouwer's Shangdong Hualu Hengsheng case study (a 3 °C bottom-
+temperature shift alongside a 79 % → 81 % efficiency change) **2.5 %**, and the licensor length
+correlation from the same paper (6 m eff. → 80 %, 8 m → 82 %) **0.8 %** — against **15 %** from the
+retired fit, which was additionally double-counting the thermal collapse $g_T$ already carries.
+
+### 20.3 $\eta_P$ — a dead lever
+
+$\eta_P = \mathrm{clamp}\!\left(2-P/P_{des},\,0.85,\,1.15\right)$ was recomputed on every tick from
+an argument that every call site passed as the frozen $P_{des}$. It was therefore identically 1.0,
+and synthesis pressure had **no** effect on stripping efficiency — physically wrong, and invisible
+to the pin gate precisely because a dead lever perturbs nothing. Now
+
+$$P_{live} = P_{des}\cdot\frac{p_{syn}}{p_{syn,des}}$$
+
+which is exactly $P_{des}$ at design since $p_{syn}\equiv p_{syn,des}$ there. Gated on
+`_STEAM_READY` exactly as `step_steam` is: the fix introduces a feedback path that did not
+previously exist, and the boot-pin settle would otherwise capture `HPCC_UA` and `HPCC_LIQ_DES_LIVE`
+off a different transient (measured +305 kg/h, 0.16 %). Those are *calibration* constants; they
+must not depend on which transient reached the design point.
+
+---
+
+## Revision Delta #21 — C10 urea-solution properties, and the ripple break (2026-07-23)
+
+### 21.1 Properties as a departure from the anchor
+
+Both correlations are applied as a *departure*, never as an absolute. That is what preserves every
+licensor-published design value to the bit:
+
+$$\phi(w,T) = \phi_{anchor} + \big[\phi_{raw}(w,T) - \phi_{raw}(w_{des},T_{des})\big]$$
+
+At the design composition the bracket is a literal $0.0$, and $\phi_{anchor}+0.0=\phi_{anchor}$
+exactly in IEEE-754.
+
+**Heat capacity — back-solved, not guessed.** With $c_{p,w}$ from steam tables (quadratic least
+squares over 20–200 °C, worst residual 0.0085 kJ/kg·K), $c_{p,u}$ follows from requiring the
+mass-weighted mixing rule to reproduce the model's own design anchor:
+
+$$c_{p,u} = \frac{c_{p,des} - (1-w_{des})\,c_{p,w}(T_{des})}{w_{des}} = 2.072\ \text{kJ/kg·K}$$
+
+The published value for molten urea is 2.0–2.1 kJ/kg·K. Nothing in the derivation forced the answer
+to be physical, so that agreement is an *independent* corroboration rather than a restatement. The
+solution property is then $c_p(w,T)=w\,c_{p,u}+(1-w)\,c_{p,w}(T)$.
+
+**Density — regressed from the PFD**, which §0 makes the strict source (12 urea-solution streams,
+34–98 % urea, 40–183 °C):
+
+$$\rho = 972.08 + 255.95\,w_{urea} - 0.4659\,(T-100)\quad\text{kg/m}^3$$
+
+Both signs came *out* of the regression rather than being imposed — denser with urea, thinner when
+hot — which makes the fit its own evidence. Worst residual 6.2 %, on streams 207 and 208, the HP
+synthesis streams carrying dissolved NH₃/CO₂ that are not urea/water binaries at all.
+
+**Unit 324** now evaluates $c_p$ at each location's own composition — feed 80 %, Stage-1 melt
+94.31 %, Stage-2 melt 97.71 % — where a single 2.5 kJ/kg·K previously ran 14–18 % high at the
+evaporator ends and 23 % low at the LP end. The *feed* $c_p$ appears in both the back-solved design
+duty and the tick and was changed in both, so $dT/dt=0$ still holds at the seed **by construction**.
+The *holdup* $c_p$ enters only as the denominator of the temperature ODE, where the design numerator
+is exactly 0 — so no value of it can move the fixed point, only the speed of approach.
+
+### 21.2 The ripple break
+
+$$\text{was:}\quad w_{D002} \leftarrow \mathrm{pin}\big(\mathrm{advance}(\cdot),\ W_{IN}\big)
+\qquad\Longrightarrow\qquad w^{urea}_{D002} \equiv 0.80\ \text{on every tick}$$
+
+The 323D002 tank strength was pinned to the **constant** $W_{IN}$, so `sol_pin_strength` overwrote
+the urea/water pair each tick and every upstream composition disturbance died in the buffer tank.
+Measured: a +4 % NH₃ step on the live reactor overflow (water traded down, total moles held) moved
+222 of 1162 telemetry leaves — and **0 of unit 324's 66**. The block's own comment claimed it gave
+324 "a real composition instead of a constant"; the next line took it away.
+
+The pin retains its §0 job — holding the PFD-published strength against percentage-rounding creep
+across 324E001/E003 — but now carries the live deviation rather than overwriting it:
+
+$$w_{auth} = W_{IN} + \big(w^{urea}_{bal} - w^{urea}_{bal,des}\big)$$
+
+which is exactly $W_{IN}$ at the seed. With it, 246 leaves respond and **every unit group in the
+train** does, unit 324 included at 13 of 66, first responding at tick 39 — the 80 m³ buffer-tank
+holdup lag, which is physically correct.
+
+**This change was REVERTED, and the reason is the finding.** It also drove $w^{urea}_{D002}$ to
+76.515 % against the PFD stream-317 anchor of 80.00, failing four design-point tests. The pin is
+documented as a guard against *residual percentage rounding* — 3.5 points is not rounding. The 323
+train's mass balance does not land on 80.00, and the pin has been silently absorbing the gap. So
+the ripple break is a **symptom**: un-freezing the pin without first reconciling the upstream
+balance merely trades a hidden composition error for a visible one, and violating §0 at the design
+point is the worse trade. Carried as **TD-013**; the 323 balance is the place to start. It stayed
+hidden because Comp-I holdup is ~92 t against ~93 t/h, so the tank's time constant is about an hour
+and no test in the suite runs long enough to watch it converge.
 
 ---
 

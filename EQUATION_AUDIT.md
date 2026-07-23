@@ -666,3 +666,72 @@ One finding surfaced while mapping the stripper and is recorded rather than left
 a **dead lever** — `P_bara` is always passed the frozen `STRIP_P_DES_BARA`, so the synthesis-pressure
 term is identically 1.0 in the live loop and pressure has no effect on stripping efficiency. That is
 physically wrong; see TECH_DEBT TD-006.
+
+---
+
+# Audit R — ripple propagation, measured (2026-07-23)
+
+**Requirement.** A change in the composition or properties of any stream must reach every stream
+below it, and keep propagating transitively.
+
+**Why this had to be measured, not read.** A term can be present, correctly written, and still be
+dead. `eta_P` above was exactly that for months — computed on every tick from an argument every
+call site passed as a frozen constant. Reading the code cannot distinguish a live term from a dead
+one, so this audit perturbs a real handle, steps the plant, and records which of the 1162 telemetry
+leaves actually move (`scratchpad/audit_ripple_live.py`, `audit_ripple.py`).
+
+**Method note — a null result is not evidence.** The first pass perturbed `STRIP_FEED207_KMOLH` and
+saw zero response. That proved nothing about the plant: the constant is a *default argument* the
+live tick never reads. Perturbing module constants where live state is what flows is a broken
+probe, not a broken model, and it was rewritten before any conclusion was drawn.
+
+## R-1 — unit 324 is composition-blind — **DIAGNOSED, fix reverted, needs its own slot**
+
+Perturbing the **live** reactor overflow by +4 % NH3 (water traded down, total moles held) moved
+222 of 1162 leaves — but **0 of the 66 belonging to unit 324**. The evaporation train could not see
+an upstream composition change at all.
+
+Root cause, and it was one line: `s.w_d002 = sol_pin_strength(sol_advance(...), R324_W_IN)`. The
+323D002 tank strength was pinned to the **constant** `R324_W_IN = 0.80`, so the urea/water pair was
+overwritten every tick and every upstream disturbance died in the buffer tank. The block's own
+comment claimed it "gives the 324 feed a real composition instead of a constant" — the next line
+took it away. `w_e001`/`w_e003` are pinned to `w1_live`/`w2_live`, which are live, so this was the
+only frozen one of the three. A second, smaller break sat downstream of it: `urea1_in` read the
+frozen `R324_W_IN` rather than the tank vector, so both had to change for the ripple to flow.
+
+The pin still has a real job (§0 — holding the PFD-published strength against percentage-rounding
+creep across 324E001/E003), so it is kept, but as **design anchor + live deviation** rather than an
+absolute overwrite. At the seed the bracket is a literal `0.0`, so the anchor survives to the bit.
+
+**The fix worked, and was reverted anyway.** With the deviation carried, 246 of 1162 leaves
+responded and every unit group in the train did, unit 324 included (13 of 66, first at tick 39 —
+the 80 m³ buffer-tank holdup lag, physically right); melt strength PY-324201 moved 94.2 → 93.8 %
+where it previously could not move at all.
+
+But it also walked D002's urea fraction to **76.515 % against the PFD stream-317 anchor of 80.00**,
+failing four design-point tests (`test_design_fixed_point_holds`, `test_design_point_does_not_drift`,
+`test_design_compositions_sit_on_their_pfd_anchors`,
+`test_species_layer_does_not_perturb_the_mass_or_energy_balance`).
+
+**That 3.5-point gap is the real finding.** The pin is documented as a guard against "residual
+percentage rounding" — 3.5 points is not rounding. The 323 train's own mass balance does not land
+on the PFD's 80.00, and the pin has been silently absorbing the difference for as long as it has
+existed. The ripple break is therefore a *symptom*: un-freezing the pin without first reconciling
+the upstream balance trades a hidden composition error for a visible one, and breaking the §0 PFD
+anchor is the worse of the two.
+
+Reverted to the hard pin deliberately — not because the fix is wrong in principle. Why this was
+never seen: Comp-I holdup is ~92 t against ~93 t/h throughput, so the tank's time constant is about
+an hour, and nothing in the suite runs long enough to watch it converge. **Needs its own slot**,
+starting from the 323 balance rather than from the pin.
+
+## R-2 — what already rippled correctly
+
+CO2 feed purity (inerts +50 %) → 234 leaves; MP header pressure (+4 %) → 159; `R323_CP_SOLN` → 45;
+`R328_CP` → 37. The synthesis loop, the desorption train and the steam system all propagate.
+
+## R-3 — recorded, not defects
+
+`STRIP_RHO_BOTTOM` shows no telemetry response because it only sets the level-span mass, and at a
+settled design point the sump inventory is stationary — correct behaviour, not a dead constant. The
+five genuinely dead density constants are listed in TECH_DEBT TD-012.
