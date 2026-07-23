@@ -145,9 +145,10 @@ matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" predi
 New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
 `probe_f8_328.py`.
 
-### Remediation slot 11 — three housekeeping gaps closed (dead constants, PID doc, launcher)
+### Remediation slot 11 — three housekeeping gaps closed (dead constants, PID doc, launcher), commit `69d459e`
 
-Small, deliberately separate from slot 10. Pin unmoved: **`leaves 25 / keys 15 / diffs 0`**.
+Small, deliberately separate from slot 10. Pin unmoved: **`leaves 25 / keys 15 / diffs 0`**;
+full suite **222 passed in 992.57 s**, the same count as before the change.
 
 1. **Five dead density constants deleted** from `backend/main.py`: `CO2_RHO`, `SCRUB_CARB_RHO`,
    `R323_C003_RHO`, `R323_F004_RHO`, `R323_F010_RHO`. Each verified dead first — one hit apiece
