@@ -267,7 +267,7 @@ the N/C settle in `test_equation_audit_322e002`; measured over 40 min it converg
 (span 0.027 by minute 40), and the old 10-minute window straddled the p_syn saturation at minute 6.
 Window widened to 25 min **and** a step-decay assertion added, so that test is now stronger.
 
-### Remediation slot 9 — C10 properties + the ripple break, commit `SLOT9SHA`
+### Remediation slot 9 — C10 properties + the ripple break, commit `219cb45`
 One cp (2.5 kJ/kg·K) covered every urea solution from 44 % urea to 97.71 % melt — 14–18 % high at
 the evaporator ends, 23 % low at the LP end, i.e. most wrong exactly where the model does its most
 important work, since the evaporation train's purpose *is* to change composition. cp is
