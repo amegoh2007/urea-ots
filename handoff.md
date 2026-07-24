@@ -145,7 +145,7 @@ matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" predi
 New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
 `probe_f8_328.py`.
 
-### Remediation slot 12 — `R3232_CP` reconciled against the carbamate-cp reference, commit `PENDING`
+### Remediation slot 12 — `R3232_CP` reconciled against the carbamate-cp reference, commit `4ab1514`
 
 Documentation only; **no model change**, so the pin is unmoved by construction (`leaves 25 / keys
 15 / diffs 0`) and the suite count is unchanged. The gap "`R3232_CP = 3.0` needs a *sourced*
