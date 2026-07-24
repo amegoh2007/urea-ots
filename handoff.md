@@ -533,15 +533,30 @@ of holdup per call — but that was tested as the ramp's cause and REFUTED.
    `STRIP_FEED207_KMOLH` and saw zero response — but that is a *default argument* the live tick
    never reads. A null result from a broken probe looks identical to one from a broken model.
 
-**Large binaries push via Git LFS, not a plain pack (2026-07-24).** `References/` is now versioned
-(slot-12 follow-on, commits `ffe7974` + `e65edcc`): 38 markdown sources normally, and the two source
-PDFs (`Merged_Searchable_PIDs.pdf` ~61 MB, `Helwan PFDs meged.pdf`) through **Git LFS** (`git-lfs
-3.7.1`; `.gitattributes` routes `*.pdf` through the filter). A direct HTTPS pack push of the 61 MB
-blob returned **HTTP 408** from the remote twice — the uplink is ~176 KB/s, past the git smart-HTTP
-server window — and neither `http.version HTTP/1.1` nor a raised `postBuffer` helped; LFS's chunked
-upload cleared it. The `.gitignore` `*.pdf` "not versioned" rule is left intact, so these two are
-`-f` exceptions added by explicit owner decision; any other `*.pdf` stays excluded. Future >~50 MB
-binary: `git lfs track` it before the first `git add -f`.
+**Large binaries: tracked via LFS, then purged from history (2026-07-24).** `References/` is
+versioned as **markdown only** — 38 sources; every citation resolves from them. The two source PDFs
+(`Merged_Searchable_PIDs.pdf` ~61 MB, `Helwan PFDs meged.pdf`) were briefly tracked via Git LFS, then
+**removed from all history with `git filter-repo` and force-pushed** (`95e4f75…836ee2b`, forced) —
+the owner reversed the call over IP exposure. They stay `.gitignore`-excluded (`*.pdf`, "not
+versioned") and local-only on disk. Two durable lessons survive the round-trip:
+
+1. **A >50 MB binary will not push in a plain pack from this environment.** A direct HTTPS pack push
+   of the 61 MB blob returned **HTTP 408** twice (uplink ~176 KB/s, past the git smart-HTTP server
+   window); neither `http.version HTTP/1.1` nor a raised `postBuffer` helped. Git LFS's chunked
+   upload cleared it. If a large binary must ever be versioned, `git lfs track` it first.
+2. **`git filter-repo` changed a large span of commit SHAs** — all of this session's commits and the
+   recent slots; a few older commits (e.g. the graphify base `411080c`) kept their SHA. So
+   pre-2026-07-24 hash pins in this handoff, `TECH_DEBT.md` and the As-Built reference are mostly
+   **stale**; commits are still findable by `git log --grep`. Full old→new map in
+   `.git/filter-repo/commit-map` and the safety bundle (session scratchpad `urea-ots-prepurge.bundle`,
+   which still holds the old history *with* the PDFs — delete once satisfied). Recent remaps: R3232_CP
+   reconcile `73e88b4` (was 4ab1514), slot-11 chore `ea516c3` (was 69d459e), slot-11 pin `7e20d2a`
+   (was 65de9db), slot-12 pin `1925f56` (was 990e952).
+
+**Still exposed until a GitHub-side purge (owner action, handed over 2026-07-24):** the force-push
+dropped the pointers from the branch, but GitHub keeps the orphaned LFS objects and the
+now-unreachable old commits (reachable by direct OID / SHA) until a server-side purge — repo
+delete+recreate, or GitHub Support. Nothing git-side from this machine removes those.
 
 ## Standing session commands (CLAUDE.md sections 6/7)
 * **Caveman mode ON** — invoke the `caveman` skill at session start; prose only, code/commits normal.
