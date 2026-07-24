@@ -629,9 +629,14 @@ delete+recreate, or GitHub Support. Nothing git-side from this machine removes t
   but do NOT change the 15 pin VALUES — expect `diffs 0` still.
 
 ## Next steps
-1. **TD-009** — component species layer downstream of unit 322. Largest remaining gap and the
-   blocker for TD-008; needs its own project, not a fix slot.
-2. **TD-008** — real 328C003 hydrolyser kinetics, once TD-009 gives it species to work on.
+1. **TD-009 remainder** — the 323 / 324 / 328-desorption species layer is DONE (slots 3/6); what is
+   left (scoped 2026-07-24, see TECH_DEBT "Remainder") is the **lumped absorber/collector vessels**:
+   **322C001** LP absorber — the one that matters, its atmospheric NH3 slip is a boot-pinned split
+   (`A328_PHI_ABS`), not a live composition — plus 328D001 / 328D003 / 323C005 collectors. It is
+   **accuracy, not a blocker**. 322C001 is the natural first unit: a reactive-absorption species layer
+   (CO2 + 2 NH3 -> carbamate), comparable in size to the F-8 work, done unit-by-unit under scope lock.
+2. **TD-008 — CLOSED.** The 328C003 hydrolyser reaction extent is in; it did **not** need the full 328
+   species vector (hydrolysis is flow-through), so it never actually depended on TD-009.
 3. **TD-006 — CLOSED 2026-07-23** (`1da9280`), both halves. So is the `eta_P` dead lever, and so
    is the unsourced `STRIP_FLOOD_ETA_K`. See "Remediation slot 8" above.
 3a. **TD-012 / C10 — cp side CLOSED, density side still open.** Every cp in units 323, 324 and

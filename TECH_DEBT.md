@@ -772,6 +772,27 @@ The frozen overhead splits `R328_C002_PHI737` / `R328_C004_PHI750` are gone from
 overheads are energy-limited in the same anchored-ratio form used at 323F010. TD-008's hydrolyser
 extent now acts on real species.
 
+### Remainder — the LP absorber and the recycle/collector vessels (still open, scoped 2026-07-24)
+
+The species layer covers the vessels that hold and *transform* composition: 323C003, 323F004,
+323F010, 323D002, 324E001, 324E003 (`sol_advance`) and the 328 desorption columns 328C002/C003/C004
+(`des_advance`). Four downstream vessels still run **lumped mass** with no species vector:
+
+* **322C001** — the LP off-gas absorber (`a328_c001_*`). The one that matters. It absorbs the 322E003
+  inert-purge off-gas (NH₃/CO₂, via HV-322604) into the recycle carbamate liquor and vents the balance
+  to 328V001, so the **atmospheric NH₃ slip is a boot-pinned split** (`A328_PHI_ABS·gcb_m`), not a
+  composition. A species layer here is the reactive-absorption mirror of the stripper: CO₂ + 2 NH₃ →
+  carbamate added to the liquor (tracked as dissolved NH₃/CO₂), inerts + slip to the vent `y`. Natural
+  first unit of the remainder.
+* **328D001** (`a328_d001_*`), **328D003** carbamate collector (`a328_d003_MI/MII`), **323C005** vent
+  scrub — recycle collectors, lumped; they carry composition through rather than transform it. Smaller.
+
+Reuse the additive pattern: C1 (total mass/energy ODEs) untouched, C2/C6 on top, anchored so
+`w == w_des` at the seed → `dw/dt == 0`, pin unmoved. 322C001 has >2 feeds (`m_755`, CPL condensate,
+absorbed off-gas), so blend the feeds first or use the `des_advance` multi-feed form. **TD-008 does
+NOT depend on this remainder** — the hydrolyser closed as a flow-through reaction (see above), so the
+remainder gates nothing; it is accuracy (a live vent NH₃ slip), not a blocker.
+
 ---
 
 ## TD-010 — `scratchpad/regress.py` cannot be invoked with the documented relative path
