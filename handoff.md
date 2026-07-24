@@ -533,6 +533,16 @@ of holdup per call — but that was tested as the ramp's cause and REFUTED.
    `STRIP_FEED207_KMOLH` and saw zero response — but that is a *default argument* the live tick
    never reads. A null result from a broken probe looks identical to one from a broken model.
 
+**Large binaries push via Git LFS, not a plain pack (2026-07-24).** `References/` is now versioned
+(slot-12 follow-on, commits `ffe7974` + `e65edcc`): 38 markdown sources normally, and the two source
+PDFs (`Merged_Searchable_PIDs.pdf` ~61 MB, `Helwan PFDs meged.pdf`) through **Git LFS** (`git-lfs
+3.7.1`; `.gitattributes` routes `*.pdf` through the filter). A direct HTTPS pack push of the 61 MB
+blob returned **HTTP 408** from the remote twice — the uplink is ~176 KB/s, past the git smart-HTTP
+server window — and neither `http.version HTTP/1.1` nor a raised `postBuffer` helped; LFS's chunked
+upload cleared it. The `.gitignore` `*.pdf` "not versioned" rule is left intact, so these two are
+`-f` exceptions added by explicit owner decision; any other `*.pdf` stays excluded. Future >~50 MB
+binary: `git lfs track` it before the first `git add -f`.
+
 ## Standing session commands (CLAUDE.md sections 6/7)
 * **Caveman mode ON** — invoke the `caveman` skill at session start; prose only, code/commits normal.
 * **Graphify** — CLI installed (`graphifyy` 0.9.22; `graphify.exe` in
