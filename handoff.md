@@ -145,7 +145,7 @@ matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" predi
 New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
 `probe_f8_328.py`.
 
-### Remediation slot 13 — TD-016: the 324 evaporator limit cycle closed with a smooth VLE curve, commit `PENDING`
+### Remediation slot 13 — TD-016: the 324 evaporator limit cycle closed with a smooth VLE curve, commit `09f2afc`
 
 The residual 324E001/324E003 limit cycle (carried since TD-015) is closed. Root cause was the
 `min(v_conc, v_duty)` relay switching against a **fixed** concentration cap (`urea_in / R324_W_EV`),
