@@ -1285,11 +1285,25 @@ inside ±0.15 % of design (against an unbounded walk before) and the melts hold 
 Gates: `test_equation_audit_td014.py::test_the_unit_324_stages_carry_the_same_closure` and
 `::test_the_324_evaporator_temperatures_stay_bounded`.
 
-**Residual, recorded not hidden.** A slow limit cycle remains — 16 h envelope 0.25 °C on 324E001 and
-0.88 °C on 324E003, from the `min()` branch switching. It is bounded and an order of magnitude below
-what the old tuning produced, but it is not zero. Removing it means replacing the concentration cap
-with a smooth equilibrium relation rather than deleting it, which is a modelling change of its own
-and is **not** attempted here.
+**Residual — CLOSED 2026-07-24 as TD-016.** The slow limit cycle (16 h envelope 0.25 °C / 0.88 °C)
+came from the `min()` branch switching against a *fixed* 94.31 % / 97.71 % concentration cap whose
+`dC_u/dT` is identically zero — the Jacobian-collapse the Urea-Water VLE research (References/) names
+for these cycles. TD-016 replaces the fixed cap with the continuous **Fahmy-Nassar** equilibrium
+`w_eq(T)` (`evap_w_eq`, `ln Pw = 16.2886 − 3186.44/(T+227.02)`, `xw = 1.06425·(0.95·Pv/Pw)^0.92498`),
+anchored so `w_eq(130,0.33) ≡ 94.31 %` bit-exact. The melt strength IS that smooth curve at the
+controlled vacuum, so the water removed is one continuous function of temperature: **no `min()`, no
+`v_duty`, no `T_bub`/`q_relax`, no relay**. Measured 16 h envelope after: **0.008 °C / 0.001 °C**
+(57× / ~2000×), with the 324F003 deep-vacuum swing cut ~10× as a side effect. Pin unmoved
+(`leaves 25 / keys 15 / diffs 0`); full suite green. The steam-cut and design-invariance tests were
+updated: with the duty branch gone the vapour rate now tracks the LIVE feed strength (AUDIT B1
+ripple) instead of being pinned — the 323D002 tank's known ~0.04 pp upstream drift (TD-013) that the
+old branch masked now shows in `vapour_th`, while the melt strength stays pinned (the real invariant).
+`bubble_T_raoult` is retained for 323F010; `R324_*_TBUB_DES` remain as its cross-check.
+
+Not adopted from the TIC faceplates this session: the plant DZ = 2.0 % dead zone and the SP = 129/139
+snapshot. The design anchor is the PFD's 130/140 (the faceplate SPs are an operating snapshot, and
+moving them would break the pin); the smooth curve alone eliminated the cycle, so the dead zone was
+not needed. Both are noted for a future tuning pass.
 
 ### One thing this changed downstream
 

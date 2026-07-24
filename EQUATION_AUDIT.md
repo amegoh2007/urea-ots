@@ -235,8 +235,8 @@ every `min()` / `max()` guard is non-binding at design.
 | 323C003 / 323E002 | `m_305 = φ·m_feed` | `m_305 = min(φ·m_feed, M305_DES·q_avail/Q305_DES)` — boil-up energy-limited |
 | 323F004 | `m_701 = φ·m_314` | true isenthalpic flash: `T_flash = 106 + [Tsat(P) − Tsat(1.13)]` (saturation constraint) and `m_701·λ = m_314·cp·ΔT − M·cp·(T_sat−T)/τ`. Substituting into the energy ODE yields exactly `dT/dt = (T_sat − T)/τ`, so energy stays conserved |
 | 323F010 / 323E010 | `m_evap = φ·m_319` | `min(φ·m_319, MEVAP_DES·q_avail/QEVAP_DES)` |
-| 324E001 | `p1_m = urea_in / 0.9431` (strength pinned) | `v1 = min(v_conc, V1_DES·q_avail/Q1_DES)`; `w1_live` published to `urea_pct` and `PY-324201` |
-| 324E003 | `p2_gen = urea_in / 0.9771` (strength pinned) | same shape; `w2_live` published to `urea_pct` and `AY-324701`; Stage-2 feed enthalpy now uses the **live** Stage-1 outlet temperature, and the recycle carries its live strength through `s.tlag["R324_recyc_w"]` |
+| 324E001 | `p1_m = urea_in / 0.9431` (strength pinned) | **TD-016:** `v1 = feed − urea_in/w_eq(T)`, the smooth Fahmy-Nassar VLE equilibrium (`evap_w_eq`) at the controlled vacuum — no `min()`, no duty branch; `w1_live` published to `urea_pct` and `PY-324201` |
+| 324E003 | `p2_gen = urea_in / 0.9771` (strength pinned) | same smooth closure; `w2_live` published to `urea_pct` and `AY-324701`; Stage-2 feed enthalpy uses the **live** Stage-1 outlet temperature, and the recycle carries its live strength through `s.tlag["R324_recyc_w"]` |
 | all four steam chests | `Q = UA·(Tsat − T)` | `Q = max(UA·(Tsat − T), 0)` (F-10) |
 | `conc_infer_324` | `w_des` assumed a constant in (0,1) | reference mole fraction clamped to the same physical band as the live one — `w_des` is now a live argument that legally reaches 0 on cold start |
 
@@ -781,8 +781,10 @@ deferred: the 323D002 pin was an *accidental clamp* on it, holding `v1_conc` wit
 separate by ~74 kg/h and the melt walks at ~0.5 pp/h. Closing it needed the same closure plus a
 retune: the measured process gain is **+8.3 °C/bar on both loops** (central difference over 1 h
 means, master in MAN), so the inherited Kc = 2.0 was a loop gain of 16.7 — the multi-hour limit
-cycle that was observed. Lambda-tuned to 0.04 and halved to 0.02 against the `min()` relay
-nonlinearity.
+cycle that was observed. Lambda-tuned to 0.04 and halved to 0.02 against the `min()` relay. **TD-016
+(2026-07-24) then removed the relay entirely** — the fixed concentration cap became the smooth
+Fahmy-Nassar equilibrium `w_eq(T)`, dropping the 16 h envelope from 0.25/0.88 °C to 0.008/0.001 °C —
+so the 0.02 is now conservatism rather than a relay necessity.
 
 **R-1 closed as a consequence.** The only argument for keeping the 323D002 strength pin was that its
 inlet was drifting. It is not any more, so the pin is gone: `s.w_d002` is a plain `sol_advance` and

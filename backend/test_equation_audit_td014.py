@@ -150,11 +150,13 @@ def test_x_water_mol_is_a_real_mole_fraction():
 
 # --------------------------------------------------------------- TD-015: the unit-324 half, closed
 def test_the_unit_324_stages_carry_the_same_closure():
-    """324E001/324E003 had the identical defect and are now fixed the same way.  Closing it needed
-    the controllers retuned as well: Kc = 2.0 / Ti = 120 was inherited from a plant whose
-    temperature ODE was identically zero, so it described nothing.  With a real plant the measured
-    gain is +8.3 °C/bar on both loops (central difference over 1 h means, master in MAN), which made
-    the old Kc a loop gain of 16.7."""
+    """TD-016.  324E001/324E003 no longer use the min(concentration-cap, duty) relay.  The melt
+    strength IS the smooth Fahmy-Nassar VLE equilibrium at the controlled vacuum, so the water
+    removed is a single continuous function of temperature with no branch to switch -- which is what
+    eliminates the residual limit cycle (measured 16 h T envelope 0.44/1.57 C -> 0.008/0.001 C).  The
+    retune stands: Kc = 2.0 / Ti = 120 was inherited from a plant whose temperature ODE was
+    identically zero; the measured gain on the real, non-degenerate plant is +8.3 C/bar, lambda-tuned
+    to 0.04 (the earlier halving to 0.02 fought the relay and is now just conservatism)."""
     assert main.State().TIC_324001["Kc"] == 0.02
     assert main.State().TIC_324002["Kc"] == 0.02
     assert main.State().TIC_324001["Ti"] == 360.0
@@ -162,8 +164,10 @@ def test_the_unit_324_stages_carry_the_same_closure():
     _run(600.0)
     for tag in ("E001", "E003"):
         d = main._DIAG[tag]
-        assert "relax" in d and "Tbub" in d
-        assert d["v"] == min(d["conc"], d["duty"])
+        assert "weq" in d and "conc" not in d and "duty" not in d      # the relay is gone
+        # v is exactly the smooth-equilibrium water removal, clamped to [0, feed] -- no min()
+        v_eq = max(min(d["feed"] - d["urea_in"] / max(d["weq"], 1e-6), d["feed"]), 0.0)
+        assert abs(d["v"] - v_eq) < 1e-9, (tag, d["v"], v_eq)
 
 
 def test_the_324_evaporator_temperatures_stay_bounded():

@@ -1430,15 +1430,25 @@ PV-329212 swinging 81–90 %). Lambda-tuned on the separator's own dynamics, $\t
 $$K_c = \frac{\tau}{K_p(\lambda+\theta)} = \frac{360}{8.3\times 1080} = 0.04
 \quad\longrightarrow\quad \text{halved to } 0.02$$
 
-The extra factor of two is not taste: `min(v_conc, v_duty)` is a **relay nonlinearity** whose branch
-switching sustains a slow limit cycle no linear tuning removes, and halving the gain measurably
-shrinks it (16 h envelope $T_{e001}$ 0.42 → 0.25 °C, $T_{e003}$ 1.33 → 0.88 °C) — which is itself the
-evidence that the residual is controller-driven, not a plant instability. The concentration cap
-**stays**: deleting it was tested and the stage diverges.
+The extra factor of two originally fought a **relay**: `min(v_conc, v_duty)` with a *fixed* 94.31 %
+concentration cap was a branch nonlinearity whose switching sustained a slow limit cycle no linear
+tuning removed, and halving the gain only shrank it (16 h envelope $T_{e001}$ 0.42 → 0.25 °C,
+$T_{e003}$ 1.33 → 0.88 °C).
 
-**Residual, recorded not hidden.** That limit cycle remains — 0.25 °C and 0.88 °C over 16 h, against
-valves that used to walk without limit. Removing it means replacing the concentration cap with a
-smooth equilibrium relation rather than deleting it, which is a modelling change of its own.
+**TD-016 — the relay is gone.** The fixed cap was the singular part: a hard 94.31 % ceiling whose
+$dC_u/dT_p$ is identically zero, so the moment the melt hit it the loop saw no process gain,
+disengaged, drifted and over-corrected (the mechanism the Urea-Water VLE research names for exactly
+these cycles). It is replaced by the continuous **Fahmy-Nassar** equilibrium $w_{eq}(T)$ —
+`evap_w_eq()`, $\ln P_w = 16.2886 - 3186.44/(T+227.02)$, $x_w = 1.06425\,(0.95\,P_v/P_w)^{0.92498}$ —
+emitted in anchored-departure form so $w_{eq}(130,0.33)\equiv$ 94.31 % bit-exact and the design HMB
+is untouched. The melt strength now *is* that single smooth curve, evaluated at the PIC-controlled
+design vacuum, so the water removed is one continuous function of temperature: no `min()`, no duty
+branch, no relay, and the $P\to v\to P$ coupling that also swung the separator pressure is gone.
+Measured 16 h envelope after the fix: $T_{e001}$ **0.008 °C**, $T_{e003}$ **0.001 °C** (from 0.44 /
+1.57), with the 324F003 deep-vacuum swing itself cut ~10× as a side effect. Pin unmoved
+(`leaves 25 / keys 15 / diffs 0`). $K_c = 0.02$ is retained as conservatism; the $\lambda$-value 0.04
+could now be restored once $K_p$ is re-measured on the non-relay plant. TD-015's two-branch closure
+and the bubble-point holdup lag are retired; `bubble_T_raoult` remains for 323F010.
 
 The constants of record for these four loops (both masters and both chest-pressure slaves) are
 **Appendix B of `Master_PID_Tuning_Constants.md`**. The plant DCS rows in that document — Kc 1.50

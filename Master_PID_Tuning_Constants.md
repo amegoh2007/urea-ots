@@ -745,21 +745,23 @@ chest-pressure slave is fast at Ti = 20 s:
 
 $$K_c = \frac{\tau}{K_p(\lambda + \theta)} = \frac{360}{8.3 \times 1080} = 0.0402 \;\rightarrow\; 0.04$$
 
-**then halved to 0.02** (loop gain 0.166). The extra factor of two is not conservatism for its own
-sake. `v_m = min(v_conc, v_duty)` is a **relay nonlinearity**, and the branch switching sustains a
-slow limit cycle that no linear tuning removes. Halving the gain measurably shrinks it — 16 h
-envelope T_e001 0.42 → **0.25 °C**, T_e003 1.33 → **0.88 °C** — and that response to gain is itself
-the evidence that the residual is controller-driven rather than a plant instability.
+**then halved to 0.02** (loop gain 0.166). The extra factor of two originally fought a relay:
+`v_m = min(v_conc, v_duty)` with a *fixed* concentration cap was a branch nonlinearity whose
+switching sustained a slow limit cycle no linear tuning removed, and halving only shrank it (16 h
+envelope T_e001 0.42 → 0.25 °C, T_e003 1.33 → 0.88 °C).
 
 Ti = 360 s follows the lambda rule's $T_i = \tau$.
 
-### Residual, and what would remove it
+### Residual — CLOSED 2026-07-24 (TD-016)
 
-The 0.25 / 0.88 °C envelope is **not zero and is not claimed to be**. It is bounded, and it replaces
-a valve that previously walked without limit, but closing it means replacing the concentration cap
-with a smooth equilibrium relation — **not** deleting the cap. Deleting it was tested: the melt runs
-away and `psat(T)` underflows to a `ZeroDivisionError` in `conc_infer_324`. The cap is doing real
-physical work. That replacement is a modelling change of its own and is not attempted.
+That relay is gone. The fixed cap (`urea_in / W_EV`) had `dC_u/dT ≡ 0` — the Jacobian collapse the
+Urea-Water VLE research names for these cycles — and is replaced by the continuous **Fahmy-Nassar**
+equilibrium `w_eq(T)` (`evap_w_eq`), anchored bit-exact at the design point. The melt strength now IS
+that single smooth curve at the controlled vacuum, so there is no `min()`, no duty branch and no
+relay. Measured 16 h envelope after: **T_e001 0.008 °C, T_e003 0.001 °C** (pin unmoved). So $K_c$ =
+0.02 is now **conservatism, not a relay necessity** — the λ-value 0.04 could be restored once $K_p$ is
+re-measured on the non-relay plant. (The earlier "deleting the cap diverges" note stood only against
+*deleting* it; *replacing* it with the equilibrium curve is what TD-016 did.)
 
 ### Seed invariance
 

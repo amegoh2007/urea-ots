@@ -99,6 +99,41 @@ def conc_infer_324(w_des: float, T_des: float, P_des: float,
     return (w_des + (_xw_to_w(xw_live) - _xw_to_w(xw_des))) * 100.0
 
 
+def _fahmy_Cu(T_C: float, P_bara: float) -> float:
+    """Urea-melt mass fraction in VLE with a pure-water vapour at (T, P) — Fahmy-Nassar correlation.
+
+    References/Urea-Water VLE Data Research.md sec 4.1.  A single continuous, differentiable curve
+    across the whole 130-140 C / 0.131-0.33 bar a evaporator envelope, with the water activity
+    coefficient folded into the exponent (so no iterative γ solve):
+        ln(Pw[mmHg]) = 16.2886 - 3186.44 / (T + 227.02)
+        xw = 1.06425 * (0.95 * Pv/Pw) ** 0.92498            (water mole fraction)
+        Cw = Mw*xw / (Mu*(1-xw) + Mw*xw) ;  Cu = 1 - Cw
+    Reproduces the reference's own tables (93.71 % @130 C/0.33 bar, 98.19 % @140 C/0.131 bar).
+    """
+    Pw = math.exp(16.2886 - 3186.44 / (T_C + 227.02))          # pure-water sat. pressure, mmHg
+    Pv = P_bara * 750.0616827                                  # separator pressure, bar a -> mmHg
+    xw = 1.06425 * (0.95 * Pv / Pw) ** 0.92498                 # water mole fraction (activity folded in)
+    xw = min(max(xw, 1e-9), 1.0 - 1e-9)
+    Mw, Mu = MW_COMP["H2O"], MW_COMP["Urea"]
+    Cw = (Mw * xw) / (Mu * (1.0 - xw) + Mw * xw)               # water mass fraction
+    return 1.0 - Cw
+
+
+def evap_w_eq(T_C: float, P_bara: float, w_des: float, T_des: float, P_des: float) -> float:
+    """Smooth VLE equilibrium urea-melt mass fraction, anchored bit-exact to the design point.
+
+    TD-016.  The evaporator concentration branch used a FIXED target `urea_in / W_EV` — a hard
+    ceiling whose d(conc)/dT is identically zero, which is exactly the Jacobian singularity that
+    sustains the residual limit cycle (References/Urea-Water VLE Data Research.md sec 2: the melt
+    hits the flat cap, dCu/dTp -> 0, the loop disengages and drifts, then over-corrects).  This
+    replaces that constant with the continuous Fahmy-Nassar curve, emitted in anchored-departure
+    form  w_des + [Cu(live) - Cu(design)]  — the same device bubble_T_raoult and conc_infer_324 use,
+    so the bracket is a literal 0.0 at (T_des,P_des) and the design HMB is untouched; only a real,
+    non-zero dCu/dT (the equilibrium slope) is added off-design.
+    """
+    return w_des + (_fahmy_Cu(T_C, P_bara) - _fahmy_Cu(T_des, P_des))
+
+
 # ===================================================================
 #  AI-328701  process-condensate conductivity soft sensor  (stream 740)
 #  Node: 328E007 hot outlet (739) -> 740 boundary -> 328P007, 89 C.
@@ -3903,14 +3938,15 @@ class State:
                            # bubble-point holdup lag), lambda = 3*tau, theta ~ 0 since the chest-P
                            # slave is fast at Ti = 20 s:
                            #     Kc = tau / (K_p * (lambda + theta)) = 360 / (8.3 * 1080) = 0.04
-                           # then HALVED to 0.02 (loop gain 0.17).  The extra factor of two is not
-                           # taste: `v_m = min(v_conc, v_duty)` is a relay nonlinearity, and the
-                           # branch switching sustains a slow limit cycle no linear tuning removes.
-                           # Halving the gain measurably shrinks it -- 16 h envelope T_e001 0.42 ->
-                           # 0.25 C, T_e003 1.33 -> 0.88 C -- which is itself the evidence that the
-                           # cycle is controller-driven rather than a plant instability.  The cap
-                           # cannot simply be deleted: without it the stage diverges (tested, the
-                           # melt runs away and psat(T) underflows), so it is doing real work.
+                           # then HALVED to 0.02 (loop gain 0.17).  The halving originally fought a
+                           # relay: `v_m = min(v_conc, v_duty)` with a FIXED concentration cap was a
+                           # branch nonlinearity that sustained a slow limit cycle no linear tuning
+                           # removed (16 h envelope T_e001 0.42/0.25, T_e003 1.33/0.88 at Kc 0.04/0.02).
+                           # TD-016 removed that relay: the cap is now the smooth Fahmy-Nassar VLE
+                           # equilibrium w_eq(T), so the melt tracks a continuous curve, TIC-324001
+                           # never disengages, and the cycle is gone (16 h envelope -> 0.008/0.001 C).
+                           # Kc = 0.02 is kept as conservatism -- the lambda value 0.04 could now be
+                           # restored, but re-measuring K_p on the non-relay plant is the precondition.
                            # Velocity form, so pv == sp == pv1 still gives du == 0 and the design
                            # seed stays bit-exact at any Kc/Ti.
                            "Kc": 0.02, "Ti": 360.0, "Td": 0.0, "act": +1.0,
@@ -5730,49 +5766,28 @@ def step_sim(dt: float) -> dict:
     # R324_W_EV1 by construction, so no operator action could dilute the product).  q1_avail is
     # the latent duty left after the feed has been carried to the stage temperature; the water
     # removed is whichever is smaller — the concentration target or what that duty can boil.
-    q1_avail_kw = (feed1_m/3600.0*cp_feed1*(R324_FEED_T_C - s.r324_e001_T)
-                   + Q_e001_kw)                                               # kW available as latent
-    # AUDIT TD-014 — Evaporator I carried the same degenerate energy ODE as 323C003/323F010:
-    # R324_Q1_DES_KW is the design LATENT load and R324_LAM_V1 its latent heat, so on the duty branch
-    # v1_m·λ/3600 cancelled q1_avail exactly and P_e001 was identically zero.  TIC-324001 was
-    # integrating against zero gain and walking PIC-329203 down forever.  Closure: the melt sits at
-    # its bubble point, which at a fixed 0.33 bar a vacuum is set by CONCENTRATION (Raoult) — so
-    # TIC-324001 becomes what it is on the plant, a melt-strength controller acting through
-    # temperature.  Live separator pressure PT-324202 is carried too, since 324F001 has a real
-    # vacuum ODE.  Design: w == W_S401 and P == 0.33 -> bracket is a literal 0.0 -> q_relax == 0.0.
-    # AUDIT TD-015 — 324E001 carried the same degenerate energy ODE TD-014 removed from
-    # 323C003/323F010: R324_Q1_DES_KW is the design LATENT load and R324_LAM_V1 its latent heat, so
-    # on the duty branch v1_m·λ/3600 cancelled q1_avail term for term and P_e001 below was
-    # identically zero — TIC-324001 integrating against a plant of zero gain, walking PIC-329203
-    # down without limit.  Same closure: the melt sits at its bubble point, which at a fixed 0.33
-    # bar a vacuum is set by CONCENTRATION (Raoult), so TIC-324001 becomes what it is on the plant —
-    # a melt-strength controller acting through temperature.  Live PT-324202 is carried too, since
-    # 324F001 has a real vacuum ODE.  Design: w == W_S401 and P == 0.33 -> the bracket is a literal
-    # 0.0 -> q_relax == 0.0 -> q1_avail − 0.0 == q1_avail bit-identically.
+    # AUDIT TD-016 — the evaporator melt strength IS the smooth VLE equilibrium at the controlled
+    # vacuum, and the water removed follows it continuously.  This closes the residual limit cycle
+    # and replaces the whole TD-014/TD-015 min(concentration-cap, duty) two-branch closure.
     #
-    # The holdup lag is load-bearing, and the reason is a defect elsewhere.  The melt strength that
-    # drives this bubble point is `w1_live = urea_in / melt`, an INSTANTANEOUS algebraic ratio that
-    # sol_pin_strength then writes straight over the species ODE — so a change in v1 reaches the
-    # bubble point with no holdup delay at all.  That closes a same-tick loop of gain ~3
-    # (dv1/dT_bub = V1_DES/Q1_DES · M·cp/τ ≈ 75 kg/h per K, dT_bub/dw ≈ 6-25 °C/pp at these
-    # strengths), and explicit Euler answers a gain-3 loop with a period-2 oscillation — measured,
-    # ±1e-4 K/tick with a growing envelope, before this lag went in.  τ is the separator's own
-    # residence time, i.e. the statement that the BULK melt's bubble point cannot move faster than
-    # the holdup turns over: the dynamics the pinned strength threw away, put back.  _lag1 is
-    # implicit-Euler (unconditionally stable) and converges to its target, so the design point is
-    # unchanged and lazy-init makes it bit-exact from the first tick.  Retire it if the E001/E003
-    # strength pins are ever dropped in favour of the species-layer ODE.
-    T_bub_e001 = _lag1(s.tlag, "R324_TBUB1",
-                       R324_E001_T_SP_C + (bubble_T_raoult(s.r324_f001_P, s.w_e001)
-                                           - R324_E001_TBUB_DES),
-                       R324_F001_M_TAU_S, dt)
-    q1_relax_kw = (s.r324_f001_M * cp_hold1 * (T_bub_e001 - s.r324_e001_T)
-                   / R324_F001_M_TAU_S)                                       # kW retained to reach bubble point
-    v1_conc    = max(feed1_m - urea1_in / R324_W_EV1, 0.0)                    # water removal to hit 94.31 %
-    v1_duty    = max(R324_V1_DES * ((q1_avail_kw - q1_relax_kw) / R324_Q1_DES_KW), 0.0)  # water the live duty can boil
-    v1_m       = min(v1_conc, v1_duty)                                        # water vapour -> 324E002 (kg/h)
-    _DIAG["E001"] = {"conc": v1_conc, "duty": v1_duty, "v": v1_m, "avail": q1_avail_kw,
-                     "relax": q1_relax_kw, "Tbub": T_bub_e001,
+    # The old concentration cap was a FIXED 94.31 % ceiling — `urea_in / R324_W_EV1` — whose
+    # d(conc)/dT is identically zero.  Once the melt hit it, more steam only raised T with no
+    # concentration payoff, so TIC-324001 saw zero process gain, disengaged, let the melt drift and
+    # then over-corrected: the relay chatter the Urea-Water VLE research (sec 2) blames for these
+    # cycles.  Worse, the min()-switching fed straight into the 324F001 vacuum ODE and swung the
+    # separator pressure.  The single continuous Fahmy-Nassar curve w_eq(T) removes all of it:
+    #   * a real, non-zero dCu/dT  -> TIC-324001 has genuine gain and never disengages;
+    #   * v depends on TEMPERATURE only (the vacuum is regulated separately by PIC-324202), so the
+    #     P -> v -> P coupling that destabilised the separator pressure is gone;
+    #   * one branch, so no min(), no relay, no chatter.
+    # Evaluated at the CONTROLLED design vacuum (0.33 bar a), not the live separator pressure, so the
+    # melt target is a pure smooth function of temperature.  Anchored (w_eq(130,0.33) == R324_W_EV1)
+    # so v == R324_V1_DES and P_e001 == 0 bit-exact at the design seed; TIC-324001 stays what TD-015
+    # made it — a melt-strength controller acting through temperature — now without the relay.
+    w_eq1      = evap_w_eq(s.r324_e001_T, R324_F001_P_BARA,                    # controlled 0.33 bar a vacuum
+                           R324_W_EV1, R324_E001_T_SP_C, R324_F001_P_BARA)     # smooth equilibrium melt frac (T-driven)
+    v1_m       = clamp(feed1_m - urea1_in / max(w_eq1, 1e-6), 0.0, feed1_m)   # water vapour -> 324E002 (kg/h)
+    _DIAG["E001"] = {"weq": w_eq1, "v": v1_m, "Q": Q_e001_kw,
                      "T": s.r324_e001_T, "feed": feed1_m, "urea_in": urea1_in}
     p1_m       = max(feed1_m - v1_m, 0.0)                                     # Stage-1 melt (kg/h)
     w1_live    = clamp(urea1_in / max(p1_m, 1e-6), 0.0, 1.0)                  # LIVE Stage-1 urea mass frac
@@ -5823,21 +5838,14 @@ def step_sim(dt: float) -> dict:
     pic212_op  = _ctrl_ipd(s.PIC_329212, pic212_pv, dt, cas_sp=tic2_op)       # steam valve stroke (%)
     p_chest_e003 = clamp(pic212_op/100.0*R323_P_STEAM_SUP, 0.02, R323_P_STEAM_SUP)
     Q_e003_kw  = max(R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T), 0.0)  # Evap-II duty (kW, F-10 floored)
-    # AUDIT F-5 — same duty limit at Stage 2; final product strength is now live, not a constant.
-    q2_avail_kw = (feed2_m/3600.0*cp_feed2*(s.r324_e001_T - s.r324_e003_T)
-                   + Q_e003_kw)                                               # kW available as latent
-    # AUDIT TD-015 — Evaporator II, same degeneracy, same bubble-point closure as Evaporator I.
-    T_bub_e003 = _lag1(s.tlag, "R324_TBUB2",                                  # holdup lag: see 324E001
-                       R324_E003_T_SP_C + (bubble_T_raoult(s.r324_f003_P, s.w_e003)
-                                           - R324_E003_TBUB_DES),
-                       R324_F003_M_TAU_S, dt)
-    q2_relax_kw = (s.r324_f003_M * cp_hold2 * (T_bub_e003 - s.r324_e003_T)
-                   / R324_F003_M_TAU_S)                                       # kW retained to reach bubble point
-    v2_conc    = max(feed2_m - urea2_in / R324_W_EV2, 0.0)                    # water removal to hit 97.71 %
-    v2_duty    = max(R324_V2_DES * ((q2_avail_kw - q2_relax_kw) / R324_Q2_DES_KW), 0.0)  # water the live duty can boil
-    v2_m       = min(v2_conc, v2_duty)                                        # water vapour -> 324E005 (kg/h)
-    _DIAG["E003"] = {"conc": v2_conc, "duty": v2_duty, "v": v2_m, "avail": q2_avail_kw,
-                     "relax": q2_relax_kw, "Tbub": T_bub_e003,
+    # AUDIT TD-016 — Evaporator II, same smooth-equilibrium closure as Evaporator I: the melt
+    # strength is the continuous Fahmy-Nassar curve at the deep-vacuum 0.131 bar a domain, so the
+    # water removed follows temperature smoothly with no min()/duty relay.  Anchored bit-exact
+    # (w_eq(140,0.131) == R324_W_EV2), T-driven at the PIC-324203-controlled vacuum.
+    w_eq2      = evap_w_eq(s.r324_e003_T, R324_F003_P_BARA,                    # controlled 0.131 bar a vacuum
+                           R324_W_EV2, R324_E003_T_SP_C, R324_F003_P_BARA)     # smooth equilibrium melt frac (T-driven)
+    v2_m       = clamp(feed2_m - urea2_in / max(w_eq2, 1e-6), 0.0, feed2_m)   # water vapour -> 324E005 (kg/h)
+    _DIAG["E003"] = {"weq": w_eq2, "v": v2_m, "Q": Q_e003_kw,
                      "T": s.r324_e003_T, "feed": feed2_m, "urea_in": urea2_in}
     p2_gen     = max(feed2_m - v2_m, 0.0)                                     # Stage-2 melt produced (kg/h)
     w2_live    = clamp(urea2_in / max(p2_gen, 1e-6), 0.0, 1.0)                # LIVE final-product urea mass frac

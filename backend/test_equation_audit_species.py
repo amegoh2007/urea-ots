@@ -150,8 +150,11 @@ def test_species_layer_does_not_perturb_the_mass_or_energy_balance():
     assert abs(c3["v305_th"] - main.R323_M305_DES / 1000.0) < 6e-3
     assert abs(f4["v701_th"] - main.R323_M701_DES / 1000.0) < 6e-3
     assert abs(f10["evap_th"] - main.R323_MEVAP_DES / 1000.0) < 6e-3
-    assert abs(e1["vapour_th"] - main.R324_V1_DES / 1000.0) < 6e-3
-    assert abs(e3["vapour_th"] - main.R324_V2_DES / 1000.0) < 6e-3
+    # TD-016: the 324 vapour now tracks the LIVE feed strength through the smooth VLE equilibrium
+    # (the fixed concentration cap that pinned it is gone), so the 323D002 tank's known ~0.04 pp
+    # upstream drift shows here while the melt strength (urea_pct asserts above) stays pinned.
+    assert abs(e1["vapour_th"] - main.R324_V1_DES / 1000.0) < 5e-2
+    assert abs(e3["vapour_th"] - main.R324_V2_DES / 1000.0) < 5e-2
 
 
 def test_stripper_composition_now_reaches_the_product():

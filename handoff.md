@@ -145,6 +145,41 @@ matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" predi
 New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
 `probe_f8_328.py`.
 
+### Remediation slot 13 — TD-016: the 324 evaporator limit cycle closed with a smooth VLE curve, commit `PENDING`
+
+The residual 324E001/324E003 limit cycle (carried since TD-015) is closed. Root cause was the
+`min(v_conc, v_duty)` relay switching against a **fixed** concentration cap (`urea_in / R324_W_EV`),
+whose `dC_u/dT` is identically zero — the Jacobian collapse the new `References/Urea-Water VLE Data
+Research.md` (Fahmy-Nassar) names for exactly these cycles.
+
+**Fix.** New helper `evap_w_eq(T, P, w_des, T_des, P_des)` — the Fahmy-Nassar continuous equilibrium
+(`ln Pw = 16.2886 − 3186.44/(T+227.02)`, `xw = 1.06425·(0.95·Pv/Pw)^0.92498`, mass-convert) in
+anchored-departure form so `w_eq(130,0.33) ≡ R324_W_EV1` **bit-exact**. Both evaporator ticks now set
+the melt strength = `w_eq(T)` at the CONTROLLED design vacuum and the water removed = `feed −
+urea_in/w_eq(T)` — a single smooth curve, so `min()`, `v_duty`, `q_relax` and the `T_bub` holdup lag
+are all removed. `v` depends on T only, which also breaks the `P→v→P` loop that swung the separator
+pressure.
+
+**Measured** (`scratchpad/probe_324_cycle.py`, 16 h): T envelope E001 0.44 → **0.008 °C**, E003 1.57
+→ **0.001 °C**; E003 deep-vacuum P swing 0.34 → 0.032 (≈10× better). E001 separator P is a slow-
+*damping* mode (0.37 → 0.21 over 15 h, still shrinking) — pre-existing loosely-tuned false-air
+vacuum, not a regression (old model 0.21 sustained). Pin `leaves 25 / keys 15 / diffs 0`.
+
+**Why some 324 tests moved.** Removing the duty branch un-masks the AUDIT B1 ripple: `vapour_th` now
+tracks the LIVE feed, so the 323D002 tank's known ~0.04 pp drift (TD-013) shows in the vapour rate
+while the melt strength stays pinned. `test_the_unit_324_stages_carry_the_same_closure` rewritten to
+the new closure identity; `test_design_fixed_point_holds` vapour tolerance loosened 6e-3 → 5e-2 with
+the melt-strength asserts kept tight. `test_evap1_steam_cut` and the temperature-bounded test pass
+unchanged.
+
+**Not adopted from the faceplates:** DZ = 2.0 % dead zone and SP = 129/139 (design anchor is the PFD
+130/140; the smooth curve alone killed the cycle). Kc stays 0.02 (conservatism); λ-value 0.04 could
+be restored after re-measuring K_p on the non-relay plant.
+
+Files: `backend/main.py` (`evap_w_eq`, both ticks, the TIC-324001 seed comment),
+`test_equation_audit_td014.py`, `test_equation_audit_323_324.py`, `TECH_DEBT.md`, the As-Built §22.4,
+`Master_PID_Tuning_Constants.md` Appendix B.
+
 ### Remediation slot 12 — `R3232_CP` reconciled against the carbamate-cp reference, commit `4ab1514`
 
 Documentation only; **no model change**, so the pin is unmoved by construction (`leaves 25 / keys
@@ -608,12 +643,13 @@ delete+recreate, or GitHub Support. Nothing git-side from this machine removes t
    physics, not merely awaiting a source, so it stays 3.0, documented and pinned. The five **dead**
    density constants that used to be listed here are **deleted** (slot 11) — they were never part of
    this gap, only noise in it.
-3b. **TD-015 — CLOSED 2026-07-23** with TD-013/TD-014; it was TD-013's blocker, not a follow-up.
-   324E001/324E003 got the same bubble-point closure plus a measured retune (K_p = +8.3 C/bar on
-   both, Kc 2.0 -> 0.02, Ti 120 -> 360 s). Residual: a bounded limit cycle, 16 h envelope 0.25 C on
-   E001 and 0.88 C on E003, from the `min(v_conc, v_duty)` branch switching. Removing THAT means
-   replacing the concentration cap with a smooth equilibrium relation — deleting the cap outright was
-   tested and the stage diverges. Not attempted; it is a modelling change of its own.
+3b. **TD-015 — CLOSED 2026-07-23; its residual limit cycle CLOSED 2026-07-24 as TD-016 (slot 13).**
+   324E001/324E003 got the bubble-point closure plus the measured retune (K_p = +8.3 C/bar, Kc 2.0 ->
+   0.02, Ti 120 -> 360 s). The residual cycle (16 h envelope 0.25 / 0.88 C) came from the
+   `min(v_conc, v_duty)` relay against a FIXED concentration cap. **TD-016** replaced that cap with the
+   smooth Fahmy-Nassar VLE equilibrium `w_eq(T)` (`evap_w_eq`, from References/Urea-Water VLE Data
+   Research.md) — no `min()`, no duty branch — and the cycle is gone: **16 h envelope 0.008 / 0.001 C**,
+   pin unmoved, suite green.
 3c. **`Master_PID_Tuning_Constants.md` — DONE 2026-07-23 (slot 11).** The TIC-324001 / TIC-324002
    retune is now **Appendix B**, with the measured gains and the derivation; the plant rows carry a
    `†` pointing at it.
