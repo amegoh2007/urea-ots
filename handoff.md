@@ -145,6 +145,35 @@ matching the *Gap Resolution* study's independent "0.32 → over 1200 ppm" predi
 New tests: 10 in `backend/test_equation_audit_desorption.py`. Probes: `probe_f8_pfd_units.py`,
 `probe_f8_328.py`.
 
+### Remediation slot 12 — `R3232_CP` reconciled against the carbamate-cp reference, commit `PENDING`
+
+Documentation only; **no model change**, so the pin is unmoved by construction (`leaves 25 / keys
+15 / diffs 0`) and the suite count is unchanged. The gap "`R3232_CP = 3.0` needs a *sourced*
+carbamate cp" is closed as **un-sourceable by design**, not as a pending source, using the new
+`References/Ammonium Carbamate Heat Capacity Data.md`.
+
+The finding: there is **no single valid equation** for the reactive aqueous carbamate cp. The
+rigorous e-NRTL / Extended UNIQUAC route is a full electrolyte package (six-equilibrium speciation,
+per-species partial-molar cp, an excess term from ∂²G^E/∂T², fitted binary parameters; ion cp
+tabulated only at 298.15 K) — out of scope for a frozen-enthalpy sequential-modular engine. The one
+closed form (Chauhan cubic, ~2.08 kJ/kg·K @90 °C) is the **pure molten salt**, coefficients printed
+as images, and the reference says a frozen polynomial "drastically underestimates" real duty. The
+governing property is the **apparent (reactive) cp** — carbamate ⇌ NH₃ + CO₂, ~70–85 kJ/mol — which
+no constant can carry ("cannot be accurately represented by a singular static value").
+
+Where 3.0 lands: pure solid carbamate ~1.9–2.2; the frozen band for the **solution** is 3.2–3.8
+(~3.64 mid at 40/25/35 wt % carbamate/NH₃/water, 80 °C); Stamicarbon CO₂-stripping runs lean in free
+ammonia → the ~3.2 low end. So **3.0 is above pure-salt ~2.1 and ~6 % below the Stamicarbon floor** —
+a defensible lean-liquor frozen value, on the low side, coherent rather than arbitrary. It is
+**locked**: the back-solved `A323_C005_LAM` and the 323E003/323E011 duty integrators use 3.0 and
+`test_equation_audit_c10_live_cp.py` pins `== 3.0`, so any change re-solves the anchor — a re-solve
+of the 323 energy balance, not a constant swap.
+
+Surgical edits: `backend/main.py` (comment at the definition), `test_equation_audit_c10_live_cp.py`
+(docstring), `TECH_DEBT.md` (the "Still open" entry), `Urea OTS — As-Built … Reference.md`, and this
+handoff. `aqueous_cp` remains the wrong correlation regardless — carbamate ion cp is negative
+(electrostriction), the opposite sign of water's IAPWS slope.
+
 ### Remediation slot 11 — three housekeeping gaps closed (dead constants, PID doc, launcher), commit `69d459e`
 
 Small, deliberately separate from slot 10. Pin unmoved: **`leaves 25 / keys 15 / diffs 0`**;
@@ -549,9 +578,11 @@ of holdup per call — but that was tested as the ramp's cause and REFUTED.
    328 and at 322C001 is now a per-stream / per-vessel departure. Still open: the **density** work —
    the PFD's >150 °C row runs ~4 % above physical water (analysed in TD-012, unchanged), the
    volumetric-controller densities (`RHO_744_KGM3`, `RHO_741_KGM3`, `R328_C002_RHO`,
-   `R328_C004_RHO`) and `R3232_CP`, which needs a *sourced carbamate* cp rather than water's.
-   `urea_soln_rho` / `aqueous_rho` are the vehicles. The five **dead** density constants that used
-   to be listed here are **deleted** (slot 11) — they were never part of this gap, only noise in it.
+   `R328_C004_RHO`). `urea_soln_rho` / `aqueous_rho` are the vehicles. `R3232_CP` is **no longer on
+   this list** — reconciled 2026-07-24 (slot 12): it is un-sourceable to any single equation by the
+   physics, not merely awaiting a source, so it stays 3.0, documented and pinned. The five **dead**
+   density constants that used to be listed here are **deleted** (slot 11) — they were never part of
+   this gap, only noise in it.
 3b. **TD-015 — CLOSED 2026-07-23** with TD-013/TD-014; it was TD-013's blocker, not a follow-up.
    324E001/324E003 got the same bubble-point closure plus a measured retune (K_p = +8.3 C/bar on
    both, Kc 2.0 -> 0.02, Ti 120 -> 360 s). Residual: a bounded limit cycle, 16 h envelope 0.25 C on

@@ -1009,7 +1009,14 @@ R323_D002_M_TIE_FULL = R323_D002_M_I_FULL + R323_D002_M_II_FULL
 #    328C004        : in 749+931(40557)         = 750(6833)+739(33724)
 #    328D001        : in 737(6665)+718A(3561.5) = 786(276)+775(1675)+776(8275.5)
 # ==========================================================================
-R3232_CP = 3.0     # kJ/kg·K  LP-carbamate / condensate train (323E003, 323E011)
+R3232_CP = 3.0     # kJ/kg·K  LP-carbamate / condensate train (323E003, 323E011).
+# UN-SOURCED on purpose (reconciled 2026-07-24 vs References/Ammonium Carbamate Heat Capacity Data.md):
+# no single valid equation for the reactive aqueous fluid -- the rigorous cp is a full e-NRTL/UNIQUAC
+# electrolyte package (ion cp tabulated only at 298 K), the one closed form (Chauhan cubic) is the pure
+# molten salt (~2.08 @90 C), and the real governing property is the reaction-shifted APPARENT cp that no
+# constant can carry.  Reference frozen band for the SOLUTION is 3.2-3.8 (Stamicarbon lean-NH3 ~3.2 low
+# end); 3.0 is above pure-salt ~2.1 and ~6% below that floor -- a defensible lean-liquor value.  aqueous_cp
+# is WRONG here (carbamate ion cp < 0, electrostriction).  LOCKED: back-solved lambdas + C10 test use 3.0.
 R328_CP  = 4.0     # kJ/kg·K  desorber / hydrolyser aqueous train (328C002/003/004)
 A328_CP  = 4.0     # kJ/kg·K  LP absorber 322C001 aqueous liquor
 

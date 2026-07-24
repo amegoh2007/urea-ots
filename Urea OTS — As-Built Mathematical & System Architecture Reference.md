@@ -1504,8 +1504,15 @@ belongs to (feed terms the feed's, holdup denominators the holdup's; 323F010's t
 share one value). The aqueous vessels 328C002/C003/C004, 328D001, 328D003 Comp I/II and 322C001 call
 `aqueous_cp()` against IAPWS, each anchored on its own design temperature — 4 % low at the cold end
 and 11 % low in the 200 °C hydrolyser before. `R3232_CP = 3.0` is deliberately left alone: 323E003 /
-323E011 carry a strong ammonium-carbamate liquor, not water, so `aqueous_cp` is the wrong
-correlation and converting it would be a fabrication rather than a fix.
+323E011 carry a strong ammonium-carbamate liquor, not water, so `aqueous_cp` (whose slope is water's,
+while the carbamate ion's partial-molar cp is *negative* from electrostriction) is the wrong
+correlation and converting it would be a fabrication rather than a fix. Reconciled 2026-07-24 against
+`References/Ammonium Carbamate Heat Capacity Data.md`: no single valid equation exists for the
+reactive aqueous fluid, whose governing property is the *apparent* (reaction-shifted) cp rather than
+any constant; the reference's frozen band for the solution is 3.2–3.8 kJ/kg·K (Stamicarbon
+lean-ammonia at the ~3.2 low end), so 3.0 sits above the pure-salt figure (~2.1) and ~6 % below that
+floor — a defensible lean-liquor value. Held constant by the back-solved lambdas and the C10 pin; the
+full argument is in `TECH_DEBT.md`.
 
 ---
 

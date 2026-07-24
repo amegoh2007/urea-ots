@@ -936,10 +936,40 @@ Pin unmoved throughout: `leaves 25 / keys 15 / diffs 0`.
 ### Still open
 
 **`R3232_CP = 3.0`** (the LP-carbamate / condensate train, 323E003 and 323E011) is deliberately
-**not** converted. Unlike the 328 streams this liquor is a strong ammonium-carbamate solution, not
-water, so `aqueous_cp` is the wrong correlation for it and the earlier "−28 % against water" note in
-this file was comparing against the wrong reference. Making it dynamic needs a *sourced* carbamate
-cp — from the licensor data or the literature — not water's.
+**not** converted, and — reconciled 2026-07-24 against
+`References/Ammonium Carbamate Heat Capacity Data.md` — it stays an **un-sourced constant on
+purpose**, because there is no single valid equation to source it to:
+
+- The rigorous route (e-NRTL / Extended UNIQUAC) is not a lumped cp at all but a full electrolyte
+  package — ionic speciation across six equilibria, a partial-molar cp for each species, an excess
+  term from the second temperature-derivative of the excess Gibbs energy, all riding on fitted
+  binary interaction parameters — and the reference tabulates ion cp only at 298.15 K. That is out
+  of scope for a sequential-modular explicit-Euler engine carrying frozen stream enthalpy.
+- The one closed-form correlation the reference offers (the Chauhan cubic, ~2.08 kJ/kg·K at 90 °C)
+  is for the **pure molten / frozen pseudo-salt**, not the aqueous solution; its coefficients are
+  printed as images, so they are not even reproducible from the reference; and the reference itself
+  flags that a frozen polynomial "drastically underestimates" the real duty.
+- Physically the governing quantity is the **apparent (reactive) cp**: heating shifts the carbamate
+  ⇌ NH₃ + CO₂ equilibrium (~70–85 kJ/mol CO₂), and that reactive term dominates. It is a
+  path/equilibrium quantity, not a material property, so **no constant can carry it** — the
+  reference's own conclusion is that the fluid "cannot be accurately represented by a singular
+  static value."
+
+What the reference *does* pin down is the bracket, and 3.0 sits inside it coherently. Pure solid
+carbamate is ~1.9–2.2 kJ/kg·K; the frozen band for the aqueous LP **solution** is **3.2–3.8**
+(a ~3.64 mid estimate at 40/25/35 wt % carbamate/NH₃/water, 80 °C); and Stamicarbon CO₂-stripping —
+this plant — runs **lean in free ammonia**, which the reference says gives the **lowest** frozen cp,
+the ~3.2 low end. So 3.0 is above the pure-salt figure (there is water and some NH₃ in it) and ~6 %
+below the reference's Stamicarbon-end floor (~18 % below the 3.64 high-ammonia mid): a defensible
+lean-liquor frozen value, on the low side, not an arbitrary one. The earlier "−28 % against water"
+note in this file was comparing against the wrong reference — water is not the correct comparand.
+
+It is also **locked**. The back-solved latent heats `A323_C005_LAM` and the 323E003/323E011 duty
+integrators are computed *with* 3.0, and `test_equation_audit_c10_live_cp.py` pins `== 3.0`. Moving
+it re-solves the anchor and breaks the pin, so any change waits on a deliberate re-solve of the 323
+energy balance, not a constant swap. And `aqueous_cp` stays the **wrong** correlation regardless:
+the carbamate ion's partial-molar cp is *negative* (electrostriction), the opposite sign of water's
+IAPWS slope, so converting it that way would be a fabrication rather than a fix.
 
 The analysis below on **water density above 150 °C** stands and is untouched: the PFD's density row
 runs ~4 % higher than water can physically be at those temperatures, so a global correlation fitted

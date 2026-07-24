@@ -71,11 +71,18 @@ def test_aqueous_cp_moves_the_right_way_and_by_the_right_amount():
 
 
 def test_the_carbamate_train_is_deliberately_left_alone():
-    """R3232_CP covers 323E003/323E011, a strong ammonium-carbamate liquor rather than water, so
-    aqueous_cp is the WRONG correlation for it and converting it would be a fabrication.  Asserted
-    so the omission reads as a decision rather than an oversight."""
+    """R3232_CP covers 323E003/323E011, a strong ammonium-carbamate liquor rather than water.
+    Reconciled 2026-07-24 against References/Ammonium Carbamate Heat Capacity Data.md: there is no
+    single valid equation to source it to.  The rigorous e-NRTL/UNIQUAC route is a full electrolyte
+    package (ion cp only at 298 K), not a lumped cp; the one closed-form Chauhan cubic is the pure
+    molten salt; and the real governing property is the reaction-shifted APPARENT cp, which no
+    constant can carry.  The reference's frozen band for the SOLUTION is 3.2-3.8 kJ/kg.K, Stamicarbon
+    lean-NH3 at the ~3.2 low end, so 3.0 sits above pure-salt ~2.1 and ~6% below that floor -- a
+    defensible lean-liquor value, not an arbitrary one.  aqueous_cp stays the WRONG correlation
+    (carbamate ion cp is negative from electrostriction).  Asserted so the omission reads as a
+    decision, and so the value stays pinned to the back-solved lambdas that were computed with it."""
     assert main.R3232_CP == 3.0
-    assert main.R3232_CP < main.R328_CP        # carbamate is genuinely well below water
+    assert main.R3232_CP < main.R328_CP        # carbamate solution is below the aqueous-vessel cp
 
 
 # --------------------------------------------------------------------------- the seed still holds
