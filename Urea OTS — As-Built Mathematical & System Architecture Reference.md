@@ -1557,6 +1557,36 @@ transient; on 323F010, which has no loop, the deeper vacuum is sustained. New ha
 handlers `hic323605_set` / `hic9606_set` join the existing `hic9605_set`; the gate is
 `backend/test_vacuum_valve_rules.py`.
 
+### 22.9 The LP absorber now vents a composition, not a constant
+
+322C001 was the last composition-blind vessel between the reactor and the atmosphere. It takes the
+322E003 inert-purge off-gas (via HV-322604 — NH₃/CO₂ plus the loop inerts N₂/O₂/CH₄/H₂) and scrubs it
+against the recycle ammonia-water loop 755 → 322C001 → 756, venting the balance to 328V001. The
+recovered mass was a boot-pinned scalar split, `A328_PHI_ABS·gcb_m`, with **no vent composition at
+all** — the atmospheric NH₃ slip, the one number an LP absorber exists to bound, was invisible.
+
+The species layer (TD-009 remainder) rides on top of the untouched total-mass and energy ODEs, the
+same additive discipline as the 323/324/328 stages. The liquor carries a six-species vector
+`s.a328_c001_w` integrated as a plain CSTR — `des_advance` with `m_vap = 0`, feeds 755 + CPL(954) +
+the absorbed NH₃/CO₂, draw 756. Its seed `W_C001_DES` is the **normalised design feed mixture**
+(755 + condensate + absorbed), and because those feeds sum in mass to stream 756 (the `A328_ABS_DES`
+= 130 kg/h closure), that mixture *is* the CSTR steady state: the liquor is a stationary fixed point,
+measured drift < 10⁻¹⁵ over 20 simulated minutes. The absorbed 130 kg/h splits at the frozen carbamate
+stoichiometry 2 NH₃ : 1 CO₂ — `A328_ABS_CO2_DES` and `A328_ABS_NH3_DES`, written so they sum to
+`A328_ABS_DES` *exactly* — mirroring the 322E003 scrubber's own `d_nh3 = 2·d_co2`. The vent then
+carries a **live** per-species composition, $y_i = \text{gcb}_i - \text{absorbed}_i$: at design
+≈1557 kg/h NH₃ (27 % of the vent) over 46 % CO₂ and the inert balance, and it tracks the off-gas —
+open HV-322604 and the purge rises 5.9 → 8.7 t/h with the NH₃ slip 1557 → 2297 kg/h.
+
+The **total** recovered mass deliberately keeps the boot-pinned `A328_PHI_ABS·gcb_m`, so C1, the
+back-solved absorption enthalpy `A328_LAMBDA_ABS` and the whole 15-key boot pin are byte-identical
+(`leaves 25 / keys 15 / diffs 0`); the species layer is a pure, conserving decomposition of that
+scalar. The upstream off-gas composition is itself pinned (the 322E003 reconciled split scaled by the
+CO₂-scale `s`), so the vent's *fractions* are fixed while its *absolute* slip rides throughput — which
+is the real plant physics, since 322C001 has no way to change what the scrubber hands it. Anchors are
+PFD-20 columns 755/756 (Amm. Water, MASS %: ≈91 % H₂O, 4 % NH₃, 3.8 % CO₂, 0.85 % urea) and 954 (100 %
+condensate). Gate: `backend/test_c001_species_layer.py`.
+
 ---
 
 *End of Document — Urea OTS As-Built Mathematical & System Architecture Reference. All equations sourced from `backend/main.py`, `backend/reactor.py`, `backend/steam_system.py`, `backend/controllers.py`. Post-2026-06-05 model deltas itemised in the Revision Delta; full audit math in `backend/reports/FULL_AUDIT_REPORT.md`.*

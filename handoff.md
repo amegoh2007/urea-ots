@@ -209,6 +209,37 @@ New state `r323_f010_P` / `HIC_323605` / `HIC_329606`; new consts `R323_HIC605_D
 in MAN to see the sustained direct effect (as the gate `test_vacuum_valve_rules.py` does). Files:
 `backend/main.py`, `backend/test_vacuum_valve_rules.py`, `scratchpad/probe_vac_rules.py`, As-Built §22.8.
 
+### Remediation slot 15 — 322C001 LP-absorber species layer (TD-009 remainder, first unit)
+
+The LP off-gas absorber was the last composition-blind vessel to the atmosphere: it recovered NH₃/CO₂
+from the 322E003 inert purge (HV-322604) into the recycle ammonia-water 755 → 322C001 → 756, but the
+**atmospheric NH₃ slip was a boot-pinned scalar** (`A328_PHI_ABS·gcb_m`) with no vent composition.
+
+**Fix (additive, C1/energy/pin untouched).** New liquor vector `s.a328_c001_w` (six-species), advanced
+as a CSTR via `des_advance(m_vap=0, xi=0)` with feeds 755 + CPL(954) + absorbed(NH₃/CO₂) and draw 756;
+seeded on `W_C001_DES`, the **normalised design feed mix**, which == the CSTR steady state (feeds sum to
+756 by the `A328_ABS_DES`=130 closure) so `dw/dt`≈0 (drift < 1e-15 / 20 min). The recovered 130 kg/h
+splits at the **frozen carbamate ratio 2 NH₃ : 1 CO₂** (`A328_ABS_CO2_DES`/`A328_ABS_NH3_DES`, summing to
+`A328_ABS_DES` exactly). The vent now carries a **live** per-species `y = off-gas − absorbed` — design
+≈1557 kg/h NH₃ (27 %), 46 % CO₂, inert balance — reported as `vent_nh3_kgh` / `vent_nh3_pct` /
+`vent_co2_pct` / `liq_nh3_pct` / `liq_co2_pct`.
+
+**Why the total stays `A328_PHI_ABS·gcb_m`.** Making the total = Σ(per-species absorbed) needed a new
+boot-pinned constant `A328_GCB_COMP_DES` (the per-species design off-gas — the only bit-exact anchor,
+since the live `gcb_i` carries the CO₂-scale `s` as a per-species factor a design-normalised sum can't
+match). That grows the pin to 16 keys / 34 leaves and breaks the CRITICAL `25/15/0` contract. So the
+scalar total is kept and only *split* by a frozen fraction — same deliverable (live vent composition),
+**pin byte-identical**. The upstream off-gas composition is itself pinned, so the vent fractions are
+fixed and the absolute slip rides throughput (open HV-322604 → 5.9→8.7 t/h purge, slip 1557→2297 kg/h);
+that is the real physics (322C001 can't change what the scrubber hands it).
+
+**Verified.** Pin `leaves 25 / keys 15 / diffs 0` (bit-exact); design hold TT 43.0000 / abs 0.1300 t/h /
+liquor stationary; off-design slip tracks HV-322604; gate `backend/test_c001_species_layer.py` (5 tests)
++ probes `scratchpad/probe_c001_verify.py` / `probe_c001_offdesign.py`. Anchors: PFD-20 cols 755/756
+(Amm. Water MASS %) / 954 (condensate). Files: `backend/main.py`, `backend/test_c001_species_layer.py`,
+`TECH_DEBT.md` (Remainder), As-Built §22.9. **Remainder now = the three lumped collectors 328D001 /
+328D003 / 323C005 only** (transport, not reactive — lowest value).
+
 ### Remediation slot 12 — `R3232_CP` reconciled against the carbamate-cp reference, commit `4ab1514`
 
 Documentation only; **no model change**, so the pin is unmoved by construction (`leaves 25 / keys
@@ -658,12 +689,12 @@ delete+recreate, or GitHub Support. Nothing git-side from this machine removes t
   but do NOT change the 15 pin VALUES — expect `diffs 0` still.
 
 ## Next steps
-1. **TD-009 remainder** — the 323 / 324 / 328-desorption species layer is DONE (slots 3/6); what is
-   left (scoped 2026-07-24, see TECH_DEBT "Remainder") is the **lumped absorber/collector vessels**:
-   **322C001** LP absorber — the one that matters, its atmospheric NH3 slip is a boot-pinned split
-   (`A328_PHI_ABS`), not a live composition — plus 328D001 / 328D003 / 323C005 collectors. It is
-   **accuracy, not a blocker**. 322C001 is the natural first unit: a reactive-absorption species layer
-   (CO2 + 2 NH3 -> carbamate), comparable in size to the F-8 work, done unit-by-unit under scope lock.
+1. **TD-009 remainder** — the 323 / 324 / 328-desorption species layer is DONE (slots 3/6), and
+   **322C001 is now DONE too (slot 15, 2026-07-25)**: the LP absorber carries a live liquor vector and a
+   live vent NH3-slip composition, pin byte-identical. What is left is only the **three lumped recycle
+   collectors 328D001 / 328D003 / 323C005** — they *transport* composition rather than react, so they
+   are the lowest-value piece; each is an anchored multi-feed CSTR (`des_advance`, m_vap=0) seeded on its
+   PFD-tabulated stream, done unit-by-unit under scope lock. **Accuracy, not a blocker.**
 2. **TD-008 — CLOSED.** The 328C003 hydrolyser reaction extent is in; it did **not** need the full 328
    species vector (hydrolysis is flow-through), so it never actually depended on TD-009.
 3. **TD-006 — CLOSED 2026-07-23** (`1da9280`), both halves. So is the `eta_P` dead lever, and so

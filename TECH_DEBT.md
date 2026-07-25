@@ -772,26 +772,33 @@ The frozen overhead splits `R328_C002_PHI737` / `R328_C004_PHI750` are gone from
 overheads are energy-limited in the same anchored-ratio form used at 323F010. TD-008's hydrolyser
 extent now acts on real species.
 
-### Remainder — the LP absorber and the recycle/collector vessels (still open, scoped 2026-07-24)
+### Remainder — the LP absorber and the recycle/collector vessels (322C001 CLOSED 2026-07-25; collectors open)
 
 The species layer covers the vessels that hold and *transform* composition: 323C003, 323F004,
-323F010, 323D002, 324E001, 324E003 (`sol_advance`) and the 328 desorption columns 328C002/C003/C004
-(`des_advance`). Four downstream vessels still run **lumped mass** with no species vector:
+323F010, 323D002, 324E001, 324E003 (`sol_advance`), the 328 desorption columns 328C002/C003/C004
+(`des_advance`) and now **322C001** (`des_advance`, m_vap=0). Three lumped recycle **collectors** remain:
 
-* **322C001** — the LP off-gas absorber (`a328_c001_*`). The one that matters. It absorbs the 322E003
-  inert-purge off-gas (NH₃/CO₂, via HV-322604) into the recycle carbamate liquor and vents the balance
-  to 328V001, so the **atmospheric NH₃ slip is a boot-pinned split** (`A328_PHI_ABS·gcb_m`), not a
-  composition. A species layer here is the reactive-absorption mirror of the stripper: CO₂ + 2 NH₃ →
-  carbamate added to the liquor (tracked as dissolved NH₃/CO₂), inerts + slip to the vent `y`. Natural
-  first unit of the remainder.
+* **322C001** — the LP off-gas absorber (`a328_c001_*`). **CLOSED 2026-07-25.** It absorbs the 322E003
+  inert-purge off-gas (NH₃/CO₂, via HV-322604) into the recycle ammonia-water 755 → 322C001 → 756 and
+  vents the balance to 328V001. The **atmospheric NH₃ slip was a boot-pinned split** (`A328_PHI_ABS·gcb_m`)
+  with no vent composition. Now: the liquor carries a six-species vector `s.a328_c001_w` (a CSTR on
+  `des_advance` with `m_vap=0`, feeds 755 + CPL + absorbed(NH₃/CO₂), draw 756), the design absorbed
+  130 kg/h splits at the frozen carbamate ratio 2 NH₃ : 1 CO₂ (`A328_ABS_CO2_DES` / `A328_ABS_NH3_DES`,
+  summing to `A328_ABS_DES` exactly), and the vent carries a **live** per-species composition `y =
+  off-gas − absorbed` — so the atmospheric NH₃ slip is a real number (≈1557 kg/h at design) that tracks
+  the off-gas throughput. **The total recovered mass keeps `A328_PHI_ABS·gcb_m`**, so C1, the energy
+  balance and the 15-key boot pin are byte-identical (`leaves 25 / keys 15 / diffs 0`); `W_C001_DES`
+  is the normalised feed mix, so the liquor is a stationary fixed point (|dw| < 1e-15 over 20 min).
+  Gate: `test_c001_species_layer.py`; anchors sourced from PFD-20 cols 755/756/954. Design compositions
+  754/756 are 91 % H₂O / ~4 % NH₃ / ~3.8 % CO₂ / ~0.85 % urea (Amm. Water, MASS %).
 * **328D001** (`a328_d001_*`), **328D003** carbamate collector (`a328_d003_MI/MII`), **323C005** vent
-  scrub — recycle collectors, lumped; they carry composition through rather than transform it. Smaller.
+  scrub — recycle collectors, lumped; they carry composition through rather than transform it. Smaller,
+  and they *transport* rather than react, so they are the last and lowest-value piece of the remainder.
 
 Reuse the additive pattern: C1 (total mass/energy ODEs) untouched, C2/C6 on top, anchored so
-`w == w_des` at the seed → `dw/dt == 0`, pin unmoved. 322C001 has >2 feeds (`m_755`, CPL condensate,
-absorbed off-gas), so blend the feeds first or use the `des_advance` multi-feed form. **TD-008 does
-NOT depend on this remainder** — the hydrolyser closed as a flow-through reaction (see above), so the
-remainder gates nothing; it is accuracy (a live vent NH₃ slip), not a blocker.
+`w == w_des` at the seed → `dw/dt == 0`, pin unmoved. **TD-008 does NOT depend on this remainder** — the
+hydrolyser closed as a flow-through reaction (see above), so the remainder gates nothing; it is
+accuracy (a live vent NH₃ slip), not a blocker.
 
 ---
 
