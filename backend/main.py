@@ -945,6 +945,12 @@ R323_M319_DES  = (1.0 - R323_PHI_V701) * R323_M314_DES                    # flas
 #   in  101 570 + 3 270 = 104 840      out  92 820 + 12 020 = 104 840      (PFD 790 tabulates 12 040)
 R323_MEVAP_DES = R323_PHI_VEVAP * R323_M319_DES + R323_M331_DES           # vapour 790 -> vacuum
 R323_M317_DES  = (1.0 - R323_PHI_VEVAP) * R323_M319_DES                   # product -> tank
+# 323F010 vacuum is a LIVE state (PT-323204) driven by two hand valves — HV-323605 (gas outlet 790,
+# HIC-323605) and HV-329605 (324F002 ejector motive).  Mapping rule: opening either drops the
+# pressure.  No controller on this node, so stability comes from the ejector's suction-pressure
+# capacity roll-off (pull ∝ P/P_des); anchored so m_evap == pull == R323_MEVAP_DES at design.
+R323_HIC605_DES_PCT = 50.0        # % HIC-323605 design opening (HV-323605 gas-outlet hand valve, stream 790)
+R323_F010_P_KP      = 0.02        # bar a per (kg/s) net vapour imbalance -> 323F010 vacuum ODE
 R323_M324_DES  = R323_M317_DES                                           # tank throughput -> Unit 324
 
 # --- Derived latent / duty terms (force dT/dt = 0 at each design fixed point) ---
@@ -2103,6 +2109,7 @@ def sol_pin_strength(w: dict, w_urea_auth: float) -> dict:
     out["H2O"]  = share - out["Urea"]
     return out
 R324_F003_EJPULL_DES = R324_V2_DES + R324_F003_FA_DES
+R324_HIC9606_DES_PCT = 50.0       # % HIC-329606 design opening (HV-329606 motive steam -> 324F004/F005 ejectors)
 
 # --- LIC-324501 melt drain (R2 -- granulation unbuilt under Scope Lock) : LV-B is
 #     the sole ACTIVE drain, carrying the 324F003 melt out to the 335 boundary ;
@@ -3856,6 +3863,7 @@ class State:
         self.r323_f004_P = R323_F004_P_BARA        # 323F004 flash pressure (dynamic, read by PIC-323203 LP node)
         self.r323_f010_M = R323_F010_M_DES         # 323F010 pre-evap separator holdup
         self.r323_f010_T = R323_F010_T_SP_C        # 99 C
+        self.r323_f010_P = R323_F010_P_BARA        # bar a 323F010 vacuum (PT-323204, live off HV-323605/HV-329605)
         self.r323_d002_M_I  = R323_D002_M_I_DES    # 323D002 Compartment I (active, 80 m3)
         # Comp II is DRY in normal operation -- it is an emergency buffer that only fills when Comp I
         # spills over the internal baffle (References/323D002.md §3.3).  It used to seed at 50 %,
@@ -4001,6 +4009,8 @@ class State:
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # ---- HIC-329605 324F002 motive LP steam hand valve (published HIC+HV 1:1)
         self.HIC_329605 = R324_HIC9605_DES_PCT       # % opening (operator hand valve, no controller mode)
+        self.HIC_329606 = R324_HIC9606_DES_PCT       # % HV-329606 324F004/F005 motive-steam hand valve
+        self.HIC_323605 = R323_HIC605_DES_PCT        # % HV-323605 323F010 gas-outlet hand valve (stream 790)
         # ---- FFIC-335406 UF85 ratio station -> FIC-335405 flow slave -----------
         self.FFIC_335406 = {"mode": "AUTO", "op": R324_UF_RATIO,
                             "sp": R324_UF_RATIO, "pv": R324_UF_RATIO,
@@ -5205,6 +5215,18 @@ def step_sim(dt: float) -> dict:
     M_f010_pre = s.r323_f010_M
     s.r323_f010_T = s.r323_f010_T + P_f010 * dt / max(M_f010_pre * cp_f010, 1e-6)
     s.r323_f010_M = max(M_f010_pre + (m_319 + m_331 - m_evap - m_317) / 3600.0 * dt, 1.0)
+    # Mapping — live 323F010 vacuum (PT-323204).  The evolved vapour m_evap is pulled out through
+    # HV-323605 (gas outlet, HIC-323605) and evacuated by the 324F002 ejector on HV-329605; opening
+    # either raises the pull and drops the pressure.  pull ∝ P/P_des is the ejector suction-pressure
+    # capacity roll-off, which makes it a stable first-order node with no controller.  Anchored: at
+    # design HIC-323605 == HIC-329605 == 50 %, P == P_des and m_evap == R323_MEVAP_DES, so
+    # pull == R323_MEVAP_DES and dP/dt is a literal 0.0.  (The bubble point above stays on the DESIGN
+    # vacuum -- TD-016 consistency; feeding live P into the concentration would reopen the P<->m_evap
+    # oscillation this repo just closed on unit 324.)
+    pull_f010  = (R323_MEVAP_DES * (s.r323_f010_P / R323_F010_P_BARA)
+                  * (s.HIC_323605 / R323_HIC605_DES_PCT)
+                  * (s.HIC_329605 / R324_HIC9605_DES_PCT))
+    s.r323_f010_P = clamp(s.r323_f010_P + R323_F010_P_KP*(m_evap - pull_f010)/3600.0*dt, 0.05, 1.0)
     y_evap     = sol_vapour_y(s.w_f010, SOL_F010["alpha"])          # AUDIT F-8: vacuum vapour comp
     xi_f010    = sol_biuret_xi("F010", M_f010_pre, s.w_f010, s.r323_f010_T)
     s.w_f010   = sol_advance(s.w_f010, M_f010_pre, s.r323_f010_M, m_319, s.w_f004,
@@ -5866,11 +5888,16 @@ def step_sim(dt: float) -> dict:
     s.w_e003   = sol_pin_strength(
         sol_advance(s.w_e003, M_f003_pre, s.r324_f003_M, feed2_m, s.w_e001,
                     v2_m, y_v2, m_fwd, xi_e003, dt), w2_live)
-    # vacuum: PIC-324203 deep-vacuum false-air bleed vs 324F004 ejector pull
+    # vacuum: PIC-324203 deep-vacuum false-air bleed vs the 324F004/F005 ejector pull.  Mapping — the
+    # pull is set by HV-329606 motive steam (HIC-329606): opening it harder drops 324F003 and the
+    # 324E005 shell pressure.  Anchored: at design HIC-329606 == 50 % -> the pull == EJPULL_DES, so
+    # the ODE is bit-identical at the seed.  (PIC-324203 trims 324F003 to SP in AUTO; the sign shows
+    # directly with the loop in MAN.)
     fa203_m    = R324_F003_FA_DES * (s.PIC_324203["op"]/max(R324_PV203_OP_DES, 1e-6))
+    ejpull2_live = R324_F003_EJPULL_DES * (s.HIC_329606 / R324_HIC9606_DES_PCT)   # HV-329606 motive -> pull
     _ctrl_ipd(s.PIC_324203, s.r324_f003_P, dt)
     s.r324_f003_P = clamp(s.r324_f003_P
-                          + R324_F003_P_KP*((v2_m + fa203_m) - R324_F003_EJPULL_DES)/3600.0*dt,
+                          + R324_F003_P_KP*((v2_m + fa203_m) - ejpull2_live)/3600.0*dt,
                           0.02, 1.0)
 
     # ---- UF85 ratio injection (FFIC-335406 ratio station -> FIC-335405 flow) ------
@@ -6193,7 +6220,8 @@ def step_sim(dt: float) -> dict:
             },
             "F010": {                            # Pre-evaporator 323F010 + Heater 323E010 (vacuum 0.46 bar)
                 "TT_323010":  round(s.r323_f010_T, 1),                       # pre-evap temp (C, hold 99)
-                "P_bara":     R323_F010_P_BARA,                              # vacuum (bar a, fixed)
+                "P_bara":     round(s.r323_f010_P, 3),                       # PT-323204 (bar a, live off HV-323605/329605)
+                "HV_323605":  round(s.HIC_323605, 1),                        # gas-outlet hand valve (%) — opening drops P
                 "LI_323F010": round(s.r323_f010_M / R323_F010_M_FULL * 100.0, 1),
                 "feed331_th": round(m_331 / 1000.0, 2),                      # urea-recovery return (t/h)
                 "evap_th":    round(m_evap / 1000.0, 2),                     # vapour 790 -> vac (t/h)
@@ -6434,6 +6462,7 @@ def step_sim(dt: float) -> dict:
                 "HIC_329605":  round(s.HIC_329605, 1),                        # 324F002 motive-steam hand valve (%)
                 "HV_329605":   round(s.HIC_329605, 1),                        # HV-329605 opening (tracks HIC 1:1)
                 "motive_kgh":  round(mot9605_m, 0),                           # 324F002 motive LP steam flow (kg/h)
+                "P_324E002_sh":round(s.r324_f001_P, 3),                       # 324E002 shell = 324F001 manifold (bar a); HV-329605 drops it
             },
             "E003": {                            # Screen 324-1B : Evaporator II 324E003 / 324F003 (140 C, 0.131 bar a)
                 "TT_324002":   round(s.r324_e003_T, 1),                       # melt temp (C, hold 140)
@@ -6453,6 +6482,9 @@ def step_sim(dt: float) -> dict:
                 "uf85_m3h":    round(m_uf / R324_UF85_RHO, 2),                # UF85 injection (m3/h @1305 kg/m3)
                 "p_chest_bara":round(p_chest_e003, 2),                        # steam chest press. (bar a)
                 "Q_kW":        round(Q_e003_kw, 0),                           # Evap-II duty (kW)
+                "HIC_329606":  round(s.HIC_329606, 1),                        # 324F004/F005 motive-steam hand valve (%)
+                "HV_329606":   round(s.HIC_329606, 1),                        # HV-329606 opening (tracks HIC 1:1) — opening drops 324F003/E005 P
+                "P_324E005_sh":round(s.r324_f003_P, 3),                       # 324E005 shell = 324F003 manifold (bar a)
                 "TIC_324002":  {"pv": round(s.TIC_324002["pv"], 1), "sp": round(s.TIC_324002["sp"], 1),
                                 "op": round(s.TIC_324002["op"], 2), "mode": s.TIC_324002["mode"]},
                 "PIC_329212":  {"pv": round(s.PIC_329212["pv"], 2), "sp": round(s.PIC_329212["sp"], 2),
@@ -6950,6 +6982,14 @@ def handle_cmd(cmd: dict):
     elif t == "hic9605_set":                   # HIC-329605 -> HV-329605 324F002 motive-steam hand valve
         if "op" in cmd:
             s.HIC_329605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "hic9606_set":                   # HIC-329606 -> HV-329606 324F004/F005 motive-steam hand valve
+        if "op" in cmd:
+            s.HIC_329606 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "hic323605_set":                 # HIC-323605 -> HV-323605 323F010 gas-outlet hand valve (790)
+        if "op" in cmd:
+            s.HIC_323605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
     elif t == "steam_supply_set":              # MP supply valve (utility import -> MP header)
         if "op" in cmd:

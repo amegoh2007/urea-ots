@@ -1524,6 +1524,39 @@ lean-ammonia at the ~3.2 low end), so 3.0 sits above the pure-salt figure (~2.1)
 floor — a defensible lean-liquor value. Held constant by the back-solved lambdas and the C10 pin; the
 full argument is in `TECH_DEBT.md`.
 
+### 22.8 The vacuum hand valves now move the pressures they should
+
+`References/Mapping of Evaporation Section.md` fixes three sign-rules the model had to obey and one
+node it did not yet carry. HV-323605 is the 323F010 gas-outlet hand valve (stream 790); HV-329605 and
+HV-329606 are the motive-steam hand valves on the two ejector sets — 329605 driving the 324F001 /
+324E002-shell / 323F010 train (via the shared 324F002 manifold) and 329606 driving the 324F003 /
+324E005-shell train. In every case **more opening must pull a deeper vacuum** (lower absolute
+pressure), and throttling must let the pressure rise; the model was blind to two of the three because
+323F010 had no live pressure state at all and 324F003's ejector pull was a fixed constant.
+
+323F010 is now a live node, `s.r323_f010_P` (PT-323204), on the same self-restoring vacuum ODE the
+324 separators use — $\dot P = K_P(\dot m_{evap} - \text{pull})/3600$ — but with the ejector pull
+scaled by *both* upstream openings:
+
+$$\text{pull}_{F010} = \dot m_{evap,des}\cdot\frac{P_{F010}}{P_{F010,des}}
+   \cdot\frac{\text{HV}_{323605}}{50}\cdot\frac{\text{HV}_{329605}}{50}$$
+
+The $P/P_{des}$ term is the ejector's suction-pressure capacity roll-off, which makes the node
+self-restoring without a controller (323F010 has none); the two opening ratios are the sign-rules —
+open either valve and pull rises above generation, so $P$ falls, exactly recovering rule **A** (323605)
+and the 323F010 half of rule **B** (329605). Rule **B**'s 324F001 / 324E002-shell half and rule **C**'s
+324F003 / 324E005-shell half ride the existing separator ODEs: 324F003's fixed pull is replaced by
+`ejpull2_live = R324_F003_EJPULL_DES · HV₃₂₉₆₀₆/50`, so opening 329606 deepens that vacuum. (324E002
+shell *is* the 324F001 manifold node and 324E005 shell *is* the 324F003 node, so the shell-side rules
+are satisfied by the separator pressures themselves — no separate state.) All three ratios are unity at
+the 50 % design openings, so every pull term collapses to its design constant and $\dot m = \text{pull}
+= \dot m_{evap,des} \Rightarrow \dot P = 0$: the seed pressures are literal identities
+($P_{F010}\equiv$ 0.46 bar a) and the pin is unmoved (`leaves 25 / keys 15 / diffs 0`). On the AUTO
+324 separators PIC-324202/324203 trim the opening step back to SP, so the rule shows there as a
+transient; on 323F010, which has no loop, the deeper vacuum is sustained. New hand-valve command
+handlers `hic323605_set` / `hic9606_set` join the existing `hic9605_set`; the gate is
+`backend/test_vacuum_valve_rules.py`.
+
 ---
 
 *End of Document — Urea OTS As-Built Mathematical & System Architecture Reference. All equations sourced from `backend/main.py`, `backend/reactor.py`, `backend/steam_system.py`, `backend/controllers.py`. Post-2026-06-05 model deltas itemised in the Revision Delta; full audit math in `backend/reports/FULL_AUDIT_REPORT.md`.*

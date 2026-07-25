@@ -180,6 +180,35 @@ Files: `backend/main.py` (`evap_w_eq`, both ticks, the TIC-324001 seed comment),
 `test_equation_audit_td014.py`, `test_equation_audit_323_324.py`, `TECH_DEBT.md`, the As-Built §22.4,
 `Master_PID_Tuning_Constants.md` Appendix B.
 
+### Remediation slot 14 — the three Mapping vacuum sign-rules made physical (uncommitted at handoff → commit on next push)
+
+`References/Mapping of Evaporation Section.md` requires: **(A)** open HV-323605 → 323F010 pressure
+falls (throttle → rises); **(B)** open HV-329605 → 323F010, 324F001 and 324E002-shell pressures fall;
+**(C)** open HV-329606 → 324F003 and 324E005-shell pressures fall. The model obeyed none of A/C and
+only the controller-mediated part of B, because 323F010 had **no live pressure state** and 324F003's
+ejector pull was a fixed constant.
+
+**Fix.** 323F010 is now a live node `s.r323_f010_P` (PT-323204) on the same self-restoring vacuum ODE
+the 324 separators use, with the ejector pull scaled by *both* upstream openings:
+`pull_f010 = R323_MEVAP_DES · (P/P_des) · (HV₃₂₃₆₀₅/50) · (HV₃₂₉₆₀₅/50)`. The `P/P_des` term is the
+ejector suction-pressure roll-off (self-restoring, no controller — 323F010 has none); the two opening
+ratios are rules A and the 323F010 half of B. 324F003's fixed pull becomes
+`ejpull2_live = R324_F003_EJPULL_DES · (HV₃₂₉₆₀₆/50)` → rule C and the 324F001-half of B ride the
+existing separator ODEs. 324E002 shell **is** the 324F001 node and 324E005 shell **is** the 324F003
+node, so the shell-side rules need no separate state.
+
+**Bit-exact.** Every ratio is 1.0 at the 50 % design openings, so each pull collapses to its design
+constant and `ṁ = pull ⇒ dP/dt = 0`: `s.r323_f010_P` seeds at `R323_F010_P_BARA` (0.46 bar a) as a
+literal identity and the pin is unmoved (`leaves 25 / keys 15 / diffs 0`). Verified
+`scratchpad/probe_vac_rules.py`: A DOWN/UP OK, B both DOWN OK, C DOWN OK; full suite **226 passed**.
+
+New state `r323_f010_P` / `HIC_323605` / `HIC_329606`; new consts `R323_HIC605_DES_PCT`,
+`R323_F010_P_KP`, `R324_HIC9606_DES_PCT`; command handlers `hic323605_set` / `hic9606_set`; telemetry
+(F010 `P_bara`+`HV_323605`, E001 `P_324E002_sh`, E003 `HIC_329606`+`HV_329606`+`P_324E005_sh`). The
+324 separators hold SP in AUTO so the rule shows there as a PIC-trimmed transient; put PIC-324202/203
+in MAN to see the sustained direct effect (as the gate `test_vacuum_valve_rules.py` does). Files:
+`backend/main.py`, `backend/test_vacuum_valve_rules.py`, `scratchpad/probe_vac_rules.py`, As-Built §22.8.
+
 ### Remediation slot 12 — `R3232_CP` reconciled against the carbamate-cp reference, commit `4ab1514`
 
 Documentation only; **no model change**, so the pin is unmoved by construction (`leaves 25 / keys

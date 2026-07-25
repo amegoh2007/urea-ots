@@ -1211,9 +1211,13 @@ the temperature is a real state with a real driver.
   higher P → higher T_sat → higher T. The composition offset stays frozen at its design value
   because this liquor's vapour is 33 % NH₃ / 50 % CO₂ — its bubble point is 9.8 °C *below* water's
   saturation temperature at 4.1 bar a, a depression Raoult-on-water cannot produce.
-* **323F010** — fixed 0.46 bar a vacuum boundary, so pressure is not a lever and **concentration**
-  is. That is the real physics of a vacuum evaporator and it makes TIC-323012 what it is on the
-  plant: a concentration controller acting through temperature.
+* **323F010** — the vacuum is **centred** on 0.46 bar a but is no longer a frozen boundary: the live
+  node `r323_f010_P` (PT-323204) now rides the two ejector hand valves HV-323605 / HV-329605 on a
+  self-restoring pull ODE (As-Built §22.8), so opening either deepens the indicated vacuum. The
+  melt-strength model still evaluates at the *design* vacuum for stability, so **concentration**
+  remains TIC-323012's lever — a concentration controller acting through temperature — which is the
+  real physics of a vacuum evaporator; the live pressure adds the correct hand-valve response on top
+  without moving the strength anchor.
 
 **The bubble-point model is Raoult's law on water, with nothing fitted.** `p_H2O = x_H2O·Psat(T)`,
 and at the bubble point that equals the stage pressure, so `T_bub = Tsat(P/x_H2O)`. Urea, biuret and
