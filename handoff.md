@@ -10,6 +10,19 @@ tag: are the equations bound correctly, is the solver engine right, is hybrid va
 and what equations are missing. Deliverable mode is **audit + auto-fix**, one unit at a time.
 
 ## Current state of the code
+
+> **Latest this session (2026-07-25) — two units landed and pushed, suite 231-green, pin `25/15/0`:**
+> * **slot 14 — the three Mapping vacuum sign-rules made physical** (commit `ec4a4d6`). HV-323605 /
+>   HV-329605 / HV-329606 now move the 323F010 / 324F001 / 324F003 (+ shell) pressures with the correct
+>   sign; 323F010 became a live self-restoring vacuum node. As-Built §22.8, gate
+>   `test_vacuum_valve_rules.py`.
+> * **slot 15 — 322C001 LP-absorber species layer** (commit `3514ced`). The last composition-blind
+>   vessel to atmosphere now carries a live liquor vector and a **live vent NH₃-slip composition**
+>   (≈1557 kg/h, was a boot-pinned scalar); total recovered mass kept as `A328_PHI_ABS·gcb_m` so the pin
+>   is byte-identical. As-Built §22.9, gate `test_c001_species_layer.py` (5 tests). **TD-009's high-value
+>   remainder is closed; only the three low-value collectors remain (see OPEN item 1).**
+> * The full open-gap register is the **"OPEN items"** section below; nothing outstanding is a blocker.
+
 * Audit report: **`EQUATION_AUDIT.md`** — architecture verdicts, 11-item findings register (all closed),
   per-tag tables for units 320/321/322/323/324/328/329, category coverage summary, applied fixes.
 * **Solver verdict: Sequential-Modular is CORRECT for all ~57 tags.** Recycles are torn with
@@ -461,63 +474,56 @@ the Store stub again. So keep using `%LOCALAPPDATA%\Python\pythoncore-3.14-64\py
 it is *pinned*, not because the alias is *broken*. `launch.bat` now resolves it that way explicitly
 and proves the interpreter runs before using it (see slot 11).
 
-## OPEN items (in TECH_DEBT.md)
+## OPEN items — the current open-gap register (2026-07-25)
 
-**All eleven audit findings are closed.** What is left is the two remaining category gaps:
+**All eleven audit findings (F-1..F-11) are closed. All numbered debts TD-001..TD-016 are closed**
+(TD-006 both halves, incl. the per-species enthalpy; `eta_P` dead lever; C10 cp; `STRIP_FLOOD_ETA_K`;
+TD-015 and its residual limit cycle as TD-016). What remains is a short tail of accuracy / housekeeping
+items, none of them a blocker and none of them moving the pin:
 
-* **TD-006** — **half closed 2026-07-23.** The **hydrodynamic flooding limit is coded, gated and
-  pushed**; the per-species enthalpy balance is what remains.
-
-  *What landed.* The unit had no tube geometry at all — every "flood" term in `stripper_322e001`
-  was a thermal metaphor for the steam-dilution branch, not a hydraulic limit. The licensor DDS
-  (Uhde UD-AU-322-DZ-0003-003 p.3) supplies **2600 tubes, 31 × 3.0 mm → ID 25.0 mm, 6000 mm eff.**,
-  and the sheet is self-consistent: N·π·d_o·L = 1519.27 m² against its own tabulated 1519.00
-  (+0.018 %), so the tube count is confirmed rather than trusted. Three documents then agree —
-  the bore is **0.984″**, so the 145 kg/h "1-inch tube" limit applies unscaled; the 6.000 m
-  effective length is exactly what Brouwer ties to 80 % design efficiency; and the quoted 183 °C
-  reference *is* `STRIP_FEED207_T_C`.
-
-  *The key structural result.* 280 797 / 2600 / 145 = **0.7448** — the plant runs at 74.5 % of its
-  flooding limit, onset at 134 % load. So the constraint is **one-sided and does not bind at the
-  design seed**: `max(φ−1, 0)` returns the literal `0.0`, making `1−e⁰ = 0` and `1/(1+Kx) = 1`
-  exact identities. **No anchored ratio was needed** — the pin guarantee rests on a physical fact,
-  not on float operand ordering, which is a stronger contract than the plan had assumed.
-
-  *Calibration from the literature, not fitted.* Brouwer's 3–4 °C-in-15-min bottom signature fixes
-  `STRIP_FLOOD_T_K` = 3.83, capped by the same 11 °C reactor-liquor ceiling the steam-dilution
-  branch already uses; the model returns 3.50 °C at 10 % over the limit. Measured cascade: overhead
-  NH₃ recovery 89 % → 56 % at onset → 30 % at 180 % load, volatiles held in the bottoms and
-  slipping to LP, exactly as described.
-
-  *One sign trap, avoided on purpose:* `g_flood` reaches the **split only, never `eta_T`** —
-  flooding *increases* residence time, so hydrolysis and biuret rise; `eta_T` scales `xi_hyd`, so
-  folding it in would have cut hydrolysis the wrong way. A regression test pins this.
-
-  *Deliberately not modelled:* the corrosion/lifetime drift (110 → 120 % as the bore grows) and the
-  active-corrosion metallurgy — both multi-year effects with no place in a shift-length scenario.
-  *One unsourced number:* `STRIP_FLOOD_ETA_K`; Brouwer publishes no efficiency-vs-flooding curve, so
-  it reuses the unit's existing choke scale (`STRIP_ETA_KT` = 1.50) rather than invent a fit.
-
-  **Still open — the per-species enthalpy half.** The bit-exactness contract is mapped in
-  TECH_DEBT TD-006 so it need not be re-derived: the replacement must sit at
-  `STRIP_DUTY_DES_KW * <factor> * 3600.0` with `<factor>` evaluating to a bare `1.0`, which an
-  enthalpy ratio `H_live/H_des` computed by one shared function gives as `X/X`. It needs a
-  carbamate dissociation enthalpy and NH₃/CO₂ latents at ~183 °C/140 bar — **none exist in the
-  codebase**, and the literature sweep that would have sourced them did not complete (the subagent
-  fleet hit the session limit). Per CLAUDE.md §1 they must be sourced or back-solved, not guessed.
-
-  **Incidental finding, not fixed:** `eta_P` is a **dead lever** — `P_bara` is always passed the
-  frozen `STRIP_P_DES_BARA`, so synthesis pressure has *no* effect on stripping efficiency. That is
-  physically wrong and worth its own slot.
-* **C10 constitutive properties** — densities and cp are still constants with no T-dependence
-  (`tsat_steam`, `psat_water_bara`, `psat_nh3_bara` are live). The 328 datasheet work supplied two
-  hard anchors: **PFD stream 739 = 923.28 kg/m³ @ 143 °C and the datasheet's 923.25 @ 143 °C**, both
-  of which are simply *water at 143 °C* — direct evidence that the desorption train's liquid can ride
-  a water correlation (Kell) with a urea-fraction correction. Implement as
-  `rho(T) = RHO_DES * (1 + beta*(T - T_DES))`-style anchored corrections so every property is
-  bit-exactly its present constant at the design temperature and the pin cannot move.
-* ~~TD-001~~ RESOLVED (log was stale — the helper already uses the negative law, real `chk`).
-* ~~TD-002..TD-005, TD-007..TD-011~~ RESOLVED.
+1. **TD-009 remainder — the three recycle collectors** (`328D001`, `328D003`, `323C005`). The only
+   vessels still on **lumped mass with no species vector**. 322C001, the high-value unit, is DONE
+   (slot 15). These three *transport* composition rather than react (carbamate collector + reflux drum
+   + vent scrub), so they are the **lowest-value** piece. Each is an anchored multi-feed CSTR
+   (`des_advance`, `m_vap=0`) seeded on the normalised feed mix (the 322C001 pattern). **Version A**
+   (a conserved vector + telemetry, nothing rewired downstream) is near-zero risk — the vectors are
+   read nowhere by the engine, so the pin and all existing tests are untouched. **Version B** (feed the
+   live collector composition into 328C002's 738/775 and 322C001's 755, replacing the frozen
+   `W_S738`/`W_S775`/`W_S755` anchors) is higher value but risks the ~1e-16 CSTR-renorm drift breaking
+   the downstream species tests' bit-exact `==` asserts — do it only with a tolerance review. Scoped in
+   `TECH_DEBT.md` "Remainder".
+2. **TD-012 density side — still open, partially blocked.** cp is fully closed (per-stream/per-vessel
+   departures, slots 9/10). Densities are still frozen constants at the **volumetric** controllers:
+   `RHO_744_KGM3`, `RHO_741_KGM3`, `R328_C002_RHO` (933 @ 139 °C), `R328_C004_RHO` (923.28 @ 143 °C).
+   `urea_soln_rho` / `aqueous_rho` (anchored-departure, already used for cp) are the vehicles.
+   **Blocker:** the PFD's Amm.-Water rows run **~4 % above physical water above 150 °C** (analysed in
+   TD-012, unchanged), so a straight water/Kell correlation contradicts the STRICT source there;
+   resolving it needs either the licensor's own density basis or a decision to honour the PFD number
+   over physics at those points. Below 150 °C it is a clean anchored-departure job.
+3. **`Master_PID_Tuning_Constants.md` doc drift — doc-only, not a tuning error.** Measured: **33 of 46
+   sim controllers differ from their plant row** (all intentional retunes), and Appendix A's `_fic_flow`
+   Kc column is on the mass basis while the engine runs those loops **volumetrically**. Some loop names
+   still use pre-rename tags / the retired ratio basis. Reconcile the document to the engine.
+4. **Graphify refresh** — the `graphify-out/` graph is stale after this session's edits. Needs
+   **semantic extraction** (subagents or a Gemini key). **Do NOT run AST-only and merge** — one doc file
+   supplies 4487 of 6080 nodes and `build_merge`'s dedup collapses the graph to ~1858 (the `to_json`
+   shrink guard then rejects the write). See "Next steps".
+5. **Ejector motive-steam model** — a *decision*, not a defect: whether to model the 324F004/F005 /
+   329 ejector motive-steam network explicitly, or keep the current design-anchored pull laws (which
+   now carry the correct hand-valve sign rules, slot 14). Not required for any open scenario.
+6. **324F001 false-air vacuum loop — a pre-existing loose loop, flagged not a regression.** The 324E001
+   separator pressure is a slow-*damping* mode (0.37 → 0.21 over 15 h, still shrinking; TD-016 slot 13);
+   it is a loosely-tuned false-air vacuum controller, the same behaviour the pre-TD-016 model had. A
+   retune (re-measure K_p on the non-relay plant, then restore the λ-value 0.04 / Kc) would tighten it.
+7. **Blocked on you (need plant/HMI facts or a build decision):** confirm the 321-1 / 323-1 overlay
+   registration on the RUNNING HMI (LSK bumped v3→v4); which row `FFIC-329401` / `TIC-328012` two-box
+   SP/MV panels put the live PV on; a **328D003 level controller** (item 3a prerequisite); and the
+   **323C005 demin make-up header** — its FIC-323418 binding was false ("ACA FROM 323P8A/B" is the 718B
+   leg) and was removed, so that leg has no flow controller until the make-up header is modelled.
+8. **GitHub-side cleanup (owner action, not a code task):** the References PDFs were purged from history
+   (`git filter-repo` + force-push), but GitHub still retains **orphaned LFS objects and unreachable
+   commits**. Clearing them needs a repo delete+recreate or a GitHub Support request. The markdown
+   references remain tracked; nothing is lost for citations.
 
 **Durable lesson from TD-011:** a component balance that will not close is evidence of a **missing
 stream** at least as often as it is evidence of bad source data. Check the topology against the
@@ -689,12 +695,19 @@ delete+recreate, or GitHub Support. Nothing git-side from this machine removes t
   but do NOT change the 15 pin VALUES — expect `diffs 0` still.
 
 ## Next steps
+
+> The authoritative **open** list is the **"OPEN items" register** above (8 entries, none a blocker).
+> The numbered notes below are kept for provenance — items 2 / 3 / 3a / 3b / 3c record what is **CLOSED**
+> and must not be reopened; items 1, 4–9 restate the open work in action form.
+
 1. **TD-009 remainder** — the 323 / 324 / 328-desorption species layer is DONE (slots 3/6), and
    **322C001 is now DONE too (slot 15, 2026-07-25)**: the LP absorber carries a live liquor vector and a
    live vent NH3-slip composition, pin byte-identical. What is left is only the **three lumped recycle
    collectors 328D001 / 328D003 / 323C005** — they *transport* composition rather than react, so they
    are the lowest-value piece; each is an anchored multi-feed CSTR (`des_advance`, m_vap=0) seeded on its
-   PFD-tabulated stream, done unit-by-unit under scope lock. **Accuracy, not a blocker.**
+   normalised feed mix (the 322C001 pattern), done unit-by-unit under scope lock. **Accuracy, not a
+   blocker.** See OPEN item 1 for the Version-A (safe, read-nowhere) vs Version-B (rewire consumers,
+   tolerance-review needed) distinction.
 2. **TD-008 — CLOSED.** The 328C003 hydrolyser reaction extent is in; it did **not** need the full 328
    species vector (hydrolysis is flow-through), so it never actually depended on TD-009.
 3. **TD-006 — CLOSED 2026-07-23** (`1da9280`), both halves. So is the `eta_P` dead lever, and so
