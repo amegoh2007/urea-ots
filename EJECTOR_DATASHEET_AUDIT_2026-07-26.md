@@ -1,6 +1,6 @@
 # 324F002 / 324F004 / 324F005 Datasheet Audit
 
-Date: 2026-07-26  
+Date: 2026-07-26; plant P&ID addendum 2026-07-27
 Plant: HFC Helwan NH3/Urea, UAN 01-3042  
 Documents reviewed:
 
@@ -12,13 +12,15 @@ Documents reviewed:
   stamped `AS BUILT`
 - `References/Sources/324F005 Datasheet 2.pdf`, 1-page mechanical general-arrangement drawing,
   stamped `AS BUILT`
+- `References/Sources/Merged_Searchable_PIDs.pdf`, P&IDs 105/1 and 105/2
 
 ## Verdict
 
-The six documents **materially assist** and close several identity, provenance, operating-state, and
-fabrication-geometry gaps. They still do **not** close the validated off-design ejector-law gap.
+The reviewed drawing and P&ID set **materially assists** and closes several identity, provenance,
+operating-state, and fabrication-geometry gaps. It still does **not** close the validated off-design
+ejector-law gap.
 
-Together they close the equipment identity, manufacturer, serial numbers, topology, line sizes,
+Together they close the equipment identity, manufacturer, serial numbers, installed topology, line sizes,
 design/max stream states, motive-steam requirements, two internally consistent package mass-balance
 cases, the F004/F005 body operating states, and much of the F004/F005 fabrication geometry. They do
 not include the certified performance curves or factory/field test results needed to derive and
@@ -93,6 +95,15 @@ model inputs, and they provide no tolerances or performance correlation tying th
 measured capacity. The `0.245 bar(a)` value closes the F005 body operating-pressure point. It does not
 explicitly state the F004 discharge, 324E006 shell pressure, or the pressure loss from E006 to F005.
 
+### Plant P&ID evidence
+
+P&ID 105/1 (`UD-VT-324-FB-0003`) and P&ID 105/2 (`UD-VT-324-FB-0004`) independently confirm the
+installed F002/E002 and F004/E006/F005/E007 sequence, the individual condensate returns to 328D003,
+their nominal line sizes, and the minimum vertical/barometric-leg arrangements. This closes installed
+route and destination ambiguity. The drawings do not give complete pipe lengths/fittings/roughness,
+effective ejector loss coefficients, or measured pressure drops, so they do not close the gas-side
+hydraulic or ejector-performance model.
+
 File-integrity identifiers for the reviewed drawing set:
 
 - F002 drawing SHA-256: `F9426BA161F8C4F1ED9BE921F76FE715A5941D36187EE70C17E872240104B672`
@@ -164,8 +175,9 @@ or exposes both as named configurations.
 - Guaranteed turndown, break/stall boundary, and restart hysteresis.
 - Acceptance-test or plant-test points confirming performance after installation.
 - Source-authority decision for the datasheet/PFD conflicts above.
-- E006/E007 cooling-water inlet/outlet states, individual duties/UA, gas-side pressure loss, and
-  condensate/non-condensable separation performance over load.
+- E006/E007 gas-side pressure loss and condensate/non-condensable separation performance over load.
+  Cooling-water states and design duties/UA are now closed separately by the 1,750-MTPD PFD,
+  cooling-water map, condenser datasheets, and explicit condenser implementation.
 
 Without these inputs, a law such as `pull ∝ motive × suction pressure` is only a design-anchored
 surrogate. It is not a validated compressible-flow or momentum equation and cannot certify C40.

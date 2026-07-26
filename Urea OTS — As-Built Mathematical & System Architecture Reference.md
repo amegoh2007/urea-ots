@@ -34,6 +34,7 @@
 | 19 | 2026-07-26 | branch `master` | Full mathematical audit remediation. 328C003 now uses the source-backed second-order Inoue/Otsuka hydrolysis law and explicit +101.5 kJ/mol hydrolysis heat; LP-header pressure reaches the HPCC shell; both Unit-324 evaporators close their pressure/T/VLE/load algebraic tears per tick; the 9-bar header includes PFD flash recovery and live 324E003 demand; recycle residuals and convergence state are published. The new 324F002/F004/F005 issue-for-order sheets close vendor design/max mass balances and topology but conflict with the strict PFD and omit off-design curves/internal geometry, so no ejector anchor was silently changed. See §22.10 and `EJECTOR_DATASHEET_AUDIT_2026-07-26.md`. |
 | 20 | 2026-07-26 | branch `master` | Reviewed the revised Körting F002/F004/F005 mechanical drawings. They close manufacturer/designation/serial, the HFC Helwan UAN 01-3042 provenance, substantial F004/F005 fabrication geometry, and their 0.122/0.245 bar(a) body operating points. The user confirmed `SUEZ II 01-3040` is a copied template error. They do not contain the certified capacity/backpressure/stability curves or loss calibration required to replace the active proportional pull surrogate; no flow anchor was changed. See §22.10 and `EJECTOR_DATASHEET_AUDIT_2026-07-26.md`. |
 | 21 | 2026-07-26 | branch `master` | Built the complete Unit-324 surface-condenser train from the strict PFD, supplied absorber/cooling-water maps, and 324E002/E005/E006/E007 datasheets. The four exchangers are distinct `Q=UA·LMTD` mass/energy nodes with individual CW branches, condensate/vent streams, geometry, and noncondensable derating. Corrected 323C005, 323E011, and 328D003 Comp-I/II routing; false air is now the PFD 21/21 kg/h; mapped numerical streams are runtime aliases. See §22.11 and `research_plan_324_vacuum_train.md`. |
+| 22 | 2026-07-27 | branch `master` | Reconciled the 33-page searchable plant P&ID set against the 1,750-MTPD PFD and operator maps. P&IDs 103/1-103/2 close the installed 323C005 → 328V001 → 328D003 liquid path; P&ID 104 proves physical 328D003 bays I/II/III and places LI-328507/508 on bays I/III; P&IDs 105/1-105/2 corroborate the four Unit-324 condensate returns and ejector/condenser layout. No equation changed because the drawings do not provide bay volumes, C40 performance curves, or gas-side loss data. See §22.12 and `PID_EVIDENCE_AUDIT_2026-07-27.md`. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -1649,12 +1650,15 @@ inserted. Off design, noncondensables reduce effective UA through a unit-normali
 departure and loss of cooling water drives condensate to zero. This is intentionally a training-grade
 departure: no plant fouling, gas-film, or rating curve was supplied.
 
-The connected recovery topology is now literal. 323C005 receives 756(33358), 702(440), and 708(462)
-and sends 343(34180) to 328D003 Comp II plus vent 341(80), an exact mass closure with no invented
-demineralized-water makeup. 323E011 receives 701+786+321+791 and outputs 718+702, closing
-$7563=7123+440$ kg/h; stream 734 is a separate Comp-II wash into 323D011. 328D003 Comp I receives
-719+720+721+759 and supplies 744, exposing the PFD's 1 kg/h rounding residual. Comp II receives 343
-and supplies 735+734+791, exposing the 2 kg/h residual. The supplied map shows both compartment levels
+The connected recovery topology is now literal at the PFD boundary. 323C005 receives 756(33358),
+702(440), and 708(462) and sends liquid 343(34180) through 328V001 to the second mapped 328D003
+inventory plus vent 341(80), an exact mass closure with no invented demineralized-water makeup.
+P&ID 104 identifies that second mapped inventory as physical bay III; the implementation's historical
+`Comp II` name is retained only as a compatibility alias. 323E011 receives 701+786+321+791 and
+outputs 718+702, closing $7563=7123+440$ kg/h; stream 734 is a separate wash from that second mapped
+inventory into 323D011. 328D003 physical bay I receives 719+720+721+759 and supplies 744, exposing
+the PFD's 1 kg/h rounding residual. The second mapped inventory/physical bay III receives 343 and
+supplies 735+734+791, exposing the 2 kg/h residual. The supplied map and P&ID show both level signals
 as indications with no level-control valve, so `LT_328507/508_open_loop` are explicitly open-loop.
 
 False-air streams 784/783 are restored to the PFD 21/21 kg/h. Vacuum inventory now balances against
@@ -1662,6 +1666,29 @@ post-condenser gas instead of forcing the condensable vapour load through the ej
 removes the former 22-40:1 entrainment artifact while preserving the documented hand-valve sign rules.
 Gas-side pressure drops remain unparameterized, so shell and upstream manifold pressures share the
 rounded PFD pressure until a pressure survey or vendor performance curve is supplied.
+
+### 22.12 Plant P&ID reconciliation
+
+The 33-page plant set `Merged_Searchable_PIDs.pdf` was indexed and the decisive sheets were rendered
+at engineering-drawing resolution. It adds primary installed-topology evidence without changing the
+PFD's quantitative authority:
+
+- P&ID 103/2 (`UD-VT-323-FB-0002`) routes 323C005 N4 through line `150-AW5-323058` to 328V001 on
+  P&ID 103/1. P&ID 103/1 (`UD-VT-323-FB-0001`) continues the stack's N1 liquid outlet to 328D003 on
+  P&ID 104. Thus stream 343 is an aggregate PFD stream across an installed route that includes
+  328V001, while stream 341 remains the unabsorbed-gas/stack boundary.
+- P&ID 104 (`UD-VT-328-FB-0003`) draws physical 328D003 bays I, II, and III. LI-328507 is attached
+  to bay I; LI-328508 is attached to bay III; bay II has no dedicated level indication. It also draws
+  the N23/N24 hand-valved bay-II/bay-III connection. This closes physical existence, numbering,
+  instrument placement, and nozzle topology, but not bay capacities, weir elevations, the normal
+  N23/N24 valve state, or dissolved-gas flashing.
+- P&IDs 105/1 and 105/2 (`UD-VT-324-FB-0003/-0004`) independently corroborate the F002/E002 and
+  F004/E006/F005/E007 sequence, individual returns `324010`, `324012`, `324013`, and `324014` to
+  328D003, and their installed nominal-size/minimum-elevation arrangements. They do not provide the
+  curves, effective loss geometry, full pipe runs, or measured pressure drops required to close C40.
+
+No new dynamic state or calibrated parameter was introduced from the P&IDs alone. The detailed
+source/disposition matrix is `PID_EVIDENCE_AUDIT_2026-07-27.md`.
 
 ---
 

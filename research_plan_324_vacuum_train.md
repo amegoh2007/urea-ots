@@ -9,9 +9,12 @@ Close the open 324E002, 324E005, 324E006, and 324E007 gaps; map every stream nam
 ## Evidence order
 
 1. Use `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md` for the 1,750 MTPD operating point.
-2. Use the four equipment datasheets for construction, geometry, nozzle service, and mechanical limits. Their process cases do not replace the PFD: 324E002 and 324E005 describe older vendor loads, and 324E006/E007 leave process data blank and refer to 324F004.
-3. Use the supplied mapping notes for equipment connectivity.
-4. Use primary literature only for model form. The DOE heat-exchanger handbook supports `Q = UA ΔT_lm`; NASA condensation work supports an explicit noncondensable-gas derating; Crowe's data-reconciliation paper supports retaining measured anchors while exposing reconciliation residuals.
+2. Use `References/Sources/Merged_Searchable_PIDs.pdf` for installed equipment connectivity,
+   nozzles, line sizes/classes, instruments, valves, and sheet continuations. A P&ID does not override
+   the PFD's quantitative heat-and-material balance.
+3. Use the four equipment datasheets for construction, geometry, nozzle service, and mechanical limits. Their process cases do not replace the PFD: 324E002 and 324E005 describe older vendor loads, and 324E006/E007 leave process data blank and refer to 324F004.
+4. Use the supplied mapping notes to pin PFD stream numbers onto the installed P&ID routes.
+5. Use primary literature only for model form. The DOE heat-exchanger handbook supports `Q = UA ΔT_lm`; NASA condensation work supports an explicit noncondensable-gas derating; Crowe's data-reconciliation paper supports retaining measured anchors while exposing reconciliation residuals.
 
 Primary sources:
 
@@ -24,9 +27,10 @@ Primary sources:
 The supplied absorber map and PFD totals resolve a previous topology error:
 
 - 323C005 receives 756, 702, and 708. At design, `33,358 + 440 + 462 = 34,180 + 80 kg/h`, which closes exactly as streams 343 and 341.
-- 328D003 Compartment I receives 719, 720, 721, and 759 and supplies 744 to 322P002. The PFD has a 1 kg/h rounding residual: `31,479 in` versus `31,478 out`.
+- 328D003 physical bay I receives 719, 720, 721, and 759 and supplies 744 to 322P002. The PFD has a 1 kg/h rounding residual: `31,479 in` versus `31,478 out`.
 - 322P002 and 322E006 turn 744 into 755 without changing mass.
-- 328D003 Compartment II receives 343 and supplies 735, 734, and 791. The PFD has a 2 kg/h rounding residual: `34,180 in` versus `34,182 out`.
+- 328D003's second mapped inventory (physical P&ID bay III; engine alias `Comp II`) receives 343 and
+  supplies 735, 734, and 791. The PFD has a 2 kg/h rounding residual: `34,180 in` versus `34,182 out`.
 - Stream 702 is the 323D011 gas outlet to 323C005. It is not an inlet to 323E011. The corrected 323E011 node closes exactly: `701 + 786 + 321 + 791 = 718 + 702 = 7,563 kg/h`.
 
 ## Vacuum-train stream map
@@ -132,8 +136,25 @@ Implemented on 2026-07-26:
 - Corrected false-air flows to streams 784/783 = 21/21 kg/h and pressure pull to the post-condenser gas load.
 - Mapped the absorber train as 744 -> 755 -> 756 -> 343, with gas feeds 702 and 708 and atmospheric vent 341.
 - Mapped cooling-water branches 1014/1015, 1016/1017, 1018/1019, and 1020/1021, plus headers 1001/1051.
-- Corrected 323E011 so stream 702 is its gas outlet, not an inlet, and corrected 328D003 Compartment I/II routing.
+- Corrected 323E011 so stream 702 is its gas outlet, not an inlet, and corrected the two mapped
+  328D003 inventory routes (engine aliases Comp I/II; physical P&ID bays I/III).
 - Published all mapped numerical streams as canonical runtime aliases with PFD component records.
+
+P&ID addendum, completed 2026-07-27:
+
+- P&ID 103/2 (`UD-VT-323-FB-0002`) and P&ID 103/1 (`UD-VT-323-FB-0001`) show that the
+  323C005 liquid route passes through 328V001 before its overflow continues to 328D003. This refines
+  the installed path without changing the PFD stream-343 balance.
+- P&ID 104 (`UD-VT-328-FB-0003`) confirms physical 328D003 bays I/II/III. LI-328507 is on bay I;
+  LI-328508 is on bay III; no level-control valve is drawn. The existing two modeled live inventories
+  therefore correspond to physical bays I and III, while the historical model name `Comp II` remains
+  only a compatibility alias for the second mapped inventory.
+- P&IDs 105/1 and 105/2 (`UD-VT-324-FB-0003/-0004`) corroborate the complete ejector/condenser
+  sequence and the individual condensate returns `324010`, `324012`, `324013`, and `324014` to
+  328D003. Their nominal sizes and minimum vertical arrangements close installed-layout ambiguity.
+- No model equation changed: these sheets provide neither the 328D003 bay volumes/normal bay-II
+  operating basis nor the curves and loss data needed to close C40. See
+  `PID_EVIDENCE_AUDIT_2026-07-27.md`.
 
 At the direct PFD point, all four exchangers have zero mass and cooling-water energy residual. The independently rounded stream-703 mixer remains visible as a 1 kg/h PFD residual. The PFD duties are 18.459, 1.926, 1.207, and 0.133 MW; the supplied cooling-water note labels these values as kW, but its flows and temperature rises prove the intended unit is MW.
 
