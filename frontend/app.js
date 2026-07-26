@@ -244,6 +244,8 @@ function renderStream(s){
     ['Temperature', fStrm(s.T_C,1)+' °C'], ['Pressure', fStrm(s.P_bara,1)+' bar a'],
     ['Mass flow', fStrm(s.mass_th,2)+' t/h ('+fStrm(s.mass_kgh,0)+' kg/h)'],
     ['Molar flow', fStrm(s.mol_kmolh,1)+' kmol/h'], ['Avg MW', fStrm(s.MW,2)+' kg/kmol'],
+    ['Specific enthalpy', s.enthalpy_kJkg!=null ? fStrm(s.enthalpy_kJkg,2)+' kJ/kg' : '— (not modelled)'],
+    ['Enthalpy flow', s.enthalpy_flow_kW!=null ? fStrm(s.enthalpy_flow_kW,2)+' kW' : '— (not modelled)'],
     ['Density', s.rho!=null ? fStrm(s.rho,1)+' kg/m³' : '—'],
     ['Volum. flow', s.vol_m3h!=null ? fStrm(s.vol_m3h,1)+' m³/h' : '—'],
     ['', ''], ['Composition', 'mol %  |  mass %'],

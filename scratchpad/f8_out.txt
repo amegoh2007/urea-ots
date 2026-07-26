@@ -1,0 +1,58 @@
+==============================================================================
+PHASE A  design hold -- 20 min at the seed
+==============================================================================
+  c002_T     139.000000 ->   139.000000   drift +0.000e+00
+  c002_M    1588.220555 ->  1588.224074   drift +3.519e-03
+  c003_T     200.000000 ->   200.001014   drift +1.014e-03
+  c003_M   34062.000000 -> 34062.112587   drift +1.126e-01
+  c004_T     143.000000 ->   143.000000   drift +0.000e+00
+  c004_M    1436.462360 ->  1436.466882   drift +4.522e-03
+  worst species drift: 9.724e-03 mass fraction
+
+==============================================================================
+PHASE B  species vs PFD tabulated compositions (mass %)
+==============================================================================
+  328C002 bot  (PFD 743)
+      CO2   live    0.180478   pfd    0.110000   diff +7.05e-02
+      H2O   live   97.527565   pfd   98.500000   diff -9.72e-01
+      NH3   live    1.532964   pfd    0.630000   diff +9.03e-01
+      Urea  live    0.758992   pfd    0.760000   diff -1.01e-03
+  328C003 bot  (PFD 747)
+      CO2   live    0.023045   pfd    0.019998   diff +3.05e-03
+      H2O   live   98.785240   pfd   99.010099   diff -2.25e-01
+      NH3   live    1.191707   pfd    0.969903   diff +2.22e-01
+      Urea  live    0.000008   pfd    0.000000   diff +8.42e-06
+  328C004 bot  (PFD 739)
+      CO2   live    0.022308   pfd    0.000000   diff +2.23e-02
+      H2O   live   99.975722   pfd   99.999800   diff -2.41e-02
+      NH3   live    0.001962   pfd    0.000100   diff +1.86e-03
+      Urea  live    0.000007   pfd    0.000100   diff -9.27e-05
+
+  anchors:
+    C002: xi=  0.0000 kmol/h  resid=  -0.337 kg/h  y-vs-PFD dev=0.002 %pt
+    C003: xi=  4.2734 kmol/h  resid=  +0.000 kg/h  y-vs-PFD dev=0.208 %pt
+    C004: xi=  0.0000 kmol/h  resid=  -0.034 kg/h  y-vs-PFD dev=0.047 %pt
+
+==============================================================================
+PHASE C  design closure + datasheet holdups
+==============================================================================
+  328C002  in    40434.0  out    40434.0  diff +0.000e+00
+  328C003  in    34874.0  out    34874.0  diff +0.000e+00
+  328C004  in    40557.0  out    40557.0  diff +0.000e+00
+
+  holdup C002  1588.2 kg (15 trays)   C004  1436.5 kg (22 trays)
+  hydrolyser urea load  256.6 kg/h   xi_des 4.2732 kmol/h
+
+==============================================================================
+PHASE D  off-design -- cut FIC-329401 LP strip steam
+==============================================================================
+  design           urea      0.1450 ppm  NH3     16.8090 ppm  T 143.00 C
+  strip steam  90% urea      0.1206 ppm  NH3     22.1945 ppm  T 143.00 C
+  strip steam  75% urea      0.1206 ppm  NH3     22.1945 ppm  T 143.00 C
+  strip steam  60% urea      0.1206 ppm  NH3     22.1945 ppm  T 143.00 C
+
+  hydrolyser temperature sweep -- urea leaving 328C003:
+    T= 200.0 C  conversion   0.999961  urea in 747         0.30 ppm
+    T= 190.0 C  conversion   0.998919  urea in 747         8.14 ppm
+    T= 180.0 C  conversion   0.989120  urea in 747        81.98 ppm
+    T= 160.0 C  conversion   0.845972  urea in 747      1160.54 ppm

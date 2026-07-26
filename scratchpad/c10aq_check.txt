@@ -1,0 +1,10 @@
+a*(r/r) != a  : 0 / 200000
+a*r/r   != a  : 15154 / 200000  <-- why the parentheses matter
+
+anchor   933.00 @ 139.0 C -> identity True ; at 200 C   870.24
+anchor   923.28 @ 143.0 C -> identity True ; at 200 C   864.52
+anchor  1002.48 @  44.0 C -> identity True ; at 200 C   875.06
+anchor   992.42 @  40.0 C -> identity True ; at 200 C   864.89
+
+aqueous_cp identity: True
+R328_CP 4.0 @139 -> at 200 C: 4.2003

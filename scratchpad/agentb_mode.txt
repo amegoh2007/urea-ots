@@ -1,0 +1,32 @@
+=== controller-tagged indicators WITHOUT a mode: field (no A/M/E badge on HMI) ===
+  L61    ?        HIC-322604     bind=SCRUB_322E003.HIC_322604
+  L75    ?        HIC-322602     bind=EJ_322F001.HIC_322602
+  L114   ?        HIC-322203     bind=CO2_FEED.HIC_322203
+  L149   ?        HIC-322605     bind=REACT_322R001.HIC_322605
+  L156   ?        PIC-329204     bind=STEAM_SYSTEM.PIC_329204.pv
+  L158   ?        HIC-329601     bind=STEAM_SYSTEM.HP_VENT.pct
+  L172   ?        PIC-329204     bind=STEAM_SYSTEM.PIC_329204.pv
+  L175   ?        HIC-329601     bind=STEAM_SYSTEM.HP_VENT.pct
+  L178   ?        PIC-329205     bind=STEAM_SYSTEM.PIC_329205.pv
+  L182   ?        LIC-329503     bind=STEAM_SYSTEM.LIC_329503.pv
+  L189   ?        LIC-329504     bind=STEAM_SYSTEM.LIC_329504.pv
+  L202   ?        HIC-329602     bind=STEAM_SYSTEM.PIC_329207C.op
+  L206   ?        LIC-329502     bind=STEAM_SYSTEM.LIC_329502.pv
+  L246   ?        PIC-323203     bind=LPCC_3232.E011.PIC_323203.pv
+  L249   ?        HIC-323605     bind=EVAP_324.VAC.vent_kgh
+  L252   ?        PIC-324202     bind=EVAP_324.E001.PIC_324202.pv
+  L397   ?        HIC-323605     bind=EVAP_324.VAC.vent_kgh
+  L399   ?        HIC-329605     bind=EVAP_324.E001.HIC_329605
+  L401   ?        PIC-323203     bind=LPCC_3232.E011.PIC_323203.pv
+count: 19
+
+=== mode values emitted by backend for every mode: bind ===
+  raw=AUTO   -> letter=A     n=41  e.g. TIC-329005, FIC-329409, PIC-322203, LIC-322501, PIC-329207A, PIC-329207B
+  raw=CAS    -> letter=E     n=15  e.g. SIC-321951, SIC-321951, PIC-329202, PIC-329208, FIC-324401, SIC-323901
+  raw=MAN    -> letter=M     n=4  e.g. SIC-321950, SIC-321950, SIC-323902, FIC-328406
+
+=== every ind with mode: whose seeded mode is NOT AUTO/CAS ===
+  L41    ?        SIC-321950     mode=MAN
+  L128   ?        SIC-321950     mode=MAN
+  L267   ?        SIC-323902     mode=MAN
+  L329   ?        FIC-328406     mode=MAN

@@ -82,22 +82,12 @@ The ejector operates using 650.00 kg/h of saturated LP motive steam, introduced 
 
 ### **Vacuum System Pull Curves**
 
-The performance of an ejector is typically characterized by its "pull curve," which defines the relationship between the suction load (mass flow of entrained gas) and the absolute suction pressure it can maintain. Based on the operational design point (94 kg/h at 0.2 bar a) and typical single-stage ejector physics (shut-off pressure near 0.06 bar a, overload at 150 kg/h yielding \~0.35 bar a), the resulting polynomial pull curve model takes the form $P\_{suc} \= 0.06 \+ c\_1 W \+ c\_2 W^2$.
-
-| Suction Load (kg/h) | Suction Pressure (bar a) |
-| :---- | :---- |
-| 0.0 | 0.0600 |
-| 20.0 | 0.0781 |
-| 40.0 | 0.1024 |
-| 60.0 | 0.1332 |
-| 80.0 | 0.1703 |
-| 94.0 | 0.2000 (Design Point) |
-| 100.0 | 0.2137 |
-| 120.0 | 0.2635 |
-| 140.0 | 0.3196 |
-| 160.0 | 0.3820 |
-
-This pull curve demonstrates the system's sensitivity to inert gas loading. If air leakage into the vacuum system increases the load to 140 kg/h, the ejector's suction pressure will rise to nearly 0.32 bar a, fundamentally altering the boiling point of the urea solution in the upstream evaporator and risking severe biuret formation.
+The issue-for-order 324F002 sheet supplies only one operating point (94 kg/h at 0.2 bar(a)), a
+40–100% control range, and the motive/discharge states. It does **not** supply a pull curve, shut-off
+pressure, overload point, critical backpressure, motive-pressure correction, or internal
+nozzle/mixing/diffuser geometry. A polynomial cannot be identified from one point. The former table in
+this section used assumed shut-off and overload values and is withdrawn; it must not be used for
+simulation or guarantee work. See EJECTOR_DATASHEET_AUDIT_2026-07-26.md in the project root.
 
 ## **Instrumentation, Control Loops, and Level Measurement**
 
@@ -138,5 +128,5 @@ Operating the pump near its Best Efficiency Point (BEP) of 71.75% ensures that t
 
 ## **Conclusion**
 
-The first-stage evaporation section of the Stamicarbon urea process represents an intricate thermodynamic system requiring precise physical and mechanical controls to ensure product purity. The structural parameters and heat transfer physics of the 324E002 condenser (with an overall heat transfer coefficient of $639.40 \\text{ W}/(m^2\\cdot\\text{K})$ operating against a 25,720 kW load) define the operational boundaries of the unit. Furthermore, the system's reliance on the 324F002 steam ejector for non-condensable gas extraction necessitates strict monitoring of air ingress, as demonstrated by the ejector pull curve.  
+The first-stage evaporation section of the Stamicarbon urea process represents an intricate thermodynamic system requiring precise physical and mechanical controls to ensure product purity. The structural parameters and heat transfer physics of the 324E002 condenser (with an overall heat transfer coefficient of $639.40 \\text{ W}/(m^2\\cdot\\text{K})$ operating against a 25,720 kW load) define the operational boundaries of the unit. Furthermore, the system's reliance on the 324F002 steam ejector for non-condensable gas extraction necessitates strict monitoring of air ingress. The vendor sheet verifies one design point; off-design response remains unqualified until the performance curve or internal geometry is supplied.
 The instrumentation mapping reveals an advanced control philosophy explicitly designed to mitigate the physical challenges of boiling urea solutions. By measuring liquid levels via stable barometric legs, protecting pressure impulse lines with instrument air purges, and utilizing false-air thermodynamics to regulate vacuum levels, the control loops ensure continuous, reliable operation. Understanding these interactions between the fluid dynamics, the physical equipment capacities, and the cascading automation logic is fundamentally essential for the successful optimization, modeling, and troubleshooting of modern urea evaporation units.  

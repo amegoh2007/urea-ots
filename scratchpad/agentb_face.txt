@@ -1,0 +1,23 @@
+--- 324/335 faceplate SET path (frontend falls through to controller_set) ---
+  TIC-324001   controller_set MAN/op=12.34 -> mode AUTO->AUTO  op 3.960->3.960  NO-OP (command silently discarded)
+  FIC-335405A  controller_set MAN/op=12.34 -> mode CAS->CAS  op 50.000->50.000  NO-OP (command silently discarded)
+  FFIC-335406  controller_set MAN/op=12.34 -> mode AUTO->AUTO  op 0.009->0.009  NO-OP (command silently discarded)
+  LIC-324501   controller_set MAN/op=12.34 -> mode AUTO->AUTO  op 75.000->75.000  NO-OP (command silently discarded)
+  PIC-324202   controller_set MAN/op=12.34 -> mode AUTO->AUTO  op 50.000->50.000  NO-OP (command silently discarded)
+
+--- same tags via r323_ctrl_set (the handler the frontend does NOT route them to) ---
+  TIC-324001   -> NO-OP (not in R323_CTRL_MODES either)
+
+--- seeded-CAS loops and whether a cas_sp is actually wired ---
+  SIC_321951   wired=True    ctrl.step(p["open_act"], dt, cas_sp=open_cas)      # updates op + pv
+  PIC_329202   wired=True    pic02_op  = _ctrl_ipd(s.PIC_329202, pic02_pv, dt, cas_sp=tic07_op)            # steam valve stroke (%)
+  PIC_329208   wired=True    pic08_op  = _ctrl_ipd(s.PIC_329208, pic08_pv, dt, cas_sp=tic12_op)            # steam valve stroke (%)
+  FIC_324401   wired=True    fic01_op  = _ctrl_ipd(s.FIC_324401, fic01_pv, dt, cas_sp=lic07_op)            # FV-324401 stroke (%)
+  PIC_329203   wired=True    pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
+  PIC_329212   wired=True    pic212_op  = _ctrl_ipd(s.PIC_329212, pic212_pv, dt, cas_sp=tic2_op)       # steam valve stroke (%)
+  FIC_335405   wired=False   _fic_flow(s.FIC_335405, R324_M_UF_DES/1000.0, R324_FIC405_OP_DES,
+  SIC_323901   wired=True    sic_op   = _ctrl_ipd(s.SIC_323901, rpm_pv, dt, lic502_op)            # cascade slave (speed)
+  TIC_323013   wired=False   tic13_op = _ctrl_ipd(s.TIC_323013, T_tw_sup, dt)           # PV = TW supply, NOT the shell temp
+  FIC_328404   wired=False   m_775    = _fic_flow(s.FIC_328404, R328_D001_M775_DES, R328_D001_FIC404_OP_DES, s.tlag, "F_328404", dt,
+  FIC_329402   wired=False   m_911    = _fic_flow(s.FIC_329402, R328_C003_M911_DES, 50.0, s.tlag, "F_329402", dt)
+  FIC_329401   wired=True    m_931    = _fic_flow(s.FIC_329401, R328_C004_M931_DES, 50.0, s.tlag, "F_329401", dt, cas_sp=ffic_op)

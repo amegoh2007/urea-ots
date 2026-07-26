@@ -1,0 +1,73 @@
+TAG           route           MODE-write  SP/OP-write  bind
+SIC-321950    dedicated fp    -           -            controllers.SIC_321950.pv
+SIC-321951    dedicated fp    -           -            controllers.SIC_321951.pv
+HIC-322604    dedicated fp    -           -            SCRUB_322E003.HIC_322604
+TIC-329005    tic_set         OK          OK           SCRUB_322E003.ccw.TIC_329005.pv
+FIC-329409    fic_set         OK          OK           SCRUB_322E003.ccw.FIC_329409.pv
+HIC-322602    dedicated fp    -           -            EJ_322F001.HIC_322602
+HIC-322203    dedicated fp    -           -            CO2_FEED.HIC_322203
+PIC-322203    dedicated fp    -           -            CO2_FEED.PIC_322203
+HIC-322605    dedicated fp    -           -            REACT_322R001.HIC_322605
+LIC-322501    lic_set         OK          OK           STRIP_322E001.LIC_322501.pv
+PIC-329204    pic329204_set   OK          OK           STEAM_SYSTEM.PIC_329204.pv
+HIC-329601    dedicated fp    -           -            STEAM_SYSTEM.HP_VENT.pct
+PIC-329205    pic329205_set   OK          IGNORED(26.0) STEAM_SYSTEM.PIC_329205.pv
+LIC-329503    lic329503_set   OK          OK           STEAM_SYSTEM.LIC_329503.pv
+LIC-329504    lic329504_set   OK          OK           STEAM_SYSTEM.LIC_329504.pv
+PIC-329207A   dedicated fp    -           -            STEAM_SYSTEM.PIC_329207A.pv
+PIC-329207B   dedicated fp    -           -            STEAM_SYSTEM.PIC_329207B.pv
+PIC-329207C   dedicated fp    -           -            STEAM_SYSTEM.PIC_329207C.pv
+HIC-329602    dedicated fp    -           -            STEAM_SYSTEM.PIC_329207C.op
+LIC-329502    lic329502_set   OK          OK           STEAM_SYSTEM.LIC_329502.pv
+TIC-323007    r323_ctrl_set   OK          IGNORED(4.4) RECIRC_323.C003.TIC_323007.pv
+PIC-329202    r323_ctrl_set   OK          OK           RECIRC_323.C003.PIC_329202.pv
+LIC-323501    r323_ctrl_set   OK          OK           RECIRC_323.C003.LIC_323501.pv
+LIC-323505    r323_ctrl_set   OK          OK           RECIRC_323.F004.LIC_323505.pv
+TIC-323012    r323_ctrl_set   OK          IGNORED(4.4) RECIRC_323.F010.TIC_323012.pv
+PIC-329208    r323_ctrl_set   OK          OK           RECIRC_323.F010.PIC_329208.pv
+LIC-323507    r323_ctrl_set   OK          OK           RECIRC_323.D002.LIC_323507.pv
+FIC-324401    r323_ctrl_set   OK          OK           RECIRC_323.D002.FIC_324401.pv
+PIC-323203    r323_ctrl_set   OK          OK           LPCC_3232.E011.PIC_323203.pv
+HIC-323605    controller_set  no-block    no-block     EVAP_324.VAC.vent_kgh
+PIC-324202    controller_set  IGNORED(AUTO)IGNORED(50.0) EVAP_324.E001.PIC_324202.pv
+FIC-335407    controller_set  no-block    no-block     None
+PIC-323202    r323_ctrl_set   OK          OK           LPCC_3232.E003.PIC_323202.pv
+SIC-323901    r323_ctrl_set   OK          OK           LPCC_3232.E003.SIC_323901.pv
+SIC-323902    r323_ctrl_set   OK          OK           LPCC_3232.E003.SIC_323902.pv
+TIC-323013    r323_ctrl_set   OK          OK           LPCC_3232.E003.TIC_323013.pv
+LIC-323503    r323_ctrl_set   OK          OK           LPCC_3232.C005.LIC_323503.pv
+FIC-328405    r323_ctrl_set   OK          OK           LPCC_3232.C005.FIC_328405.pv
+FIC-323418    r323_ctrl_set   OK          OK           LPCC_3232.C005.FIC_323418.pv
+FIC-323402    r323_ctrl_set   OK          OK           LPCC_3232.E011.FIC_323402.pv
+FIC-323401    r323_ctrl_set   OK          OK           LPCC_3232.E011.FIC_323401.pv
+PIC-328202    r323_ctrl_set   OK          OK           DESORB_328.D001.PIC_328202.pv
+LIC-328501    r323_ctrl_set   OK          OK           DESORB_328.D001.LIC_328501.pv
+TIC-328002    r323_ctrl_set   OK          OK           DESORB_328.D001.TIC_328002.pv
+LIC-328503    r323_ctrl_set   OK          OK           DESORB_328.C002.LIC_328503.pv
+PIC-328203    r323_ctrl_set   OK          OK           DESORB_328.C003.PIC_328203.pv
+TIC-328012    r323_ctrl_set   OK          OK           DESORB_328.C003.TIC_328012.pv
+FIC-329402    r323_ctrl_set   OK          OK           DESORB_328.C003.FIC_329402.pv
+LIC-328505    r323_ctrl_set   OK          OK           DESORB_328.C003.LIC_328505.pv
+LIC-328504    r323_ctrl_set   OK          OK           DESORB_328.C004.LIC_328504.pv
+FFIC-329401   r323_ctrl_set   OK          OK           DESORB_328.C004.FFIC_329401.pv
+FIC-329401    r323_ctrl_set   OK          OK           DESORB_328.C004.FIC_329401.pv
+TIC-328008    r323_ctrl_set   OK          OK           DESORB_328.D001.TIC_328008.pv
+FIC-328404    r323_ctrl_set   OK          OK           DESORB_328.D001.FIC_328404.pv
+FIC-328406    r323_ctrl_set   OK          OK           ABSORB_328.D003.FIC_328406.pv
+FIC-328402    r323_ctrl_set   OK          OK           LPCC_3232.E003.FIC_328402.pv
+PIC-322201    r323_ctrl_set   OK          OK           ABSORB_328.C001.PIC_322201.pv
+LIC-322502    r323_ctrl_set   OK          OK           ABSORB_328.C001.LIC_322502.pv
+TIC-324001    controller_set  IGNORED(AUTO)IGNORED(0.0) EVAP_324.E001.TIC_324001.pv
+PIC-329203    controller_set  IGNORED(CAS)IGNORED(88.8) EVAP_324.E001.PIC_329203.pv
+LIC-329505    controller_set  IGNORED(AUTO)IGNORED(49.0) EVAP_324.E001.LIC_329505.pv
+HIC-329605    dedicated fp    -           -            EVAP_324.E001.HIC_329605
+PIC-324203    controller_set  IGNORED(AUTO)IGNORED(50.0) EVAP_324.E003.PIC_324203.pv
+TIC-324002    controller_set  IGNORED(AUTO)IGNORED(2.92) EVAP_324.E003.TIC_324002.pv
+PIC-329212    controller_set  IGNORED(CAS)IGNORED(89.7) EVAP_324.E003.PIC_329212.pv
+LIC-324501    controller_set  IGNORED(AUTO)IGNORED(73.9) EVAP_324.E003.LIC_324501.pv
+FFIC-335406   controller_set  IGNORED(AUTO)IGNORED(0.0091) EVAP_324.E003.FFIC_335406.pv
+FIC-335405A   controller_set  IGNORED(CAS)IGNORED(50.0) EVAP_324.E003.FIC_335405.pv
+HIC-329606    controller_set  no-block    no-block     None
+FIC-335401    controller_set  no-block    no-block     None
+HIC-335602    controller_set  no-block    no-block     None
+FIC-335405B   controller_set  no-block    no-block     None

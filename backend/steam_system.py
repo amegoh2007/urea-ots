@@ -44,6 +44,7 @@ H_G_SUP = 2801.0    # h_g, 25 bar a supply steam (stream 901)
 H_G_HP  = 2798.0    # h_g, 19.7 bar a (329D005 saturated)
 H_G_MP  = 2773.0    # h_g, 9.0 bar a  (329D009 saturated)
 H_G_LP  = 2743.0    # h_g, 4.4 bar a  (322D001A/B saturated)
+H_F_MP  = 742.0     # h_f, 9.0 bar a saturated condensate
 H_W     = 419.0     # h_f desuperheat condensate (~100 C, BFW)
 # back-compat aliases (legacy 2-node names still referenced by external probes)
 H_MP = H_G_HP
@@ -58,7 +59,11 @@ P_LP_BARA  = 4.4    # 322D001A/B LP drums design (== HPCC_STEAM_P_BARA)
 # ---------------------------------------------------------------- valve flow coeffs [ (kg/s)/sqrt(bar) ]
 #   Seeded so the design stream split (PFD-26) is reproduced at the design node pressures.
 K_902 = (39400.0 / 1850.0) / (0.50 * (P_SUP_BARA - P_HP_BARA) ** 0.5)  # PV-329204 BL(25)->329D005: sized so a 50% design opening passes the HP-stripper draw (STRIP_DUTY_DES_KW 39400 / lambda_MP 1850 = 21.297 kg/s) at 25->19.7 bar  (~18.50)
-K_903 = 1.0         # PV-329205A  : BL(25) -> 329D009 (MP drum admit)
+# PFD-26 stream 903 is a real 1,754 kg/h make-up flow at the design point.
+# Size PV-329205A for a 50 % design opening at 25 -> 9 bar.
+M_903_DES = 1754.0 / 3600.0
+PV205A_BIAS_PCT = 50.0
+K_903 = M_903_DES / ((PV205A_BIAS_PCT / 100.0) * (P_SUP_BARA - P_MP_BARA) ** 0.5)
 K_963 = 2.0         # PV-329207C+HV-329602 : BL(25) -> 4-bar header (design shut)
 K_LD9 = 2.0         # PV-329205B  : 329D009 (9) -> 4-bar header let-down (split-range vent)
 
@@ -141,13 +146,16 @@ M_HPCC_DES  = 3.0      # kg/s, design LP steam raised in the HP carbamate conden
 #   trims the residual off-design.
 M_USERS_LP = M_HPCC_DES
 
-# ---------------------------------------------------------------- 9-bar design throughput (reduced scope)
-#   PFD-26 stream 903 = 1754 kg/h admitted to 329D009 at full design, consumed by the 9-bar header
-#   users 324E003 / 335225 -- both LATER units, out of the current sim scope.  With no in-scope
-#   9-bar consumer the drum has zero design throughput: PV-329205A and PV-329205B both shut, the
-#   header held at 9.0 bar by the split-range PIC (Sourcing Law: the 1754 kg/h is the ultimate
-#   design and is not fabricated into an in-scope flow it has nowhere to go).
-M_903_DES = 1754.0 / 3600.0   # kg/s, documented ultimate-design reference only (unused in scope)
+# ---------------------------------------------------------------- 9-bar flash source and consumers
+# PFD-26 closes the design 329D009 vapour node directly:
+#   stream 907 (9-bar header) = 6,687 kg/h
+#   stream 903 (25-bar make-up) = 1,754 kg/h
+# Therefore the effective vapour recovered by flashing stream 904 condensate, including the
+# desuperheating increment from the 317 C make-up, is 4,933 kg/h.  This is the missing 904 ->
+# 905(liquid)+906(vapour) energy-recovery path.  Both figures are PFD measurements, not fitted
+# constants.  The live flash source follows the HP-stripper condensate production.
+M_USERS_9_DES = 6687.0 / 3600.0
+M_FLASH9_DES = M_USERS_9_DES - M_903_DES
 
 # ---------------------------------------------------------------- drum level loops (LIC-329502/503/504)
 #   Three condensate-inventory level loops, each a LOCAL mass balance (accumulation = in - out) and
@@ -227,13 +235,15 @@ class SteamState:
     P_LP:  float = P_LP_BARA        # 322D001A/B LP drums 4.4
     # --- valve openings (%) ---
     valve_supply_pct:  float = field(default_factory=_seed_supply_pct)   # PV-329204
-    valve_admit9_pct:  float = 0.0   # PV-329205A (BL admit); split-range, design shut (no 9-bar users)
+    valve_admit9_pct:  float = PV205A_BIAS_PCT  # PV-329205A; 1,754 kg/h design make-up
     valve_letdown_pct: float = 0.0   # PV-329205B (9->4 let-down); split-range, design shut
     valve_963_pct:     float = 0.0   # PV-329207C+HV-329602 (BL->4-bar); design shut
     hv_vent_hp_pct:    float = 0.0   # HV-329601 329D005 atm vent (design shut)
     # --- last-tick flow diagnostics (kg/s) ---
     m_supply: float = 0.0            # stream 902  (BL -> 329D005)
     m_903:    float = 0.0            # stream 903  (BL -> 329D009)
+    m_flash9: float = 0.0            # stream 904 flash contribution to 9-bar vapour header
+    m_users9: float = M_USERS_9_DES  # actual 9-bar users (324E003 + remaining header users)
     m_ld:     float = 0.0            # 9->4 let-down (PV-329205B)  [m_ld field kept for compat]
     m_963:    float = 0.0            # stream 963  (BL -> 4-bar header)
     m_water:  float = 0.0            # desuperheat water on the 9->4 let-down
@@ -280,7 +290,8 @@ class SteamState:
 
 
 def step_steam(state: SteamState, dt: float,
-               m_strip_consume: float, m_hpcc_gen: float) -> SteamState:
+               m_strip_consume: float, m_hpcc_gen: float,
+               m_9_users: float = M_USERS_9_DES) -> SteamState:
     """Advance the 4-level steam network one Euler tick.
 
     Args:
@@ -288,6 +299,7 @@ def step_steam(state: SteamState, dt: float,
         dt               : timestep (s).
         m_strip_consume  : MP steam drawn by the HP-stripper reboiler (kg/s).
         m_hpcc_gen       : LP steam raised in the HPCC (kg/s).
+        m_9_users        : total steam drawn from 329D009's 9-bar vapour header (kg/s).
     """
     # -- BL supply header held at boundary (site 25-bar main) --
     state.P_SUP = P_SUP_BARA
@@ -304,21 +316,19 @@ def step_steam(state: SteamState, dt: float,
     m_supply = _valve_flow(K_902, state.valve_supply_pct, state.P_SUP, state.P_MP)
     m_vent_hp = _valve_flow(K_902, state.hv_vent_hp_pct, state.P_MP, 1.01325)  # HV-329601 atm
 
-    # -- 329D009 split-range PIC-329205 about SP (mutually-exclusive 205A admit / 205B let-down) --
-    #   P_9 > SP: PV-329205A shut, PV-329205B (let-down 9->4) opens proportionally.
-    #   P_9 < SP: PV-329205B shut, PV-329205A (BL admit) opens proportionally.
-    #   |P_9 - SP| <= dead-band: both legs shut -> design fixed point (zero 9-bar throughput).
+    # -- 329D009 split-range PIC-329205 about the measured design make-up bias --
+    # The A valve carries stream 903 at the design point.  Rising pressure first closes A; only
+    # after A reaches zero does B let excess steam down to the 4-bar header.  Falling pressure
+    # opens A above its bias.  This is the physical split range described by the operating manual.
     if state.pic205_mode == "AUTO":
         err9 = state.P_9 - state.pic205_sp
-        if err9 > DB_9:            # over-pressure: vent excess to the 4-bar header
-            state.valve_admit9_pct  = 0.0
-            state.valve_letdown_pct = min(100.0, K_PIC_9 * (err9 - DB_9))
-        elif err9 < -DB_9:        # under-pressure: admit BL steam
+        split = PV205A_BIAS_PCT - K_PIC_9 * err9
+        if split >= 0.0:
+            state.valve_admit9_pct = min(100.0, split)
             state.valve_letdown_pct = 0.0
-            state.valve_admit9_pct  = min(100.0, K_PIC_9 * (-err9 - DB_9))
-        else:                     # dead-band: both shut
-            state.valve_admit9_pct  = 0.0
-            state.valve_letdown_pct = 0.0
+        else:
+            state.valve_admit9_pct = 0.0
+            state.valve_letdown_pct = min(100.0, -split)
     # MAN: split-range writes frozen; operator-set 205A/205B openings persist unchanged.
 
     # -- stream 903: BL -> 329D009 (PV-329205A) ; 9->4 let-down (PV-329205B) --
@@ -364,8 +374,10 @@ def step_steam(state: SteamState, dt: float,
     # -- node mass balances --
     #   329D005 (HP):  in 902 ; out stripper + HP vent
     dP_MP = (m_supply - m_strip_consume - m_vent_hp) / C_MP
-    #   329D009 (9-bar): in 903 ; out 9->4 let-down (+ later 9-bar users = 0)
-    dP_9  = (m_903 - m_ld9) / C_9
+    #   329D009 (9-bar): in 903 + flash vapour from the HP-stripper condensate;
+    #                     out actual 9-bar users + optional 9->4 let-down.
+    m_flash9 = M_FLASH9_DES * (m_strip_consume / max(M_STRIP_DES, 1e-12))
+    dP_9  = (m_903 + m_flash9 - m_9_users - m_ld9) / C_9
     #   322D001A/B (4-bar): in HPCC + let-down + desuperheat + 963(C) + turbine(B) ; out users + vent(A)
     dP_LP = (m_hpcc_gen + m_ld9 + m_water + m_963 + m_turbine - M_USERS_LP - m_vent) / C_LP
 
@@ -375,6 +387,7 @@ def step_steam(state: SteamState, dt: float,
 
     # publish diagnostics (m_ld field carries the 9->4 let-down for back-compat telemetry)
     state.m_supply, state.m_903, state.m_ld = m_supply, m_903, m_ld9
+    state.m_flash9, state.m_users9 = m_flash9, m_9_users
     state.m_963, state.m_water, state.m_vent_hp, state.m_pic = m_963, m_water, m_vent_hp, m_pic
     state.m_vent, state.m_turbine = m_vent, m_turbine
 
