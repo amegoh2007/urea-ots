@@ -35,6 +35,7 @@
 | 20 | 2026-07-26 | branch `master` | Reviewed the revised Körting F002/F004/F005 mechanical drawings. They close manufacturer/designation/serial, the HFC Helwan UAN 01-3042 provenance, substantial F004/F005 fabrication geometry, and their 0.122/0.245 bar(a) body operating points. The user confirmed `SUEZ II 01-3040` is a copied template error. They do not contain the certified capacity/backpressure/stability curves or loss calibration required to replace the active proportional pull surrogate; no flow anchor was changed. See §22.10 and `EJECTOR_DATASHEET_AUDIT_2026-07-26.md`. |
 | 21 | 2026-07-26 | branch `master` | Built the complete Unit-324 surface-condenser train from the strict PFD, supplied absorber/cooling-water maps, and 324E002/E005/E006/E007 datasheets. The four exchangers are distinct `Q=UA·LMTD` mass/energy nodes with individual CW branches, condensate/vent streams, geometry, and noncondensable derating. Corrected 323C005, 323E011, and 328D003 Comp-I/II routing; false air is now the PFD 21/21 kg/h; mapped numerical streams are runtime aliases. See §22.11 and `research_plan_324_vacuum_train.md`. |
 | 22 | 2026-07-27 | branch `master` | Reconciled the 33-page searchable plant P&ID set against the 1,750-MTPD PFD and operator maps. P&IDs 103/1-103/2 close the installed 323C005 → 328V001 → 328D003 liquid path; P&ID 104 proves physical 328D003 bays I/II/III and places LI-328507/508 on bays I/III; P&IDs 105/1-105/2 corroborate the four Unit-324 condensate returns and ejector/condenser layout. No equation changed because the drawings do not provide bay volumes, C40 performance curves, or gas-side loss data. See §22.12 and `PID_EVIDENCE_AUDIT_2026-07-27.md`. |
+| 23 | 2026-07-27 | branch `master` | Implemented the owner-approved 328D003 compartment basis: I = 18 m³, II = 43 m³, III = 429 m³ (490 m³ total), with openings among all three and III as the shared accumulation baffle. Corrected the prior P&ID-only I/III process-inventory inference: external streams remain on physical I and II, while III is a separate communicating surge state. LI-328507 reports I and LI-328508 reports III. See §22.13, `MAP_328D003.md`, and `research_plan_328d003_compartments.md`. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -1651,15 +1652,15 @@ departure and loss of cooling water drives condensate to zero. This is intention
 departure: no plant fouling, gas-film, or rating curve was supplied.
 
 The connected recovery topology is now literal at the PFD boundary. 323C005 receives 756(33358),
-702(440), and 708(462) and sends liquid 343(34180) through 328V001 to the second mapped 328D003
-inventory plus vent 341(80), an exact mass closure with no invented demineralized-water makeup.
-P&ID 104 identifies that second mapped inventory as physical bay III; the implementation's historical
-`Comp II` name is retained only as a compatibility alias. 323E011 receives 701+786+321+791 and
-outputs 718+702, closing $7563=7123+440$ kg/h; stream 734 is a separate wash from that second mapped
-inventory into 323D011. 328D003 physical bay I receives 719+720+721+759 and supplies 744, exposing
-the PFD's 1 kg/h rounding residual. The second mapped inventory/physical bay III receives 343 and
-supplies 735+734+791, exposing the 2 kg/h residual. The supplied map and P&ID show both level signals
-as indications with no level-control valve, so `LT_328507/508_open_loop` are explicitly open-loop.
+702(440), and 708(462) and sends liquid 343(34180) through 328V001 to physical compartment II plus
+vent 341(80), an exact mass closure with no invented demineralized-water makeup. 323E011 receives
+701+786+321+791 and outputs 718+702, closing $7563=7123+440$ kg/h; stream 734 is a separate wash from
+compartment II into 323D011. Physical compartment I receives 719+720+721+759 and supplies 744,
+exposing the PFD's 1 kg/h rounding residual. Physical compartment II receives 343 and supplies
+735+734+791, exposing the 2 kg/h residual. Physical compartment III has no separately mapped
+external PFD stream; it is the approved shared accumulation compartment for I and II. The supplied
+map and P&ID show both installed level signals as indications with no level-control valve, so
+`LT_328507/508_open_loop` remain explicitly open-loop.
 
 False-air streams 784/783 are restored to the PFD 21/21 kg/h. Vacuum inventory now balances against
 post-condenser gas instead of forcing the condensable vapour load through the ejector surrogate, which
@@ -1679,9 +1680,11 @@ PFD's quantitative authority:
   328V001, while stream 341 remains the unabsorbed-gas/stack boundary.
 - P&ID 104 (`UD-VT-328-FB-0003`) draws physical 328D003 bays I, II, and III. LI-328507 is attached
   to bay I; LI-328508 is attached to bay III; bay II has no dedicated level indication. It also draws
-  the N23/N24 hand-valved bay-II/bay-III connection. This closes physical existence, numbering,
-  instrument placement, and nozzle topology, but not bay capacities, weir elevations, the normal
-  N23/N24 valve state, or dissolved-gas flashing.
+  the N23/N24 hand-valved bay-II/bay-III connection. This P&ID closes physical existence, numbering,
+  instrument placement, and nozzle topology, but does not itself provide bay capacities or opening
+  hydraulics. The later owner-approved basis supplies capacities of 18/43/429 m³ and confirms that
+  compartment III communicates with and accumulates for compartments I and II; it does not supply
+  opening areas, elevations, or a finite-rate transfer calibration.
 - P&IDs 105/1 and 105/2 (`UD-VT-324-FB-0003/-0004`) independently corroborate the F002/E002 and
   F004/E006/F005/E007 sequence, individual returns `324010`, `324012`, `324013`, and `324014` to
   328D003, and their installed nominal-size/minimum-elevation arrangements. They do not provide the
@@ -1689,6 +1692,34 @@ PFD's quantitative authority:
 
 No new dynamic state or calibrated parameter was introduced from the P&IDs alone. The detailed
 source/disposition matrix is `PID_EVIDENCE_AUDIT_2026-07-27.md`.
+
+### 22.13 328D003 approved three-compartment inventory
+
+The former theoretical 561 m³, 50/30/20 allocation is retired. Owner-approved liquid capacities are
+18 m³ for compartment I, 43 m³ for compartment II, and 429 m³ for compartment III, totaling 490 m³.
+At the retained 992 kg/m³ density anchor, the full-mass capacities are 17,856, 42,656, and 425,568 kg.
+
+The external PFD streams remain assigned to active process compartments I and II. Compartment III is
+a separate dynamic state and the common accumulation volume. In the absence of opening geometry, the
+model applies a parameter-free equal-level-fraction approximation after the external flow balances:
+
+$$
+f=\frac{M_I+M_{II}+M_{III}}
+        {M_{I,\mathrm{full}}+M_{II,\mathrm{full}}+M_{III,\mathrm{full}}},
+\qquad M_i=fM_{i,\mathrm{full}}.
+$$
+
+This internal redistribution conserves total mass and $\sum_i M_iT_i$, a constant-$c_p$ sensible-
+energy proxy. It is a reduced-order communicating-vessel limit, not a calibrated orifice/weir model
+and not a claim of instantaneous thermal homogenization. Transfers carry the donor compartment
+temperature, so compartments I and II retain separate process temperatures. The 50% startup level
+and the derived compartment-III startup temperature are simulator initial conditions, not approved
+plant operating targets.
+
+P&ID 104 places LI-328507 on compartment I and LI-328508 on compartment III; compartment II has no
+dedicated level indication. Runtime `LT_328507_open_loop` and `LT_328508_open_loop` follow those
+physical locations. Under the current equal-level approximation all three level fractions coincide,
+while `LI_328II` remains available as the calculated compartment-II inventory.
 
 ---
 

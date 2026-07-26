@@ -335,7 +335,7 @@
       { k: 'pic82021',t: 'ind', x: 878, y: 135, tag: 'PIC-328202', bind: 'DESORB_328.D001.PIC_328202.pv', mode: 'DESORB_328.D001.PIC_328202.mode', u: 'BAR A', dec: 2, note: '328D001 pressure via PV-328202' },
       { k: 'pv82021', t: 'avalve', x: 1295, y: 165, tag: 'PV-328202', bind: 'DESORB_328.D001.PIC_328202.op', u: '%', dec: 1 },
       // ---- 328D003 collection tank (drawn on 328-1) : ABSORB_328.D003 cross-ref ----
-      { k: 'fic8406', t: 'ind', x: 1088, y: 423, tag: 'FIC-328406', bind: 'ABSORB_328.D003.FIC_328406.pv', mode: 'ABSORB_328.D003.FIC_328406.mode', u: 'M3/H', dec: 2, note: '328E007 -> 328E001 -> 328D003 Comp-I process-condensate recycle, PFD stream 741 (0 at normal operation), via FV-328406' },
+      { k: 'fic8406', t: 'ind', x: 1088, y: 423, tag: 'FIC-328406', bind: 'ABSORB_328.D003.FIC_328406.pv', mode: 'ABSORB_328.D003.FIC_328406.mode', u: 'M3/H', dec: 2, note: '328E007 -> 328E001 -> 328D003 Comp-II process-condensate recycle, PFD stream 741 (0 at normal operation), via FV-328406' },
       { k: 'fv8406', t: 'avalve', x: 1069, y: 458, tag: 'FV-328406', bind: 'ABSORB_328.D003.FIC_328406.op', u: '%', dec: 1 },
       // ---- 323 recycle : LPCC_3232.E003.FIC_328402 cross-ref ----
       // FIC-328402 binds .pv (NOT .vol_m3h): the loop is now volumetric, so pv/sp are already
@@ -368,15 +368,15 @@
       { k: 'lic2502', t: 'ind', x: 372, y: 355, tag: 'LIC-322502', bind: 'ABSORB_328.C001.LIC_322502.pv', mode: 'ABSORB_328.C001.LIC_322502.mode', u: '%', dec: 1, note: 'holds 322C001 sump level via LV-322502' },
       { k: 'lv2502', t: 'avalve', x: 247, y: 423, tag: 'LV-322502', bind: 'ABSORB_328.C001.LIC_322502.op', u: '%', dec: 1 },
       { k: 'ovr915', t: 'ovrd', x: 121, y: 63, tag: 'XV-322915', bind: 'ABSORB_328.C001.XV_322915', note: 'external override forces XV-322915 CLOSED' },
-      // ---- 328D003 collection tank : D003 block, twin-compartment levels ----
-      { k: 'lt8508', t: 'ind', x: 644, y: 513, tag: 'LT-328508',  bind: 'ABSORB_328.D003.LI_328II',     u: '%',   dec: 1 },   // compartment II
+      // ---- 328D003 collection tank : active compartments I/II + shared accumulation III ----
+      { k: 'lt8508', t: 'ind', x: 644, y: 513, tag: 'LT-328508',  bind: 'ABSORB_328.D003.LI_328III',    u: '%',   dec: 1 },   // compartment III
       { k: 'lt8507', t: 'ind', x: 886, y: 513, tag: 'LT-328507',  bind: 'ABSORB_328.D003.LI_328I',      u: '%',   dec: 1 },   // compartment I
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
       { k: 'ft2404', t: 'ind', x: 156, y: 161, tag: 'FT-322404', bind: 'ABSORB_328.C001.cpl_kgh', u: 'KG/H', dec: 0, face: 'hic', note: 'FT-322404 condensate 954 -> 322C001; operator-set inlet flow (kg/h), des 1750' },
       { k: 'ft2402', t: 'ind', x: 106, y: 257, tag: 'FT-322402', bind: 'ABSORB_328.D003.flow755_m3h', u: 'M3/H', dec: 1, note: '322P002 collector draw (stream 755, Amm. Water) -> 322C001, des 31.3 m3/h' },
       { k: 'tt3010', t: 'ind', x: 508, y: 358, tag: 'TT-323010', bind: 'RECIRC_323.F010.TT_323010', u: 'C', dec: 1 },   // pre-evaporator 99C
       { k: 'tt3009', t: 'ind', x: 624, y: 295, tag: 'TT-323009', bind: 'LPCC_3232.C005.TT_323C005', u: 'C', dec: 1 },   // atm absorber scrub liquid 55C
-      { k: 'tt8015', t: 'ind', x: 654, y: 420, tag: 'TT-328015', bind: 'ABSORB_328.D003.TT_328II', u: 'C', dec: 1 },   // NH3 recovery tank Comp-II 44C
+      { k: 'tt8015', t: 'ind', x: 654, y: 420, tag: 'TT-328015', bind: 'ABSORB_328.D003.TT_328II', u: 'C', dec: 1 },   // physical compartment II process temperature
       { k: 'p2002w',  t: 'ind', x: 352, y: 599, tag: '322P002'   },
       { k: 'p3003w',  t: 'ind', x: 941, y: 625, tag: '328P003'   },
       { k: 'nav-321', t: 'nav', x: 44, y: 189, w: 90, h: 22, tag: '321E001 -> 321-1', goto: 'screen-321-1' },

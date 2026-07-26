@@ -327,7 +327,9 @@ expected for an inferential composition loop with `Ti = 250 s`.
 ### TD-005 — RESOLVED
 
 `FIC-328406` now indicates the real PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 ->
-328D003 Comp I, instead of being fed its own opening as a PV.
+328D003 physical compartment II, instead of being fed its own opening as a PV. The compartment route
+follows `Mapping of Desorber Hydrolyzer unit.md` and is unambiguous under the approved 18/43/429 m3
+physical-compartment basis.
 
 PFD-22 col 741 is "Pur. Pr. C", **0 kg/h / 0 m3/h** at 40 C / 3.9 bar, rho 992.42 — the line exists
 but is normally closed at 100 % load, exactly like the 793 spare. So:
@@ -337,8 +339,8 @@ but is normally closed at 100 % load, exactly like the 793 spare. So:
   992.42` (the PFD's own "Density eff." row), `A328_M741_T = 40.0` C.
 * Driven through `_fic_flow(..., rho=RHO_741_KGM3)` with `op_des = 100`, so 0 % stroke is exactly
   0 flow and the loop is a genuine VOLUMETRIC m3/h measurement matching its `M3/H` overlay label.
-* Wired into the Comp-I balance as an INFLOW: `in_compI` gains `m_741`, and `P_compI` gains
-  `m_741 * (A328_M741_T - TI)`. Stream 740 is a boundary export in this model (there is no tracked
+* Wired into the Comp-II balance as an INFLOW: `in_compII` gains `m_741`, and `P_compII` gains
+  `m_741 * (A328_M741_T - TII)`. Stream 740 is a boundary export in this model (there is no tracked
   `m_740` — only the `R328_E007_TH_OUT` temperature), so the recycle returns liquid that would
   otherwise leave the envelope.
 * The previous `_ctrl_ipd(s.FIC_328406, s.FIC_328406["op"], dt)` self-referential step is removed.

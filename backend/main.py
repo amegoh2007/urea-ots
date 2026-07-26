@@ -1389,10 +1389,22 @@ A323_C005_SENS_DES = ((A323_C005_M756_DES*(A328_C001_T - A323_C005_T)
                        + A323_C005_M708_DES*(121.0 - A323_C005_T))
                       / 3600.0 * R3232_CP)
 A323_C005_LAM = -A323_C005_SENS_DES * 3600.0 / A323_C005_ABS_DES
-A328_D003_MI_FULL = 280.50 * 992.0                          # Comp I  (V·ρ)  278256 kg
-A328_D003_MII_FULL = 168.30 * 992.0                         # Comp II       166954 kg
-A328_D003_MI_DES  = A328_D003_MI_FULL * 0.50               # 139128 kg
-A328_D003_MII_DES = A328_D003_MII_FULL * 0.50              # 83477 kg
+# Owner-approved 328D003 physical capacities. These supersede the theoretical 561 m3,
+# 50/30/20 split formerly copied from a secondary equipment summary. All three liquid bays
+# communicate through openings; compartment III is the large shared accumulation baffle.
+A328_D003_VOL_I_M3 = 18.0
+A328_D003_VOL_II_M3 = 43.0
+A328_D003_VOL_III_M3 = 429.0
+A328_D003_VOL_TOTAL_M3 = (
+    A328_D003_VOL_I_M3 + A328_D003_VOL_II_M3 + A328_D003_VOL_III_M3
+)
+A328_D003_RHO_KGM3 = 992.0
+A328_D003_MI_FULL = A328_D003_VOL_I_M3 * A328_D003_RHO_KGM3
+A328_D003_MII_FULL = A328_D003_VOL_II_M3 * A328_D003_RHO_KGM3
+A328_D003_MIII_FULL = A328_D003_VOL_III_M3 * A328_D003_RHO_KGM3
+A328_D003_MI_DES = A328_D003_MI_FULL * 0.50
+A328_D003_MII_DES = A328_D003_MII_FULL * 0.50
+A328_D003_MIII_DES = A328_D003_MIII_FULL * 0.50
 A328_D003_M343_DES = A323_C005_BOT_DES
 A328_D003_COMP_I_ROUNDING_KGH = 1.0
 A328_D003_COMP_II_ROUNDING_KGH = 2.0
@@ -1401,11 +1413,11 @@ A328_D003_COMP_II_ROUNDING_KGH = 2.0
 # 0 m3/h, so FIC-328405 sits at 0 % stroke at design; full stroke is one branch capacity, i.e.
 # the twin of the 791/734 legs (1534 kg/h).
 S793_CAP_KGH = R3232_E011_M402_DES                          # 1534.0 kg/h at 100 % stroke
-# Stream 741 (TD-005): purified process-condensate RECYCLE, 328E007 -> 328E001 -> 328D003 Comp I.
+# Stream 741 (TD-005): purified process-condensate RECYCLE, 328E007 -> 328E001 -> 328D003 Comp II.
 # PFD-22 col 741 is "Pur. Pr. C", 0 kg/h / 0 m3/h at 40 C / 3.9 bar with rho 992.42 -- i.e. the line
 # exists but is NORMALLY CLOSED at 100 % load, exactly like the 793 spare.  It is a DIVERSION of
 # the 740 boundary export (the condensed 328C004 bottoms, stream 739), NOT new mass: at run time
-# m_741 is clamped to m739_prev and the 740 export is published as (m_739 - m_741), so Comp I gains
+# m_741 is clamped to m739_prev and the 740 export is published as (m_739 - m_741), so Comp II gains
 # exactly what the boundary loses and the plant balance closes (Expert_Interrogation_Log CP-2).
 # S741_CAP is the full-stroke ask; the min() against m739_prev enforces the physical cap.
 S741_CAP_KGH  = R328_C004_M739_DES                          # 33724 kg/h full-stroke ask (= design 740)
@@ -1413,6 +1425,11 @@ RHO_741_KGM3  = 992.42                                      # kg/m3, PFD col 741
 A328_M741_T   = 40.0                                        # C, PFD col 741 operating temperature
 S793_M_DES   = 0.0                                          # PFD design flow (normally closed)
 A328_D003_TI = 44.0 ; A328_D003_TII = 56.0
+# Compartment III has no independent process feed temperature. Seed it from the inventory-weighted
+# temperatures of the two active bays so the buffer introduces no independent heat anchor.
+A328_D003_TIII = ((A328_D003_MI_DES * A328_D003_TI
+                   + A328_D003_MII_DES * A328_D003_TII)
+                  / (A328_D003_MI_DES + A328_D003_MII_DES))
 A328_D003_V001_T = A328_D003_TII
 # Comp I carbamate-formation exotherm 2NH3+CO2<=>NH2COONH4 (λ_I on total inflow):
 A328_D003_LAM_I = -A328_CP * (
@@ -2350,6 +2367,61 @@ def psat_nh3_bara(T_C: float) -> float:
 
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
+
+
+def redistribute_communicating_compartments(masses_kg, temperatures_c, full_masses_kg):
+    """Equalize three communicating liquid heads without creating mass or sensible energy.
+
+    Compartments I and II are the active process bays and compartment III is the common
+    accumulation baffle. Transfers are routed through III at the donor temperature. This is the
+    parameter-free reduced model supported by the approved openings; an orifice model would require
+    opening geometry and elevations that are not available.
+    """
+    if not (len(masses_kg) == len(temperatures_c) == len(full_masses_kg) == 3):
+        raise ValueError("the 328D003 communicating model requires exactly three compartments")
+    if any(not math.isfinite(value) for value in (*masses_kg, *temperatures_c, *full_masses_kg)):
+        raise ValueError("compartment inventory inputs must be finite")
+    if any(mass < 0.0 for mass in masses_kg):
+        raise ValueError("compartment masses cannot be negative")
+    if any(full <= 0.0 for full in full_masses_kg):
+        raise ValueError("compartment full masses must be positive")
+
+    total_mass = sum(masses_kg)
+    if total_mass == 0.0:
+        return tuple(0.0 for _ in masses_kg), tuple(temperatures_c)
+
+    common_level = total_mass / sum(full_masses_kg)
+    target_masses = tuple(common_level * full for full in full_masses_kg)
+    energies = [mass * temp for mass, temp in zip(masses_kg, temperatures_c)]
+    buffer_mass = masses_kg[2]
+    buffer_energy = energies[2]
+
+    # Every active-bay transfer crosses the shared compartment-III boundary. Mix all active-bay
+    # donors into III first, then supply receivers from that mixed buffer. The order prevents an
+    # almost-empty buffer from exporting more liquid at its old temperature than it initially held.
+    deltas = tuple(target_masses[index] - masses_kg[index] for index in (0, 1))
+    for index, delta in enumerate(deltas):
+        if delta < 0.0:
+            donated_mass = -delta
+            donated_energy = donated_mass * temperatures_c[index]
+            energies[index] -= donated_energy
+            buffer_mass += donated_mass
+            buffer_energy += donated_energy
+
+    buffer_temperature = buffer_energy / buffer_mass if buffer_mass > 0.0 else temperatures_c[2]
+    for index, delta in enumerate(deltas):
+        if delta > 0.0:
+            received_energy = delta * buffer_temperature
+            energies[index] += received_energy
+            buffer_mass -= delta
+            buffer_energy -= received_energy
+    energies[2] = buffer_energy
+
+    target_temperatures = tuple(
+        energy / mass if mass > 0.0 else temperatures_c[index]
+        for index, (energy, mass) in enumerate(zip(energies, target_masses))
+    )
+    return target_masses, target_temperatures
 
 
 def lmtd_countercurrent(hot_in_c, hot_out_c, cold_in_c, cold_out_c):
@@ -4359,13 +4431,15 @@ class State:
         self.a328_c001_P = A328_C001_P_BARA
         self.a328_c001_w = dict(W_C001_DES)  # TD-009: liquor species (SOL_SPECIES); == design feed mix
         self.cpl_flow_kgh = A328_CPL_DES     # FT-322404 condensate (954) feed, operator-manipulable at runtime (kg/h)
-        # ---- 323C005 vent scrub (55 C) / 328D003 carbamate collector (Comp I 56, II 44)
+        # ---- 323C005 vent scrub / 328D003 communicating compartments I, II, and III
         self.a323_c005_M  = A323_C005_M_DES
         self.a323_c005_T  = A323_C005_T
         self.a328_d003_MI  = A328_D003_MI_DES
         self.a328_d003_MII = A328_D003_MII_DES
+        self.a328_d003_MIII = A328_D003_MIII_DES
         self.a328_d003_TI  = A328_D003_TI
         self.a328_d003_TII = A328_D003_TII
+        self.a328_d003_TIII = A328_D003_TIII
 
         # -- 323-2 controllers -------------------------------------------------
         # PIC-323202 LPCC/323D001 vent pressure -> PV-323202 (DIRECT: P>SP -> vent more).
@@ -4404,7 +4478,7 @@ class State:
         #   it at 50 % capacity.  This op is realised as the TOTAL DRAW DEMAND for the header rather
         #   than as a raw stroke: FIC-323418 holds the metered 718B slipstream and 718A is the
         #   UNMETERED REMAINDER (a transport lag, no controller of its own -- FIC-328405 belongs to
-        #   PFD stream 793 off the 328D003 Comp-I header, not to this leg).  See the 323D011 runtime
+        #   PFD stream 793 off the 328D003 Comp-II header, not to this leg). See the 323D011 runtime
         #   block for why the series form cannot work.
         #   Tuning is the OEM DCS pair verbatim (Master_PID_Tuning_Constants.md:26, "323D011,ACA").
         #   Legal here (and NOT for the flow loops) because the PV is a level in percent, so the
@@ -4428,7 +4502,7 @@ class State:
                            "pv1": R3232_TW_SUP_T, "pv2": R3232_TW_SUP_T,
                            "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 45.0, "sp_hi": R3232_TW_RET_T}
-        # FIC-323401 328D003 Comp-I flush 401 -> FV-323401 (REVERSE flow).  VOLUMETRIC loop (m3/h):
+        # FIC-323401 328D003 Comp-II flush 401 -> FV-323401 (REVERSE flow). VOLUMETRIC loop (m3/h):
         #   seeds = M401_DES/RHO_401 (PFD stream 734: 1534/992.4 = 1.546 m3/h -> PFD 1.5), sp_hi
         #   2000/RHO_401, Kc 1.2*RHO_401 (=1190.9) so Kc*g invariant vs the mass loop;
         #   _fic_flow(rho=RHO_401_KGM3) returns kg/h.
@@ -4437,18 +4511,18 @@ class State:
                            "pv1": R3232_E011_M401_DES / RHO_401_KGM3, "pv2": R3232_E011_M401_DES / RHO_401_KGM3,
                            "Kc": 1.2 * RHO_401_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 2000.0 / RHO_401_KGM3}
-        # FIC-323402 328D003 Comp-I wash 402 -> FV-323402 (REVERSE flow).
+        # FIC-323402 328D003 Comp-II wash 402 -> FV-323402 (REVERSE flow).
         #   VOLUMETRIC loop (m3/h): the operator enters SP in m3/h, so the seeds are
         #   M402_DES/RHO_791 (1534/992.4 = 1.546 m3/h, PFD stream 791), sp_hi is the old 6000 kg/h
         #   span divided by rho, and Kc is scaled by rho so the loop coefficient 1-Kc*a*g is
         #   IDENTICAL to the mass-basis tune noted below.  _fic_flow(rho=RHO_791_KGM3) still
-        #   returns kg/h, so the 323E011 / Comp-I mass balance is untouched.
+        #   returns kg/h, so the 323E011 / Comp-II mass balance is untouched.
         self.FIC_323402 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E011_M402_DES / RHO_791_KGM3, "pv": R3232_E011_M402_DES / RHO_791_KGM3,
                            "pv1": R3232_E011_M402_DES / RHO_791_KGM3, "pv2": R3232_E011_M402_DES / RHO_791_KGM3,
                            "Kc": 0.5 * RHO_791_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: loop coef 1-Kc*a*g, a=0.0196. On the PFD-791 design (M402_DES=1534) g=1534/50=30.68, so Kc=0.5 -> coef 0.699, monotone with margin (the old 2931 basis gave g=58.6, coef 0.43; Kc=1.2 there gave coef -0.38 and rang).  Kc*RHO_791 holds the vol-loop coef equal.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 6000.0 / RHO_791_KGM3}
-        # FIC-328405 ammonia-water stream 793, a normally-closed SPARE branch off the 328D003 Comp-I
+        # FIC-328405 ammonia-water stream 793, a normally-closed SPARE branch off the 328D003 Comp-II
         #   discharge header 343/733 (the same header that feeds 735 / 791 / 734) -> FV-328405.
         #   PFD-22 col 793: 0 kg/h, 0 m3/h, rho 992.4, 56 C -> the valve is SHUT at design, so the
         #   loop seeds at op 0 / sp 0 / pv 0.  It is NOT the 718A carbamate leg (that physics is
@@ -4592,12 +4666,12 @@ class State:
                            "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
                            "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
-        # FIC-328402 328D003 Comp-I -> Comp-II transfer 744 wash -> FV-328402 (REVERSE flow).
+        # FIC-328402 328D003 Comp-I absorber-feed draw 744 -> FV-328402 (REVERSE flow).
         #   VOLUMETRIC loop (m3/h): the operator enters SP in m3/h, so the seeds are
         #   M744_DES/RHO_744 (31478/1002.48 = 31.4 m3/h, PFD stream 744), sp_hi is the old
         #   60000 kg/h span divided by rho, and Kc is scaled by rho so the loop coefficient
         #   1-Kc*a*g is IDENTICAL to the mass-basis tune noted below.  _fic_flow(rho=RHO_744_KGM3)
-        #   still returns kg/h, so the 323E003 / Comp-II mass balance is untouched.
+        #   still returns kg/h, so the compartment-I and 323E003 mass balances are untouched.
         self.FIC_328402 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E003_M744_DES / RHO_744_KGM3, "pv": R3232_E003_M744_DES / RHO_744_KGM3,
                            "pv1": R3232_E003_M744_DES / RHO_744_KGM3, "pv2": R3232_E003_M744_DES / RHO_744_KGM3,
@@ -4605,7 +4679,7 @@ class State:
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0 / RHO_744_KGM3}
         # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
         # FIC-328406 indicates the PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 ->
-        # 328D003 Comp I (TD-005).  Normally CLOSED at 100 % load (PFD 741 = 0 kg/h), so it is
+        # 328D003 Comp II (TD-005). Normally CLOSED at 100 % load (PFD 741 = 0 kg/h), so it is
         # MAN at 0 % stroke.  It is now a real VOLUMETRIC measurement through _fic_flow rather
         # than the controller being fed its own opening: design 0 -> pv 0, and stroking it in MAN
         # shows genuine m3/h.  op_des = 100 so 0 % stroke is exactly 0 flow.
@@ -5717,7 +5791,7 @@ def step_sim(dt: float) -> dict:
     s.a323_c005_T = Tc005 + P_c005*dt/max(s.a323_c005_M*R3232_CP, 1e-6)
     s.a323_c005_M = max(s.a323_c005_M + (m756_prev + abs_c005 - bot_c005)/3600.0*dt, 1.0)
 
-    # ----- Stage 2 : 328D003  Comp-I (formation) + Comp-II (collector) ----
+    # ----- Stage 2 : 328D003 active bays I/II + communicating accumulation bay III ----
     TI       = s.a328_d003_TI
     m_401    = _fic_flow(s.FIC_323401, R3232_E011_M401_DES, 50.0, s.tlag, "F_323401", dt,
                          rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
@@ -5729,11 +5803,11 @@ def step_sim(dt: float) -> dict:
     # term: an outflow at the bulk temperature contributes nothing to P_compII).
     m_793    = _fic_flow(s.FIC_328405, S793_CAP_KGH, 100.0, s.tlag, "F_328405", dt,
                          rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
-    # Stream 741 (TD-005): purified process-condensate RECYCLE 328E007 -> 328E001 -> 328D003 Comp I.
+    # Stream 741 (TD-005): purified process-condensate RECYCLE 328E007 -> 328E001 -> 328D003 Comp II.
     # It is a DIVERSION of the 740 boundary export, NOT new mass: the 328C004 bottoms (739) are
-    # condensed in 328E007 to stream 740, and m_741 of that is taken back to Comp I while the
+    # condensed in 328E007 to stream 740, and m_741 of that is taken back to Comp II while the
     # REMAINDER (m_740 = m739_prev - m_741) leaves the envelope.  So the plant balance closes:
-    # Comp I gains m_741, the 740 export loses exactly m_741.  The draw is therefore clamped to the
+    # Comp II gains m_741, the 740 export loses exactly m_741. The draw is therefore clamped to the
     # condensate that actually exists this tick (m739_prev, one-tick-delayed like every other tear).
     # Normally closed (PFD 741 = 0 kg/h at 100 % load), so at design m_741 == 0, m_740 == m_739 and
     # every term below is byte-identical to the pre-741 balance -- the boot pin cannot move.
@@ -5753,22 +5827,34 @@ def step_sim(dt: float) -> dict:
     m_720    = s.tlag.get("R324_720", A328_D003_M720)
     m_721    = s.tlag.get("R324_721", A328_D003_M721)
     m_759    = s.tlag.get("R324_759", A328_D003_M759)
-    in_compI = m_719 + m_720 + m_721 + m_759 + m_741 - A328_D003_COMP_I_ROUNDING_KGH
+    in_compI = m_719 + m_720 + m_721 + m_759 - A328_D003_COMP_I_ROUNDING_KGH
     out_compI= m_744
     P_compI  = ((m_719*(A328_D003_M719_T - TI)
                  + m_720*(A328_D003_M720_T - TI)
                  + m_721*(A328_D003_M721_T - TI)
-                 + m_759*(A328_D003_M759_T - TI)
-                 + m_741        *(A328_M741_T       - TI))/3600.0*cp_328d3i
+                 + m_759*(A328_D003_M759_T - TI))/3600.0*cp_328d3i
                 + (m_719 + m_720 + m_721 + m_759)/3600.0*A328_D003_LAM_I)
-    s.a328_d003_TI = TI + P_compI*dt/max(s.a328_d003_MI*cp_328d3i, 1e-6)
-    s.a328_d003_MI = max(s.a328_d003_MI + (in_compI - out_compI)/3600.0*dt, 1.0)
+    TI_raw = TI + P_compI*dt/max(s.a328_d003_MI*cp_328d3i, 1e-6)
+    MI_raw = max(s.a328_d003_MI + (in_compI - out_compI)/3600.0*dt, 1.0)
     TII      = s.a328_d003_TII
-    in_compII = bot_c005 + A328_D003_COMP_II_ROUNDING_KGH
+    in_compII = bot_c005 + m_741 + A328_D003_COMP_II_ROUNDING_KGH
     out_compII = m_735 + m_401 + m_402 + m_793
-    P_compII = bot_c005/3600.0*cp_328d3ii*(A328_D003_V001_T - TII)
-    s.a328_d003_TII = TII + P_compII*dt/max(s.a328_d003_MII*cp_328d3ii, 1e-6)
-    s.a328_d003_MII = max(s.a328_d003_MII + (in_compII - out_compII)/3600.0*dt, 1.0)
+    P_compII = ((bot_c005 * (A328_D003_V001_T - TII)
+                 + m_741 * (A328_M741_T - TII)) / 3600.0 * cp_328d3ii)
+    TII_raw = TII + P_compII*dt/max(s.a328_d003_MII*cp_328d3ii, 1e-6)
+    MII_raw = max(s.a328_d003_MII + (in_compII - out_compII)/3600.0*dt, 1.0)
+
+    # The approved openings make compartment III the shared surge volume. With no opening areas or
+    # elevations, enforce the parameter-free communicating-vessel limit after the external process
+    # flows. This retains every external mass term and moves internal sensible energy at the donor
+    # temperature; 429/490 of a net disturbance therefore accumulates in compartment III.
+    d003_masses, d003_temperatures = redistribute_communicating_compartments(
+        (MI_raw, MII_raw, s.a328_d003_MIII),
+        (TI_raw, TII_raw, s.a328_d003_TIII),
+        (A328_D003_MI_FULL, A328_D003_MII_FULL, A328_D003_MIII_FULL),
+    )
+    s.a328_d003_MI, s.a328_d003_MII, s.a328_d003_MIII = d003_masses
+    s.a328_d003_TI, s.a328_d003_TII, s.a328_d003_TIII = d003_temperatures
 
     # ----- 328E007 feed/effluent interchanger (AUDIT C10) ----------------
     #  Cold: 328D003 Comp-II draw 735 (56 C) heated against the 328C004 bottoms 739 (143 C) -> 738.
@@ -5921,7 +6007,7 @@ def step_sim(dt: float) -> dict:
 
     # ----- Stage 6 : 328D001  Desorber-I reflux drum (61°C, 328E004) -----
     Td001    = s.a328_d001_T
-    # AUDIT B2 — stream 793 used to be drawn out of 328D003 Comp-I (out_compI, Stage 2) and delivered
+    # AUDIT B2 — stream 793 used to be drawn out of 328D003 Comp-II (Stage 2) and delivered
     # NOWHERE: up to S793_CAP_KGH = 1534 kg/h of mass was destroyed at full FV-328405 stroke, and the
     # leak was invisible at design only because the design stroke is 0 %.  Mapping of Desorber
     # Hydrolyzer unit.md:34-36 puts it in the 737 header ahead of 328E004, i.e. into this drum.
@@ -6108,7 +6194,7 @@ def step_sim(dt: float) -> dict:
     # the SPECIFIC recycle flow rate of lean carbamate", 328E021 328E007 328P003 328P006.md:369) and
     # 718A is the UNMETERED REMAINDER -- a transport lag on (total draw - 718B demand), no controller
     # of its own.  FIC-328405 used to be cascaded onto 718A; that binding is stripped, because the PFD
-    # puts FIC-328405 on ammonia-water stream 793 off the 328D003 Comp-I header (see stage 2), not on
+    # puts FIC-328405 on ammonia-water stream 793 off the 328D003 Comp-II header (see stage 2), not on
     # this carbamate leg.  The remainder form keeps one integrator per degree of freedom (inventory ->
     # LIC-323503; split -> FIC-323418) and removes a second flow integrator that was marginally stable
     # here.  Modelling a series LV-503 as a derate on both FVs instead was tried and REJECTED: two
@@ -6910,7 +6996,7 @@ def step_sim(dt: float) -> dict:
                 "FIC_328405": {"pv": round(s.FIC_328405["pv"], 2), "sp": round(s.FIC_328405["sp"], 2),
                                "op": round(s.FIC_328405["op"], 1), "mode": s.FIC_328405["mode"],
                                "vol_m3h": round(m_793 / RHO_401_KGM3, 2),   # volumetric loop PV (m3/h), PFD 793
-                               "m_kgh": round(m_793, 1)},                   # 793 spare draw off 328D003 Comp-I (kg/h)
+                               "m_kgh": round(m_793, 1)},                   # 793 spare draw off 328D003 Comp-II (kg/h)
                 "LIC_323503": {"pv": round(s.LIC_323503["pv"], 1), "sp": round(s.LIC_323503["sp"], 1),
                                "op": round(s.LIC_323503["op"], 1), "mode": s.LIC_323503["mode"]},
             },
@@ -6970,7 +7056,7 @@ def step_sim(dt: float) -> dict:
                 "steam931_th":round(m_931 / 1000.0, 2),                    # FIC-329401 LP steam (t/h)
                 "ovhd750_th": round(m_750 / 1000.0, 2),                    # relief -> 328C002 (t/h)
                 "bot739_th":  round(m_739 / 1000.0, 2),                    # bottoms -> 328E007 (stream 739, t/h)
-                "recyc741_th":round(m_741 / 1000.0, 2),                    # 740 condensate diverted back to Comp I (FIC-328406, t/h)
+                "recyc741_th":round(m_741 / 1000.0, 2),                    # 740 condensate diverted back to Comp II (FIC-328406, t/h)
                 "export740_th":round(max(m_739 - m_741, 0.0) / 1000.0, 2), # 740 leaving the envelope = 739 - 741 (t/h)
                 "TT_328006":   round(T_740, 1),                            # stream 740 condensate temp (89C, 328E007 hot out) - AUDIT C10: live
                 "AI_328701":   round(_ai701_uS, 2),                        # process-condensate conductivity (uS/cm @25C)
@@ -7030,26 +7116,32 @@ def step_sim(dt: float) -> dict:
                 "LIC_322502": {"pv": round(s.LIC_322502["pv"], 1), "sp": round(s.LIC_322502["sp"], 1),
                                "op": round(s.LIC_322502["op"], 1), "mode": s.LIC_322502["mode"]},
             },
-            "D003": {                            # 328D003 recirc collector (Comp-I 44°C / Comp-II 56°C)
+            "D003": {                            # 328D003 active bays I/II + accumulation bay III
                 "TT_328I":    round(s.a328_d003_TI, 1),
                 "TT_328II":   round(s.a328_d003_TII, 1),
+                "TT_328III":  round(s.a328_d003_TIII, 1),
                 "LI_328I":    round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1),
                 "LI_328II":   round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1),
+                "LI_328III":  round(s.a328_d003_MIII / A328_D003_MIII_FULL * 100.0, 1),
                 "LT_328507_open_loop": round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1),
-                "LT_328508_open_loop": round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1),
+                "LT_328508_open_loop": round(s.a328_d003_MIII / A328_D003_MIII_FULL * 100.0, 1),
+                "capacities_m3": {"I": A328_D003_VOL_I_M3,
+                                    "II": A328_D003_VOL_II_M3,
+                                    "III": A328_D003_VOL_III_M3},
                 "form735_th": round(m_735 / 1000.0, 2),                    # Comp-II -> 328C002
                 "collect755_th": round(m_755 / 1000.0, 2),                 # Comp-I -> 322P002/E006/C001
                 "flow755_m3h": round(m_755 / A328_M755_RHO, 2),            # FT-322402: 755 draw in m3/h (des 31.3)
-                "compI_pfd_rounding_kgh": round((m_719 + m_720 + m_721 + m_759 + m_741) - m_744, 3),
-                "compII_pfd_rounding_kgh": round(bot_c005 - (m_735 + m_401 + m_402 + m_793), 3),
-                # FIC-328406 is the PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 -> Comp I
+                "compI_pfd_rounding_kgh": round((m_719 + m_720 + m_721 + m_759) - m_744, 3),
+                "compII_pfd_rounding_kgh": round((bot_c005 + m_741)
+                                                   - (m_735 + m_401 + m_402 + m_793), 3),
+                # FIC-328406 is the PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 -> Comp II
                 # (TD-005).  Normally closed, so pv/sp read 0.00 m3/h at 100 % load.  It is now a
                 # VOLUMETRIC loop: pv/sp are already m3/h, and m_kgh carries the delivered mass that
-                # the Comp-I holdup ODE actually sees.
+                # the Comp-II holdup ODE actually sees.
                 "FIC_328406": {"pv": round(s.FIC_328406["pv"], 2), "sp": round(s.FIC_328406["sp"], 2),
                                "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"],
                                "vol_m3h": round(m_741 / RHO_741_KGM3, 2),   # PFD stream 741 (raw, unlagged)
-                               "m_kgh": round(m_741, 1)},                   # recycle -> 328D003 Comp I (kg/h)
+                               "m_kgh": round(m_741, 1)},                   # recycle -> 328D003 Comp II (kg/h)
                 # AUDIT C4: unit-328 energy-closure residual (kW).  Envelope {C002,C003,C004,D001,
                 # E021,E007}, reference 0 C.  A non-zero reading is the reaction enthalpy currently
                 # hidden inside the back-solved latent heats, NOT energy created from nothing -- see

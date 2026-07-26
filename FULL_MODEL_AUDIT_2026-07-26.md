@@ -8,6 +8,12 @@ Audited runtime: `backend/main.py`, `backend/reactor.py`, `backend/steam_system.
 This section supersedes the original 2-pass/8-fail execution snapshot below. The original text is
 retained as the pre-remediation audit trail.
 
+**2026-07-27 328D003 closure:** The historical findings below that compartment III was absent and
+physical bay II was unmodeled are closed. Owner-approved capacities are I/II/III = 18/43/429 m³;
+all three communicate and III is the common accumulation baffle. The runtime now has three inventory
+states, maps external process streams to physical I and II, and maps LI-328508 to physical III. See
+`research_plan_328d003_compartments.md` and `MAP_328D003.md`.
+
 Current executable result: **6 passed / 4 failed**.
 
 Closed with source-backed implementation:

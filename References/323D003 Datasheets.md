@@ -1,5 +1,22 @@
 # **Comprehensive Engineering Analysis of Ammonia Water Tank 328D003: Volumetric Projections, Stream Dynamics, and Compartmental Thermodynamics**
 
+> **Approved correction — 2026-07-27.** This file is a secondary historical analysis, not a
+> datasheet. Its theoretical 561 m³, 50/30/20 allocation and the resulting compartment duties are
+> superseded and must not be used. Owner-approved liquid capacities are compartment I = **18 m³**,
+> compartment II = **43 m³**, and compartment III = **429 m³**, totaling **490 m³**. All three
+> compartments have openings between them; compartment III is the shared accumulation baffle for I
+> and II. The calculated 560.86 m³ geometric envelope later in this file includes roof/headspace and
+> is not an approved partitionable liquid capacity.
+>
+> Current stream mapping: compartment I receives 719/720/721/759 and supplies 744; compartment II
+> receives 343 through 328V001 (and normally closed recycle 741) and supplies 735/734/791 plus spare
+> 793; compartment III has no separately numbered external PFD liquid stream and buffers I/II through
+> the approved openings. LI-328507 is on physical I and LI-328508 is on physical III; physical II has
+> no dedicated LI on P&ID 104. Stream 341 is the 323C005 unabsorbed-gas/stack boundary and stream 722
+> is the 324E007 gas outlet, not a compartment-III discharge. See `../MAP_328D003.md` for the current
+> reconciled basis. All contradictory compartment capacities, isolation claims, stream routes, and
+> instrument assignments below are retained only as a trace of the superseded derivation.
+
 ## **Executive Overview and Process Context**
 
 The Ammonia Water Tank, formally designated by the equipment tag 328D003 (and frequently referenced interchangeably in process documentation as 3280003 or 328O003), serves as a critical phase-separation, buffering, and fluid-routing vessel within the urea desorption and hydrolyzer network. Situated within the broader operational framework of the Helwan fertilizer complex, the tank is engineered to manage complex mixtures of process condensates, aqueous ammonia, and ammonium carbamate solutions recovered from various upstream evaporation and condensation stages. Its primary process objective is to facilitate the safe and efficient recycling of unreacted ammonia ($NH\_3$) and carbon dioxide ($CO\_2$) back into the high-pressure synthesis loop, while concurrently preparing stripped wastewater for ultimate purification in the hydrolyzer system.  

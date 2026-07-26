@@ -350,13 +350,13 @@ node is off by exactly one exchanger ΔP — and the code already reconstructs t
 constant `R328_C003_T746` = 190 °C. Doc line 17 puts TT-328011 on stream 748 (**188 °C**), and
 `R328_C002_T748 = 188.0` already exists at `main.py:1087`.
 
-## B7. Stream 741 returns to Comp I; the doc says the 2nd compartment
+## B7. Stream 741 compartment route — closed 2026-07-27
 
-`main.py:5484` adds `m_741` to `in_compI`. Doc line 33: "recycled back to 2nd compartment of
-328D003". PFD 741 = 0 kg/h so the PFD cannot adjudicate, and both compartment balances close either
-way at design. Off-design it matters: `S741_CAP_KGH = 33724` (`main.py:1408`), so full stroke
-injects up to 33.7 t/h of 40 °C water into a 34.2 t/h Comp-I inventory and halves the 735 feed
-concentration to the desorber.
+The desorber mapping states that stream 741 recycles to the second compartment. The approved physical
+I/II/III basis removed the old ambiguity, so `main.py` now adds its mass and sensible heat to physical
+compartment II. The stream remains a bounded diversion of live stream 740 and is zero at the design
+point. An off-design regression opens FIC-328406 and verifies direct cooling of compartment II rather
+than compartment I.
 
 ## B8. PT-324201 and PT-324204 are not published
 

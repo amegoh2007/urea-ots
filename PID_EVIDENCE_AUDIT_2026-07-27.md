@@ -23,6 +23,16 @@ The execution plan was to index all 33 searchable pages, render the sheets conta
 tags, reconcile those sheets with the PFD and operator maps, and change the model only where the
 P&ID supplied every parameter needed by the governing equation.
 
+## Later owner-approved compartment addendum
+
+After this P&ID-only audit, the owner supplied an approved operating basis: physical compartments I,
+II, and III have capacities of 18, 43, and 429 m³, all three communicate through openings, and
+compartment III is the accumulation baffle for I and II. This later evidence supersedes the audit's
+inference that the second mapped process inventory was physical bay III and closes the missing-
+capacity/third-inventory gap. The external stream map is now physical I for the Unit-324 condensate
+circuit, physical II for stream 343 and its desorber/wash/flush header, and physical III for shared
+accumulation. Opening geometry and finite-rate transfer coefficients remain unspecified.
+
 ## Reviewed sheets and dispositions
 
 | PDF page | Plant drawing | Relevant evidence | Disposition |
@@ -34,10 +44,10 @@ P&ID supplied every parameter needed by the governing equation.
 | 9 | P&ID 105/2, `UD-VT-324-FB-0004` | Draws the 324F004-E006-F005-E007 train and the E005/E006/E007 condensate returns `324012`, `324013`, and `324014` to 328D003, including nominal line sizes and minimum vertical arrangements. | Closes line-order, destination, and installed-size/elevation ambiguity. It does not close C40 pressure loss or off-design ejector performance. |
 | 10, 19, 26-32 | Unit-335 P&ID sheets, including `UD-VT-335-FB-0002` through `-0010` | Supplies plant equipment, piping, valves, and instrumentation for Unit 335. | Useful for later topology implementation, but a P&ID is not a 1,750-MTPD heat-and-material balance. The quantitative Unit-335 boundary remains open. |
 
-## 328D003 reconciliation
+## 328D003 reconciliation at the P&ID-only stage
 
-The P&ID resolves the apparent conflict between the two-compartment operating map and the
-three-compartment secondary summary:
+The following was the initial P&ID-only interpretation. The later approved-data addendum above
+supersedes its process-inventory assignment while retaining the P&ID topology and instrument facts:
 
 - 328D003 physically has three labeled bays.
 - The two mapped live level inventories correspond to LI-328507 on physical bay I and LI-328508 on
@@ -53,9 +63,9 @@ three-compartment secondary summary:
   for either inventory, so the model's open-loop status remains correct.
 
 The P&ID does **not** validate the secondary report's theoretical 50/30/20 volume split or its
-112.2 m3 “vapour disengagement compartment.” Those values remain deductions. Adding a third dynamic
-inventory would still require the vessel GA/mechanical drawing or an approved operating-volume basis,
-plus the normal state of the N23/N24 connection and any overflow/weir elevations.
+112.2 m3 “vapour disengagement compartment.” Those deductions are retired by the later approved
+18/43/429 m³ basis. The implemented third inventory uses a reduced communicating-volume model; a
+finite-rate hydraulic model would still require opening geometry or plant response data.
 
 ## Unit-324 vacuum-train reconciliation
 
@@ -79,6 +89,6 @@ available.
 
 The supplied P&IDs close three documentary gaps: the existence and numbering of all 328D003 bays,
 the actual 323C005-to-328D003 route through 328V001, and the installed Unit-324
-ejector/condenser/condensate-return topology. They narrow, but do not close, the remaining 328D003
-dynamic-volume and C40 performance gaps. They also establish Unit-335 plant topology without
-supplying the missing 1,750-MTPD quantitative basis.
+ejector/condenser/condensate-return topology. The later owner-approved basis closes the 328D003
+dynamic-volume gap; C40 performance remains open. The P&IDs also establish Unit-335 plant topology
+without supplying the missing 1,750-MTPD quantitative basis.
