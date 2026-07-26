@@ -12,7 +12,9 @@ Target: `backend/main.py`.
 
 ## Remediation status (2026-07-26)
 
-Design point held. **5 published telemetry values changed, every one of them intended:**
+This report records the original audit and its remediation. The 2026-07-26 condenser/absorber pass
+subsequently closed C24/C15/C23 and corrected the 323C005/328D003 routing; current equations and
+anchors are documented in `research_plan_324_vacuum_train.md` and As-Built §22.11.
 
 | value | before → after | why |
 |---|---|---|
@@ -30,8 +32,8 @@ Raw state drift elsewhere is ~1e-8 relative or smaller, below published resoluti
 | B2 | stream 793 destroyed | **FIXED** | now enters `in_d001` + `sens_d001` at the Comp-I bulk temperature |
 | B4 | TT-328008 on the wrong stream, aliased to TT-328010 | **FIXED** | TT-328008 → live 328C002 top (117 °C); TT-328010 → live 328E007 cold outlet (114 °C); two distinct instruments, HMI repointed |
 | B6 | TT-328011 aliased to TT-328012 | **FIXED** | published from the live hydrolyser state at the PFD 12 °C offset (188 °C) |
-| B8 | PT-324201 / PT-324204 unpublished | **FIXED** | both published; shell tags kept as documented aliases pending C24 |
-| C2 | evaporation → 328D003 loop open | **FIXED (interim)** | 719/720/721 now scale with the live vacuum-train load via a one-tick tear. Probe: a 30 % 324E001 duty cut moves Comp-I by **−9.84 kg** (was +0.018) and TI by 6.5e-5 K (was 1.3e-6). Per-condenser split still frozen — see C24 |
+| B8 | PT-324201 / PT-324204 unpublished | **FIXED** | both published; shell pressure shares the rounded PFD manifold pending gas-side ΔP data |
+| C2 | evaporation → 328D003 loop open | **FIXED** | 719/720/721/759 are individual live condenser returns with distinct thermal states |
 | C3 | 324F001 holdup identically frozen | **FIXED** | drain is now a square-root hydraulic law. Probe: a +25 % feed step moves the holdup **+1158.7 kg** (was exactly 0.0) |
 | C5 | vacuum ODEs open integrators | **FIXED** | both ejector pulls carry the suction-pressure roll-off 323F010 already had. Probe: HIC-329605 50 → 25 % with PIC-324202 in MAN now **settles at 0.660 bar a** (= 0.33/0.5, the expected fixed point) instead of railing to the 1.0 clamp in 8.4 s |
 | C7 | clip residual never read | **FIXED** | published as `SPECIES_323_324.clip_resid_kgh`; reads C003 0, F004 −1.917, F010 0, **E001 −170.105**, **E003 −126.793** kg/h |
@@ -42,11 +44,16 @@ Raw state drift elsewhere is ~1e-8 relative or smaller, below published resoluti
 | C1 | desorber dT/dt ≡ 0 | **FIXED** | 328C002 and 328C004 given pressure states and bubble-point temperatures. Probe: a 30 % LP-steam cut to 328C004 now moves it **−9.93 °C** (143.0 → 133.1; was exactly 0.0), and cutting the 328C003 overhead relief moves 328C002 **−2.33 °C** (was 8e-10). See below for why the auditor's own proposed fix was wrong |
 | B5 | PIC-328202 PV on the drum, not the column | **FIXED** | rebound to the live 328C002 pressure state; SP re-seeded 2.6 → 3.5 bar a with the span shifted |
 | C16 | 324F002 motive steam 650 vs PFD 390 | **FIXED** | PFD wins; pull is ratio-anchored so the fixed point is untouched |
-| C15 | false air 250/120 vs PFD 21/21 | **OPEN — deliberately sequenced after C24** | see below |
-| B10 | stream 759 missing from 328D003 | **FIXED** | P&ID confirms the routing. Resolved by moving 190 kg/h out of the back-solved demin makeup and into stream 759 — the makeup is an unmodelled utility header with no PFD row, i.e. the plug that had silently been standing in for 759. Comp I still closes at 34182 kg/h exactly, so MI and TI do not move; the one visible correction is the 323C005 bottoms, 2893 → 2703 kg/h |
+| C15 | false air 250/120 vs PFD 21/21 | **FIXED** | applied with C24; vacuum inventory now sees post-condenser gas and the sign-rule transient gate passes |
+| B10 | stream 759 missing from 328D003 | **FIXED** | 759 is an individual Comp-I condenser return; the supplied absorber map removes the fictitious C005 makeup entirely |
 | B3, B7, B9, B11, C4, C6, C8, C9, C11-C17, C19-C30 | — | **OPEN** | unchanged; several need decisions rather than edits |
 
-### C33 (NEW, found while attempting C24) — the model's unit-324 flows do not match the PFD rows, and this blocks the condenser train
+### C33 — resolved by constrained PFD data reconciliation
+
+**Resolution (2026-07-26):** exact PFD mass/thermal nodes govern condenser and ejector anchors, while
+the engine retains molecular conservation for live off-design departures. Independent PFD rounding
+and molecular residuals are published rather than hidden behind a fictitious urea sink. This decision
+unblocked and closed C24, C15, and C23. The text below is retained as the conflict record.
 
 Attempting C24 surfaced a discrepancy no auditor reported, because the two auditors who would have
 caught it (`connectivity`, `thermo-anchor`) never ran. **The evaporation section's own design flows
@@ -82,7 +89,7 @@ authoritative — they cannot both hold), then C6/C7 fall out of the same decisi
 anchored, and only then C15 and C23. A partial C24 was written and **reverted** rather than left in
 the tree half-anchored.
 
-### C15 must not be applied before C24 — order matters
+### C15/C24 sequencing — completed together
 
 Decision taken: PFD overrides the OEM datasheet values. **C16 applied** (324F002 motive steam
 650 → 390 kg/h). It is risk-free: the pull is anchored as the ratio `mot9605_m / MOTIVE_DES`, so the

@@ -1,44 +1,90 @@
-# Handoff Summary: Open Gaps
+# Handoff: Open Gaps Only
 
-## 328 / 323-324 Audit (2026-07-26) — see `AUDIT_328_324_STREAM_AND_MESH.md`
-* **NEW BLOCKER — C33 (needs a decision before C24/C15/C23/C6/C7 can proceed).** Found while attempting C24. The model's unit-324 design flows differ from the PFD-21 rows: stream 705 is 708 kg/h low, 709 is 581 kg/h low, and the Evaporator-II melt 402 is 1219 kg/h heavy. Root cause is that **the PFD is not urea-conservative across unit 324** — 317 carries 74256 kg/h of urea, 401 carries 73602, 402 carries 72990, i.e. ~1266 kg/h vanishes against a biuret extent worth only ~298. The engine conserves urea and pins the melt *strengths*, so its *flows* must differ. **Decide which is authoritative** (conserve urea, or honour the PFD flows and admit a urea sink) — C6, C7 and C24's anchoring all fall out of that one call. A partial C24 was written and reverted rather than left half-anchored.
-* **Then, in this order:**
-  1. **C24 — vacuum condenser train.** Model 324E002/E005/E006/E007 as distinct nodes with Q=U·A·ΔT_lm, a cooling-water inlet and non-condensable blanketing. Anchors are already computed and verified (UA = 531.0 / 56.5 / 43.3 / 3.0 kW/K; every PFD node closes to exactly 0 kg/h; the PFD's own condensate subcooling confirms blanketing is real). Blocked only by C33. Unblocks **C15** (false air 250/120 → PFD 21/21, which must NOT be applied alone — see the report) and **C23** (ejector entrainment is 22-40:1 because the condensable load wrongly goes through the ejector), and turns C2's interim ratio into a real per-condenser split with distinct temperatures.
-  2. **C4 — reaction enthalpy, not "energy created".** The "+413 kW created at design" claim is **withdrawn**: the auditor's envelope credited the 2005 kW 328E007 recovery to its inlet without debiting it, and both its arguments treated unit 328 as non-reacting. A live diagnostic (`ABSORB_328.D003.Q328_*`) now measures the closure — at design: in 6653.8, out 8344.2, **residual −1690.5 kW**, the opposite sign to the claim. That residual is net carbamate enthalpy (stream 737 alone carries 39.46 kmol/h of CO₂ into the drum = 1096–1425 kW of formation exotherm). Two λ for one stream is correct physics: boil-up in 328C002, condensation + carbamate formation in 328D001. **Real defect:** the reaction enthalpy is implicit inside back-solved latents, so it scales with stream rate instead of reaction extent — same class as C9. Fix: explicit ξ·ΔH from the species layer, then re-back-solve each λ. Independent of C33.
-  3. **C19/C20** — three inconsistent urea-water VLE relations; no activity coefficient.
-* **328D003 mapped** — see `MAP_328D003.md`. Two new gaps: **Compartment III (112.20 m³, vapour disengagement) and the tank vent stream 341 (80 kg/h) are not modelled at all**, and neither compartment has a level controller. Also records two `323D003 Datasheets.md` deductions that the PFD contradicts (it puts stream 718 on Comp II — it is actually 323D011/323P008; and it claims stream 722 as the Comp-III vent — 722 is the 324E007 vent, the tank's own vent is 341).
+Updated 2026-07-26 after the Unit-324 condenser, cooling-water, absorber, and 328D003 mapping pass.
+Closed work is recorded in As-Built §22.11 and `research_plan_324_vacuum_train.md`.
 
-## TD-009 Remainder (Species Layer)
-* **Scope:** Recycle collectors 328D001, 328D003, and 323C005 use lumped mass without a species vector[cite: 5]. They transport rather than react[cite: 5].
-* **Next Step:** Implement Version A (safe telemetry) or Version B (rewire consumers; requires tolerance review)[cite: 5].
+## Model-compliance gaps
 
-## TD-012 (Density Side)
-* **Scope:** Volumetric controller densities (RHO_744_KGM3, RHO_741_KGM3, R328_C002_RHO, R328_C004_RHO) remain frozen constants[cite: 5].
-* **Blocker:** PFD Ammonium-Water rows run ~4% above physical water >150 °C[cite: 5]. Decide between licensor density basis or PFD values[cite: 5].
+### C34 — canonical stream graph and enthalpy
 
-## Documentation Drift
-* **Scope:** `Master_PID_Tuning_Constants.md` shows 33/46 simulation controllers intentionally differing from plant rows[cite: 5]. Appendix A's `_fic_flow` Kc is mass-based, but the engine is volumetric[cite: 5]. Some tags are pre-rename[cite: 5].
+The runtime now publishes 55 canonical stream records, including every numbered stream needed by the
+supplied absorber and Unit-324 cooling-water maps, but the in-scope PFD contains 163 unique stream
+numbers. None of the 55 records has a calculated enthalpy. Complete the remaining
+`[T, P, phase, F_i, h, rho]` graph after the thermodynamic basis in C36 is approved.
 
-## Engine & UI Refinements
-* **324F001 False-Air Vacuum Loop:** Pre-existing loose loop causing slow-damping mode (0.37 → 0.21 over 15h) requires K_p remeasurement and retuning[cite: 5].
+### C35 — molecular conservation versus the PFD
 
-## GitHub Cleanup
-* **Scope:** Orphaned LFS objects and unreachable commits remain after PDF purge[cite: 5].
-* **Next Step:** Repo delete+recreate or GitHub Support request[cite: 5].
+The strict PFD is not molecularly conservative through Unit 324. The implemented reconciliation keeps
+PFD hydraulic/thermal nodes exact and preserves molecular conservation in live departures; it exposes
+the mismatch instead of inventing a urea sink. Remaining design residuals are 324F004 −1.917,
+324E001 −170.105, and 324E003 −126.793 kg/h. Molecular certification requires reconciled licensor
+stream data or approved measurement weights/uncertainties.
 
-## Blocked Items (Pending User Action)
-* Confirm 321-1 / 323-1 overlay registration on the RUNNING HMI[cite: 5].
-* Determine live PV row assignment for FFIC-329401 / TIC-328012 ratio panels[cite: 5].
-* Model the 323C005 demin make-up header to provide a flow controller for the 718B leg[cite: 5].
-* Sprint items 7, 22, and 25 are blocked[cite: 5].
-* Sprint item 3a (#17) awaits a 328D003 level controller[cite: 5].
+### C36 / TD-009 / TD-012 — property and species basis
 
-## Full Model Audit (2026-07-26) — see `FULL_MODEL_AUDIT_2026-07-26.md`
-* **C34 — canonical stream graph and enthalpy.** Runtime has 17 post-calculation stream dictionaries versus 163 unique in-scope PFD stream numbers. Unit 323/324/328 transfers are local scalars, not shared state carriers. No stream has a defensible calculated enthalpy. Build the canonical `[T,P,phase,F_i,h,rho]` graph after the thermodynamic basis is supplied.
-* **C35 — measured conservation failures / source conflict.** Design-point component residuals remain F004 −1.917, 324E001 −170.105, and 324E003 −126.793 kg/h. `sol_advance` clips/normalises and `sol_pin_strength` rewrites the urea/water pair. C33 must decide whether Unit 324 conserves urea or reproduces non-conservative rounded PFD rows.
-* **C36 — full property/speciation package absent (data blocked).** Hydrolysis kinetics and its +101.5 kJ/mol heat are now explicit and source-backed. Remaining block: no complete EOS/activity/electrolyte parameter set enforces fugacity equality for NH3-CO2-H2O-urea across HP/MP/LP service. Supplied Aspen/VMG papers describe the architecture but omit proprietary coefficients. Need the licensor parameter set or an approved open replacement basis.
-* **C39 — recycle classification/solve remainder.** Dynamic tear residuals, tolerance, and convergence status are now published. Still classify each tear as physical transport inventory versus algebraic recycle; algebraic tears need bounded direct-substitution/Wegstein/Broyden iteration instead of one-tick transport.
-* **C40 — heat-transfer/momentum completion (partially data blocked).** The six F002/F004/F005 documents now close the vendor design/max loads, motive-steam states, package topology, connection sizes, final Körting identity/serials, and substantial F004/F005 fabrication geometry; the revised drawings are UAN 01-3042 and F004/F005 are stamped `AS BUILT`. F004's body point is 0.122 bar(a)/77 °C and F005's is 0.245 bar(a)/100 °C. Still open: unambiguous effective hydraulic geometry for all three stages (F002 has no internal dimensions; F004/F005 drawings do not identify every effective throat/exit/NXP/loss coefficient), F004 discharge/E006 pressure and interstage pressure drop, critical backpressure, pull/correction/dryness curves, breakdown/recovery hysteresis, and acceptance-test points. ASME PTC 24 identifies those as required performance-test outputs, and published 1-D models still calibrate loss/mixing coefficients. The issue-for-order flows also conflict with the strict PFD: F002 is 94+650=744 kg/h versus PFD 72+390=462; F004/F005 motive is 600/505 versus PFD 1220/180 kg/h. Keep the PFD active unless an approved source-authority change is supplied; do not reverse-engineer a curve from the drawings. Vacuum condensers still lack individual live Q/UA/LMTD/CW/phase states and gas-side pressure drops; 328E004 duty is linear in controller stroke; many exchangers use single-point UA/effectiveness; pipes and columns lack pressure-drop equations. Exact vendor/plant-test data request is in `EJECTOR_DATASHEET_AUDIT_2026-07-26.md` §7.
-* **C41 — remaining flowsheet routes / Unit 335.** PFD stream 708 (706 72 kg/h + motive 924 390 kg/h = 462 kg/h) should feed 323C005 but adding it conflicts with the existing back-solved demin-water closure. Unit 335 scope/topology is confirmed by `02 FUNDAMENTALS.pdf`, but its detailed PFD is 2000 MTPD while the target is 1750 MTPD. Need the missing C005 makeup row/controller and a consistent 1750-MTPD Unit 335 H&MB before wiring either route.
-* **C43 — Unit 328 energy/speciation closure.** The envelope remains 6653.8 kW in, 8344.2 kW out, residual −1690.5 kW. Hydrolysis heat is explicit, but carbamate association/dissociation enthalpy still sits inside back-solved latent terms because the molecular species layer does not expose ionic/carbamate extents. Close only with C36 speciation and phase enthalpy.
-* **C42 — compliance gate remains red.** `backend/audit_model_compliance.py` now reports **6 passed / 4 failed**. Focused source-backed closure tests report 7 passed. Remaining failures are C34, C35, C43, and the enthalpy part of C36; do not certify until all are green.
+- No complete NH3-CO2-H2O-urea electrolyte EOS/activity parameter set is available for HP/MP/LP
+  fugacity, speciation, density, heat capacity, and enthalpy.
+- 328D001, 328D003, and 323C005 still transport lumped mass rather than a live molecular vector.
+- `RHO_744_KGM3`, `RHO_741_KGM3`, `R328_C002_RHO`, and `R328_C004_RHO` remain frozen. The PFD's hot
+  ammonia-water densities conflict with ordinary water behavior, so use licensor densities or an
+  explicitly approved replacement basis; do not silently fit a generic aqueous correlation.
+- The empirical Unit-324 evaporator VLE is now centralized in `evap_w_eq()`, but it is not a rigorous
+  activity/fugacity model.
+
+### C43 — Unit-328 energy and reaction closure
+
+The compliance envelope remains 6653.8 kW in, 8344.2 kW out, residual −1690.5 kW. Hydrolysis heat is
+explicit, but carbamate association/dissociation enthalpy remains embedded in back-solved latent terms.
+Close this only after C36 exposes reaction extents and phase enthalpies.
+
+### C39 — recycle tear classification and solve
+
+Residuals and convergence status are published, but the one-tick tears for streams 748, 750, 775,
+718A, and 931 are not all backed by parameterized line inventory. Classify each as physical transport
+or algebraic recycle. Algebraic tears need bounded direct substitution, Wegstein, or Broyden iteration;
+retain a dynamic lag only where residence/transport evidence exists.
+
+## Equipment and source-data gaps
+
+### C40 — ejector performance and gas-side pressure drop
+
+The four condensers now have individual live mass, `Q`, `UA`, LMTD, cooling-water, phase-outlet, and
+geometry states. Still missing are the ejectors' certified suction/motive/discharge curves, critical
+backpressure, dryness corrections, breakdown/recovery hysteresis, acceptance points, and unambiguous
+effective throat/exit/loss geometry. F004 discharge/E006 pressure and condenser/ejector gas-side
+pressure drops are also absent. Until vendor or plant-test data arrive, retain the PFD-anchored
+training surrogate and shared rounded manifold pressures.
+
+### 328D003 vessel evidence
+
+A secondary equipment summary infers a 561 m³ three-compartment split, but the supplied operating map
+does not identify a third compartment and explicitly assigns stream 341 to the 323C005 vent into
+328V001. Obtain the approved 328D003 vessel drawing/P&ID before adding a third inventory, nozzles, or
+flash-gas model. `LT-328507/508` remain intentional open-loop indications; no level-control valves are
+shown in the supplied map.
+
+### Unit 335
+
+The available detailed Unit-335 PFD is for 2000 MTPD, while this simulator's target is 1750 MTPD.
+Obtain the matching 1750-MTPD H&MB/PFD before extending the product boundary beyond the currently
+mapped UF85 ratio and melt-feed interface.
+
+## Product and repository follow-up
+
+- Reconcile `Master_PID_Tuning_Constants.md`: 33 of 46 simulator controller settings intentionally
+  differ from plant rows; Appendix A still describes a mass-basis `_fic_flow` while the engine is
+  volumetric, and some tags predate renames.
+- Confirm the 321-1/323-1 overlay registration and FFIC-329401/TIC-328012 live-PV row assignment on a
+  running HMI.
+- Orphaned Git LFS objects and unreachable commits remain after the historical PDF purge; repository
+  recreation or GitHub Support is required if remote storage cleanup is still desired.
+
+## Verification state
+
+- `test_vacuum_condenser_mapping.py` + `test_vacuum_valve_rules.py`: **13 passed**.
+- Coupled regression set (`test_equation_audit_323_324.py`, `test_session_regression_gate.py`,
+  `test_streams.py`, `test_full_audit_closures.py`): **25 passed**.
+- Repository collection: **264 tests**. The all-suite run reached its 15-minute command limit without
+  emitting a failure; record this as a timeout, not a pass.
+- `audit_model_compliance.py`: **6 passed / 4 failed**. The four failures correspond to C34, C35,
+  C36 enthalpy, and C43 above. Do not certify full mathematical compliance until they close.

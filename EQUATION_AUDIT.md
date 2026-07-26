@@ -147,8 +147,8 @@ Legend: ✔ bound correctly · ~ bound, reduced/empirical (acceptable) · ✗ de
 | **323F010 + 323E010** | ✔ | ✗ **F-3** duty decoupled | — | ✗ | duty-limited evaporation |
 | 323D002 tank | ✔ two-compartment weir spill | — | — | ✔ | none |
 | 323E003 LPCC + 323D001 + 323P001 | ✔ | ✔ back-solved λ_cond, UA vs tempered water | — | ~ | `R3232_E003_Q_DES_KW = 14000` kW vs PFD 1102/1103 (55/65 °C) implying ≈ 12 703 kW — anchor conflict, left as documented |
-| 323E011 + 323D011 | ✔ vapour split back-solved off PFD 718 | ✔ | — | ✔ | none |
-| 323C005 + 328V001 | ✔ makeup back-solved to close 328D003 Comp I | ✔ | — | ✔ | none |
+| 323E011 + 323D011 | ✔ 701+786+321+791 = 718+702 | ✔ | — | ✔ | none |
+| 323C005 + 328V001 | ✔ 756+702+708 = 343+341, no fictitious makeup | ✔ | — | ✔ | none |
 
 ### Unit 324 — Two-stage vacuum evaporation
 
@@ -157,7 +157,7 @@ Legend: ✔ bound correctly · ~ bound, reduced/empirical (acceptable) · ✗ de
 | **324E001 + 324F001** | ✔ urea conserved | ✗ **F-4** | ✔ false-air vs ejector-pull vacuum ODE | ✗ conc. pinned | ✗ | duty-limited evaporation + live concentration |
 | **324E003 + 324F003** | ✔ | ✗ **F-5** | ✔ | ✗ | ✗ | same |
 | 324F002 / 324F004 ejectors | ✔ pull ∝ motive (HIC-329605) | — | ✔ | — | ✔ | none |
-| 324E002/E005/E006/E007 | ✔ boundary sinks, envelope closes | — | — | — | ~ | condensate sub-cooling not modelled (cosmetic) |
+| 324E002/E005/E006/E007 | ✔ four explicit condenser nodes | ✔ `Q=UA·LMTD`, CW energy closes | ✔ NCG derating | geometry from datasheets | ~ | gas-side ΔP and plant fouling/rating curves not supplied |
 | LIC-324501 / LV-A/B | ✔ | — | ✔ span from design stroke | — | ✔ | none |
 | FFIC-335406 / FIC-335405 | ✔ ratio feed-forward, off-network additive | — | ✔ | — | ✔ | none |
 | PY-324201 / AY-324701 | — | — | — | ✔ frozen-γ activity inversion on `psat_water` | ✔ | **inconsistent with F-4/F-5**: the soft sensor moves off-design while the mass balance holds concentration fixed |

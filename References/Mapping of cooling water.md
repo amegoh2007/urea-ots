@@ -1,0 +1,21 @@
+Cooling Water Mapping
+Main cooling water supply header (stream 1001)
+Main cooling water return header (stream 1051)
+Cooling water consumers:
+1. To 329E004 (stream 1006) 5.36 kW (Return stream 1007)
+2. To 329E002 (stream 1008) 12.71 kW (Return stream 1009)
+3. To 328E001 (stream 1004) 0 kW (Return stream 1005)
+4. To 329E001 (stream 1030) 2.67 kW (Return stream 1031)
+5. To 323E011 (stream 1012) 3.51 kW (Return stream 1013)
+6. To 324E002 (stream 1014) 18.46 kW (Return stream 1015)
+7. To 321E001 (stream 1032) 0.17 kW (Return stream 1033)
+8. 329E005 (0.06 kW) (Supply stream 1002) (Return stream 1003)
+9. 328E004 (3.79 kW) (Supply stream 1028) (Return stream 1029)
+10. 322E006 (0.16 kW) (Supply stream 1010) (Return stream 1011)
+11. 324E005 (1.93 kW) (Supply stream 1016) (Return stream 1017)
+12. 324E006 (1.21 kW) (Supply stream 1018) (Return stream 1019)
+13. 324E007 (0.13 kW) (Supply stream 1020) (Return stream 1021)
+14. Oil coolers of 335K002 (0.58 kW) (Supply stream 1036) (Return stream 1037)
+15. Bagging and loading coolers (Supply stream 1351) (Return stream 1352)
+Stream 1035 bypass between supply and return headers
+Process condensate from 328E007 is injected into the main return header (stream 740A)

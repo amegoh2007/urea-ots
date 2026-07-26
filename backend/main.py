@@ -1033,15 +1033,14 @@ R323_D002_M_TIE_FULL = R323_D002_M_I_FULL + R323_D002_M_II_FULL
 #  These screens only READ Unit-323 outputs (feed-forward) -> the 135/106/99°C
 #  boundaries stay isolated by construction.
 #
-#  Whole-network mass closure (design, kg/h) — verified to close exactly, on the
-#  PFD-20/21/22 stream table (CLAUDE.md §0), which rules every discrepancy:
-#    328D003 Comp I : in 719+720+721(31289)+759(190)+V001(2703) = 34182 (PFD 343/733 34180)
-#                     = out 735(31114)+791/402(1534)+734/401(1534)+793(0, spare)
-#    Comp II        : in 744(31478)             = out 755(31478)
-#    322C001        : in 755+GCB+CPL(900)       = vent + 756(33358); abs 980
-#    323E003        : in 305+718B+776+797+756   = 321(1323)+744(31478)+308
-#    323E011        : in 701+702+786+321+402    = 7999.6 = v011(2410.6)+liq(5589.0);
-#                     liq +401(1534) -> D011 -> 718(7123) = 718A(3561.5)+718B(3561.5)
+#  Whole-network design closure follows the PFD-20/21/22 stream table (CLAUDE.md §0):
+#    328D003 Comp I : in 719+720+721+759 = 31479; out 744 = 31478 (1 kg/h table rounding)
+#    Comp II        : in 343 = 34180; out 735+791+734+793 = 34182 (2 kg/h table rounding)
+#    322C001        : in 744+GCB+CPL = vent + 756(33358)
+#    323C005        : in 756+702+708 = 343(34180)+341(80), exact
+#    323E003        : in 305+718B+776+797 = 321(1323)+308
+#    323E011        : in 701+786+321+791 = 7563 = 718(7123)+702(440), exact
+#    323D011        : in 718+734 = split 718A+718B plus the 734 wash contribution
 #    328C002        : in 738+748+750+775(40434) = 737(6665)+743(33769)
 #    328C003        : in 746+911(34874)         = 748(812)+747(34062)
 #    328C004        : in 749+931(40557)         = 750(6833)+739(33724)
@@ -1201,36 +1200,37 @@ R328_C004_M_DES = _r328_holdup(R328_C004_NTRAY, R328_C004_H_NLL, R328_C004_RHO) 
 
 # ==========================================================================
 #  323E011 + 323D011  (LP carbamate condenser + drum, 45 °C, 1.13 bar a)
-#  Inlets are PFD-21/22 streams 701+702+786+321+791; the 328D003 Comp-I branch
-#  734 falls straight into the drum.  Vapour v011 -> 323C005; liquid + 734 ->
-#  323D011 -> 718.  The vapour split is BACK-SOLVED off the PFD 718 anchor
-#  (7123 kg/h) — the old 3100/9400 condenser-datasheet split is superseded per
-#  CLAUDE.md §0 (the PFD rules every mass-balance / stream discrepancy).
+#  Inlets are PFD-21/22 streams 701+786+321+791.  Outputs are liquid 718 to
+#  323D011 and gas 702 to 323C005.  Stream 734 is a separate 328D003 Comp-II
+#  wash branch into 323D011; it is not an E011 inlet.  The PFD closes E011 at
+#  7563 = 7123 + 440 kg/h exactly and supersedes the old vendor process case.
 # ==========================================================================
 R3232_E011_M701_DES = R323_M701_DES                         # 4426.6 flash vapour ex 323F004 (PFD 701 4430)
 R3232_E011_M786_DES = 276.0                                 # vent from 328D001 (stream 786)
 R3232_E011_M321_DES = R3232_M797_DES*0.0 + 1323.0           # 323E003 vent (stream 321)
 R3232_E011_M402_DES = 1534.0                                # PFD-21/22 stream 791 Amm. Water 56 C / 4.1 bar,
-#   328D003 Comp-I wash (FIC-323402).  Was 2931 (an unsourced coded constant back-fitted to the
+#   328D003 Comp-II wash (FIC-323402).  Was 2931 (an unsourced coded constant back-fitted to the
 #   3100/9400 condenser datasheet); PFD-ruled to 1534 kg/h.
 # PFD-21/22 stream 791 design volumetric flow (m3/h) = 1534/992.4 = 1.546 -> tabulated 1.5.
 # Read-only UI anchor for FIC-323402: vol = 1.5 * (m_402 / M402_DES), bit-exact 1.5 at design.
 S791_VOL_DES = 1.5
-R3232_E011_IN_DES   = (R3232_E011_M701_DES + R3232_M702_DES + R3232_E011_M786_DES
-                       + R3232_E011_M321_DES + R3232_E011_M402_DES)       # 7999.6
+R3232_E011_IN_DES   = 7563.0                               # PFD: 701+786+321+791, reconciled rounded total
+R3232_E011_RECON_KGH = (R3232_E011_IN_DES -
+                        (R3232_E011_M701_DES + R3232_E011_M786_DES
+                         + R3232_E011_M321_DES + R3232_E011_M402_DES))
 R3232_E011_M401_DES = 1534.0                                # PFD-21/22 stream 734 Amm. Water 56 C / 4.1 bar,
-#   328D003 Comp-I flush (FIC-323401) -> 323D011.  Was 823 (back-fitted residual); the PFD splits the
-#   Comp-I discharge header 343/733 (34180) into exactly 735(31114) + 791(1534) + 734(1534), so 734 is
+#   328D003 Comp-II flush (FIC-323401) -> 323D011.  Was 823 (back-fitted residual); the PFD splits the
+#   Comp-II discharge header 343/733 (34180) into 735(31114) + 791(1534) + 734(1534), so 734 is
 #   this leg and 343 now closes on the PFD (34182 vs tabulated 34180 = table rounding; molar 1850.65
 #   vs 1850.64 closes exactly).
 R3232_D011_M718_DES = 7123.0                                # PFD-21/22 stream 718 Carb. Liq. 45 C, 6.7 m3/h
-# Vapour split BACK-SOLVED off that 718 anchor:  m_v011 = in_e011 + 401 - 718.  PHIV is defined
-# first and MV_DES = PHIV*IN_DES second (not the reverse) so that the live gen_v011 = PHIV*in_e011
-# is bit-identical to MV_DES at the design seed -> the PIC-323203 pressure ODE has an exact fixed
-# point.  The reciprocal residual on the liquid side is O(1e-13) kg/h, far below any state weight.
-R3232_E011_PHIV     = ((R3232_E011_IN_DES + R3232_E011_M401_DES - R3232_D011_M718_DES)
-                       / R3232_E011_IN_DES)                 # 0.30134 vapour split -> 323C005 (v011)
-R3232_E011_MV_DES   = R3232_E011_PHIV * R3232_E011_IN_DES   # 2410.6 vapour -> 323C005
+# The supplied mapping identifies 702 as the 323D011 gas outlet.  On the PFD basis,
+# 701+786+321+791 = 7563 = 718(7123)+702(440) kg/h exactly.  Stream 734 is a separate
+# 328D003 branch and does not enter this node.
+R3232_E011_MV_DES   = 440.0                                 # PFD stream 702 -> 323C005
+R3232_E011_PHIV     = R3232_E011_MV_DES / R3232_E011_IN_DES
+R3232_E011_MCOND_DES = (R3232_E011_IN_DES - R3232_E011_M402_DES
+                        - R3232_E011_MV_DES)                 # gas condensed/absorbed in 323E011
 R3232_M718A_DES = 0.5 * R3232_D011_M718_DES                 # 3561.5 -> 328D001 (PFD 718A 3562 ✓)
 R3232_M718B_DES = 0.5 * R3232_D011_M718_DES                 # 3561.5 -> 323E003 (PFD 718B 3562 ✓)
 R3232_E011_T = 45.0 ; R3232_E011_T701 = 106.0 ; R3232_E011_T786 = 61.0
@@ -1250,14 +1250,13 @@ R3232_M718A_TAU_S   = 45.0                       # 718A leg transport lag (was t
 R3232_E011_Q_DES_KW = 3440.0                                # datasheet condenser duty
 R3232_E011_UA_KW    = R3232_E011_Q_DES_KW / (R3232_E011_T - 35.0)         # kW/K vs 35°C CW
 # λ_v011 (vapour-generation latent) closes the drum energy balance at 45°C:
-R3232_E011_SENS = ((R3232_E011_M701_DES*(R3232_E011_T701 - R3232_E011_T)
-                    + R3232_M702_DES*(R3232_M702_T       - R3232_E011_T)
+R3232_E011_SENS = (((R3232_E011_M701_DES + R3232_E011_RECON_KGH)*(R3232_E011_T701 - R3232_E011_T)
                     + R3232_E011_M786_DES*(R3232_E011_T786 - R3232_E011_T)
                     + R3232_E011_M321_DES*(74.0          - R3232_E011_T)
                     + R3232_E011_M402_DES*(56.0          - R3232_E011_T))
                    / 3600.0 * R3232_CP)                                   # kW
-R3232_E011_LAMV = ((R3232_E011_SENS - R3232_E011_Q_DES_KW)
-                   / (R3232_E011_MV_DES/3600.0)) * -1.0                   # kJ/kg (>0)
+R3232_E011_LAMV = ((R3232_E011_Q_DES_KW - R3232_E011_SENS)
+                   / (R3232_E011_MCOND_DES/3600.0))                       # kJ/kg condensed gas
 
 # ==========================================================================
 #  328D001  Desorber-I reflux drum (61 °C, 2.6 bar a); 328E004 condenses 737
@@ -1319,9 +1318,8 @@ R3232_E003_M305_DES  = R323_M305_DES                        # 24563.4 top vapour
 R3232_E003_M718B_DES = R3232_M718B_DES                      # 3560.4
 R3232_E003_M776_DES  = R328_D001_M776_DES                   # 8274.4
 R3232_E003_M797_DES  = R3232_M797_DES                       # 1758
-R3232_E003_M756_DES  = A328_M756_DES                        # 33358
 R3232_E003_IN_DES    = (R3232_E003_M305_DES + R3232_E003_M718B_DES + R3232_E003_M776_DES
-                        + R3232_E003_M797_DES + R3232_E003_M756_DES)      # 71514.2
+                       + R3232_E003_M797_DES)                              # mapped physical inlets
 R3232_E003_PHI321 = 1323.0 / (R3232_E003_M305_DES + R3232_E003_M797_DES)  # vent split on (305+797)
 R3232_E003_M321_DES = R3232_E003_PHI321 * (R3232_E003_M305_DES + R3232_E003_M797_DES)  # 1323
 R3232_E003_PHI744 = 31478.0 / A328_M756_DES                 # wash split on 756 -> Comp II
@@ -1346,7 +1344,7 @@ RHO_744_KGM3 = R3232_E003_M744_DES / S744_VOL_DES            # 1002.48 kg/m3, PF
 # pin cannot move.  At design 6.495 t/h / 31.4 m3/h = 0.20685 T/M3.
 R328_FFIC_RATIO_DES = ((R328_C004_M931_DES / 1000.0)
                        / (R3232_E003_M744_DES / RHO_744_KGM3))           # 0.20685 T/M3
-R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES - R3232_E003_M744_DES  # 38713.2
+R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES             # condensed-liquid draw
 R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
 # 323E003 tempered-water circuit: PFD stream 1102 supply 55 °C / 1103 return 65 °C.  R3232_TW_T is
 #   their mean (== 60) and stays the DESIGN datum for the UA back-solve below -- never a live value.
@@ -1365,8 +1363,7 @@ R3232_E003_M_COND_DES = R3232_E003_M305_DES + R3232_E003_M797_DES - R3232_E003_M
 R3232_E003_SENS = ((R3232_E003_M305_DES *(R3232_E003_T305    - R3232_E003_T)
                     + R3232_E003_M718B_DES*(R3232_E011_T      - R3232_E003_T)
                     + R3232_E003_M776_DES *(R328_D001_T       - R3232_E003_T)
-                    + R3232_E003_M797_DES *(R3232_M797_T      - R3232_E003_T)
-                    + R3232_E003_M756_DES *(A328_C001_T       - R3232_E003_T))
+                    + R3232_E003_M797_DES *(R3232_M797_T      - R3232_E003_T))
                    / 3600.0 * R3232_CP)                                   # kW
 R3232_E003_LAMC = ((R3232_E003_Q_DES_KW - R3232_E003_SENS)
                    / (R3232_E003_M_COND_DES/3600.0))                      # kJ/kg
@@ -1375,34 +1372,32 @@ R3232_P001_RPM_DES = R3232_E003_M308_DES / (1218.0 * 0.5046)              # 62.9
 # ==========================================================================
 #  323C005 + 328V001 + 328D003  (LP absorber vent scrub + carbamate collector)
 # ==========================================================================
-A323_C005_MV_DES   = R3232_E011_MV_DES                      # 2410.6 vapour in ex 323E011
-# AUDIT B10 — stream 759 (324E007 condensate, 190 kg/h @ 55 C) was missing from the Comp-I inlet
-# set entirely.  Confirmed from the P&ID: "Condensed gases in bottom of shell side of 324E007 is
-# discharged to 328D003 (stream 759)".  It belongs in this back-solve, not outside it: the makeup is
-# an UNMODELLED demin utility header with no PFD row of its own, i.e. the plug that absorbs whatever
-# the modelled inlets do not cover -- so it had silently been standing in for 759 all along.  Adding
-# 759 here and subtracting the same 190 kg/h from the makeup keeps Comp I closed at 34182 kg/h
-# exactly (in == out at design), which is why MI and TI do not move.  The visible consequence is
-# that the 323C005 bottoms to 328V001 correct from 2893 to 2703 kg/h.
-A323_C005_MAKEUP   = ((R328_C002_M738_DES + R3232_E011_M401_DES + R3232_E011_M402_DES
-                       - A328_D003_M719 - A328_D003_M720 - A328_D003_M721 - A328_D003_M759)
-                      - A323_C005_MV_DES)                   # 292.4: makeup water back-solved
-#   so bot_c005 (=MV_DES+MAKEUP) exactly closes 328D003 Comp-I: in_compI == out_compI at design.
-#   Stream 793 is a normally-closed spare off the same header (PFD 0 kg/h) and so does not enter here.
-A323_C005_BOT_DES  = A323_C005_MV_DES + A323_C005_MAKEUP    # 2893.0 -> 328V001 -> Comp I
+A323_C005_M756_DES = 33358.0
+A323_C005_M702_DES = 440.0
+A323_C005_M708_DES = 462.0
+A323_C005_VENT_DES = 80.0
+# Supplied absorber mapping closes this unit without a fictitious makeup stream:
+# 756(33358)+702(440)+708(462) = 343(34180)+341(80) kg/h exactly.
+A323_C005_MAKEUP = 0.0
+A323_C005_BOT_DES  = 34180.0
 A323_C005_T = 55.0 ; A323_C005_MAKEUP_T = 30.0
 A323_C005_M_TAU_S = 300.0
-A323_C005_M_DES = A323_C005_BOT_DES/3600.0 * A323_C005_M_TAU_S            # 298.2 kg
-A323_C005_LAM = ((A323_C005_MV_DES/3600.0*R3232_CP*(R3232_E011_T - A323_C005_T)
-                  + A323_C005_MAKEUP/3600.0*4.0*(A323_C005_MAKEUP_T - A323_C005_T))
-                 / (A323_C005_MV_DES/3600.0)) * -1.0                      # kJ/kg absorbed
+A323_C005_M_DES = A323_C005_BOT_DES/3600.0 * A323_C005_M_TAU_S
+A323_C005_ABS_DES = A323_C005_M702_DES + A323_C005_M708_DES - A323_C005_VENT_DES
+A323_C005_SENS_DES = ((A323_C005_M756_DES*(A328_C001_T - A323_C005_T)
+                       + A323_C005_M702_DES*(45.0 - A323_C005_T)
+                       + A323_C005_M708_DES*(121.0 - A323_C005_T))
+                      / 3600.0 * R3232_CP)
+A323_C005_LAM = -A323_C005_SENS_DES * 3600.0 / A323_C005_ABS_DES
 A328_D003_MI_FULL = 280.50 * 992.0                          # Comp I  (V·ρ)  278256 kg
 A328_D003_MII_FULL = 168.30 * 992.0                         # Comp II       166954 kg
 A328_D003_MI_DES  = A328_D003_MI_FULL * 0.50               # 139128 kg
 A328_D003_MII_DES = A328_D003_MII_FULL * 0.50              # 83477 kg
-A328_D003_M343_DES = R328_C002_M738_DES + R3232_E011_M402_DES + R3232_E011_M401_DES  # 34182 out (PFD 343/733 34180 ✓)
+A328_D003_M343_DES = A323_C005_BOT_DES
+A328_D003_COMP_I_ROUNDING_KGH = 1.0
+A328_D003_COMP_II_ROUNDING_KGH = 2.0
 # PFD-22 stream 793 (Amm. Water 56 C, rho 992.4) — a normally-closed SPARE branch off the same
-# 343/733 Comp-I discharge header that feeds 735 / 791 / 734.  PFD design flow is 0 kg/h and
+# 343/733 Comp-II discharge header that feeds 735 / 791 / 734.  PFD design flow is 0 kg/h and
 # 0 m3/h, so FIC-328405 sits at 0 % stroke at design; full stroke is one branch capacity, i.e.
 # the twin of the 791/734 legs (1534 kg/h).
 S793_CAP_KGH = R3232_E011_M402_DES                          # 1534.0 kg/h at 100 % stroke
@@ -1417,17 +1412,15 @@ S741_CAP_KGH  = R328_C004_M739_DES                          # 33724 kg/h full-st
 RHO_741_KGM3  = 992.42                                      # kg/m3, PFD col 741 "Density eff." @ 40 C
 A328_M741_T   = 40.0                                        # C, PFD col 741 operating temperature
 S793_M_DES   = 0.0                                          # PFD design flow (normally closed)
-A328_D003_TI = 56.0 ; A328_D003_TII = 44.0
-A328_D003_V001_T = A323_C005_T                             # 55 °C V001 pass-through
+A328_D003_TI = 44.0 ; A328_D003_TII = 56.0
+A328_D003_V001_T = A328_D003_TII
 # Comp I carbamate-formation exotherm 2NH3+CO2<=>NH2COONH4 (λ_I on total inflow):
 A328_D003_LAM_I = -A328_CP * (
       A328_D003_M719*(A328_D003_M719_T - A328_D003_TI)
     + A328_D003_M720*(A328_D003_M720_T - A328_D003_TI)
     + A328_D003_M721*(A328_D003_M721_T - A328_D003_TI)
-    + A328_D003_M759*(A328_D003_M759_T - A328_D003_TI)      # AUDIT B10: 324E007 condensate @ 55 C
-    + A323_C005_BOT_DES*(A328_D003_V001_T - A328_D003_TI)
-    ) / (A328_D003_M719 + A328_D003_M720 + A328_D003_M721
-         + A328_D003_M759 + A323_C005_BOT_DES)   # exact back-solve, P_compI == 0 at the 56 C seed
+    + A328_D003_M759*(A328_D003_M759_T - A328_D003_TI)
+    ) / (A328_D003_M719 + A328_D003_M720 + A328_D003_M721 + A328_D003_M759)
 
 # ==========================================================================
 #  328E021 A/B  (hydrolyser feed/effluent interchanger, two shells in series)
@@ -1460,9 +1453,9 @@ R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 b
 #   cold: 56 + (58/87)*(143-56) = 114.0 EXACTLY  (Q_cold = 31114/3600*4.0*58 = 2005.1 kW)
 #   hot : 143 - (31114*58 + 16484)/33724 = 89.0 EXACTLY  (16484 kg.K/h = 18.32 kW ~ R328_E007_LOSS)
 # Both verified bit-exact in IEEE754, same as R328_E021_EPS_T / R328_E021_LOSS_DT above.
-R328_E007_EPS_T   = (R328_E007_TC_OUT - A328_D003_TI) / (R328_C004_T - A328_D003_TI)   # 58/87 = 0.66667
+R328_E007_EPS_T   = (R328_E007_TC_OUT - A328_D003_TII) / (R328_C004_T - A328_D003_TII)   # 58/87 = 0.66667
 R328_E007_LOSS_DT = (R328_C004_M739_DES * (R328_C004_T - R328_E007_TH_OUT)
-                     - R328_C002_M738_DES * (R328_E007_TC_OUT - A328_D003_TI))         # 16484 kg.K/h
+                     - R328_C002_M738_DES * (R328_E007_TC_OUT - A328_D003_TII))         # 16484 kg.K/h
 # 328C002 top-to-bottom design differential: the column top (stream 737 / TT-328008 node, 117 C) sits
 # 22 C below the bottoms state s.a328_c002_T (139 C).  Lets TT-328008 and the TIC-328008 inferential
 # ride the LIVE column instead of a module constant (AUDIT B4 / C31).
@@ -1591,9 +1584,9 @@ R324_F001_M_DES   = R324_P1_DES/3600.0 * R324_F001_M_TAU_S
 R324_F001_M_FULL  = R324_F001_M_DES / (R324_F001_LVL_SP/100.0)
 # vacuum : PIC-324202 false-air bleed balances the 324F002 ejector pull at design
 R324_F001_P_KP    = 0.02                           # bar a per (kg/s) net vapour imbalance
-R324_F001_FA_DES  = 250.0                           # kg/h design false-air (PV-324202)
+R324_F001_FA_DES  = 21.0                            # kg/h PFD stream 784 false-air (PV-324202)
 R324_PV202_OP_DES = 50.0                            # % PV-324202 design stroke
-R324_F001_EJPULL_DES = R324_V1_DES + R324_F001_FA_DES   # ejector pull = gen + air at design
+R324_F001_EJPULL_DES = 72.0                         # kg/h PFD stream 706, gas leaving 324E002
 # --- 324E001 steam-side condensate : LIC-329505 "active controlled steam trap" -
 #  The chest condenses the LP heating steam whose latent it surrenders as Q_e001,
 #  so the shell fills with condensate; LV-329505 drains it to hold the level and
@@ -1648,7 +1641,7 @@ R324_F003_LVL_SP  = 54.7                            # % LIC-324501 setpoint (tag
 R324_F003_M_DES   = R324_P2_DES/3600.0 * R324_F003_M_TAU_S
 R324_F003_M_FULL  = R324_F003_M_DES / (R324_F003_LVL_SP/100.0)
 R324_F003_P_KP    = 0.02
-R324_F003_FA_DES  = 120.0                            # kg/h design false-air (PV-324203)
+R324_F003_FA_DES  = 21.0                             # kg/h PFD stream 783 false-air (PV-324203)
 R324_PV203_OP_DES = 50.0
 
 # ==============================================================================================
@@ -2251,8 +2244,10 @@ def sol_pin_strength(w: dict, w_urea_auth: float) -> dict:
     out["Urea"] = clamp(w_urea_auth, 0.0, share)
     out["H2O"]  = share - out["Urea"]
     return out
-R324_F003_EJPULL_DES = R324_V2_DES + R324_F003_FA_DES
+R324_F003_EJPULL_DES = 584.0                         # kg/h PFD stream 712, gas leaving 324E005
 R324_HIC9606_DES_PCT = 50.0       # % HIC-329606 design opening (HV-329606 motive steam -> 324F004/F005 ejectors)
+R324_F004_MOTIVE_DES = 1220.0     # kg/h PFD stream 927, first deep-vacuum ejector motive steam
+R324_F005_MOTIVE_DES = 180.0      # kg/h PFD stream 929, second deep-vacuum ejector motive steam
 
 # --- LIC-324501 melt drain (R2 -- granulation unbuilt under Scope Lock) : LV-B is
 #     the sole ACTIVE drain, carrying the 324F003 melt out to the 335 boundary ;
@@ -2355,6 +2350,221 @@ def psat_nh3_bara(T_C: float) -> float:
 
 def clamp(x, lo, hi):
     return max(lo, min(hi, x))
+
+
+def lmtd_countercurrent(hot_in_c, hot_out_c, cold_in_c, cold_out_c):
+    """Counter-current log-mean temperature difference with pinch guards."""
+    dt_hot_end = hot_in_c - cold_out_c
+    dt_cold_end = hot_out_c - cold_in_c
+    if dt_hot_end <= 0.0 or dt_cold_end <= 0.0:
+        return 0.0
+    if math.isclose(dt_hot_end, dt_cold_end, rel_tol=0.0, abs_tol=1e-12):
+        return 0.5 * (dt_hot_end + dt_cold_end)
+    return (dt_hot_end - dt_cold_end) / math.log(dt_hot_end / dt_cold_end)
+
+
+# PFD-28 cooling-water heat capacity back-solved from the largest, best-resolved node:
+# 324E002, 18.46 MW = 1591 t/h * Cp * (40-30) K.  The other three mapped duties round
+# to 1.93, 1.21, and 0.13 MW with the same Cp.
+CW_CP_KJKG_K = 18_460.0 * 3600.0 / (1_591_000.0 * 10.0)
+
+
+def _vacuum_condenser_spec(tag, inlet, condensate, vent, hot_in, hot_out,
+                           cw_flow, cw_in, cw_out, area, tubes, length_mm,
+                           shell_id_mm, tube_od_mm, tube_wall_mm):
+    q_kw = cw_flow / 3600.0 * CW_CP_KJKG_K * (cw_out - cw_in)
+    lmtd_k = lmtd_countercurrent(hot_in, hot_out, cw_in, cw_out)
+    return {
+        "tag": tag,
+        "inlet_kgh": inlet,
+        "condensate_kgh": condensate,
+        "vent_kgh": vent,
+        "hot_in_c": hot_in,
+        "hot_out_c": hot_out,
+        "cw_flow_kgh": cw_flow,
+        "cw_in_c": cw_in,
+        "cw_out_c": cw_out,
+        "q_kw": q_kw,
+        "lmtd_k": lmtd_k,
+        "ua_kw_k": q_kw / lmtd_k,
+        "h_eff_kjkg": q_kw * 3600.0 / condensate,
+        "area_m2": area,
+        "tube_count": tubes,
+        "tube_length_mm": length_mm,
+        "shell_id_mm": shell_id_mm,
+        "tube_od_mm": tube_od_mm,
+        "tube_wall_mm": tube_wall_mm,
+    }
+
+
+# Operating flows and temperatures are PFD-21/28 anchors.  Geometry is transcribed from
+# the four supplied equipment datasheets.  324E006/E007 have no vendor process case, so no
+# process value is inferred from their blank sheets.
+VACUUM_CONDENSERS = {
+    "324E002": _vacuum_condenser_spec(
+        "324E002", 26840.0, 26768.0, 72.0, 116.0, 45.0,
+        1_591_000.0, 30.0, 40.0, 1079.0, 2329, 5900.0, 1850.0, 25.0, 1.6,
+    ),
+    "324E005": _vacuum_condenser_spec(
+        "324E005", 3342.0, 2758.0, 584.0, 140.0, 40.0,
+        415_000.0, 30.0, 34.0, 187.0, 486, 4900.0, 925.0, 25.0, 1.6,
+    ),
+    "324E006": _vacuum_condenser_spec(
+        "324E006", 1804.0, 1763.0, 41.0, 104.0, 41.0,
+        208_000.0, 30.0, 35.0, 56.5, 250, 3600.0, 550.0, 20.0, 2.0,
+    ),
+    "324E007": _vacuum_condenser_spec(
+        "324E007", 221.0, 190.0, 31.0, 120.0, 55.0,
+        23_000.0, 30.0, 35.0, 11.0, 70, 2500.0, 324.0, 20.0, 2.0,
+    ),
+}
+
+# PFD-20/21 mass-percent rows for the mapped absorber and vacuum-train streams.
+# make_stream_mass_pct normalizes independently rounded rows to preserve the stated stream total.
+PFD_324_MASS_PCT = {
+    "204": {"CH4": 5.93, "CO2": 2.22, "H2": 3.14, "H2O": 0.26,
+            "N2": 68.81, "NH3": 8.26, "O2": 11.39},
+    "341": {"CO2": 1.17, "H2O": 8.21, "N2": 68.04, "NH3": 5.05, "O2": 17.53},
+    "343": {"CO2": 3.71, "H2O": 90.24, "NH3": 5.23, "Urea": 0.82},
+    "702": {"CO2": 0.14, "H2O": 6.35, "N2": 3.30, "NH3": 89.40, "O2": 0.81},
+    "703": {"CO2": 1.47, "H2O": 93.78, "N2": 0.08, "NH3": 4.45, "O2": 0.02, "Urea": 0.20},
+    "705": {"CO2": 0.82, "H2O": 96.77, "N2": 0.07, "NH3": 2.07, "O2": 0.02, "Urea": 0.25},
+    "706": {"CO2": 3.81, "H2O": 29.39, "N2": 38.64, "NH3": 17.91, "O2": 10.26},
+    "708": {"CO2": 0.46, "H2O": 91.45, "N2": 4.68, "NH3": 2.17, "O2": 1.24},
+    "709": {"CO2": 3.54, "H2O": 87.58, "N2": 0.33, "NH3": 7.48, "O2": 0.09, "Urea": 0.98},
+    "712": {"CO2": 13.59, "H2O": 57.87, "N2": 2.14, "NH3": 25.84, "O2": 0.57},
+    "714": {"CO2": 3.88, "H2O": 87.98, "N2": 0.61, "NH3": 7.37, "O2": 0.16},
+    "715": {"CO2": 17.22, "H2O": 21.22, "N2": 39.48, "NH3": 11.63, "O2": 10.45},
+    "717": {"CO2": 2.22, "H2O": 89.93, "N2": 5.05, "NH3": 1.49, "O2": 1.34},
+    "719": {"CO2": 3.50, "H2O": 91.75, "NH3": 4.08, "Urea": 0.66},
+    "720": {"CO2": 3.92, "H2O": 88.73, "NH3": 3.68, "Urea": 3.68},
+    "721": {"CO2": 8.54, "H2O": 84.87, "NH3": 6.59},
+    "722": {"CO2": 14.33, "H2O": 15.15, "N2": 54.44, "NH3": 1.66, "O2": 14.42},
+    "744": {"CO2": 0.11, "H2O": 98.50, "NH3": 0.63, "Urea": 0.76},
+    "755": {"CO2": 3.81, "H2O": 91.13, "NH3": 4.17, "Urea": 0.89},
+    "756": {"CO2": 3.79, "H2O": 91.18, "NH3": 4.20, "Urea": 0.84},
+    "759": {"CO2": 2.27, "H2O": 96.31, "NH3": 1.42},
+    "783": {"N2": 79.06, "O2": 20.94},
+    "784": {"N2": 79.06, "O2": 20.94},
+    "790": {"CO2": 2.29, "H2O": 90.04, "N2": 0.09, "NH3": 7.41, "O2": 0.02, "Urea": 0.14},
+    "797": {"CH4": 6.47, "CO2": 0.05, "H2": 3.43, "H2O": 2.28,
+            "N2": 75.15, "NH3": 0.18, "O2": 12.44},
+}
+
+
+def vacuum_condenser_node(spec, inlet_kgh, noncondensable_kgh, hot_in_c,
+                          cw_flow_kgh=None, cw_in_c=None):
+    """Reduced condenser node, anchored exactly to its PFD design point.
+
+    The design UA already contains the design gas-film resistance.  Above the design
+    noncondensable fraction, UA is derated by the remaining condensable fraction.  This
+    supplies the source-backed direction of effect without inventing a fitted coefficient.
+    """
+    cw_flow = spec["cw_flow_kgh"] if cw_flow_kgh is None else max(cw_flow_kgh, 0.0)
+    cw_in = spec["cw_in_c"] if cw_in_c is None else cw_in_c
+    inlet = max(inlet_kgh, 0.0)
+    nc = clamp(noncondensable_kgh, 0.0, inlet)
+
+    if (inlet == spec["inlet_kgh"] and nc == spec["vent_kgh"]
+            and hot_in_c == spec["hot_in_c"] and cw_flow == spec["cw_flow_kgh"]
+            and cw_in == spec["cw_in_c"]):
+        return {
+            "tag": spec["tag"], "inlet_kgh": inlet,
+            "condensate_kgh": spec["condensate_kgh"], "vent_kgh": spec["vent_kgh"],
+            "q_kw": spec["q_kw"], "lmtd_k": spec["lmtd_k"],
+            "ua_kw_k": spec["ua_kw_k"], "ua_eff_kw_k": spec["ua_kw_k"],
+            "cw_flow_kgh": cw_flow, "cw_in_c": cw_in, "cw_out_c": spec["cw_out_c"],
+            "hot_in_c": hot_in_c, "hot_out_c": spec["hot_out_c"],
+            "mass_residual_kgh": 0.0, "energy_residual_kw": 0.0,
+        }
+
+    if inlet <= 0.0 or cw_flow <= 0.0:
+        return {
+            "tag": spec["tag"], "inlet_kgh": inlet,
+            "condensate_kgh": 0.0, "vent_kgh": inlet,
+            "q_kw": 0.0, "lmtd_k": 0.0, "ua_kw_k": spec["ua_kw_k"],
+            "ua_eff_kw_k": 0.0, "cw_flow_kgh": cw_flow,
+            "cw_in_c": cw_in, "cw_out_c": cw_in, "hot_in_c": hot_in_c,
+            "hot_out_c": hot_in_c, "mass_residual_kgh": 0.0,
+            "energy_residual_kw": 0.0,
+        }
+
+    x_nc = nc / inlet
+    x_nc_des = spec["vent_kgh"] / spec["inlet_kgh"]
+    condensable_ratio = clamp((1.0 - x_nc) / max(1.0 - x_nc_des, 1e-12), 0.0, 1.0)
+    ua_eff = spec["ua_kw_k"] * condensable_ratio
+    hot_out = spec["hot_out_c"] + (hot_in_c - spec["hot_in_c"])
+    q_kw = spec["q_kw"] * min(cw_flow / spec["cw_flow_kgh"], inlet / spec["inlet_kgh"])
+    lmtd_k = 0.0
+    for _ in range(30):
+        cw_out = cw_in + q_kw * 3600.0 / (cw_flow * CW_CP_KJKG_K)
+        lmtd_k = lmtd_countercurrent(hot_in_c, hot_out, cw_in, cw_out)
+        q_cap = max(ua_eff * lmtd_k, 0.0)
+        cond = min(max(inlet - nc, 0.0), q_cap * 3600.0 / spec["h_eff_kjkg"])
+        q_next = cond * spec["h_eff_kjkg"] / 3600.0
+        if abs(q_next - q_kw) <= 1e-10:
+            q_kw = q_next
+            break
+        q_kw = 0.5 * (q_kw + q_next)
+    condensate = min(max(inlet - nc, 0.0), q_kw * 3600.0 / spec["h_eff_kjkg"])
+    vent = inlet - condensate
+    cw_out = cw_in + q_kw * 3600.0 / (cw_flow * CW_CP_KJKG_K)
+    return {
+        "tag": spec["tag"], "inlet_kgh": inlet,
+        "condensate_kgh": condensate, "vent_kgh": vent,
+        "q_kw": q_kw, "lmtd_k": lmtd_k, "ua_kw_k": spec["ua_kw_k"],
+        "ua_eff_kw_k": ua_eff, "cw_flow_kgh": cw_flow,
+        "cw_in_c": cw_in, "cw_out_c": cw_out, "hot_in_c": hot_in_c,
+        "hot_out_c": hot_out, "mass_residual_kgh": inlet - condensate - vent,
+        "energy_residual_kw": q_kw - cw_flow / 3600.0 * CW_CP_KJKG_K * (cw_out - cw_in),
+    }
+
+
+def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
+                     false_air2_kgh, motive924_kgh, motive927_kgh, motive929_kgh,
+                     cw_factors=None):
+    """Four condensers and three ejector mixing nodes on the PFD-21 basis."""
+    cw_factors = cw_factors or {}
+    streams = {
+        "705": 14799.0 + (vapour1_kgh - R324_V1_DES) + (false_air1_kgh - R324_F001_FA_DES),
+        "790": 12040.0 + (m_evap_kgh - R323_MEVAP_DES),
+        "709": 3342.0 + (vapour2_kgh - R324_V2_DES) + (false_air2_kgh - R324_F003_FA_DES),
+        "924": motive924_kgh, "927": motive927_kgh, "929": motive929_kgh,
+    }
+    streams["703"] = 26840.0 + (streams["705"] - 14799.0) + (streams["790"] - 12040.0)
+    e002 = vacuum_condenser_node(
+        VACUUM_CONDENSERS["324E002"], streams["703"],
+        max(72.0 - R324_F001_FA_DES + false_air1_kgh, 0.0), 116.0,
+        VACUUM_CONDENSERS["324E002"]["cw_flow_kgh"] * cw_factors.get("324E002", 1.0),
+    )
+    streams["719"], streams["706"] = e002["condensate_kgh"], e002["vent_kgh"]
+    streams["708"] = streams["706"] + streams["924"]
+
+    e005 = vacuum_condenser_node(
+        VACUUM_CONDENSERS["324E005"], streams["709"],
+        max(584.0 - R324_F003_FA_DES + false_air2_kgh, 0.0), 140.0,
+        VACUUM_CONDENSERS["324E005"]["cw_flow_kgh"] * cw_factors.get("324E005", 1.0),
+    )
+    streams["720"], streams["712"] = e005["condensate_kgh"], e005["vent_kgh"]
+    streams["714"] = streams["712"] + streams["927"]
+
+    e006 = vacuum_condenser_node(
+        VACUUM_CONDENSERS["324E006"], streams["714"],
+        41.0 + max(streams["712"] - 584.0, 0.0), 104.0,
+        VACUUM_CONDENSERS["324E006"]["cw_flow_kgh"] * cw_factors.get("324E006", 1.0),
+    )
+    streams["721"], streams["715"] = e006["condensate_kgh"], e006["vent_kgh"]
+    streams["717"] = streams["715"] + streams["929"]
+
+    e007 = vacuum_condenser_node(
+        VACUUM_CONDENSERS["324E007"], streams["717"],
+        31.0 + max(streams["715"] - 41.0, 0.0), 120.0,
+        VACUUM_CONDENSERS["324E007"]["cw_flow_kgh"] * cw_factors.get("324E007", 1.0),
+    )
+    streams["759"], streams["722"] = e007["condensate_kgh"], e007["vent_kgh"]
+    return {"streams_kgh": streams,
+            "nodes": {"324E002": e002, "324E005": e005, "324E006": e006, "324E007": e007},
+            "mixing_residual_703_kgh": streams["703"] - streams["705"] - streams["790"]}
 
 
 # ----- L3 boundary guards (Level-3 audit, Batch 1) -----
@@ -3598,14 +3808,14 @@ def _lag1(store: dict, key: str, target: float, tau_s: float, dt: float) -> floa
 #   integral term Kc*(dt/Ti)*err == (Kc*rho)*(dt/Ti)*(err/rho) is likewise invariant, so Ti stays.
 #   _fic_flow RETURNS kg/h (mass) unchanged, so every downstream HMB mass balance is byte-untouched
 #   and the boot pin (design constants only, no FIC flow) is neutral by construction.
-RHO_401_KGM3 = 992.4    # 328D003 Comp-I flush 401: Amm.Water (PFD amm.water streams 735/791, ~992 kg/m3)
+RHO_401_KGM3 = 992.4    # 328D003 Comp-II flush 734/401: Amm.Water (~992 kg/m3)
 RHO_718_KGM3 = 1065.0   # 323D011 lean-carbamate 718A/718B: Carb.Liq (PFD stream 718, 7123 kg/h / 6.7 m3/h)
 # 791 / 775 take the PFD's OWN "Density eff." row, NOT a mass/volume back-solve.  Both streams are
 # printed at a 2-significant-figure volume of 1.5 m3/h, so back-solving would fabricate 1534/1.5 =
 # 1022.7 and 1675/1.5 = 1116.7 -- 3.0 % and 2.0 % away from the tabulated densities.  (Stream 744
 # tolerated a back-solve only because its volume carries 3 figures: 31478/31.4 = 1002.5 vs 1002.)
 # Design volumes follow as 1534/992.4 = 1.546 and 1675/1095 = 1.530, both printing as the PFD's 1.5.
-RHO_791_KGM3 = 992.4    # 328D003 Comp-I wash 791 -> 323E011: Amm.Water 56 C / 4.1 bar (PFD col 791)
+RHO_791_KGM3 = 992.4    # 328D003 Comp-II wash 791 -> 323E011: Amm.Water 56 C / 4.1 bar
 RHO_775_KGM3 = 1095.0   # 328D001 carbamate reflux 775 -> 328C002: Carb.Liq 61 C / 2.6 bar (PFD col 775)
 
 
@@ -3719,6 +3929,19 @@ def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None, h_kjkg=None):
         "mol_pct":  {k: round(n[k] / n_tot * 100.0, 3) if n_tot else 0.0 for k in MW_COMP},
         "mass_pct": {k: round(m[k] / m_tot * 100.0, 3) if m_tot else 0.0 for k in MW_COMP},
     }
+
+
+def make_stream_mass_pct(mass_kgh, mass_pct, T, P, name, src, dst, phase,
+                         rho=None, h_kjkg=None):
+    """Build a canonical stream from an independently rounded PFD mass-percent row."""
+    total_pct = sum(max(mass_pct.get(k, 0.0), 0.0) for k in MW_COMP)
+    if mass_kgh <= 0.0 or total_pct <= 0.0:
+        return make_stream({}, T, P, name, src, dst, phase, rho=rho, h_kjkg=h_kjkg)
+    comp_kmolh = {
+        k: mass_kgh * max(mass_pct.get(k, 0.0), 0.0) / total_pct / MW_COMP[k]
+        for k in MW_COMP
+    }
+    return make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=rho, h_kjkg=h_kjkg)
 
 
 # ----- Pump model -----
@@ -5468,7 +5691,9 @@ def step_sim(dt: float) -> dict:
     cp_328d3i  = aqueous_cp(A328_CP, A328_D003_TI,    s.a328_d003_TI)
     cp_328d3ii = aqueous_cp(A328_CP, A328_D003_TII,   s.a328_d003_TII)
     cp_322c001 = aqueous_cp(A328_CP, A328_C001_T,     s.a328_c001_T)
-    mv011_prev = s.tlag.get("R3232_v011", R3232_E011_MV_DES)
+    m702_prev  = s.tlag.get("R3232_702", A323_C005_M702_DES)
+    m756_prev  = s.tlag.get("R322_756", A323_C005_M756_DES)
+    m708_prev  = s.tlag.get("R324_708", A323_C005_M708_DES)
     m748_prev  = s.tlag.get("R328_748",   R328_C002_M748_DES)
     m750_prev  = s.tlag.get("R328_750",   R328_C002_M750_DES)
     m775_prev  = s.tlag.get("R328_775",   R328_C002_M775_DES)
@@ -5478,19 +5703,19 @@ def step_sim(dt: float) -> dict:
     m931_prev  = s.tlag.get("R328_M931",  R328_C004_M931_DES)
     m739_prev  = s.tlag.get("R328_739",   R328_C004_M739_DES)   # 328C004 bottoms -> 328E007 -> 740
 
-    # ----- Stage 1 : 323C005 vent scrub -> 328V001 -> Comp-I feed ---------
+    # ----- Stage 1 : 323C005 vent scrub -> 328V001 -> Comp-II feed --------
     Tc005    = s.a323_c005_T
-    m_makeup = A323_C005_MAKEUP     # demin make-up from an unmodelled utility header: constant per
-    #   ui_guidelines.md §4.  FIC-323418 used to drive this, but its OEM service is "ACA FROM 323P8A/B"
-    #   (Master_PID_Tuning_Constants.md:14) -- the 718B leg -- so that binding was false and is gone.
-    #   Modelling gap: this leg has no flow controller of its own until the make-up header is built.
-    in_c005  = mv011_prev + m_makeup
-    bot_c005 = A323_C005_BOT_DES * (s.a323_c005_M / A323_C005_M_DES)      # -> V001 @ 55°C
-    P_c005   = (mv011_prev/3600.0*R3232_CP*(R3232_E011_T       - Tc005)
-                + m_makeup/3600.0*4.0   *(A323_C005_MAKEUP_T   - Tc005)
-                + mv011_prev/3600.0*A323_C005_LAM)
+    gas_c005 = m702_prev + m708_prev
+    m_341    = A323_C005_VENT_DES * gas_c005 / (A323_C005_M702_DES + A323_C005_M708_DES)
+    abs_c005 = max(gas_c005 - m_341, 0.0)
+    in_c005  = m756_prev + gas_c005
+    bot_c005 = A323_C005_BOT_DES * (s.a323_c005_M / A323_C005_M_DES)
+    P_c005   = ((m756_prev/3600.0*R3232_CP*(A328_C001_T - Tc005)
+                 + m702_prev/3600.0*R3232_CP*(45.0 - Tc005)
+                 + m708_prev/3600.0*R3232_CP*(121.0 - Tc005))
+                + abs_c005/3600.0*A323_C005_LAM)
     s.a323_c005_T = Tc005 + P_c005*dt/max(s.a323_c005_M*R3232_CP, 1e-6)
-    s.a323_c005_M = max(s.a323_c005_M + (in_c005 - bot_c005)/3600.0*dt, 1.0)
+    s.a323_c005_M = max(s.a323_c005_M + (m756_prev + abs_c005 - bot_c005)/3600.0*dt, 1.0)
 
     # ----- Stage 2 : 328D003  Comp-I (formation) + Comp-II (collector) ----
     TI       = s.a328_d003_TI
@@ -5498,10 +5723,10 @@ def step_sim(dt: float) -> dict:
                          rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
     m_402    = _fic_flow(s.FIC_323402, R3232_E011_M402_DES, 50.0, s.tlag, "F_323402", dt,
                          rho=RHO_791_KGM3)         # SP in m3/h, returns kg/h
-    # Stream 793: normally-closed spare off the same Comp-I discharge header as 735/791/734.
+    # Stream 793: normally-closed spare off the same Comp-II discharge header as 735/791/734.
     # Design stroke 0 % -> 0 kg/h (PFD-22 col 793), full stroke = one branch capacity.  Opening it
-    # draws real liquid out of Comp I, so it enters the holdup ODE as an export at TI (no enthalpy
-    # term: an outflow at the bulk temperature contributes nothing to P_compI).
+    # draws real liquid out of Comp II, so it enters that holdup ODE as an export at TII (no enthalpy
+    # term: an outflow at the bulk temperature contributes nothing to P_compII).
     m_793    = _fic_flow(s.FIC_328405, S793_CAP_KGH, 100.0, s.tlag, "F_328405", dt,
                          rho=RHO_401_KGM3)                        # volumetric loop, returns kg/h
     # Stream 741 (TD-005): purified process-condensate RECYCLE 328E007 -> 328E001 -> 328D003 Comp I.
@@ -5515,54 +5740,48 @@ def step_sim(dt: float) -> dict:
     m_741_raw = _fic_flow(s.FIC_328406, S741_CAP_KGH, 100.0, s.tlag, "F_328406", dt,
                           rho=RHO_741_KGM3)                       # volumetric loop, returns kg/h
     m_741    = min(m_741_raw, m739_prev)                          # cannot recycle more than 740 carries
-    m_735    = R328_C002_M738_DES * (s.a328_d003_MI / A328_D003_MI_DES)   # -> 738 via 328E007
-    # AUDIT C2 — the three PFD condensate returns were FROZEN constants, so the evaporation section
-    # was a source with no sink (m_324_cond was computed and shown on a display only) and 328D003's
-    # largest inlet could not respond to the plant that produces it: a 30 % cut to the 324E001 duty
-    # moved the Comp-I inventory by 1.3e-7 relative.  They now scale with the LIVE vacuum-train
-    # condensable load, read one tick delayed because unit 324 is solved later in the tick -- the same
-    # tear discipline every other recycle here uses.  Anchored: ratio == 1.0 at design, bit-exact.
-    # STILL OPEN (audit C24): the four condensers are not individually modelled, so the per-condenser
-    # split and their distinct temperatures (45/40/41/55 C) stay at the design proportions, and the
-    # 324E007 return (PFD 759, 190 kg/h @ 55 C) is still absent from the inlet list entirely.
-    cond_ratio = clamp(s.tlag.get("R324_COND", R324_COND_DES) / R324_COND_DES, 0.0, 5.0)
-    m_719    = A328_D003_M719 * cond_ratio
-    m_720    = A328_D003_M720 * cond_ratio
-    m_721    = A328_D003_M721 * cond_ratio
-    m_759    = A328_D003_M759 * cond_ratio                   # AUDIT B10: 324E007 condensate
-    in_compI = m_719 + m_720 + m_721 + m_759 + bot_c005 + m_741
-    out_compI= m_735 + m_401 + m_402 + m_793
-    # Energy: the carbamate-formation exotherm (LAM_I) is back-solved on the CARBAMATE feed only, so
-    # it must NOT be levied on the 100 %-water 741 recycle -- apply it to (in_compI - m_741).  The
-    # recycle still carries its own sensible-heat term at the PFD-741 temperature (40 C) vs bulk TI.
+    run_p002 = s.aux_pumps["322P002A"]["on"] or s.aux_pumps["322P002B"]["on"]
+    m_744_cmd = _fic_flow(s.FIC_328402, R3232_E003_M744_DES, 50.0, s.tlag, "F_328402", dt,
+                          rho=RHO_744_KGM3)
+    m_744    = m_744_cmd * (1.0 if run_p002 else 0.0)
+    m_755    = m_744
+    m_735    = R328_C002_M738_DES * (s.a328_d003_MII / A328_D003_MII_DES)   # -> 738 via 328E007
+    # The four explicit vacuum-condenser returns are read one tick delayed because Unit 324 is solved
+    # later in the tick.  Their distinct live flows and 45/40/41/55 C thermal nodes replace the former
+    # aggregate proportional split.
+    m_719    = s.tlag.get("R324_719", A328_D003_M719)
+    m_720    = s.tlag.get("R324_720", A328_D003_M720)
+    m_721    = s.tlag.get("R324_721", A328_D003_M721)
+    m_759    = s.tlag.get("R324_759", A328_D003_M759)
+    in_compI = m_719 + m_720 + m_721 + m_759 + m_741 - A328_D003_COMP_I_ROUNDING_KGH
+    out_compI= m_744
     P_compI  = ((m_719*(A328_D003_M719_T - TI)
                  + m_720*(A328_D003_M720_T - TI)
                  + m_721*(A328_D003_M721_T - TI)
-                 + m_759*(A328_D003_M759_T - TI)              # AUDIT B10: 324E007 condensate @ 55 C
-                 + bot_c005     *(A328_D003_V001_T  - TI)
+                 + m_759*(A328_D003_M759_T - TI)
                  + m_741        *(A328_M741_T       - TI))/3600.0*cp_328d3i
-                + (in_compI - m_741)/3600.0*A328_D003_LAM_I)
+                + (m_719 + m_720 + m_721 + m_759)/3600.0*A328_D003_LAM_I)
     s.a328_d003_TI = TI + P_compI*dt/max(s.a328_d003_MI*cp_328d3i, 1e-6)
     s.a328_d003_MI = max(s.a328_d003_MI + (in_compI - out_compI)/3600.0*dt, 1.0)
     TII      = s.a328_d003_TII
-    run_p002 = s.aux_pumps["322P002A"]["on"] or s.aux_pumps["322P002B"]["on"]
-    m_755    = A328_M755_DES * (s.a328_d003_MII / A328_D003_MII_DES) * (1.0 if run_p002 else 0.0)
-    P_compII = m744_prev/3600.0*cp_328d3ii*(R3232_E003_T744 - TII)          # 744 in @ 44 = TII
+    in_compII = bot_c005 + A328_D003_COMP_II_ROUNDING_KGH
+    out_compII = m_735 + m_401 + m_402 + m_793
+    P_compII = bot_c005/3600.0*cp_328d3ii*(A328_D003_V001_T - TII)
     s.a328_d003_TII = TII + P_compII*dt/max(s.a328_d003_MII*cp_328d3ii, 1e-6)
-    s.a328_d003_MII = max(s.a328_d003_MII + (m744_prev - m_755)/3600.0*dt, 1.0)
+    s.a328_d003_MII = max(s.a328_d003_MII + (in_compII - out_compII)/3600.0*dt, 1.0)
 
     # ----- 328E007 feed/effluent interchanger (AUDIT C10) ----------------
-    #  Cold: 328D003 Comp-I draw 735 (56 C) heated against the 328C004 bottoms 739 (143 C) -> 738.
+    #  Cold: 328D003 Comp-II draw 735 (56 C) heated against the 328C004 bottoms 739 (143 C) -> 738.
     #  Hot : 739 giving up exactly the duty the cold side took, plus the design shell loss -> 740.
     #  The hot inlet s.a328_c004_T is last tick's value (328C004 is Stage 5), i.e. the same one-tick
     #  tear m739_prev already uses -- consistent with every other recycle in this engine.
     #  Pinch-bounded: a counter-current interchanger cannot drive either outlet past the opposite
     #  inlet, so T_740 is clamped between the two live inlet temperatures.
-    T_738    = s.a328_d003_TI + R328_E007_EPS_T * (s.a328_c004_T - s.a328_d003_TI)
-    T740_raw = s.a328_c004_T - (m_735 * (T_738 - s.a328_d003_TI)
+    T_738    = s.a328_d003_TII + R328_E007_EPS_T * (s.a328_c004_T - s.a328_d003_TII)
+    T740_raw = s.a328_c004_T - (m_735 * (T_738 - s.a328_d003_TII)
                                 + R328_E007_LOSS_DT) / max(m739_prev, 1e-6)
-    T_740    = min(max(T740_raw, min(s.a328_d003_TI, s.a328_c004_T)),
-                   max(s.a328_d003_TI, s.a328_c004_T))
+    T_740    = min(max(T740_raw, min(s.a328_d003_TII, s.a328_c004_T)),
+                   max(s.a328_d003_TII, s.a328_c004_T))
 
     # ----- Stage 3 : 328C002  Desorber-I (bottoms 139°C, floats PIC-328202)
     Tc002    = s.a328_c002_T
@@ -5743,7 +5962,7 @@ def step_sim(dt: float) -> dict:
     Q_e004   = R328_E004_Q_DES_KW * (tic002_op / R328_E004_TV_OP_DES)
     sens_d001= ((m_737*(T_737 - Td001)                                    # AUDIT C31: live column top
                  + m718A_prev*(R328_D001_T718A - Td001)
-                 + m_793*(s.a328_d003_TI - Td001))/3600.0*cp_328d001)     # AUDIT B2: 793 @ Comp-I bulk (56 C)
+                 + m_793*(s.a328_d003_TII - Td001))/3600.0*cp_328d001)
     P_d001   = sens_d001 + m_737/3600.0*R328_D001_LAM737 - Q_e004
     s.a328_d001_P = max(s.a328_d001_P + R328_D001_P_KP*(gen786 - m_786_d001)/3600.0*dt, 0.1)
     s.a328_d001_T = Td001 + P_d001*dt/max(s.a328_d001_M*cp_328d001, 1e-6)
@@ -5779,9 +5998,9 @@ def step_sim(dt: float) -> dict:
     #  internally.  Taking the feed at T_738 instead would credit the 2005 kW E007 recovery to the
     #  inlet without ever debiting it -- the same boundary slip that made the audit's own envelope
     #  disagree with its lambda arithmetic.
-    q328_in  = ((m_735 * s.a328_d003_TI
+    q328_in  = ((m_735 * s.a328_d003_TII
                  + m718A_prev * R328_D001_T718A
-                 + m_793 * s.a328_d003_TI) / 3600.0 * R328_CP
+                 + m_793 * s.a328_d003_TII) / 3600.0 * R328_CP
                 + m_911 / 3600.0 * R328_C003_M911_DH
                 + m_931 / 3600.0 * R328_C004_M931_DH)
     q328_out = ((m739_prev * T_740
@@ -5840,12 +6059,10 @@ def step_sim(dt: float) -> dict:
 
     # ----- Stage 8 : 323E003 + 323D001  LPCC (74°C, tempered water) -------
     Te003    = s.r3232_e003_T
-    in_e003  = m_305 + m718B_prev + m_776 + R3232_M797_DES + m_756
+    in_e003  = m_305 + m718B_prev + m_776 + R3232_M797_DES
     pic202_op= _ctrl_ipd(s.PIC_323202, s.r3232_d001_P, dt)
     m_321    = R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)   # vent -> 323E011
     gen321   = R3232_E003_PHI321 * (m_305 + R3232_M797_DES)
-    m_744    = _fic_flow(s.FIC_328402, R3232_E003_M744_DES, 50.0, s.tlag, "F_328402", dt,
-                         rho=RHO_744_KGM3)          # wash -> Comp-II (SP in m3/h, returns kg/h)
     lvl_d001_323 = s.r3232_d001_M / R3232_D001_M_DES * R3232_D001_LVL_SP
     lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master
     rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
@@ -5869,16 +6086,18 @@ def step_sim(dt: float) -> dict:
     sens_e003= ((m_305*(R3232_E003_T305 - Te003)
                  + m718B_prev*(R3232_E011_T - Te003)
                  + m_776    *(R328_D001_T  - Te003)
-                 + R3232_M797_DES*(R3232_M797_T - Te003)
-                 + m_756    *(A328_C001_T  - Te003))/3600.0*R3232_CP)
+                 + R3232_M797_DES*(R3232_M797_T - Te003))/3600.0*R3232_CP)
     P_e003   = sens_e003 + m_cond/3600.0*R3232_E003_LAMC - Q_e003
     s.r3232_d001_P = max(s.r3232_d001_P + R3232_D001_P_KP*(gen321 - m_321)/3600.0*dt, 0.1)
     s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
-    s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_744 - m_308)/3600.0*dt, 1.0)
+    s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_308)/3600.0*dt, 1.0)
 
     # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
     Te011    = s.r3232_e011_T
-    in_e011  = m_701 + R3232_M702_DES + m_786_d001 + m_321 + m_402
+    in_e011  = (R3232_E011_IN_DES + (m_701 - R3232_E011_M701_DES)
+                + (m_786_d001 - R3232_E011_M786_DES)
+                + (m_321 - R3232_E011_M321_DES)
+                + (m_402 - R3232_E011_M402_DES))
     pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
     m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
     gen_v011 = R3232_E011_PHIV * in_e011
@@ -5921,18 +6140,20 @@ def step_sim(dt: float) -> dict:
     m_718A   = _lag1(s.tlag, "F_718A", m718A_dmd, R3232_M718A_TAU_S, dt)  # -> 328E004/328D001 (bal)
     m_718_tot= m_718A + m_718B                                            # -> 323D011 draw (kg/h)
     Q_e011   = R3232_E011_UA_KW * (Te011 - 35.0)
-    sens_e011= ((m_701*(R3232_E011_T701 - Te011)
-                 + R3232_M702_DES*(R3232_M702_T   - Te011)
+    sens_e011= (((m_701 + R3232_E011_RECON_KGH)*(R3232_E011_T701 - Te011)
                  + m_786_d001*(R3232_E011_T786    - Te011)
                  + m_321*(74.0 - Te011)
                  + m_402*(56.0 - Te011))/3600.0*R3232_CP)
-    P_e011   = sens_e011 + m_v011/3600.0*R3232_E011_LAMV - Q_e011
+    m_cond_e011 = max(in_e011 - m_402 - m_v011, 0.0)
+    P_e011   = sens_e011 + m_cond_e011/3600.0*R3232_E011_LAMV - Q_e011
     s.r3232_e011_P = max(s.r3232_e011_P + R3232_E011_P_KP*(gen_v011 - m_v011)/3600.0*dt, 0.1)
     s.r3232_e011_T = Te011 + P_e011*dt/max(s.r3232_e011_M*R3232_CP, 1e-6)
-    s.r3232_e011_M = max(s.r3232_e011_M + (in_e011 + m_401 - m_v011 - m_718A - m_718B)/3600.0*dt, 1.0)
+    s.r3232_e011_M = max(s.r3232_e011_M + (in_e011 - m_v011 - m_718A - m_718B)/3600.0*dt, 1.0)
 
     # ----- recycle-tear writes (one-tick delay -> next step reads these) --
     s.tlag["R3232_v011"] = m_v011
+    s.tlag["R3232_702"]  = m_v011
+    s.tlag["R322_756"]   = m_756
     s.tlag["R328_748"]   = m_748
     s.tlag["R328_750"]   = m_750
     s.tlag["R328_775"]   = m_775
@@ -6028,10 +6249,15 @@ def step_sim(dt: float) -> dict:
         pwr1 = (feed1_m/3600.0 * cp_feed1 * (T_feed1 - t1_solved)
                 + Q_e001_kw - v1_m/3600.0 * R324_LAM_V1)
         t1_next = t1_old + pwr1 * dt / max(M_f001_pre * cp_hold1, 1e-6)
+        m703_fp = (VACUUM_CONDENSERS["324E002"]["inlet_kgh"]
+                   + (m_evap - R323_MEVAP_DES) + (v1_m - R324_V1_DES)
+                   + (fa202_m - R324_F001_FA_DES))
+        nc002_fp = max(72.0 - R324_F001_FA_DES + fa202_m, 0.0)
+        vent002_fp = max(nc002_fp, m703_fp - VACUUM_CONDENSERS["324E002"]["condensate_kgh"])
         ejpull_live = (R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES)
                        * (p1_solved / R324_F001_P_BARA))
         p1_next = clamp(p1_old
-                        + R324_F001_P_KP * ((v1_m + fa202_m) - ejpull_live) / 3600.0 * dt,
+                        + R324_F001_P_KP * (vent002_fp - ejpull_live) / 3600.0 * dt,
                         0.05, 1.0)
         if max(abs(p1_next - p1_solved), abs(t1_next - t1_solved)) <= 1e-12:
             p1_solved = p1_next
@@ -6119,10 +6345,14 @@ def step_sim(dt: float) -> dict:
         pwr2 = (feed2_m/3600.0 * cp_feed2 * (s.r324_e001_T - t2_solved)
                 + Q_e003_kw - v2_m/3600.0 * R324_LAM_V2)
         t2_next = t2_old + pwr2 * dt / max(M_f003_pre * cp_hold2, 1e-6)
+        m709_fp = (VACUUM_CONDENSERS["324E005"]["inlet_kgh"]
+                   + (v2_m - R324_V2_DES) + (fa203_m - R324_F003_FA_DES))
+        nc005_fp = max(584.0 - R324_F003_FA_DES + fa203_m, 0.0)
+        vent005_fp = max(nc005_fp, m709_fp - VACUUM_CONDENSERS["324E005"]["condensate_kgh"])
         ejpull2_live = (R324_F003_EJPULL_DES * (s.HIC_329606 / R324_HIC9606_DES_PCT)
                         * (p2_solved / R324_F003_P_BARA))
         p2_next = clamp(p2_old
-                        + R324_F003_P_KP * ((v2_m + fa203_m) - ejpull2_live) / 3600.0 * dt,
+                        + R324_F003_P_KP * (vent005_fp - ejpull2_live) / 3600.0 * dt,
                         0.02, 1.0)
         if max(abs(p2_next - p2_solved), abs(t2_next - t2_solved)) <= 1e-12:
             p2_solved = p2_next
@@ -6173,20 +6403,23 @@ def step_sim(dt: float) -> dict:
     _fic_flow(s.FIC_335405, R324_M_UF_DES/1000.0, R324_FIC405_OP_DES,
               s.tlag, "R324_UF", dt, cas_sp=m_uf/1000.0)                      # FIC-335405 slave liveness (t/h)
 
-    # ---- condensation train sinks (conservative pass-through boundary) -----------
-    #  Stage vapours + false air are pulled by ejectors 324F002/F004 through the
-    #  vacuum condensers 324E002/E005/E006/E007: water condenses (-> 328D003 process
-    #  condensate) and the non-condensables (false air) vent via 324F005.  Modelled
-    #  as boundary sinks so the 324 envelope closes:  V1+V2 -> condensate,
-    #  false air -> vent.
-    # AUDIT C2 — m_324_cond now carries the 323F010 flash vapour 790 as well, because 790 and 705
-    # merge into PFD stream 703 and condense together in the 324E002 shell (703 = 705 + 790 = 14799 +
-    # 12040 = 26839 ~ 26840, and 703 = 719 + 706 = 26768 + 72).  Without it the "total process
-    # condensate" was 16.8 t/h against the 31.3 t/h the PFD actually returns to 328D003.  Written to
-    # the tear below so the 328D003 Comp-I return can follow it.
-    m_324_cond = m_evap + v1_m + v2_m                                         # total process condensate (kg/h)
-    s.tlag["R324_COND"] = m_324_cond                                          # -> next tick's 328D003 Comp-I return
-    m_324_vent = fa202_m + fa203_m                                            # non-condensable vent (kg/h)
+    # ---- four-condenser vacuum train ----------------------------------------------
+    #  Each exchanger is an explicit mass/energy node with Q=UA*LMTD, a cooling-water
+    #  branch, condensate return to 328D003 Comp I, and noncondensable derating.  The
+    #  intervening ejectors are conservative mixing nodes on strict PFD anchors.
+    motive_ratio_606 = max(s.HIC_329606 / R324_HIC9606_DES_PCT, 0.0)
+    mot927_m = R324_F004_MOTIVE_DES * motive_ratio_606
+    mot929_m = R324_F005_MOTIVE_DES * motive_ratio_606
+    vac324 = vacuum_train_324(
+        m_evap, v1_m, v2_m, fa202_m, fa203_m,
+        mot9605_m, mot927_m, mot929_m,
+    )
+    vac_stream = vac324["streams_kgh"]
+    m_324_cond = vac_stream["719"] + vac_stream["720"] + vac_stream["721"] + vac_stream["759"]
+    m_324_vent = vac_stream["722"]
+    for _sid in ("719", "720", "721", "759", "708"):
+        s.tlag["R324_" + _sid] = vac_stream[_sid]
+    s.tlag["R324_COND"] = m_324_cond  # retained aggregate for backward-compatible diagnostics
     # ---- recycle tear write (one-tick delay -> next step reads it) ---------------
     s.tlag["R324_recyc"]   = m_recyc
     s.tlag["R324_recyc_w"] = w2_live                                          # AUDIT F-5: live recycle strength
@@ -6335,6 +6568,85 @@ def step_sim(dt: float) -> dict:
             "CCW return (shell side, warm)", "322E003", "329P006 A/B", "liquid",
             rho=SCRUB_CCW_RHO_OUT),
     }
+
+    # Numbered aliases from the supplied absorber/cooling-water maps.  PFD component rows are
+    # independently rounded, so make_stream_mass_pct normalizes each row to the live total.
+    mapped_m702 = 440.0 + (m_v011 - R3232_E011_MV_DES)
+    mapped_m341 = m_341
+    mapped_m343 = bot_c005
+    streams.update({
+        "S0204": make_stream(hv604["comp_kmolh"], hv604["T_out"], hv604["P_out"],
+                              "204 HP off-gas", "HV-322604", "322C001", "vapor"),
+        "S0341": make_stream_mass_pct(mapped_m341, PFD_324_MASS_PCT["341"], 43.0, 1.0,
+                                       "341 absorber vent", "323C005", "328V001", "vapor"),
+        "S0343": make_stream_mass_pct(mapped_m343, PFD_324_MASS_PCT["343"], 56.0, 1.0,
+                                       "343 ammonia water", "323C005", "328D003 Comp II", "liquid", rho=992.2),
+        "S0702": make_stream_mass_pct(mapped_m702, PFD_324_MASS_PCT["702"], 45.0, 1.0,
+                                       "702 flash-condenser gas", "323D011", "323C005", "vapor"),
+        "S0703": make_stream_mass_pct(vac_stream["703"], PFD_324_MASS_PCT["703"], 116.0, 0.3,
+                                       "703 condenser-I inlet", "705 + 790", "324E002", "vapor"),
+        "S0705": make_stream_mass_pct(vac_stream["705"], PFD_324_MASS_PCT["705"], 130.0, 0.3,
+                                       "705 evaporator-I vapor", "324F001", "324E002", "vapor"),
+        "S0706": make_stream_mass_pct(vac_stream["706"], PFD_324_MASS_PCT["706"], 45.0, 0.3,
+                                       "706 condenser-I gas", "324E002", "324F002", "vapor"),
+        "S0708": make_stream_mass_pct(vac_stream["708"], PFD_324_MASS_PCT["708"], 121.0, 1.0,
+                                       "708 ejector-I discharge", "324F002", "323C005", "vapor"),
+        "S0709": make_stream_mass_pct(vac_stream["709"], PFD_324_MASS_PCT["709"], 140.0, 0.1,
+                                       "709 condenser-II inlet", "324F003", "324E005", "vapor"),
+        "S0712": make_stream_mass_pct(vac_stream["712"], PFD_324_MASS_PCT["712"], 40.0, 0.1,
+                                       "712 condenser-II gas", "324E005", "324F004", "vapor"),
+        "S0714": make_stream_mass_pct(vac_stream["714"], PFD_324_MASS_PCT["714"], 104.0, 0.3,
+                                       "714 ejector-II discharge", "324F004", "324E006", "vapor"),
+        "S0715": make_stream_mass_pct(vac_stream["715"], PFD_324_MASS_PCT["715"], 41.0, 0.3,
+                                       "715 condenser-III gas", "324E006", "324F005", "vapor"),
+        "S0717": make_stream_mass_pct(vac_stream["717"], PFD_324_MASS_PCT["717"], 120.0, 1.0,
+                                       "717 ejector-III discharge", "324F005", "324E007", "vapor"),
+        "S0719": make_stream_mass_pct(vac_stream["719"], PFD_324_MASS_PCT["719"], 45.0, 0.3,
+                                       "719 condenser-I condensate", "324E002", "328D003 Comp I", "liquid", rho=999.1),
+        "S0720": make_stream_mass_pct(vac_stream["720"], PFD_324_MASS_PCT["720"], 40.0, 0.1,
+                                       "720 condenser-II condensate", "324E005", "328D003 Comp I", "liquid", rho=1014.0),
+        "S0721": make_stream_mass_pct(vac_stream["721"], PFD_324_MASS_PCT["721"], 41.0, 0.3,
+                                       "721 condenser-III condensate", "324E006", "328D003 Comp I", "liquid", rho=1036.0),
+        "S0722": make_stream_mass_pct(vac_stream["722"], PFD_324_MASS_PCT["722"], 55.0, 1.0,
+                                       "722 final vacuum vent", "324E007", "atmosphere", "vapor"),
+        "S0744": make_stream_mass_pct(m_744, PFD_324_MASS_PCT["744"], 44.0, 1.0,
+                                       "744 absorber-pump suction", "328D003 Comp I", "322P002", "liquid", rho=1002.0),
+        "S0755": make_stream_mass_pct(m_755, PFD_324_MASS_PCT["755"], 40.0, 3.9,
+                                       "755 cooled absorber feed", "322E006", "322C001", "liquid", rho=1005.0),
+        "S0756": make_stream_mass_pct(m_756, PFD_324_MASS_PCT["756"], 43.0, 3.9,
+                                       "756 LP-absorber solution", "322C001", "323C005", "liquid", rho=1003.0),
+        "S0759": make_stream_mass_pct(vac_stream["759"], PFD_324_MASS_PCT["759"], 55.0, 1.0,
+                                       "759 condenser-IV condensate", "324E007", "328D003 Comp I", "liquid", rho=989.1),
+        "S0783": make_stream_mass_pct(fa203_m, PFD_324_MASS_PCT["783"], 32.0, 1.0,
+                                       "783 stage-II false air", "atmosphere", "PV-324203", "vapor"),
+        "S0784": make_stream_mass_pct(fa202_m, PFD_324_MASS_PCT["784"], 32.0, 1.0,
+                                       "784 stage-I false air", "atmosphere", "PV-324202", "vapor"),
+        "S0797": make_stream_mass_pct(R3232_M797_DES, PFD_324_MASS_PCT["797"], 46.0, 3.9,
+                                       "797 LP-absorber vent", "322C001", "PV-322201", "vapor"),
+        "S0924": make_stream({"H2O": vac_stream["924"] / MW_COMP["H2O"]}, 146.0, 4.1,
+                              "924 ejector motive", "LP steam", "324F002", "vapor"),
+        "S0927": make_stream({"H2O": vac_stream["927"] / MW_COMP["H2O"]}, 146.0, 4.1,
+                              "927 ejector motive", "LP steam", "324F004", "vapor"),
+        "S0929": make_stream({"H2O": vac_stream["929"] / MW_COMP["H2O"]}, 146.0, 4.1,
+                              "929 ejector motive", "LP steam", "324F005", "vapor"),
+        "S0954": make_stream({"H2O": s.cpl_flow_kgh / MW_COMP["H2O"]}, 46.0, 12.0,
+                              "954 process condensate", "process-condensate header", "322C001", "liquid", rho=990.32),
+    })
+    for _tag, _supply, _return in (
+        ("324E002", "1014", "1015"), ("324E005", "1016", "1017"),
+        ("324E006", "1018", "1019"), ("324E007", "1020", "1021"),
+    ):
+        _node = vac324["nodes"][_tag]
+        streams["S" + _supply] = make_stream(
+            {"H2O": _node["cw_flow_kgh"] / MW_COMP["H2O"]}, _node["cw_in_c"], 3.6,
+            _supply + " cooling-water supply", "1001 header", _tag, "liquid")
+        streams["S" + _return] = make_stream(
+            {"H2O": _node["cw_flow_kgh"] / MW_COMP["H2O"]}, _node["cw_out_c"], 2.2,
+            _return + " cooling-water return", _tag, "1051 header", "liquid")
+    streams["S1001"] = make_stream({"H2O": 4_847_000.0 / MW_COMP["H2O"]}, 30.0, 4.7,
+                                    "1001 main CW supply", "cooling towers", "CW consumers", "liquid")
+    streams["S1051"] = make_stream({"H2O": 4_865_000.0 / MW_COMP["H2O"]}, 39.0, 2.2,
+                                    "1051 main CW return", "CW consumers", "cooling towers", "liquid")
 
     # AI-328701 process-condensate conductivity soft sensor (stream 740, read-only)
     _nh3_740, _urea_740 = ppm_infer_328701(s.a328_c004_T, s.a328_c003_T)
@@ -6584,6 +6896,13 @@ def step_sim(dt: float) -> dict:
                 "TT_323C005": round(s.a323_c005_T, 1),                     # scrub liquid temp (C, hold 55)
                 "LI_323503":  round(s.a323_c005_M / A323_C005_M_DES * 50.0, 1),
                 "bot_th":     round(bot_c005 / 1000.0, 2),                 # bottoms -> 328V001 (t/h)
+                "in756_kgh":  round(m756_prev, 1),
+                "in702_kgh":  round(m702_prev, 1),
+                "in708_kgh":  round(m708_prev, 1),
+                "out343_kgh": round(mapped_m343, 1),
+                "out341_kgh": round(mapped_m341, 1),
+                "closure_kgh": round(m756_prev + m702_prev + m708_prev
+                                     - mapped_m343 - mapped_m341, 6),
                 "FIC_323418": {"pv": round(s.FIC_323418["pv"], 2), "sp": round(s.FIC_323418["sp"], 2),
                                "op": round(s.FIC_323418["op"], 1), "mode": s.FIC_323418["mode"],
                                "vol_m3h": round(m_718B / RHO_718_KGM3, 2),  # volumetric loop PV (m3/h), PFD 718B
@@ -6702,7 +7021,7 @@ def step_sim(dt: float) -> dict:
                 "vent_co2_pct": round((y_vent["CO2"] if y_vent else 0.0) * 100.0, 2),  # CO2 mass% in the atm vent
                 "liq_nh3_pct":  round(s.a328_c001_w.get("NH3", 0.0) * 100.0, 2),        # dissolved NH3 in the liquor
                 "liq_co2_pct":  round(s.a328_c001_w.get("CO2", 0.0) * 100.0, 2),        # dissolved CO2 in the liquor
-                "liquor756_th": round(m_756 / 1000.0, 2),                 # LV-322502 draw -> 323E003 (t/h)
+                "liquor756_th": round(m_756 / 1000.0, 2),                 # LV-322502 draw -> 323C005 (t/h)
                 "cpl_kgh":    round(s.cpl_flow_kgh, 1),                    # FT-322404: condensate 954 in (kg/h, operator-set)
                 "make_conc_pct": round(abs_c001 / max(m_756, 1e-6) * 100.0, 2),  # absorbed NH3/CO2 fraction of 756 draw (dilutes as CPL rises)
                 "XV_322915":  bool(s.XV_322915),                          # steam-flood trip valve (22.1)
@@ -6711,14 +7030,18 @@ def step_sim(dt: float) -> dict:
                 "LIC_322502": {"pv": round(s.LIC_322502["pv"], 1), "sp": round(s.LIC_322502["sp"], 1),
                                "op": round(s.LIC_322502["op"], 1), "mode": s.LIC_322502["mode"]},
             },
-            "D003": {                            # 328D003 recirc collector (Comp-I 56°C / Comp-II 44°C)
-                "TT_328I":    round(s.a328_d003_TI, 1),                    # Comp-I temp (C, hold 56)
-                "TT_328II":   round(s.a328_d003_TII, 1),                   # Comp-II temp (C, hold 44)
+            "D003": {                            # 328D003 recirc collector (Comp-I 44°C / Comp-II 56°C)
+                "TT_328I":    round(s.a328_d003_TI, 1),
+                "TT_328II":   round(s.a328_d003_TII, 1),
                 "LI_328I":    round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1),
                 "LI_328II":   round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1),
-                "form735_th": round(m_735 / 1000.0, 2),                    # Comp-I formation -> 328C002 (t/h)
-                "collect755_th": round(m_755 / 1000.0, 2),                 # 322P002 collector -> 322C001 (t/h)
+                "LT_328507_open_loop": round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1),
+                "LT_328508_open_loop": round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1),
+                "form735_th": round(m_735 / 1000.0, 2),                    # Comp-II -> 328C002
+                "collect755_th": round(m_755 / 1000.0, 2),                 # Comp-I -> 322P002/E006/C001
                 "flow755_m3h": round(m_755 / A328_M755_RHO, 2),            # FT-322402: 755 draw in m3/h (des 31.3)
+                "compI_pfd_rounding_kgh": round((m_719 + m_720 + m_721 + m_759 + m_741) - m_744, 3),
+                "compII_pfd_rounding_kgh": round(bot_c005 - (m_735 + m_401 + m_402 + m_793), 3),
                 # FIC-328406 is the PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 -> Comp I
                 # (TD-005).  Normally closed, so pv/sp read 0.00 m3/h at 100 % load.  It is now a
                 # VOLUMETRIC loop: pv/sp are already m3/h, and m_kgh carries the delivered mass that
@@ -6745,9 +7068,9 @@ def step_sim(dt: float) -> dict:
                 # is the pressure input to the PY-324201 concentration inferential; PIC-324202 is the
                 # 324E002 SHELL controller (line 14).  The separator vacuum used to be published only
                 # under the shell controller's tag, so PT-324201 was invisible on the HMI.  The shell
-                # is still aliased to the separator node until the condenser train is modelled (C24).
+                # retains the PFD's rounded manifold pressure because no gas-side pressure-drop datum exists.
                 "PT_324201":   round(s.r324_f001_P, 3),                       # 324F001 separator vacuum (bar a, hold 0.33)
-                "PT_324202":   round(s.r324_f001_P, 3),                       # 324E002 shell (aliased to the separator node - C24 open)
+                "PT_324202":   round(s.r324_f001_P, 3),                       # 324E002 shell pressure (shared rounded PFD manifold)
                 "LI_324F001":  round(s.r324_f001_M / R324_F001_M_FULL * 100.0, 1),
                 "feed_th":     round(feed1_m / 1000.0, 2),                    # blended Stage-1 feed (t/h)
                 "vapour_th":   round(v1_m / 1000.0, 2),                       # water vapour -> 324E002 (t/h)
@@ -6779,7 +7102,7 @@ def step_sim(dt: float) -> dict:
                 # AUDIT B8 — PT-324204 is the 324F003 separator transmitter (mapping doc line 20) and
                 # feeds the AY-324701 inferential; PIC-324203 is the 324E005 shell controller (line 24).
                 "PT_324204":   round(s.r324_f003_P, 3),                       # 324F003 separator vacuum (bar a, hold 0.131)
-                "PT_324203":   round(s.r324_f003_P, 3),                       # 324E005 shell (aliased to the separator node - C24 open)
+                "PT_324203":   round(s.r324_f003_P, 3),                       # 324E005 shell pressure (shared rounded PFD manifold)
                 "LI_324F003":  round(s.r324_f003_M / R324_F003_M_FULL * 100.0, 1),
                 "feed_th":     round(feed2_m / 1000.0, 2),                    # 95% melt from Stage 1 (t/h)
                 "vapour_th":   round(v2_m / 1000.0, 2),                       # water vapour -> 324E005 (t/h)
@@ -6812,8 +7135,28 @@ def step_sim(dt: float) -> dict:
                                 "op": round(s.FIC_335405["op"], 1), "mode": s.FIC_335405["mode"]},
             },
             "VAC": {                             # vacuum condensation train (324E002/E005/E006/E007 + ejectors)
-                "condensate_th": round(m_324_cond / 1000.0, 2),              # V1+V2 -> 328D003 (t/h)
+                "condensate_th": round(m_324_cond / 1000.0, 2),              # 719+720+721+759 -> 328D003 Comp I (t/h)
                 "vent_kgh":      round(m_324_vent, 1),                        # non-condensable vent -> atm (kg/h)
+                "mix703_residual_kgh": round(vac324["mixing_residual_703_kgh"], 3),
+                **{
+                    _tag: {
+                        "Q_kW": round(_node["q_kw"], 1),
+                        "UA_kW_K": round(_node["ua_kw_k"], 3),
+                        "UA_eff_kW_K": round(_node["ua_eff_kw_k"], 3),
+                        "LMTD_K": round(_node["lmtd_k"], 3),
+                        "cw_in_th": round(_node["cw_flow_kgh"] / 1000.0, 3),
+                        "cw_in_C": round(_node["cw_in_c"], 2),
+                        "cw_out_C": round(_node["cw_out_c"], 2),
+                        "inlet_kgh": round(_node["inlet_kgh"], 1),
+                        "condensate_kgh": round(_node["condensate_kgh"], 1),
+                        "vent_kgh": round(_node["vent_kgh"], 1),
+                        "mass_residual_kgh": round(_node["mass_residual_kgh"], 6),
+                        "energy_residual_kW": round(_node["energy_residual_kw"], 6),
+                        "area_m2": VACUUM_CONDENSERS[_tag]["area_m2"],
+                        "tube_count": VACUUM_CONDENSERS[_tag]["tube_count"],
+                    }
+                    for _tag, _node in vac324["nodes"].items()
+                },
             },
         },
         "HPCC_322E002": {                        # HP Carbamate Condenser 322E002 -> 322R001

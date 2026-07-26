@@ -33,6 +33,7 @@
 | 18 | 2026-07-23 | branch `master` | Equation audit remediation, slot 10 — **TD-014 root cause (open-loop temperature integrator), TD-013 closed, and cp made a property across units 323 and 328.** The 323 train's urea fraction was on a linear −0.0067 pp/h ramp that never arrested and was tick-invariant, so it read as a model property. Walking the operator-supplied stream map (207 → 208 → 301/311 → 313 → 302/314 → 319 → 317) with every node instrumented showed the stripper bottoms **bit-flat for 6 h** while `w_c003` fell −0.0041 pp/h — the ramp is born in the stage, not carried in. A 2-minute-residence CSTR with constant inputs cannot ramp for 14 h, so an input had to be moving: the boil-up, falling 5.97 kg/h per hour, perfectly linearly. Cause: three stages take the energy-limited branch `m_vap = M_DES·(q_avail/Q_DES)` while their latent constants are back-solved from that same design duty, `λ = Q_DES/(M_DES/3600)`, so `P = q_avail − m_vap·λ/3600 ≡ 0` **identically at every load** — the temperature had no input, the controller integrated against zero gain, and its velocity increment Kc·(dt/Ti)·err walked the steam valve down forever at a dt-independent rate (hence the tick-invariance) and in one direction only (hence the monotone ramp), because the composition-split branch caps the other side. Fixed with the bubble-point relaxation 323F004 already used, giving `dT/dt = (T_bub − T)/τ`: 323C003's bubble point rides the live column pressure, 323F010's rides **composition** through Raoult on water, which is the real physics of a fixed-vacuum evaporator and makes TIC-323012 the concentration controller it is on the plant. Raoult is quoted, not fitted, and reproduces 88–99 % of a 20–90 °C elevation against the licensor's own (w, P, T) triplets; it is explicitly excluded at 323C003/323F004, whose NH₃/CO₂-bearing liquors it overshoots by 33 °C and 16 °C. Every 323 node's slope is now exactly 0.0. **324E001/324E003 carry the same identity and are not fixed** — switching the closure on gives loops tuned against a zero-gain plant a real gain and they diverge (T_e003 → 138.5 °C in 6 h; bounded with both masters in MAN, which proves it is tuning, not the model). Carried as TD-015 with a measured recommendation. With the inlet stationary the only argument for the **323D002 strength pin** was gone, so it was dropped (TD-013 closed, option (c)): the tank tracks 323F010 with its own residence-time lag, the last composition-blind node between reactor and evaporators is open, and a C2 violation (+0.600 kg urea fabricated per 1000 kg holdup per call) goes with it. The vessel was rebuilt to its real topology — Comp I 80 m³ active, Comp II 300 m³ passive, and the **field tie-in spool** between them as an operator boolean on screen 323-1; opening it against a dry Comp II collapses a 10 % head from 80 m³ into 380 m³ (10 % → 2.1 %), the hazard it exists to train. Three constants corrected from source: LIC-323507 setpoint 65 % → **10 %** (the compartment exists to hold residence under ~6 min so biuret cannot form), ρ 1300 → **1151 kg/m³** (PFD stream 315/317), Comp II seed 50 % → **0 %**. TI-323008 became a real state. Finally **cp is a property, not a constant**: one lumped 2.5 kJ/kg·K covered the whole 323 train (44 % @ 40 °C to 80 % @ 99 °C, a 30 % spread) and one 4.0 covered every aqueous vessel from 40 to 200 °C — both replaced by per-stream/per-vessel departures anchored on their own design point. `R3232_CP` deliberately left alone: that liquor is carbamate, not water. Pin unmoved throughout: `leaves 25 / keys 15 / diffs 0`. See Revision Delta #22. |
 | 19 | 2026-07-26 | branch `master` | Full mathematical audit remediation. 328C003 now uses the source-backed second-order Inoue/Otsuka hydrolysis law and explicit +101.5 kJ/mol hydrolysis heat; LP-header pressure reaches the HPCC shell; both Unit-324 evaporators close their pressure/T/VLE/load algebraic tears per tick; the 9-bar header includes PFD flash recovery and live 324E003 demand; recycle residuals and convergence state are published. The new 324F002/F004/F005 issue-for-order sheets close vendor design/max mass balances and topology but conflict with the strict PFD and omit off-design curves/internal geometry, so no ejector anchor was silently changed. See §22.10 and `EJECTOR_DATASHEET_AUDIT_2026-07-26.md`. |
 | 20 | 2026-07-26 | branch `master` | Reviewed the revised Körting F002/F004/F005 mechanical drawings. They close manufacturer/designation/serial, the HFC Helwan UAN 01-3042 provenance, substantial F004/F005 fabrication geometry, and their 0.122/0.245 bar(a) body operating points. The user confirmed `SUEZ II 01-3040` is a copied template error. They do not contain the certified capacity/backpressure/stability curves or loss calibration required to replace the active proportional pull surrogate; no flow anchor was changed. See §22.10 and `EJECTOR_DATASHEET_AUDIT_2026-07-26.md`. |
+| 21 | 2026-07-26 | branch `master` | Built the complete Unit-324 surface-condenser train from the strict PFD, supplied absorber/cooling-water maps, and 324E002/E005/E006/E007 datasheets. The four exchangers are distinct `Q=UA·LMTD` mass/energy nodes with individual CW branches, condensate/vent streams, geometry, and noncondensable derating. Corrected 323C005, 323E011, and 328D003 Comp-I/II routing; false air is now the PFD 21/21 kg/h; mapped numerical streams are runtime aliases. See §22.11 and `research_plan_324_vacuum_train.md`. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -1622,6 +1623,45 @@ breakdown/recovery hysteresis, or acceptance-test points. The proportional press
 equations therefore remain training surrogates, not validated ejector momentum models. ASME PTC 24
 requires those performance relationships, and published 1-D models calibrate mixing/loss coefficients
 against test or CFD data, so geometry alone is not a defensible substitute.
+
+### 22.11 Unit-324 condenser and absorber topology
+
+The old `R324_COND` boundary sink has been replaced by four explicit exchanger nodes and the three
+ejector mixers between them. The strict PFD defines the operating case:
+
+| Equipment | Process inlet | Condensate | Gas outlet | Cooling water | PFD duty |
+|---|---:|---:|---:|---:|---:|
+| 324E002 | 703 = 26840 kg/h | 719 = 26768 | 706 = 72 | 1014/1015 = 1591 t/h, 30/40 °C | 18459 kW |
+| 324E005 | 709 = 3342 kg/h | 720 = 2758 | 712 = 584 | 1016/1017 = 415 t/h, 30/34 °C | 1926 kW |
+| 324E006 | 714 = 1804 kg/h | 721 = 1763 | 715 = 41 | 1018/1019 = 208 t/h, 30/35 °C | 1207 kW |
+| 324E007 | 717 = 221 kg/h | 759 = 190 | 722 = 31 | 1020/1021 = 23 t/h, 30/35 °C | 133 kW |
+
+The cooling-water note writes 18.46/1.93/1.21/0.13 "kW". Its mass flows and temperature rises make
+those figures MW; interpreting them as kW would violate the water-side energy balance by three orders
+of magnitude. One shared $c_p=4.1761$ kJ/kg-K is derived from the exact E002 point and reproduces the
+other three rounded duties. Each node solves $Q=UA\Delta T_{lm}$ and reports mass and water-side energy
+residuals. The datasheets provide areas/tube counts of 1079/2329, 187/486, 56.5/250, and 11/70; their
+older or blank vendor process cases do not override the PFD.
+
+The PFD's independently rounded E002 mixer is preserved transparently:
+$705(14799)+790(12040)=26839$ kg/h versus stream 703 at 26840 kg/h. No fictitious component source is
+inserted. Off design, noncondensables reduce effective UA through a unit-normalized gas-blanketing
+departure and loss of cooling water drives condensate to zero. This is intentionally a training-grade
+departure: no plant fouling, gas-film, or rating curve was supplied.
+
+The connected recovery topology is now literal. 323C005 receives 756(33358), 702(440), and 708(462)
+and sends 343(34180) to 328D003 Comp II plus vent 341(80), an exact mass closure with no invented
+demineralized-water makeup. 323E011 receives 701+786+321+791 and outputs 718+702, closing
+$7563=7123+440$ kg/h; stream 734 is a separate Comp-II wash into 323D011. 328D003 Comp I receives
+719+720+721+759 and supplies 744, exposing the PFD's 1 kg/h rounding residual. Comp II receives 343
+and supplies 735+734+791, exposing the 2 kg/h residual. The supplied map shows both compartment levels
+as indications with no level-control valve, so `LT_328507/508_open_loop` are explicitly open-loop.
+
+False-air streams 784/783 are restored to the PFD 21/21 kg/h. Vacuum inventory now balances against
+post-condenser gas instead of forcing the condensable vapour load through the ejector surrogate, which
+removes the former 22-40:1 entrainment artifact while preserving the documented hand-valve sign rules.
+Gas-side pressure drops remain unparameterized, so shell and upstream manifold pressures share the
+rounded PFD pressure until a pressure survey or vendor performance curve is supplied.
 
 ---
 
