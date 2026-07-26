@@ -59,10 +59,26 @@ def test_streams_crosslink():
                - (pkt["HPCC_322E002"]["gas_th"] + pkt["HPCC_322E002"]["liq_th"])) < 0.1
 
 
+def test_packet_omits_crystallization_assessment():
+    main.state = main.State()
+    pkt = main.step_sim(0.1)
+    assert "CRYST" not in pkt
+
+
+def test_packet_omits_crystallization_alarm_flags():
+    main.state = main.State()
+    pkt = main.step_sim(0.1)
+    removed = {"CARBAMATE_CRYST_WARN", "CARBAMATE_CRYST_ALARM"}
+    assert removed.isdisjoint(pkt["flags"])
+    assert removed.isdisjoint(main.state.flags)
+
+
 if __name__ == "__main__":
     fails = 0
     for t in (test_make_stream_invariants, test_make_stream_zero_flow,
-              test_streams_in_packet, test_streams_crosslink):
+              test_streams_in_packet, test_streams_crosslink,
+              test_packet_omits_crystallization_assessment,
+              test_packet_omits_crystallization_alarm_flags):
         try:
             t(); print("PASS", t.__name__)
         except Exception:

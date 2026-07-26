@@ -493,7 +493,6 @@
   let lastS = {};
   let editing = false;
   let simBtn = null;   // fixed SLOW/FAST pacing toggle button
-  let crystEl = null;  // fixed carbamate-crystallization alarm banner (Bug 2)
 
   const stage = () => document.getElementById('stage');
   const gp = (o, path) => path ? path.split('.').reduce((a, k) => (a == null ? undefined : a[k]), o) : undefined;
@@ -721,18 +720,7 @@
       '.ov-act button{padding:7px 14px;border-radius:6px;border:1px solid #2f4858;background:#13202c;color:#cfe;cursor:pointer;font:600 12px "Segoe UI";}' +
       '.ov-act .prim{background:#2f8f5f;border-color:#3a6b4e;color:#04140c;}' +
       '.ov-act .danger{background:#3a1717;border-color:#88322f;color:#fbb;}' +
-      '.ov-act button:hover{filter:brightness(1.18);}' +
-      '#ov-cryst{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:9500;display:none;flex-direction:column;gap:3px;min-width:352px;max-width:62vw;padding:9px 15px;border-radius:7px;box-shadow:0 6px 22px rgba(0,0,0,.55);}' +
-      '#ov-cryst.warn{display:flex;background:#3a2a08;border:1px solid #b3892f;color:#ffdf9a;}' +
-      '#ov-cryst.alarm{display:flex;background:#3a0d0d;border:1px solid #ff3030;color:#ffc2c2;animation:crystblink 1s steps(1) infinite;}' +
-      '#ov-cryst .ttl{font:800 12px "Segoe UI",system-ui;letter-spacing:.7px;display:flex;align-items:center;gap:7px;margin-bottom:1px;}' +
-      '#ov-cryst .ttl .ic{font-size:15px;line-height:1;}' +
-      '#ov-cryst .row{font:600 11px Consolas,monospace;opacity:.96;white-space:nowrap;}' +
-      '#ov-cryst .row .eq{display:inline-block;min-width:126px;}' +
-      '#ov-cryst .row .st{display:inline-block;min-width:52px;font-weight:800;}' +
-      '#ov-cryst .row.oor{opacity:.55;}' +                    // OOR = UNASSESSED, greyed (never silent)
-      '#ov-cryst .row.flag .st{color:#ff5555;}' +             // hard process flags render red
-      '@keyframes crystblink{50%{opacity:.42;}}';
+      '.ov-act button:hover{filter:brightness(1.18);}';
     document.head.appendChild(s);
   }
 
@@ -930,69 +918,10 @@
     simBtn.querySelector('.lbl').textContent = (fast ? 'FAST' : 'SLOW') + (sp != null ? ' ×' + sp : '');
   }
 
-  function crystBanner() {                         // Bug 2: plant-wide carbamate-crystallization banner
-    if (document.getElementById('ov-cryst')) return;
-    const d = document.createElement('div'); d.id = 'ov-cryst';
-    document.body.appendChild(d); crystEl = d;
-  }
-  function crystRender(s) {                         // read CRYST + flags each packet; amber WARN / red-blink ALARM
-    if (!crystEl) return;
-    const C = (s && s.CRYST) || {}, F = (s && s.flags) || {};
-    crystEl.classList.remove('warn', 'alarm');
-    const alarms = [], warns = [], bad = [], oor = [];
-    for (const eq in C) {
-      const r = C[eq]; if (!r) continue;
-      if (r.state === 'ALARM')      alarms.push([eq, r]);
-      else if (r.state === 'WARN')  warns.push([eq, r]);
-      else if (r.state === 'BAD')   bad.push([eq, r]);   // bad PV surfaces too (never silently OK)
-      else if (r.state === 'OOR')   oor.push([eq, r]);   // G7(f): out-of-range shown greyed, not hidden
-    }
-    // G7(b): the four hard process flags used to reach no pixel. Surface them as red alarm rows.
-    const FLAG_LABEL = {
-      SCRUBBER_SOLIDIFICATION: '322E003 scrubber — SOLIDIFICATION',
-      STRIPPER_SOLIDIFICATION: '322E001 stripper — SOLIDIFICATION',
-      CARBAMATE_DEPOSITION:    'carbamate DEPOSITION',
-      RATIO_PV_BAD:            'AT-322701 N/C — PV INVALID (ratio frozen)',
-    };
-    const flagRows = Object.keys(FLAG_LABEL).filter(function (k) { return !!F[k]; });
-    const alarm = !!F.CARBAMATE_CRYST_ALARM || alarms.length > 0 || flagRows.length > 0;
-    const warn  = !!F.CARBAMATE_CRYST_WARN  || warns.length > 0;
-    if (!alarm && !warn && bad.length === 0 && oor.length === 0) {
-      crystEl.style.display = 'none'; crystEl.innerHTML = ''; return;
-    }
-    const rows = (alarm ? alarms.concat(warns) : warns).concat(bad);
-    const cls  = alarm ? 'alarm' : 'warn';
-    const ttl  = (flagRows.length && !alarms.length && !warns.length)
-                   ? 'PROCESS ALARM'
-                   : (alarm ? 'CARBAMATE CRYSTALLIZATION — ONSET'
-                            : 'CARBAMATE CRYSTALLIZATION — APPROACHING');
-    let html = '<div class="ttl"><span class="ic">⚠</span>' + ttl + '</div>';
-    flagRows.forEach(function (k) {
-      html += '<div class="row flag"><span class="eq">' + FLAG_LABEL[k]
-            + '</span><span class="st">ALARM</span></div>';
-    });
-    rows.forEach(function (p) {
-      const eq = p[0], r = p[1];
-      let det = '';
-      if (r.state === 'BAD') det = 'bad PV — unverifiable';
-      else det = 'margin ' + r.margin + '°C'
-               + (r.T_cryst != null ? '  (Tcryst ' + r.T_cryst + '°C, T ' + (r.T_cryst + r.margin).toFixed(1) + '°C)' : '');
-      html += '<div class="row"><span class="eq">' + eq + '</span><span class="st">' + r.state + '</span>' + det + '</div>';
-    });
-    oor.forEach(function (p) {                            // greyed UNASSESSED rows, never silent
-      html += '<div class="row oor"><span class="eq">' + p[0]
-            + '</span><span class="st">UNASSESSED</span>out of assessed range</div>';
-    });
-    crystEl.innerHTML = html;
-    crystEl.classList.add(cls);
-    crystEl.style.display = 'flex';
-  }
-
-  window.OV_apply = function (s) { lastS = s; window.OTS_LAST = s; renderAll(); simRender(s); crystRender(s); };  // app.js calls each ws packet (OTS_LAST -> faceplate prefill)
+  window.OV_apply = function (s) { lastS = s; window.OTS_LAST = s; renderAll(); simRender(s); };  // app.js calls each ws packet (OTS_LAST -> faceplate prefill)
 
   for (const sid in OV) build(sid);
   editButton();
   simToggle();
-  crystBanner();
   renderAll();
 })();

@@ -2444,100 +2444,6 @@ def _f_flow(T: float, T_cryst: float, dT_mush: float = 5.0) -> float:
     return clamp((T - T_cryst) / dT_mush, 0.0, 1.0)
 
 
-# ----- Bug 2: predictive carbamate-crystallization monitor (Batch 3) -----
-#   Ammonium-carbamate liquor freezes to a solid crust before it reaches its solidus.  The model
-#   already carries two REACTIVE cut-off anchors (STRIP_BOT_T_CRYST_C urea-melt floor 132.7 C via
-#   _f_flow at the stripper drain, and the 60.0 C carbamate anchor at the scrubber overflow) that
-#   only bite once flow is ALREADY choking.  This block adds a PREDICTIVE freezing-margin monitor
-#   across every carbamate/urea liquid so an alarm is raised BEFORE the crystallization point is
-#   reached, per the operability requirement ("alarms should be given if crystallization point is
-#   about to occur"), and -- critically -- is emitted to telemetry so it reaches the operator UI.
-#   Sourcing Law: only two VERIFIED anchors place the composition-dependent freezing line -- pure
-#   ammonium carbamate m.p. 152 C (NIST) at zero free water, and the plant's own validated 60 C
-#   carbamate cut-off at the upper recycle water envelope (~40 wt% H2O).  The line between them is
-#   the minimum-assumption monotone interpolation (freezing T falls as free water rises, matching
-#   the verified CO2/H2O-ratio crystallization direction); no fabricated polynomial or constant.
-CARB_MP_PURE_C  = 152.0    # NIST pure ammonium-carbamate melting point (0 wt% free-water anchor)
-CARB_W_HI       = 0.40     # upper reliable recycle-liquor free-water mass fraction (60 C anchor)
-CARB_T_CRYST_LO = 60.0     # model-validated carbamate freezing anchor at CARB_W_HI
-CARB_WARN_DT_C  = 15.0     # freezing margin below which a predictive WARN is raised (approaching)
-CARB_MUSH_DT_C  = 5.0      # freezing margin below which a crystallization ALARM is raised (onset)
-#   Applicability of the composition freezing line is gated by molar N/C: the two anchors both sit
-#   inside the verified reliable envelope (N/C 1.8-2.6).  Outside it the water-only line no longer
-#   describes the mixture -- excess ammonia (high N/C) acts as a solvent that DISSOLVES carbamate
-#   and depresses freezing (e.g. the NH3-flooded 322F001 ejector discharge, N/C ~ 8), while the
-#   CO2-rich side (low N/C) RAISES it.  Gate rather than fabricate a wider correlation (Sourcing Law).
-CARB_NC_LO      = 1.8      # verified lower N/C bound of the reliable carbamate freezing envelope
-CARB_NC_HI      = 4.0      # applicability cap: above this the liquor is ammonia-solvent-dominated
-#                            (well beyond the 2.6 upper envelope) -> no freezing point is asserted
-
-
-def _carb_t_cryst_water(w_h2o: float) -> float:
-    r"""Composition-dependent carbamate freezing temperature (deg C) vs free-water mass fraction.
-    Minimum-assumption monotone interpolation between two VERIFIED anchors:
-        w = 0          -> 152.0 C  (pure ammonium carbamate m.p., NIST)
-        w = CARB_W_HI  ->  60.0 C  (plant-validated carbamate cut-off, upper recycle envelope)
-    Linear in w, clamped to [CARB_T_CRYST_LO, CARB_MP_PURE_C]:
-        $T_{cryst}(w) = 152.0 + (60.0 - 152.0)\,\dfrac{\mathrm{clamp}(w,\,0,\,0.40)}{0.40}$
-    Monotonically decreasing in free water, consistent with the verified CO2/H2O crystallization
-    direction (freezing point rises with CO2/H2O mass ratio, i.e. falls with free-water fraction)."""
-    w = clamp(w_h2o, 0.0, CARB_W_HI)
-    return CARB_MP_PURE_C + (CARB_T_CRYST_LO - CARB_MP_PURE_C) * (w / CARB_W_HI)
-
-
-def _stream_nc(mol_pct: dict) -> float:
-    """Molar N/C atom ratio from a stream's mol %:  N = NH3 + 2*Urea + 3*Biuret,
-    C = CO2 + Urea + 2*Biuret.  Returns None if the stream carries no carbon (no carbamate
-    phase to freeze).  mol %/mole counts differ only by a common factor, so the ratio is exact."""
-    nN = mol_pct.get("NH3", 0.0) + 2.0 * mol_pct.get("Urea", 0.0) + 3.0 * mol_pct.get("Biuret", 0.0)
-    nC = mol_pct.get("CO2", 0.0) + mol_pct.get("Urea", 0.0) + 2.0 * mol_pct.get("Biuret", 0.0)
-    return (nN / nC) if nC > 1e-9 else None
-
-
-def _cryst_assess(stream: dict, T_cryst: float = None) -> dict:
-    """Predictive crystallization assessment for ONE carbamate/urea liquid stream (as built by
-    make_stream).  Reads the stream's own derived mass %, computes the freezing margin and a
-    three-tier state.  T_cryst None -> derive the freezing line from the stream's free-water
-    content via _carb_t_cryst_water; else use the caller's equipment anchor (e.g. the 132.7 C
-    urea-melt floor at the stripper bottom).
-        margin = T - T_cryst ;  ALARM if margin < CARB_MUSH_DT_C, WARN if < CARB_WARN_DT_C, else OK.
-
-    The composition line (T_cryst None) is only physically valid inside the verified carbamate
-    envelope, so its applicability is gated by molar N/C:
-      * N/C > CARB_NC_HI  -> liquor is ammonia-solvent-dominated (e.g. the NH3-flooded 322F001
-        ejector discharge, N/C ~ 8); carbamate stays dissolved, no freezing point is asserted ->
-        state 'OOR' (out of range), EXCLUDED from the WARN/ALARM aggregation.
-      * N/C < CARB_NC_LO  -> CO2-rich side, where the water-only line UNDER-predicts freezing
-        (non-conservative); the state is floored at WARN so a possibly-freezing stream is never
-        reported a false OK.
-    An explicit T_cryst (a distinct solid phase, e.g. the urea-melt floor) is always assessed and
-    is NOT N/C-gated.  Any non-finite core input -> 'BAD' (a bad measurement never reads OK)."""
-    T   = stream.get("T_C")
-    mp  = stream.get("mass_pct", {})
-    co2 = mp.get("CO2", 0.0)
-    h2o = mp.get("H2O", 0.0)
-    w   = h2o / 100.0
-    nc  = _stream_nc(stream.get("mol_pct", {}))
-    nc_r = (round(nc, 2) if (nc is not None and math.isfinite(nc)) else None)
-    explicit = T_cryst is not None
-    if not _pv_ok(T, w) or (explicit and not _pv_ok(T_cryst)):
-        return {"T_cryst": None, "margin": None, "co2_h2o": None, "h2o_wt": None,
-                "nc": nc_r, "state": "BAD"}
-    if not explicit:
-        if nc is None or not math.isfinite(nc) or nc > CARB_NC_HI:
-            return {"T_cryst": None, "margin": None, "co2_h2o": None,
-                    "h2o_wt": round(h2o, 2), "nc": nc_r, "state": "OOR"}
-        T_cryst = _carb_t_cryst_water(w)
-    margin  = T - T_cryst
-    co2_h2o = (co2 / h2o) if h2o > 1e-9 else None
-    state   = "ALARM" if margin < CARB_MUSH_DT_C else ("WARN" if margin < CARB_WARN_DT_C else "OK")
-    if (not explicit) and (nc is not None) and nc < CARB_NC_LO and state == "OK":
-        state = "WARN"    # CO2-rich: water-only line under-predicts -> never a false OK
-    return {"T_cryst": round(T_cryst, 1), "margin": round(margin, 1),
-            "co2_h2o": (round(co2_h2o, 3) if co2_h2o is not None else None),
-            "h2o_wt": round(h2o, 2), "nc": nc_r, "state": state}
-
-
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
                      overflow_kmolh: dict = None, L_feed: float = None,
                      W_feed: float = None, T_feed_C: float = None) -> dict:
@@ -4515,13 +4421,11 @@ class State:
         #   the live condition having recovered -> a tripped pump cannot self-restart.
         self.trips        = {"21_2": False, "21_4": False, "21_8": False, "21_10": False, "22_1": False}
         self.trip_latched = {"21_2": False, "21_4": False, "21_8": False, "21_10": False, "22_1": False}
-        # L3 phase-boundary diagnostics (mushy-zone / crystallization detection, Batch 2)
+        # L3 phase-boundary diagnostics (mushy-zone / solidification detection, Batch 2)
         self.flags = {"SCRUBBER_SOLIDIFICATION": False,
                       "STRIPPER_SOLIDIFICATION": False,
                       "CARBAMATE_DEPOSITION":    False,
-                      "RATIO_PV_BAD":            False,   # L3-3 N/C measurement-validity (Batch 3)
-                      "CARBAMATE_CRYST_WARN":    False,   # Bug 2 predictive: approaching freezing
-                      "CARBAMATE_CRYST_ALARM":   False}   # Bug 2 predictive: crystallization onset
+                      "RATIO_PV_BAD":            False}   # L3-3 N/C measurement-validity (Batch 3)
 
 
 state = State()
@@ -6432,22 +6336,6 @@ def step_sim(dt: float) -> dict:
             rho=SCRUB_CCW_RHO_OUT),
     }
 
-    # ---- Bug 2: predictive carbamate-crystallization monitor across every carbamate/urea liquid ----
-    #   STRIP_BOT keeps its urea-melt-floor anchor (132.7 C, same value the reactive drain factor
-    #   uses); the carbamate/urea liquors derive their freezing line from their own live free-water
-    #   content.  WARN raised while still molten but within CARB_WARN_DT_C of freezing; ALARM at the
-    #   CARB_MUSH_DT_C onset margin -- both BEFORE the reactive _f_flow cut-off starts choking flow.
-    cryst = {
-        "STRIP_BOT":      _cryst_assess(streams["STRIP_BOT"], T_cryst=STRIP_BOT_T_CRYST_C),
-        "CARB_RECYCLE":   _cryst_assess(streams["CARB_RECYCLE"]),
-        "EJ_DISCH":       _cryst_assess(streams["EJ_DISCH"]),
-        "HPCC_PROD":      _cryst_assess(streams["HPCC_PROD"]),
-        "REACT_OVERFLOW": _cryst_assess(streams["REACT_OVERFLOW"]),
-    }
-    _cryst_states = [v["state"] for v in cryst.values()]
-    s.flags["CARBAMATE_CRYST_WARN"]  = any(st in ("WARN", "ALARM") for st in _cryst_states)
-    s.flags["CARBAMATE_CRYST_ALARM"] = any(st == "ALARM" for st in _cryst_states)
-
     # AI-328701 process-condensate conductivity soft sensor (stream 740, read-only)
     _nh3_740, _urea_740 = ppm_infer_328701(s.a328_c004_T, s.a328_c003_T)
     _ai701_uS = cond_infer_328701(_nh3_740, _urea_740, 0.0)                  # CO2 fully co-stripped with NH3
@@ -7167,8 +7055,7 @@ def step_sim(dt: float) -> dict:
             "xi_hydrolysis_kmolh": round(xi_hyd_328, 5),
         },
         "STREAMS": streams,
-        "CRYST":   cryst,                              # Bug 2 per-equipment predictive freezing margins
-        "flags":   {k: v for k, v in s.flags.items()}, # Bug 2 crystallization + existing phase-boundary flags
+        "flags":   {k: v for k, v in s.flags.items()},
         "ratio": {
             "SP":  round(s.ratio_SP, 3),
             "PV":  round(s.ratio_PV, 3),

@@ -57,7 +57,7 @@ Every new screen is a `.screen.shot` div inside `#stage`. Reuse the existing she
 Two font stacks only — do not introduce others.
 
 * **Value/readout font** (`--val-font`): `"Cascadia Mono","Consolas",ui-monospace,"Segoe UI Mono",monospace`, always with `font-variant-numeric:tabular-nums`. Use for every live process value, valve %, RPM, current — anything numeric that updates.
-* **UI/chrome font:** global `*` = `Arial,Helvetica,sans-serif`. Rev-2 overlay chrome (toolbar, context menu, edit modal, crystallization banner) = `"Segoe UI",system-ui`. Text inputs / mode tags / DCS tag chips / stream tables = `Consolas,monospace`.
+* **UI/chrome font:** global `*` = `Arial,Helvetica,sans-serif`. Rev-2 overlay chrome (toolbar, context menu, and edit modal) = `"Segoe UI",system-ui`. Text inputs, mode tags, DCS tag chips, and stream tables = `Consolas,monospace`.
 
 **Font-size catalogue (px) — match exactly:**
 
