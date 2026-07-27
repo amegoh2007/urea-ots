@@ -56,11 +56,6 @@ The approved 18/43/429 m³ communicating-compartment basis closes the physical-b
 Obtain plant survey data for dissolved-gas flashing and tank pressure/emissions only if those
 behaviors are required for training.
 
-### Unit 335
-
-Obtain the matching 1,750-MTPD Unit-335 H&MB/PFD before extending the product boundary beyond the
-currently mapped UF85 ratio and melt-feed interface. The available detailed PFD is for 2,000 MTPD.
-
 ## Product and repository follow-up
 
 - Reconcile `Master_PID_Tuning_Constants.md`: 33 of 46 simulator controller settings intentionally

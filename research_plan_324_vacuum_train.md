@@ -157,7 +157,9 @@ P&ID addendum, completed 2026-07-27:
 - P&ID 104 (`UD-VT-328-FB-0003`) confirms physical 328D003 bays I/II/III. LI-328507 is on bay I;
   LI-328508 is on bay III; no level-control valve is drawn. The original P&ID-only execution inferred
   process inventories I/III. The later approved 18/43/429 m³ basis supersedes that inference: process
-  routes are I/II and III is the communicating accumulator.
+  routes are I/II and III is the communicating accumulator. The approved operator mapping also
+  supersedes the visual tag-service inference: LT-328507 indicates I and LT-328508 indicates II,
+  both open-loop.
 - P&IDs 105/1 and 105/2 (`UD-VT-324-FB-0003/-0004`) corroborate the complete ejector/condenser
   sequence and the individual condensate returns `324010`, `324012`, `324013`, and `324014` to
   328D003. Their nominal sizes and minimum vertical arrangements close installed-layout ambiguity.

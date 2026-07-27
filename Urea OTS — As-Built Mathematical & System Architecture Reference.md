@@ -36,6 +36,7 @@
 | 21 | 2026-07-26 | branch `master` | Built the complete Unit-324 surface-condenser train from the strict PFD, supplied absorber/cooling-water maps, and 324E002/E005/E006/E007 datasheets. The four exchangers are distinct `Q=UA·LMTD` mass/energy nodes with individual CW branches, condensate/vent streams, geometry, and noncondensable derating. Corrected 323C005, 323E011, and 328D003 Comp-I/II routing; false air is now the PFD 21/21 kg/h; mapped numerical streams are runtime aliases. See §22.11 and `research_plan_324_vacuum_train.md`. |
 | 22 | 2026-07-27 | branch `master` | Reconciled the 33-page searchable plant P&ID set against the 1,750-MTPD PFD and operator maps. P&IDs 103/1-103/2 close the installed 323C005 → 328V001 → 328D003 liquid path; P&ID 104 proves physical 328D003 bays I/II/III and places LI-328507/508 on bays I/III; P&IDs 105/1-105/2 corroborate the four Unit-324 condensate returns and ejector/condenser layout. No equation changed because the drawings do not provide bay volumes, C40 performance curves, or gas-side loss data. See §22.12 and `PID_EVIDENCE_AUDIT_2026-07-27.md`. |
 | 23 | 2026-07-27 | branch `master` | Implemented the owner-approved 328D003 compartment basis: I = 18 m³, II = 43 m³, III = 429 m³ (490 m³ total), with openings among all three and III as the shared accumulation baffle. Corrected the prior P&ID-only I/III process-inventory inference: external streams remain on physical I and II, while III is a separate communicating surge state. LI-328507 reports I and LI-328508 reports III. See §22.13, `MAP_328D003.md`, and `research_plan_328d003_compartments.md`. |
+| 24 | 2026-07-27 | branch `master` | Corrected the 328D003 instrument service from the approved operator mapping: LT-328507 indicates physical compartment I and LT-328508 indicates physical compartment II, both open-loop. This supersedes the earlier P&ID-only visual association of 328508 with compartment III. Compartment III remains the calculated accumulation state with no approved LT assignment. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -1684,7 +1685,8 @@ PFD's quantitative authority:
   instrument placement, and nozzle topology, but does not itself provide bay capacities or opening
   hydraulics. The later owner-approved basis supplies capacities of 18/43/429 m³ and confirms that
   compartment III communicates with and accumulates for compartments I and II; it does not supply
-  opening areas, elevations, or a finite-rate transfer calibration.
+  opening areas, elevations, or a finite-rate transfer calibration. The approved operator mapping
+  later supersedes the P&ID-only tag-service inference: LT-328507 maps to I and LT-328508 maps to II.
 - P&IDs 105/1 and 105/2 (`UD-VT-324-FB-0003/-0004`) independently corroborate the F002/E002 and
   F004/E006/F005/E007 sequence, individual returns `324010`, `324012`, `324013`, and `324014` to
   328D003, and their installed nominal-size/minimum-elevation arrangements. They do not provide the
@@ -1716,10 +1718,11 @@ temperature, so compartments I and II retain separate process temperatures. The 
 and the derived compartment-III startup temperature are simulator initial conditions, not approved
 plant operating targets.
 
-P&ID 104 places LI-328507 on compartment I and LI-328508 on compartment III; compartment II has no
-dedicated level indication. Runtime `LT_328507_open_loop` and `LT_328508_open_loop` follow those
-physical locations. Under the current equal-level approximation all three level fractions coincide,
-while `LI_328II` remains available as the calculated compartment-II inventory.
+The approved operator mapping assigns LT-328507 to compartment I and LT-328508 to compartment II;
+both are open-loop. Runtime `LT_328507_open_loop` and `LT_328508_open_loop` follow those approved
+services. Under the current equal-level approximation all three level fractions coincide, while
+`LI_328III` remains available as the calculated compartment-III accumulation inventory without an
+approved LT assignment.
 
 ---
 

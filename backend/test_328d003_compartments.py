@@ -103,7 +103,7 @@ def test_state_and_packet_expose_all_three_physical_compartments():
     assert d003["LI_328II"] == 50.0
     assert d003["LI_328III"] == 50.0
     assert d003["LT_328507_open_loop"] == d003["LI_328I"]
-    assert d003["LT_328508_open_loop"] == d003["LI_328III"]
+    assert d003["LT_328508_open_loop"] == d003["LI_328II"]
     assert d003["form735_th"] == 31.11
     assert d003["collect755_th"] == 31.48
 
@@ -121,9 +121,31 @@ def test_stream_741_recycle_returns_to_physical_compartment_two():
     assert main.state.a328_d003_TI > main.A328_D003_TI
 
 
-def test_lt_328508_overlay_reads_the_physical_compartment_three_inventory():
+def test_open_loop_level_tags_follow_the_approved_compartment_assignments():
+    state = main.State()
+    state.a328_d003_MI = 0.30 * main.A328_D003_MI_FULL
+    state.a328_d003_MII = 0.40 * main.A328_D003_MII_FULL
+    state.a328_d003_MIII = 0.60 * main.A328_D003_MIII_FULL
+
+    levels = main.d003_level_telemetry(state)
+
+    assert levels["LI_328I"] == 30.0
+    assert levels["LI_328II"] == 40.0
+    assert levels["LI_328III"] == 60.0
+    assert levels["LT_328507_open_loop"] == 30.0
+    assert levels["LT_328508_open_loop"] == 40.0
+
+
+def test_level_overlays_bind_to_the_approved_open_loop_tags():
     overlay = (PROJECT_ROOT / "frontend" / "overlays.js").read_text(encoding="utf-8")
     lt_328508 = next(line for line in overlay.splitlines() if "k: 'lt8508'" in line)
+    lt_328507_lines = [line for line in overlay.splitlines() if "tag: 'LT-328507'" in line]
 
-    assert "ABSORB_328.D003.LI_328III" in lt_328508
-    assert "compartment III" in lt_328508
+    assert "bind: 'ABSORB_328.D003.LT_328508_open_loop'," in lt_328508
+    assert "LI_328III" not in lt_328508
+    assert lt_328508.rstrip().endswith("// compartment II")
+    assert len(lt_328507_lines) == 2
+    assert all(
+        "bind: 'ABSORB_328.D003.LT_328507_open_loop'" in line
+        for line in lt_328507_lines
+    )

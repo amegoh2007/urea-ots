@@ -352,7 +352,7 @@
       { k: 'tt8009', t: 'ind', x: 201,  y: 507, tag: 'TT-328009', bind: 'DESORB_328.C003.TT_328009', u: 'C', dec: 1 },   // 328E021 cold outlet -> 328C003 feed 190C (stream 746)
       { k: 'tt8005', t: 'ind', x: 597,  y: 517, tag: 'TT-328005', bind: 'DESORB_328.C004.TT_328005', u: 'C', dec: 1 },   // 328C004 bottoms -> 328E007 143C (stream 739)
       { k: 'tt8007', t: 'ind', x: 523,  y: 586, tag: 'TT-328007', bind: 'DESORB_328.C002.TT_328007', u: 'C', dec: 1 },   // 328C002 bottoms -> 328P006 suction 139C (stream 743)
-      { k: 'lt8507w', t: 'ind', x: 1294, y: 380, tag: 'LT-328507' },
+      { k: 'lt8507w', t: 'ind', x: 1294, y: 380, tag: 'LT-328507', bind: 'ABSORB_328.D003.LT_328507_open_loop', u: '%', dec: 1 },
       { k: 'tt8006', t: 'ind', x: 815,  y: 533, tag: 'TT-328006', bind: 'DESORB_328.C004.TT_328006', u: 'C', dec: 1 },   // 328E007 cold-out / 328P007 discharge process condensate 89C (stream 740)
       { k: 'ai8701', t: 'ind', x: 838,  y: 632, tag: 'AI-328701', bind: 'DESORB_328.C004.AI_328701', u: 'uS/cm', dec: 2 },   // process-condensate conductivity soft sensor (stream 740, NH3/urea/CO2 trace -> Kohlrausch)
       { k: 'p006w',   t: 'ind', x: 421,  y: 632, tag: '328P006'   },
@@ -369,8 +369,8 @@
       { k: 'lv2502', t: 'avalve', x: 247, y: 423, tag: 'LV-322502', bind: 'ABSORB_328.C001.LIC_322502.op', u: '%', dec: 1 },
       { k: 'ovr915', t: 'ovrd', x: 121, y: 63, tag: 'XV-322915', bind: 'ABSORB_328.C001.XV_322915', note: 'external override forces XV-322915 CLOSED' },
       // ---- 328D003 collection tank : active compartments I/II + shared accumulation III ----
-      { k: 'lt8508', t: 'ind', x: 644, y: 513, tag: 'LT-328508',  bind: 'ABSORB_328.D003.LI_328III',    u: '%',   dec: 1 },   // compartment III
-      { k: 'lt8507', t: 'ind', x: 886, y: 513, tag: 'LT-328507',  bind: 'ABSORB_328.D003.LI_328I',      u: '%',   dec: 1 },   // compartment I
+      { k: 'lt8508', t: 'ind', x: 644, y: 513, tag: 'LT-328508',  bind: 'ABSORB_328.D003.LT_328508_open_loop', u: '%', dec: 1 },   // compartment II
+      { k: 'lt8507', t: 'ind', x: 886, y: 513, tag: 'LT-328507',  bind: 'ABSORB_328.D003.LT_328507_open_loop', u: '%', dec: 1 },   // compartment I
       // ---- WHITE FRAMES : unmodelled boundary / analyzer / downstream ----
       { k: 'ft2404', t: 'ind', x: 156, y: 161, tag: 'FT-322404', bind: 'ABSORB_328.C001.cpl_kgh', u: 'KG/H', dec: 0, face: 'hic', note: 'FT-322404 condensate 954 -> 322C001; operator-set inlet flow (kg/h), des 1750' },
       { k: 'ft2402', t: 'ind', x: 106, y: 257, tag: 'FT-322402', bind: 'ABSORB_328.D003.flow755_m3h', u: 'M3/H', dec: 1, note: '322P002 collector draw (stream 755, Amm. Water) -> 322C001, des 31.3 m3/h' },

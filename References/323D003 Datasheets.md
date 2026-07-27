@@ -11,8 +11,9 @@
 > Current stream mapping: compartment I receives 719/720/721/759 and supplies 744; compartment II
 > receives 343 through 328V001 (and normally closed recycle 741) and supplies 735/734/791 plus spare
 > 793; compartment III has no separately numbered external PFD liquid stream and buffers I/II through
-> the approved openings. LI-328507 is on physical I and LI-328508 is on physical III; physical II has
-> no dedicated LI on P&ID 104. Stream 341 is the 323C005 unabsorbed-gas/stack boundary and stream 722
+> the approved openings. Approved instrument mapping assigns LT-328507 to physical I and LT-328508
+> to physical II; both are open-loop. The earlier P&ID-only visual association of 328508 with physical
+> III is superseded. Stream 341 is the 323C005 unabsorbed-gas/stack boundary and stream 722
 > is the 324E007 gas outlet, not a compartment-III discharge. See `../MAP_328D003.md` for the current
 > reconciled basis. All contradictory compartment capacities, isolation claims, stream routes, and
 > instrument assignments below are retained only as a trace of the superseded derivation.

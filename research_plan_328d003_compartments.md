@@ -82,7 +82,7 @@ cases:
     assertion: Total mass and sum(mass*temperature) close within floating-point tolerance.
   - requirement: Physical instrument placement remains explicit.
     level: integration
-    assertion: LI-328507 reports compartment 1 and LI-328508 reports accumulation compartment 3.
+    assertion: LT-328507 reports compartment 1 and LT-328508 reports compartment 2; both are open-loop.
   - requirement: Design startup remains pinned.
     level: integration
     assertion: Initial levels are 50 percent and mapped design streams retain their PFD values.

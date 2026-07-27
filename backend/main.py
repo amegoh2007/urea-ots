@@ -2424,6 +2424,20 @@ def redistribute_communicating_compartments(masses_kg, temperatures_c, full_mass
     return target_masses, target_temperatures
 
 
+def d003_level_telemetry(s):
+    """Map calculated compartment levels to the approved open-loop LT assignments."""
+    level_i = round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1)
+    level_ii = round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1)
+    level_iii = round(s.a328_d003_MIII / A328_D003_MIII_FULL * 100.0, 1)
+    return {
+        "LI_328I": level_i,
+        "LI_328II": level_ii,
+        "LI_328III": level_iii,
+        "LT_328507_open_loop": level_i,
+        "LT_328508_open_loop": level_ii,
+    }
+
+
 def lmtd_countercurrent(hot_in_c, hot_out_c, cold_in_c, cold_out_c):
     """Counter-current log-mean temperature difference with pinch guards."""
     dt_hot_end = hot_in_c - cold_out_c
@@ -6737,6 +6751,7 @@ def step_sim(dt: float) -> dict:
     # AI-328701 process-condensate conductivity soft sensor (stream 740, read-only)
     _nh3_740, _urea_740 = ppm_infer_328701(s.a328_c004_T, s.a328_c003_T)
     _ai701_uS = cond_infer_328701(_nh3_740, _urea_740, 0.0)                  # CO2 fully co-stripped with NH3
+    _d003_levels = d003_level_telemetry(s)
 
     # Dynamic sequential-modular tear audit.  These recycle signals cross real vessel/line
     # inventories and therefore advance once per integration tick rather than being iterated to an
@@ -7120,11 +7135,7 @@ def step_sim(dt: float) -> dict:
                 "TT_328I":    round(s.a328_d003_TI, 1),
                 "TT_328II":   round(s.a328_d003_TII, 1),
                 "TT_328III":  round(s.a328_d003_TIII, 1),
-                "LI_328I":    round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1),
-                "LI_328II":   round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1),
-                "LI_328III":  round(s.a328_d003_MIII / A328_D003_MIII_FULL * 100.0, 1),
-                "LT_328507_open_loop": round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1),
-                "LT_328508_open_loop": round(s.a328_d003_MIII / A328_D003_MIII_FULL * 100.0, 1),
+                **_d003_levels,
                 "capacities_m3": {"I": A328_D003_VOL_I_M3,
                                     "II": A328_D003_VOL_II_M3,
                                     "III": A328_D003_VOL_III_M3},

@@ -11,8 +11,15 @@ retained as the pre-remediation audit trail.
 **2026-07-27 328D003 closure:** The historical findings below that compartment III was absent and
 physical bay II was unmodeled are closed. Owner-approved capacities are I/II/III = 18/43/429 m³;
 all three communicate and III is the common accumulation baffle. The runtime now has three inventory
-states, maps external process streams to physical I and II, and maps LI-328508 to physical III. See
-`research_plan_328d003_compartments.md` and `MAP_328D003.md`.
+states and maps external process streams to physical I and II. See
+`research_plan_328d003_compartments.md` and `MAP_328D003.md`; the approved instrument mapping is
+recorded immediately below.
+
+**2026-07-27 instrument-mapping correction:** The approved operator mapping supersedes the historical
+P&ID-only visual inference recorded in `PID_EVIDENCE_AUDIT_2026-07-27.md`. LT-328507 indicates
+physical compartment I and LT-328508
+indicates physical compartment II; both are open-loop. Compartment III remains the calculated shared
+accumulation state without an approved LT assignment.
 
 Current executable result: **6 passed / 4 failed**.
 

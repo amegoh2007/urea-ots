@@ -31,7 +31,9 @@ compartment III is the accumulation baffle for I and II. This later evidence sup
 inference that the second mapped process inventory was physical bay III and closes the missing-
 capacity/third-inventory gap. The external stream map is now physical I for the Unit-324 condensate
 circuit, physical II for stream 343 and its desorber/wash/flush header, and physical III for shared
-accumulation. Opening geometry and finite-rate transfer coefficients remain unspecified.
+accumulation. The approved operator mapping also supersedes the P&ID-only instrument interpretation:
+LT-328507 indicates compartment I and LT-328508 indicates compartment II, both open-loop. Opening
+geometry and finite-rate transfer coefficients remain unspecified.
 
 ## Reviewed sheets and dispositions
 
@@ -39,7 +41,7 @@ accumulation. Opening geometry and finite-rate transfer coefficients remain unsp
 |---:|---|---|---|
 | 4 | P&ID 103/1, `UD-VT-323-FB-0001` | Draws 328V001 and the continuation from its N1 liquid outlet to 328D003 on P&ID 104. | Closes the missing installed intermediate route between 323C005 and 328D003. |
 | 5 | P&ID 103/2, `UD-VT-323-FB-0002` | Draws the 323C005 N4 liquid outlet as line `150-AW5-323058` to 328V001 on P&ID 103/1. | Refines the PFD-level shorthand: stream 343 reaches 328D003 through 328V001; it is not a direct pipe from 323C005 to the tank. |
-| 7 | P&ID 104, `UD-VT-328-FB-0003` | Draws 328D003 with physical bays `I`, `II`, and `III`; LI-328507 is on bay I and LI-328508 is on bay III. It also shows the N23/N24 hand-valved connection between bays III and II, the pump connections to 322P002/328P003/328P007, and the continuations to 328V001 and the Unit-324 condensers. | Closes the existence, numbering, instrument-location, and installed-nozzle-topology questions. It does **not** provide bay capacities, normal liquid allocation for unnumbered internal transfers, or flash/emissions data. |
+| 7 | P&ID 104, `UD-VT-328-FB-0003` | Draws 328D003 with physical bays `I`, `II`, and `III`; LI-328507 is on bay I and LI-328508 is on bay III. It also shows the N23/N24 hand-valved connection between bays III and II, the pump connections to 322P002/328P003/328P007, and the continuations to 328V001 and the Unit-324 condensers. | Closes physical existence, numbering, and installed-nozzle topology. The visual LI transcription is historical and is superseded for simulator tag service by the approved operator mapping above. The sheet does **not** provide bay capacities, normal liquid allocation for unnumbered internal transfers, or flash/emissions data. |
 | 8 | P&ID 105/1, `UD-VT-324-FB-0003` | Draws 324F002/324E002 and condensate return `150-VPC1-324010` to 328D003; shows the installed barometric-leg/elevation arrangement. | Confirms the implemented E002/ejector topology and return destination. No performance curve or gas-side loss coefficient is present. |
 | 9 | P&ID 105/2, `UD-VT-324-FB-0004` | Draws the 324F004-E006-F005-E007 train and the E005/E006/E007 condensate returns `324012`, `324013`, and `324014` to 328D003, including nominal line sizes and minimum vertical arrangements. | Closes line-order, destination, and installed-size/elevation ambiguity. It does not close C40 pressure loss or off-design ejector performance. |
 | 10, 19, 26-32 | Unit-335 P&ID sheets, including `UD-VT-335-FB-0002` through `-0010` | Supplies plant equipment, piping, valves, and instrumentation for Unit 335. | Useful for later topology implementation, but a P&ID is not a 1,750-MTPD heat-and-material balance. The quantitative Unit-335 boundary remains open. |
@@ -47,7 +49,8 @@ accumulation. Opening geometry and finite-rate transfer coefficients remain unsp
 ## 328D003 reconciliation at the P&ID-only stage
 
 The following was the initial P&ID-only interpretation. The later approved-data addendum above
-supersedes its process-inventory assignment while retaining the P&ID topology and instrument facts:
+supersedes its process-inventory and tag-service assignments while retaining the physical topology
+and the still-valid open-loop status:
 
 - 328D003 physically has three labeled bays.
 - The two mapped live level inventories correspond to LI-328507 on physical bay I and LI-328508 on
