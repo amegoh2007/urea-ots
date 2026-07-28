@@ -37,6 +37,7 @@
 | 22 | 2026-07-27 | branch `master` | Reconciled the 33-page searchable plant P&ID set against the 1,750-MTPD PFD and operator maps. P&IDs 103/1-103/2 close the installed 323C005 → 328V001 → 328D003 liquid path; P&ID 104 proves physical 328D003 bays I/II/III and places LI-328507/508 on bays I/III; P&IDs 105/1-105/2 corroborate the four Unit-324 condensate returns and ejector/condenser layout. No equation changed because the drawings do not provide bay volumes, C40 performance curves, or gas-side loss data. See §22.12 and `PID_EVIDENCE_AUDIT_2026-07-27.md`. |
 | 23 | 2026-07-27 | branch `master` | Implemented the owner-approved 328D003 compartment basis: I = 18 m³, II = 43 m³, III = 429 m³ (490 m³ total), with openings among all three and III as the shared accumulation baffle. Corrected the prior P&ID-only I/III process-inventory inference: external streams remain on physical I and II, while III is a separate communicating surge state. LI-328507 reports I and LI-328508 reports III. See §22.13, `MAP_328D003.md`, and `research_plan_328d003_compartments.md`. |
 | 24 | 2026-07-27 | branch `master` | Corrected the 328D003 instrument service from the approved operator mapping: LT-328507 indicates physical compartment I and LT-328508 indicates physical compartment II, both open-loop. This supersedes the earlier P&ID-only visual association of 328508 with compartment III. Compartment III remains the calculated accumulation state with no approved LT assignment. |
+| 25 | 2026-07-29 | branch `master` | Closed C39: classified the five Unit-328 one-tick tears. Streams 748/750/775 are algebraic recycles (vapour/reflux lines, no inventory) resolved by bounded one-tick direct substitution — certified contractive ($|z|\approx0.95<1$), monotone, non-oscillatory, bit-exact at design; 718A is physical transport (retained 45 s liquid-leg lag); 931 is an FFIC-controlled LP-steam utility feed, not a recycle. No engine equation changed. See §22.14 and `backend/test_c39_recycle_tears.py`. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -1723,6 +1724,41 @@ both are open-loop. Runtime `LT_328507_open_loop` and `LT_328508_open_loop` foll
 services. Under the current equal-level approximation all three level fractions coincide, while
 `LI_328III` remains available as the calculated compartment-III accumulation inventory without an
 approved LT assignment.
+
+### 22.14 C39 — Unit-328 one-tick recycle-tear classification
+
+The desorption/hydrolysis train (328C002 Desorber-I, 328C003 Hydrolyser, 328C004 Desorber-II,
+328D001 reflux drum) is solved sequential-modular within one tick in the order C002 → C003 → C004
+→ D001. Five streams flow against that order, so each is read one tick late (`s.tlag.get(...)` at the
+top of `step_sim`, written back at tick end). C39 classifies each such stream as *physical transport*
+or *algebraic recycle* and fixes the solve method accordingly.
+
+| Stream | Route | Class | Evidence | Solve method |
+| --- | --- | --- | --- | --- |
+| 748 | 328C003 overhead → 328C002 | Algebraic recycle | vapour line, no holdup inventory | one-tick bounded direct substitution |
+| 750 | 328C004 overhead → 328C002 | Algebraic recycle | vapour line, no holdup inventory | one-tick bounded direct substitution |
+| 775 | 328D001 reflux → 328C002 | Algebraic recycle | pumped reflux, no line residence-time evidence | one-tick bounded direct substitution |
+| 718A | 323D011 draw → 328D001 | **Physical transport** | 45 s liquid-leg lag `R3232_M718A_TAU_S`, LIC-323503 draw | retained first-order `_lag1` |
+| 931 | LP steam → 328C004 | **Not a recycle** | FFIC-329401/FIC-329401 controlled utility feed | live controlled flow; `m931_prev` is a measurement-PV term only |
+
+The three vapour/reflux recycles carry no line inventory, so they are algebraic: the engine resolves
+them by one Gauss-Seidel sweep per tick (last-tick value in, this-tick value out), which the time
+integration drives to the recycle fixed point. This is the handoff's "bounded direct substitution"
+option, and it is *certified* rather than assumed. `backend/test_c39_recycle_tears.py` shows: (i) the
+design seed sits bit-exactly on every tear's PFD flow (748 = 812, 750 = 6833, 775 = 1675, 718A =
+3561.5, 931 = 6495 kg/h) and does not creep; (ii) under a 20 % cut to the LP-steam ratio master the
+on-loop vapour tear 750 stays inside `(0, design]`, approaches its new fixed point monotonically with
+zero increment sign-changes, and contracts (successive increments shrink, discrete loop gain
+$|z|\approx0.95<1$); no Wegstein/Broyden acceleration is needed because the map is already contractive
+and non-oscillatory.
+
+718A is the one physical case: it feeds 328D001 through a real ~45 s liquid leg, so it keeps a
+first-order transport lag (`_lag1(..., R3232_M718A_TAU_S, dt)`), whose implicit-Euler step returns the
+fraction $a=\Delta t/(\tau+\Delta t)$ of a demand change per tick — a genuine transport delay, not an
+algebraic tie. 931 is not a recycle at all: it is an FFIC-ratio-controlled LP-steam utility feed
+computed live each tick from `_fic_flow`; the one-tick `m931_prev` only forms the measured steam/feed
+ratio PV (sensor causality), so moving the FFIC-329401 master retargets the live 931 flow away from
+its design value, as the gate asserts.
 
 ---
 

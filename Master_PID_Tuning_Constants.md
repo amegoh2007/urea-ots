@@ -624,8 +624,8 @@ $M\lesssim40$ (≥2.5× margin) to survive the Domino live tie-ins.
 | **FIC-323401** | 323-2 | 328D003 Comp-I flush 401 | AUTO | +1 | 1.20 | 25.0 | 823 | 50.0 | 16.5 | 19.8 | monotone |
 | **FIC-323402** | 323-2 | 328D003 Comp-I wash 402 | AUTO | +1 | **0.50** | 25.0 | 2931 | 50.0 | 58.6 | 29.3 | monotone ¹ |
 | **FIC-323418** | 323-2 | 323C005 makeup water | AUTO | +1 | 1.20 | 25.0 | 480 | 50.0 | 9.6 | 11.5 | monotone |
-| **FIC-326402** | 328-1 | 328C003 hydrolyser MP-steam 911 | CAS | +1 | 1.20 | 25.0 | 1105 | 50.0 | 22.1 | 26.5 | monotone |
-| **FIC-328401** | 328-1 | 328C004 desorber-II LP-steam 931 (slave) | CAS | +1 | **0.30** | 25.0 | 6495 | 50.0 | 129.9 | 39.0 | monotone ² |
+| **FIC-329402** | 328-1 | 328C003 hydrolyser MP-steam 911 | CAS | +1 | 1.20 | 25.0 | 1105 | 50.0 | 22.1 | 26.5 | monotone |
+| **FIC-329401** | 328-1 | 328C004 desorber-II LP-steam 931 (slave) | CAS | +1 | **0.30** | 25.0 | 6495 | 50.0 | 129.9 | 39.0 | monotone ² |
 | **FIC-328402** | 328-1 | 328D003 Comp-I→II transfer 744 | AUTO | +1 | **0.06** | 25.0 | 31478 | 50.0 | 629.6 | 37.8 | monotone ³ |
 | **FIC-328404** | 328-1 | 328D001 reflux 775 | CAS | +1 | **0.50** | 25.0 | 1675 | 30.2 | 55.5 | 27.7 | monotone ¹ |
 | FIC-328406 | 328-1 | 328D003 standby pump (spare) | MAN | +1 | 1.20 | 25.0 | — | — | — | — | inactive (op=0) |
@@ -634,7 +634,7 @@ $M\lesssim40$ (≥2.5× margin) to survive the Domino live tie-ins.
 
 | Tag | Unit | Loop | Mode | act | Kc | Ti (s) | note |
 | :--- | :---: | :--- | :---: | :---: | :---: | :---: | :--- |
-| **FFIC-328401** | 328-1 | 328C004 steam/feed ratio master → FIC-328401 cas_sp | AUTO | +1 | 0.80 | 40.0 | PV is dimensionless ratio; effective $M\approx5\times10^{-7}$ (g=1/31114) → effectively frozen, stable. Output = LP-steam demand (kg/h), op_hi=12000. |
+| **FFIC-329401** | 328-1 | 328C004 steam/feed ratio master → FIC-329401 cas_sp | AUTO | +1 | **8.0e5** | 40.0 | PV is the dimensionless T/M3 steam-feed ratio (order 0.2); open-loop gain $g=1/(1000\,S744_{\mathrm{VOL,des}})=3.185\times10^{-5}$ per kg/h. At the former **Kc=0.80** the loop coefficient was $1-K_c a g \approx 1-5\times10^{-7}$ — the master was **inert** (a +5 % ratio SP step moved FV-329401 by 0.0009 % in 600 s). Retuned to $K_c=0.5/(a g)=8.0\times10^{5}$ → coefficient 0.500, matching the sibling flow loops. Output = LP-steam demand (kg/h), op_hi=12000, sp_hi=0.5. ⁴ |
 
 ### Level / pressure / temperature controllers (PV in engineering units, standard I-PD)
 
@@ -662,7 +662,7 @@ flow-loop stability index does not apply.
    damped-oscillatory band ($M=70$ and $67$); they ring on any disturbance and would
    couple oscillation into the D003/D001 recycle tears once live tie-ins move their SPs.
    Kc=0.50 moves both to $M\approx28$ (coef ≈0.45, monotone).
-2. **FIC-328401** — reduced Kc 1.20 → **0.30**. Root cause of the observed steam-cascade
+2. **FIC-329401** — reduced Kc 1.20 → **0.30**. Root cause of the observed steam-cascade
    0↔100 limit cycle: with the FFIC master injecting a moving cascade SP, the $M=156$
    loop had pole $1-aM=-2.06$ (growing oscillation, eigenvalue ≈ −2.1/tick confirmed by
    per-tick trace). Kc=0.30 → $M=39$, pole +0.24 (monotone, 2.6× margin). This is the
@@ -672,6 +672,13 @@ flow-loop stability index does not apply.
    only because it runs AUTO at a bit-exact fixed-point seed with no disturbance; a live
    Comp-I→II tie-in in the Domino phase would detonate it. Kc=0.06 → $M=38$, pole +0.26
    (monotone). Defensive — no steady-state effect (Δu=0 at the fixed point for any Kc).
+4. **FFIC-329401** — raised Kc 0.80 → **8.0e5** (opposite direction to the others). The
+   ratio master's PV is an order-0.2 dimensionless T/M3 ratio while its output is an
+   order-6495 kg/h steam demand, so its open-loop gain is tiny ($g=3.185\times10^{-5}$).
+   At Kc=0.80 the loop coefficient was $1-5\times10^{-7}$ — the master was inert (measured
+   FV-329401 move of 0.0009 % in 600 s for a +5 % ratio step). $K_c=0.5/(a g)=8.0\times10^{5}$
+   restores coefficient 0.500, so the ratio master actually acts. Δu=0 at the seed for any
+   Kc, so the boot pin is untouched.
 
 Verification: `smoke_323_328.py` to t=3600 s (true steady state) → 323-1 anchors
 135/106/99 °C bit-exact (drift 4.9e-9 / 7.3e-9 / 1.6e-11), all new-state drift ≤1e-5,
@@ -687,6 +694,19 @@ the footnotes above — is **identical** to the mass-basis tune recorded here. S
 and `FIC-328402 Kc = 60.149` against `0.06`. Those are the same tuning in different units, not a
 regression. The table is kept on the mass basis because that is the basis the stability analysis
 above is written in; **do not "correct" the engine to these numbers.**
+
+The two **steam** flow loops in the table — `FIC-329402` (MP 911) and `FIC-329401` (LP 931) — stay on
+the **mass** basis in the engine too (`Kc = 1.20` and `0.30`, no ρ factor), because steam flow is
+metered by mass, not volume. So the engine constants match the table for those two rows directly. The
+`FFIC-329401` ratio master is neither: its `Kc = 8.0e5` is a small-open-loop-gain retune (footnote 4),
+not a mass↔volumetric conversion.
+
+> **Tag reconciliation (2026-07-29).** Appendix A was reconciled against `State.__init__`. Three rows
+> carried pre-rename tags now corrected to the engine: `FIC-326402 → FIC-329402`,
+> `FIC-328401 → FIC-329401`, and `FFIC-328401 → FFIC-329401` (the last also carried the superseded
+> `Kc = 0.80`; the engine value is `8.0e5`, footnote 4). All other Appendix-A/B constants verified equal
+> to the seeds (mass rows direct; volumetric rows = `Kc_mass · ρ`). The 33-of-46 plant-vs-simulator
+> divergences remain intentional and are documented in the header note and footnotes above.
 
 ---
 

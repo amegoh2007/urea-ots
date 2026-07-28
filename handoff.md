@@ -1,8 +1,10 @@
 # Handoff: Open Gaps Only
 
-Updated 2026-07-27. Closed work is recorded in As-Built §§22.11-22.13,
-`research_plan_324_vacuum_train.md`, `research_plan_328d003_compartments.md`, and
-`PID_EVIDENCE_AUDIT_2026-07-27.md`.
+Updated 2026-07-29. Closed work is recorded in As-Built §§22.11-22.14,
+`research_plan_324_vacuum_train.md`, `research_plan_328d003_compartments.md`,
+`PID_EVIDENCE_AUDIT_2026-07-27.md`, and — for the C39 tear classification and the
+Master_PID tag reconciliation closed on 2026-07-29 — As-Built §22.14 with
+`backend/test_c39_recycle_tears.py` and Appendix A of `Master_PID_Tuning_Constants.md`.
 
 ## Model-compliance gaps
 
@@ -32,13 +34,8 @@ measurement weights and uncertainties; do not introduce a fictitious urea sink.
 
 The compliance envelope remains 6653.8 kW in, 8344.2 kW out, residual −1690.5 kW. Close the balance
 after C36 exposes carbamate reaction extents and phase enthalpies instead of embedding them in
-back-solved latent terms.
-
-### C39 — recycle tear classification and solve
-
-Classify the one-tick tears for streams 748, 750, 775, 718A, and 931 as physical transport or
-algebraic recycle. Use bounded direct substitution, Wegstein, or Broyden iteration for algebraic
-tears; retain a dynamic lag only where residence-time or transport evidence exists.
+back-solved latent terms. (The `q328_resid` diagnostic in `step_sim` already measures this residual
+every tick; it is read-only until the explicit-ξ·ΔH rework lands.)
 
 ## Equipment and source-data gaps
 
@@ -50,17 +47,8 @@ geometry for 324F002/F004/F005. Also obtain F004 discharge/E006 pressure, comple
 lengths/fittings/roughness, and condenser/ejector gas-side pressure drops. Until then, retain the
 PFD-anchored training surrogate and shared rounded manifold pressures.
 
-### 328D003 flashing and emissions
-
-The approved 18/43/429 m³ communicating-compartment basis closes the physical-bay inventory gap.
-Obtain plant survey data for dissolved-gas flashing and tank pressure/emissions only if those
-behaviors are required for training.
-
 ## Product and repository follow-up
 
-- Reconcile `Master_PID_Tuning_Constants.md`: 33 of 46 simulator controller settings intentionally
-  differ from plant rows; Appendix A describes a mass-basis `_fic_flow` while the engine is
-  volumetric, and some tags predate renames.
 - Confirm the 321-1/323-1 overlay registration and FFIC-329401/TIC-328012 live-PV row assignment on a
   running HMI.
 - Remove orphaned Git LFS objects and unreachable commits through repository recreation or GitHub
