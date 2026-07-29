@@ -38,6 +38,7 @@
 | 23 | 2026-07-27 | branch `master` | Implemented the owner-approved 328D003 compartment basis: I = 18 m³, II = 43 m³, III = 429 m³ (490 m³ total), with openings among all three and III as the shared accumulation baffle. Corrected the prior P&ID-only I/III process-inventory inference: external streams remain on physical I and II, while III is a separate communicating surge state. LI-328507 reports I and LI-328508 reports III. See §22.13, `MAP_328D003.md`, and `research_plan_328d003_compartments.md`. |
 | 24 | 2026-07-27 | branch `master` | Corrected the 328D003 instrument service from the approved operator mapping: LT-328507 indicates physical compartment I and LT-328508 indicates physical compartment II, both open-loop. This supersedes the earlier P&ID-only visual association of 328508 with compartment III. Compartment III remains the calculated accumulation state with no approved LT assignment. |
 | 25 | 2026-07-29 | branch `master` | Closed C39: classified the five Unit-328 one-tick tears. Streams 748/750/775 are algebraic recycles (vapour/reflux lines, no inventory) resolved by bounded one-tick direct substitution — certified contractive ($|z|\approx0.95<1$), monotone, non-oscillatory, bit-exact at design; 718A is physical transport (retained 45 s liquid-leg lag); 931 is an FFIC-controlled LP-steam utility feed, not a recycle. No engine equation changed. See §22.14 and `backend/test_c39_recycle_tears.py`. |
+| 26 | 2026-07-29 | branch `master` | Delivered the first-principles closure engines for the C34/C35/C36/C40/C43 cluster, standalone (no `main.py` change; design pin intact). Completed the Extended UNIQUAC basis `props_nh3co2h2o.py` (Debye-Hückel long-range term, complete activity coefficient, SRK gas fugacity, Newton speciation, explicit reaction enthalpy = C43 core, excess enthalpy = C34 excess part; 37/37) transcribed verbatim from Thomsen 2005 IUPAC; the Crowe reconciliation engine `reconcile_crowe.py` (C35; 6/6); and the Huang 1-D ejector core `ejector_huang.py` (C40; 11/11). Remaining per gap is external data (paywalled NH3(aq)/CO2(aq) Cp; approved sensor covariance; vendor ejector geometry) or engine wiring — none fabricated. See §22.15. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -1759,6 +1760,67 @@ algebraic tie. 931 is not a recycle at all: it is an FFIC-ratio-controlled LP-st
 computed live each tick from `_fic_flow`; the one-tick `m931_prev` only forms the measured steam/feed
 ratio PV (sensor causality), so moving the FFIC-329401 master retargets the live 931 flow away from
 its design value, as the gate asserts.
+
+### 22.15 First-principles closure engines for C34/C35/C36/C40/C43 (standalone, 2026-07-29)
+
+Every closure model named in the owner references (`Resolving Simulator Thermodynamics Gaps.docx`,
+`Urea Simulation Gaps Resolution1.md`) is now implemented from first principles and validated against
+independent anchors. These are **standalone** modules — none is wired into `main.py`, so the bit-exact
+design pin is untouched — delivered so the physics is proven before engine integration (phases 2-5).
+
+**Extended UNIQUAC property basis — `backend/props_nh3co2h2o.py` (C36, C34-excess, C43-core; 37/37).**
+Parameters and equations are transcribed verbatim from the definitive open specification of this exact
+model, Thomsen, *Pure Appl. Chem.* 77 (2005) 531 (IUPAC), cross-checked against the Darde 2011 thesis
+and the owner references. The excess Gibbs energy is the sum of three contributions and the activity
+coefficients are their partial molar derivatives:
+
+- *Combinatorial* (eq 12) and *residual* (eq 16) short-range terms — validated earlier (Gibbs-Duhem
+  $<10^{-9}$, exact pure/infinite-dilution limits).
+- *Long-range Debye-Hückel* (eqs 5-9): $A(T)=1.131+1.335\times10^{-3}(T-T_0)+1.164\times10^{-5}(T-T_0)^2$
+  (kg/mol)$^{1/2}$ with $T_0=273.15$ K and $b=1.5$; ion term $\ln\gamma_i^{DH}=-z_i^2A\sqrt I/(1+b\sqrt I)$
+  (unsymmetric) and water term $\ln\gamma_w^{DH}=M_w(2A/b^3)[1+b\sqrt I-(1+b\sqrt I)^{-1}-2\ln(1+b\sqrt I)]$
+  (symmetric), with $I=0.5\sum_i x_iz_i^2/(x_wM_w)$. Verified to reproduce eqs 8/9, the DH limiting law
+  ($\ln\gamma_i/(-z^2A\sqrt I)=1/(1+b\sqrt I)\to1$), and its own Gibbs-Duhem.
+- *Complete activity coefficient* `activity_ln_gamma` (eqs 17-18): symmetric for water, unsymmetric for
+  solutes; reduces to the short-range term when no ions are present.
+- *Gas-phase fugacity* `srk_phi`: Soave-Redlich-Kwong with $k_{ij}=0$ (Thomsen 2005), public NIST/DIPPR
+  criticals; $\phi\to1$ as $P\to0$, physical real-gas $Z$, monotone in pressure.
+- *Speciation* `speciate`: damped log-space Newton-Raphson on the five aqueous equilibria R1-R5 with the
+  full activity coefficients, subject to N/C element and charge balances (molality basis, solute activity
+  $a_i=m_i\gamma_i^*x_w$ per eq 4). Closes every balance and reaction quotient to $\sim10^{-14}$ and
+  reproduces Le Chatelier (more NH$_3$ $\Rightarrow$ higher pH, more carbamate) and the pH 9-11 carbamate
+  window of Thomsen 2005 Fig. 4.
+- *Explicit reaction enthalpy* `dH_reaction` (**C43 core**): $\Delta H_{rxn}(T_0)=\sum_i\nu_i\Delta_fH_i$,
+  matching textbook aqueous values (water ionization $+55.8$, NH$_4^+$ formation $-52.2$, CO$_2$ first
+  ionization $\sim+7.6$, bicarbonate ionization $+14.9$ kJ/mol) — the first-principles replacement for
+  back-solved latent duties.
+- *Excess enthalpy* `excess_enthalpy` (**C34 excess part**): $h^E=-RT^2\sum_i x_i\,d\ln\gamma_i/dT$; the
+  combinatorial part contributes exactly zero and pure-water $h^E=0$.
+
+*One documented external input, not fabricated:* the NH$_3$(aq)/CO$_2$(aq) standard-state $C_p$
+coefficients (Thomsen & Rasmussen 1999, paywalled) gate the R2/R3/R5 constants and `speciate` above
+25 °C and the absolute (vs excess) stream enthalpy (**C34**). Deep web research 2026-07-29 (Plyasunov &
+Shock 2000) did not surface an open temperature-resolved $C_p$ usable in the 3-parameter Helgeson form
+without fitting unpublished data, so the two rows remain `None`; the framework is already parametrized
+on them and refuses to extrapolate rather than guess.
+
+**Crowe reconciliation engine — `backend/reconcile_crowe.py` (C35; 6/6).** Crowe et al., *AIChE J.* 29
+(1983) 881: `wls_reconcile` gives the closed-form weighted-least-squares estimate
+$\hat x=y-\Sigma A^\top(A\Sigma A^\top)^{-1}(Ay-c)$; `projection_matrix` builds $P$ with $PA_u=0$ from the
+left null space of the unmeasured submatrix (SVD); `crowe_reconcile` eliminates the unmeasured variables,
+reconciles the redundant reduced system, and back-calculates them. Validated on hand-solvable networks
+(equal-variance imbalance splits evenly, variance weighting moves the noisy sensor most, shared
+unmeasured stream back-calculates identically from both nodes, Lagrange optimality holds). *Remaining
+input:* an approved sensor covariance $\Sigma$ to certify the Unit-324 residuals — a governance artifact,
+not derivable.
+
+**Huang ejector core — `backend/ejector_huang.py` (C40; 11/11).** Huang et al., *Int. J. Refrigeration*
+22 (1999) 354: isentropic area/Mach/pressure relations, choked-nozzle mass flux, normal-shock jump, and
+the entrainment-ratio / critical-backpressure (breakdown) assembly. Validated against standard
+gas-dynamics tables ($\gamma=1.4$: critical pressure ratio 0.5283, $A/A^*$ at $M=2$ is 1.6875, shock at
+$M_1=2$ gives $M_2=0.5774$, $p_2/p_1=4.5$, $p_{02}/p_{01}=0.7209$; choked air flux matches
+$0.0404\,P_0A/\sqrt{T_0}$). *Remaining input:* the vendor throat/exit/mixing geometry for
+324F002/F004/F005 and the downstream tie pressures (F004/E006) that fix the shock position.
 
 ---
 

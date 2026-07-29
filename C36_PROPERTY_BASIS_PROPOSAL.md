@@ -85,15 +85,22 @@ does for cp/rho) and lands behind tests, exactly like the C10 aqueous work.
    live in Thomsen & Rasmussen (1999, paywalled) and are left `None`, so the two reactions consuming
    them are exposed at 25 °C only; the module refuses to extrapolate them (asserted by a test).
 
-   **Phase 1b — short-range activity term DELIVERED 2026-07-29.** `props_nh3co2h2o.py` now carries the
-   UNIQUAC combinatorial and residual (short-range) activity coefficients with their infinite-dilution
-   limits and a symmetric/unsymmetric combiner (`short_range_ln_gamma`), from the same verbatim `r,q`
-   and `u⁰/uᵀ` parameters. It is validated for **thermodynamic consistency** — Gibbs-Duhem closes to
-   < 1e-9, `ln γ = 0` at every pure-component limit, the numeric infinite-dilution limit matches the
-   closed form, and the unsymmetric `ln γ*` vanishes at infinite dilution (18/18 tests pass). Remaining
-   phase-1b work: the **Debye-Hückel** long-range electrostatic term, the multiphase **Newton
-   speciation** solver, and the **SRK-VLE** gas-phase closure — after which phases 2-5 (enthalpy datum,
-   live vectors, C43 rework, Unit-324 VLE) proceed.
+   **Phase 1b — COMPLETE 2026-07-29 (37/37 tests).** `props_nh3co2h2o.py` now carries the entire
+   Extended UNIQUAC liquid+vapor model, all transcribed verbatim from the definitive open specification
+   Thomsen 2005, IUPAC *Pure Appl. Chem.* 77, 531 (eqs 6-9/17-18/21):
+   - combinatorial + residual short-range activity (Gibbs-Duhem < 1e-9, exact pure/inf-dilution limits);
+   - the **Debye-Hückel** long-range term `debye_huckel_ln_gamma` ($A(T)$ eq 6, $b=1.5$; reproduces
+     eqs 8/9, the DH limiting law, and its own Gibbs-Duhem);
+   - the **complete activity coefficient** `activity_ln_gamma` (symmetric water / unsymmetric solutes);
+   - the **SRK-VLE** gas-phase fugacity `srk_phi` ($k_{ij}=0$; → ideal gas at low P, correct real-gas $Z$);
+   - the **Newton speciation** solver `speciate` (R1-R5 with full activities + N/C/charge balances;
+     closes every balance and reaction quotient to ~1e-14; reproduces Le Chatelier and the pH 9-11
+     carbamate window);
+   - the **explicit reaction enthalpy** `dH_reaction` (C43 core; matches textbook +55.8/−52.2/+14.9 kJ/mol)
+     and the **excess enthalpy** `excess_enthalpy` (C34 excess part).
+   Still standalone (no engine change). The one paywalled input (NH3(aq)/CO2(aq) $C_p$) is documented and
+   the framework is parametrized on it. Phases 2-5 (enthalpy datum, live vectors, C43 wiring, Unit-324
+   VLE) proceed next; see As-Built §22.15.
 2. **Enthalpy datum (C34):** derive per-stream specific enthalpy = sensible (existing cited cp) +
    excess (UNIQUAC) + formation/reaction terms, on one declared datum. Populate the `enthalpy_kJkg`
    field the records already carry. Only after phase 1 validates — a sensible-only enthalpy now would

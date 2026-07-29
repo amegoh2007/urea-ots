@@ -1,83 +1,97 @@
 # Handoff: Open Gaps Only
 
-Updated 2026-07-29. Closed work is recorded in As-Built §§22.11-22.14,
+Updated 2026-07-29. Closed/delivered work is recorded in As-Built §§22.11-22.15,
 `research_plan_324_vacuum_train.md`, `research_plan_328d003_compartments.md`,
-`PID_EVIDENCE_AUDIT_2026-07-27.md`, and — for the C39 tear classification and the
-Master_PID tag reconciliation closed on 2026-07-29 — As-Built §22.14 with
-`backend/test_c39_recycle_tears.py` and Appendix A of `Master_PID_Tuning_Constants.md`.
+`PID_EVIDENCE_AUDIT_2026-07-27.md`, `C36_PROPERTY_BASIS_PROPOSAL.md`, and the standalone,
+test-gated modules delivered on 2026-07-29:
+`backend/props_nh3co2h2o.py` (+`test_props_nh3co2h2o.py`, 37/37),
+`backend/reconcile_crowe.py` (+`test_reconcile_crowe.py`, 6/6),
+`backend/ejector_huang.py` (+`test_ejector_huang.py`, 11/11).
 
-The C34/C35/C36/C43 gaps below are ONE coupled cluster that all need the electrolyte property/
-speciation/enthalpy basis. `C36_PROPERTY_BASIS_PROPOSAL.md` (2026-07-29) is the sourced, cited,
-approvable path for that basis; on approval it closes C36, then C34 and C43 in dependency order.
-No property, sink, or curve was fabricated to force closure. The owner-supplied
-`References/Resolving Simulator Thermodynamics Gaps.docx` independently corroborates the whole model
-selection (Extended UNIQUAC / Gorlovskii-Kucheryavyi / Huang / Crowe) and its Table 1 `r,q` values
-match `props_nh3co2h2o.py` exactly — a second-source check now locked by a test.
+The five gaps below no longer lack a *method* — every closure model named in the two owner-supplied
+references (`Resolving Simulator Thermodynamics Gaps.docx`,
+`Urea Simulation Gaps Resolution1.md`) is now implemented from first principles and validated against
+independent anchors. What remains for each is narrowly one of two things: (a) a specific external datum
+that is paywalled, vendor-proprietary, or a governance artifact and therefore cannot be sourced or
+fabricated, or (b) engine integration into `main.py` (phases 2-5), which is deliberately deferred to
+keep the bit-exact design pin intact until the property basis is wired in behind a flag. No property,
+sink, curve, covariance, or geometry was fabricated to force a closure.
 
-**Phase 1 + the short-range activity term are delivered** (`backend/props_nh3co2h2o.py` +
-`test_props_nh3co2h2o.py`, 18/18 pass): the Extended UNIQUAC parameter matrix
-(Darde 2011 / Thomsen 1997 / CODATA / Rumpf-Maurer) is transcribed verbatim (cross-checked vs the
-document), the standard-state thermodynamics are validated against textbook pKw(T)/pKa1/pKa2(T)/
-pKa(NH4+)/Cp/Henry data, and the UNIQUAC combinatorial + residual short-range activity coefficients
-are validated for thermodynamic consistency (Gibbs-Duhem < 1e-9, pure-limit = 0, infinite-dilution
-limits exact). Standalone — not yet wired into the engine. Remaining to finish C36: source the
-NH3(aq)/CO2(aq) Cp coefficients (Thomsen & Rasmussen 1999); complete phase 1b (the Debye-Hückel
-long-range term + Newton speciation + SRK-VLE solver); then phases 2-5 (engine integration).
+## C36 / TD-009 / TD-012 — property and species basis  [ENGINE COMPLETE; wiring + Cp rows remain]
 
-## Model-compliance gaps
+DELIVERED — the complete Extended UNIQUAC property basis as a validated standalone module
+(`backend/props_nh3co2h2o.py`), all parameters/equations transcribed verbatim from the definitive open
+source (Thomsen 2005, IUPAC Pure Appl. Chem. 77, 531) and cross-checked against the Darde 2011 thesis
+and the owner references:
+- combinatorial + residual short-range activity (Gibbs-Duhem < 1e-9, pure/inf-dilution limits exact);
+- **long-range Debye-Huckel term** `debye_huckel_ln_gamma` (A(T) eq 6, b=1.5; reproduces eqs 8/9, the
+  DH limiting law, and its own Gibbs-Duhem);
+- **complete activity coefficient** `activity_ln_gamma` (symmetric water / unsymmetric solutes, eqs 17-18);
+- **SRK gas-phase fugacity** `srk_phi` (k_ij=0; -> ideal gas at low P, correct real-gas Z);
+- **Newton speciation solver** `speciate` (R1-R5 + N/C/charge balances with full activities; closes every
+  balance and reaction quotient to ~1e-14; reproduces Le Chatelier and the pH 9-11 carbamate window).
 
-### C34 — canonical stream graph and enthalpy
+REMAINING:
+1. *Engine integration (phases 2-5).* Wire the module into `main.py` behind a flag: live molecular
+   vectors replacing lumped-mass transport in 328D001/328D003/323C005; explicit approval or replacement
+   of the frozen `RHO_744`/`RHO_741`/`R328_C002_RHO`/`R328_C004_RHO`; and the rigorous activity/fugacity
+   VLE for the Unit-324 evaporators (replacing empirical `evap_w_eq`). Must preserve the design seed.
+2. *One paywalled datum.* The NH3(aq)/CO2(aq) standard-state Cp coefficients (Thomsen & Rasmussen 1999,
+   3-parameter Helgeson form) gate the R2/R3/R5 constants above 25 C, `speciate` above 25 C, and the
+   absolute (vs excess) stream enthalpy. Deep web research on 2026-07-29 (Plyasunov & Shock 2000;
+   Thomsen & Rasmussen 1999) did not surface an open, temperature-resolved Cp usable in that form without
+   fitting unpublished data, so it is left as the one documented external input — the framework is
+   already parametrized on it. At 298.15 K everything runs on the sourced dGf alone.
 
-The in-scope PFD contains 163 unique stream numbers, while the runtime publishes 55 canonical stream
-records. Complete the remaining stream graph with calculated `[T, P, phase, F_i, h, rho]` records
-after the C36 thermodynamic basis is approved. None of the current records has calculated enthalpy;
-the records already carry an `enthalpy_kJkg` field left `None` on purpose (no partial/misleading
-property). It is populated in phase 2 of `C36_PROPERTY_BASIS_PROPOSAL.md`, once the enthalpy datum
-(sensible + excess + formation) exists.
+## C34 — canonical stream graph and enthalpy  [excess machinery delivered; absolute datum blocked]
 
-### C35 — molecular conservation versus the PFD
+DELIVERED — the excess (mixing) enthalpy machinery `excess_enthalpy` (h^E from the temperature
+derivative of the model; combinatorial part contributes exactly zero, pure-water h^E = 0), ready to
+supply the composition-aware enthalpy deviation.
 
-Unreconciled Unit-324 design residuals remain: 324F004 −1.917, 324E001 −170.105, and 324E003
-−126.793 kg/h. Molecular certification requires reconciled licensor stream data or approved
-measurement weights and uncertainties; do not introduce a fictitious urea sink.
+REMAINING — the PFD has 163 unique stream numbers vs 55 canonical runtime records; the `enthalpy_kJkg`
+field is `None` on purpose. Populating it (and completing the stream graph) needs the ABSOLUTE stream
+enthalpy = sensible (pure-component Cp integrals) + excess + formation. The excess and formation parts
+exist now; the pure-component sensible part is blocked on the same two paywalled Cp rows as C36 item 2.
+This is phase 2 of `C36_PROPERTY_BASIS_PROPOSAL.md`.
 
-### C36 / TD-009 / TD-012 — property and species basis
+## C43 — Unit-328 energy and reaction closure  [reaction-enthalpy core delivered; wiring remains]
 
-Sourced approvable path now written up in `C36_PROPERTY_BASIS_PROPOSAL.md` (2026-07-29). It recommends
-the **Darde–Thomsen Extended UNIQUAC** basis (valid 0–150 °C / 1–100 bar, covering every LP unit here)
-and gives the phased, design-pin-preserving integration plan for C36 → C34 → C43. The one decision it
-turns on is approving the Extended UNIQUAC interaction-parameter matrix from Darde et al. (2010). The
-proposal also records what is already cited-and-addressed so it is not re-litigated:
+DELIVERED — `dH_reaction` computes the explicit standard enthalpy of reaction from formation enthalpies,
+validated against textbook aqueous values (water ionization +55.8, NH4+ formation -52.2, CO2 first
+ionization ~+7.6, bicarbonate ionization +14.9 kJ/mol). This is the first-principles replacement for the
+back-solved latent duties.
 
-- Density *slopes* already come from IAPWS/Wagner-Pruss (`aqueous_rho`), and the frozen anchors 933.0 /
-  923.28 are proven physical (±0.6 % of water) with the "impossible" 908.5/897.7 values never used.
-- The carbamate/urea/NH3 reaction enthalpies (Frejacques/Brouwer 117 / 15.5 / 23 kJ/mol) are already
-  cited and validated in the stripper and are the recommended set for the C43 rework.
+REMAINING — map the lumped analytical NH3/CO2 mass flows into the speciated carbamate matrix inside the
+Unit-328 vectors and replace the embedded latent terms with explicit xi*dH. The compliance envelope
+(6653.8 kW in / 8344.2 kW out / residual -1690.5 kW) and the read-only `q328_resid` diagnostic in
+`step_sim` remain the acceptance check; the audit comment there estimates the missing carbamate term at
+~1096-1425 kW, consistent with unaccounted reaction enthalpy rather than a leak. Phase 4 of the proposal.
 
-Still open (needs the approval above, then implementation): a complete electrolyte activity/speciation
-basis; live molecular vectors replacing lumped-mass transport in 328D001/328D003/323C005; explicit
-approval or replacement of the frozen `RHO_744`/`RHO_741`/`R328_C002_RHO`/`R328_C004_RHO`; and a
-rigorous activity/fugacity VLE for the Unit-324 evaporators (replacing empirical `evap_w_eq`).
+## C35 — molecular conservation / steady-state reconciliation  [engine delivered; covariance remains]
 
-### C43 — Unit-328 energy and reaction closure
+DELIVERED — the Crowe (1983) projection-matrix reconciliation engine `backend/reconcile_crowe.py`
+(WLS closed form + unmeasured-variable projection + back-calculation), validated on hand-solvable
+mass-balance networks (6/6).
 
-The compliance envelope remains 6653.8 kW in, 8344.2 kW out, residual −1690.5 kW. Close the balance
-after C36 exposes carbamate reaction extents and phase enthalpies instead of embedding them in
-back-solved latent terms. (The `q328_resid` diagnostic in `step_sim` already measures this residual
-every tick; it is read-only until the explicit-ξ·ΔH rework lands.) This is phase 4 of
-`C36_PROPERTY_BASIS_PROPOSAL.md`, using the already-cited Frejacques/Brouwer enthalpies; the audit
-comment at `step_sim` estimates the missing carbamate term at ~1096–1425 kW, consistent with the
-residual being unaccounted reaction enthalpy rather than a leak.
+REMAINING — certifying the Unit-324 residuals (324F004 -1.917, 324E001 -170.105, 324E003 -126.793 kg/h)
+needs an APPROVED measurement-error covariance matrix Sigma (sensor precisions). Without an approved
+Sigma the WLS weights are arbitrary and the reconciled vector is numerically valid but operationally
+meaningless. Do not introduce a fictitious urea sink. Sigma is a governance artifact, not a web-sourceable
+or derivable quantity.
 
-## Equipment and source-data gaps
+## C40 — ejector performance and gas-side pressure drop  [physics core delivered; vendor data remains]
 
-### C40 — ejector performance and gas-side pressure drop
+DELIVERED — the Huang (1999) 1-D compressible-flow core `backend/ejector_huang.py` (isentropic
+area/Mach/pressure relations, choked-nozzle mass flux, normal-shock jump, entrainment ratio, and
+critical-backpressure/breakdown assembly), validated against standard gas-dynamics tables (11/11).
 
-Obtain certified suction/motive/discharge curves, critical backpressure, motive-steam dryness
-corrections, breakdown/recovery hysteresis, acceptance points, and effective throat/exit/loss
-geometry for 324F002/F004/F005. Also obtain F004 discharge/E006 pressure, complete gas-line
-lengths/fittings/roughness, and condenser/ejector gas-side pressure drops. Until then, retain the
-PFD-anchored training surrogate and shared rounded manifold pressures.
+REMAINING — resolving the shock position (hence the true breakdown backpressure) for 324F002/F004/F005
+needs the vendor throat/exit/mixing-loss geometry and the firm downstream tie pressures (F004 discharge /
+E006), plus the gas-line lengths/fittings/roughness and condenser/ejector gas-side pressure drops. These
+are plant-/vendor-specific and cannot be substituted by a correlation. Until they are supplied, retain
+the PFD-anchored training surrogate and shared rounded manifold pressures; the physics core is ready to
+consume the geometry the moment it is available.
 
 ## Product and repository follow-up
 
