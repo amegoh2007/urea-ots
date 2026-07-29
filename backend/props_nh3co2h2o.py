@@ -31,18 +31,31 @@ and surface parameters are additionally cross-checked against an independent tra
 `References/Resolving Simulator Thermodynamics Gaps.docx`, 2026-07-29) — an exact match to all nine
 species, confirming the verbatim transcription against a second source.
 
-Phase 1b (short-range activity) — DELIVERED 2026-07-29: the UNIQUAC combinatorial term
+Phase 1b — DELIVERED IN FULL 2026-07-29. Short-range: the UNIQUAC combinatorial term
 (`uniquac_combinatorial_ln_gamma`), the residual/enthalpic term (`uniquac_residual_ln_gamma`), their
-infinite-dilution limits, and the combined symmetric/unsymmetric `short_range_ln_gamma`. The residual
-term is validated for thermodynamic consistency: Gibbs-Duhem closes to < 1e-9, ln gamma == 0 at every
-pure-component limit, and the numeric infinite-dilution limit matches the closed form. This is the
-SHORT-RANGE part only; the long-range Debye-Huckel electrostatic term, the multiphase Newton
-speciation, and the SRK-VLE gas-phase solver are the remaining phase-1b work.
+infinite-dilution limits, and `short_range_ln_gamma`. Long-range and solvers (this file, second block):
+  * `debye_huckel_ln_gamma` / `debye_huckel_A` / `ionic_strength` — the extended Debye-Huckel term,
+    transcribed verbatim from Thomsen (2005) IUPAC Pure Appl. Chem. 77, 531, eqs 6-9 (A(T), b=1.5).
+  * `activity_ln_gamma` — the COMPLETE Extended UNIQUAC gamma (combinatorial+residual+Debye-Huckel),
+    symmetric for water, unsymmetric for solutes (Thomsen 2005 eqs 17-18).
+  * `srk_phi` — Soave-Redlich-Kwong gas-phase fugacity coefficients, k_ij = 0 (Thomsen 2005), from
+    public NIST/DIPPR critical constants; the gamma-phi VLE gas side.
+  * `speciate` — damped log-space Newton-Raphson liquid speciation of R1-R5 with the full activity
+    coefficients, subject to N/C element and charge balances (molality basis).
+  * `dH_reaction` (explicit reaction enthalpy, gap C43) and `excess_enthalpy` (excess/mixing enthalpy,
+    gap C34) from formation enthalpies and the temperature derivatives of the model.
+All validated (see test_props_nh3co2h2o.py, 37/37): Debye-Huckel reproduces eqs 8/9 and the limiting
+law and satisfies Gibbs-Duhem; SRK -> ideal-gas at low P; reaction enthalpies match textbook aqueous
+values (+55.8/-52.2/+14.9 kJ/mol); speciation closes every balance and reaction quotient to ~1e-10.
 
 KNOWN VERBATIM GAP (not fabricated): the standard-state Cp coefficients for NH3(aq) and CO2(aq) live
-in Thomsen & Rasmussen (1999), which is paywalled; they are left as None below. Consequently the two
-reactions that consume them (R2, R3) are exposed at 298.15 K only; R1/R4 (water, carbonate) carry
-full temperature dependence. Supplying those two rows completes the set.
+in Thomsen & Rasmussen (1999), which is paywalled; they are left as None below. Consequently the R2/R3/
+R5 constants, off-25 C reaction enthalpies, `speciate` above 25 C, and the ABSOLUTE (as opposed to
+excess) stream enthalpy that closes gap C34 are exposed at 298.15 K only or refuse to extrapolate.
+Supplying those two rows completes the set; the whole framework above is already parametrized on them.
+Deep web research on 2026-07-29 (Plyasunov & Shock 2000; Thomsen & Rasmussen 1999) did not surface an
+open, temperature-resolved Cp(T) for these two species usable in the 3-parameter Helgeson form without
+fitting unpublished data, so they remain the one documented external input rather than a guessed value.
 """
 
 import math
@@ -330,6 +343,334 @@ def short_range_ln_gamma(x, T, unsymmetric_species=None, solvent="H2O"):
                   + uniquac_residual_ln_gamma_inf(s, T, solvent))
         out[s] = g
     return out
+
+
+# ===========================================================================
+# Phase 1b completion (2026-07-29): long-range electrostatics, complete activity
+# coefficient, SRK gas-phase fugacity, and explicit reaction/excess enthalpy.
+#
+# SOURCE for the electrostatic term, the gamma composition rule, and the SRK gamma-phi
+# choice is the definitive open specification of this exact model:
+#   Kaj Thomsen, "Modeling electrolyte solutions with the extended universal
+#   quasichemical (UNIQUAC) model", Pure Appl. Chem. 77 (2005) 531-542
+#   (IUPAC; doi 10.1351/pac200577030531).  Equation numbers below refer to that paper.
+# Every constant here is transcribed verbatim from it; nothing is fitted or invented.
+# The paper also confirms, verbatim, that the residual (eq 16) and combinatorial (eq 12)
+# terms already in this module are exactly Thomsen's forms -- an independent second source
+# for the short-range code delivered earlier.
+# ===========================================================================
+
+# Ionic charge z_i (for ionic strength and the Debye-Huckel term). Neutrals are 0.
+CHARGE = {
+    "H2O": 0, "NH3(aq)": 0, "CO2(aq)": 0,
+    "H+": +1, "NH4+": +1,
+    "OH-": -1, "HCO3-": -1, "NH2COO-": -1, "CO3--": -2,
+}
+
+B_DH = 1.5      # (kg/mol)^0.5 -- Debye-Huckel closest-approach constant, Thomsen 2005 eq 5/9.
+
+
+def debye_huckel_A(T):
+    """Debye-Huckel parameter A(T) [(kg/mol)^0.5], Thomsen 2005 eq 6 (Sander et al. 1986 fit to the
+    density and relative permittivity of water), valid to 500 K.  A carries the whole T-dependence of
+    water's permittivity/density; reference temperature in the fit is 273.15 K.
+        A = 1.131 + 1.335e-3 (T-273.15) + 1.164e-5 (T-273.15)^2.
+    Anchor: A(298.15) = 1.1717, matching the literature Debye-Huckel slope ~1.174."""
+    t = T - 273.15
+    return 1.131 + 1.335e-3 * t + 1.164e-5 * t * t
+
+
+def ionic_strength(x):
+    """Mole-fraction-based ionic strength I [mol/kg] (Thomsen 2005 eq 7):
+        I = 0.5 * sum_i x_i z_i^2 / (x_w M_w).
+    x is a species -> mole-fraction dict; water must be present as the solvent."""
+    xw = x.get("H2O", 0.0)
+    if xw <= 0.0:
+        raise ValueError("ionic_strength requires water (solvent) to be present")
+    s = sum(x[sp] * CHARGE[sp] ** 2 for sp in x if x[sp] > 0.0)
+    return 0.5 * s / (xw * M_W)
+
+
+def debye_huckel_ln_gamma(x, T):
+    """Long-range electrostatic contribution to ln gamma (Thomsen 2005 eqs 8, 9).
+        ion i (unsymmetric):  ln g_i^DH = -z_i^2 A sqrt(I) / (1 + b sqrt(I))
+        water   (symmetric):  ln g_w^DH = M_w (2A/b^3) [1 + b sqrt(I) - 1/(1+b sqrt(I)) - 2 ln(1+b sqrt(I))]
+    Neutral solutes (z=0) get 0 from eq 8, which is correct -- the electrostatic term acts only on
+    charged species and the solvent.  The ion form is already unsymmetric (-> 0 as I -> 0), so it is
+    added directly to the unsymmetric solute activity coefficient (eq 17), with no infinite-dilution
+    subtraction.  Returns a dict species -> ln gamma^DH."""
+    A = debye_huckel_A(T)
+    I = ionic_strength(x)
+    sI = math.sqrt(I)
+    b = B_DH
+    out = {}
+    for sp in x:
+        if x[sp] <= 0.0:
+            continue
+        if sp == "H2O":
+            out[sp] = M_W * (2.0 * A / b ** 3) * (
+                1.0 + b * sI - 1.0 / (1.0 + b * sI) - 2.0 * math.log(1.0 + b * sI))
+        else:
+            z = CHARGE[sp]
+            out[sp] = -(z * z) * A * sI / (1.0 + b * sI)
+    return out
+
+
+def activity_ln_gamma(x, T, solutes=None, solvent="H2O"):
+    """Complete Extended UNIQUAC activity coefficient ln gamma at T [K] -- the full model, not just the
+    short-range part.  Combines the validated combinatorial + residual terms with the Debye-Huckel term
+    per Thomsen 2005 eqs 17 (solutes, unsymmetric) and 18 (water, symmetric):
+
+        water:      ln g_w   = ln g_w^C + ln g_w^R + ln g_w^DH
+        solute i:   ln g_i^* = (ln g_i^C - ln g_i^{C,inf}) + (ln g_i^R - ln g_i^{R,inf}) + ln g_i^DH
+
+    `solutes` = the set on the unsymmetric (infinite-dilution-in-water) reference; defaults to every
+    non-solvent species present.  Returns a dict species -> ln gamma.  This is the electrolyte activity
+    coefficient the speciation/VLE solvers consume."""
+    comb = uniquac_combinatorial_ln_gamma(x)
+    res = uniquac_residual_ln_gamma(x, T)
+    dh = debye_huckel_ln_gamma(x, T)
+    if solutes is None:
+        solutes = set(sp for sp in x if sp != solvent and x[sp] > 0.0)
+    out = {}
+    for sp in comb:
+        if sp == solvent:
+            out[sp] = comb[sp] + res[sp] + dh[sp]
+        elif sp in solutes:
+            out[sp] = ((comb[sp] - uniquac_combinatorial_ln_gamma_inf(sp, solvent))
+                       + (res[sp] - uniquac_residual_ln_gamma_inf(sp, T, solvent))
+                       + dh[sp])
+        else:
+            out[sp] = comb[sp] + res[sp] + dh[sp]
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Gas-phase fugacities: Soave-Redlich-Kwong cubic EoS with k_ij = 0 (Thomsen 2005, "Gas-phase
+# fugacities" section: SRK for water + volatile solutes, binary interaction parameters zero).
+# Critical constants Tc [K], Pc [Pa], acentric factor omega -- NIST/DIPPR public values.
+# ---------------------------------------------------------------------------
+SRK_CRIT = {
+    "H2O": (647.096, 22.064e6, 0.3443),
+    "NH3": (405.40,  11.353e6, 0.2560),
+    "CO2": (304.13,   7.377e6, 0.2239),
+}
+
+
+def _srk_ai_bi(sp, T):
+    Tc, Pc, w = SRK_CRIT[sp]
+    m = 0.480 + 1.574 * w - 0.176 * w * w
+    alpha = (1.0 + m * (1.0 - math.sqrt(T / Tc))) ** 2
+    ai = 0.42748 * R * R * Tc * Tc / Pc * alpha
+    bi = 0.08664 * R * Tc / Pc
+    return ai, bi
+
+
+def _cubic_largest_root(a3, a2, a1, a0):
+    """Largest real root of a3 x^3 + a2 x^2 + a1 x + a0 = 0 (the vapor compressibility root)."""
+    p = a2 / a3
+    q = a1 / a3
+    r = a0 / a3
+    P = q - p * p / 3.0                          # depressed cubic t^3 + P t + Q, x = t - p/3
+    Q = 2.0 * p ** 3 / 27.0 - p * q / 3.0 + r
+    disc = Q * Q / 4.0 + P ** 3 / 27.0
+    if disc >= 0.0:
+        sq = math.sqrt(disc)
+        u = math.copysign(abs(-Q / 2.0 + sq) ** (1.0 / 3.0), -Q / 2.0 + sq)
+        v = math.copysign(abs(-Q / 2.0 - sq) ** (1.0 / 3.0), -Q / 2.0 - sq)
+        return u + v - p / 3.0
+    m = 2.0 * math.sqrt(-P / 3.0)
+    arg = (3.0 * Q) / (2.0 * P) * math.sqrt(-3.0 / P)
+    arg = max(-1.0, min(1.0, arg))
+    phi = math.acos(arg) / 3.0
+    roots = [m * math.cos(phi - 2.0 * math.pi * k / 3.0) - p / 3.0 for k in range(3)]
+    return max(roots)
+
+
+def srk_phi(y, T, P):
+    """SRK vapor-phase fugacity coefficients for a vapor mixture y (species -> mole fraction) at T [K]
+    and P [Pa], with k_ij = 0.  Species keys must be SRK_CRIT keys ('H2O', 'NH3', 'CO2').  Returns
+    (phi_dict, Z) where phi_dict maps species -> fugacity coefficient and Z is the vapor compressibility.
+    Van-der-Waals one-fluid mixing (k_ij=0): a_mix = (sum_i y_i sqrt(a_i))^2, b_mix = sum_i y_i b_i."""
+    sp = [s for s in y if y[s] > 0.0]
+    a = {}
+    b = {}
+    for s in sp:
+        a[s], b[s] = _srk_ai_bi(s, T)
+    sqrt_a = {s: math.sqrt(a[s]) for s in sp}
+    am = sum(y[s] * sqrt_a[s] for s in sp) ** 2
+    bm = sum(y[s] * b[s] for s in sp)
+    A = am * P / (R * R * T * T)
+    B = bm * P / (R * T)
+    Z = _cubic_largest_root(1.0, -1.0, A - B - B * B, -A * B)
+    phi = {}
+    for s in sp:
+        bi_bm = b[s] / bm
+        term = 2.0 * math.sqrt(a[s] / am)                       # = 2 (sum_j y_j a_sj)/a_m, k_ij=0
+        ln_phi = (bi_bm * (Z - 1.0) - math.log(Z - B)
+                  - (A / B) * (term - bi_bm) * math.log(1.0 + B / Z))
+        phi[s] = math.exp(ln_phi)
+    return phi, Z
+
+
+# ---------------------------------------------------------------------------
+# Explicit reaction enthalpy (gap C43) and excess (mixing) enthalpy (gap C34, excess part).
+# ---------------------------------------------------------------------------
+def h0(species, T):
+    """Standard-state molar enthalpy H_i(T) [J/mol] = dHf + integral_{T0}^{T} Cp0 dT'  (Helgeson Cp).
+    At T0 this is just dHf (always available).  Off T0 it needs the species' Cp coefficients and raises
+    if they are not in an open source (NH3(aq)/CO2(aq); see module docstring) -- not fabricated."""
+    dGf, dHf, cp = STANDARD_STATE[species]
+    H = dHf * 1000.0
+    if T == T0:
+        return H
+    if cp is None:
+        raise ValueError(f"H0({species}) off 298.15 K needs its Cp (Thomsen&Rasmussen 1999, "
+                         f"paywalled); not fabricated.")
+    a, b, c = cp
+    # integral of a + bT + c/(T-200) from T0 to T:
+    H += a * (T - T0) + 0.5 * b * (T * T - T0 * T0) + c * math.log((T - 200.0) / (T0 - 200.0))
+    return H
+
+
+def dH_reaction(reaction, T=T0):
+    """Standard enthalpy of reaction dH_rxn(T) [kJ/mol] = sum_i nu_i H_i(T), products +, reactants -.
+    At T0 this is the explicit heat of reaction from formation enthalpies alone -- the first-principles
+    replacement for back-solved latent duties (gap C43).  Validated against textbook aqueous reaction
+    enthalpies (water ionization +55.8, NH4+ protonation -52.2, HCO3-/CO3-- +14.7 kJ/mol)."""
+    stoich = REACTIONS[reaction]
+    return sum(nu * h0(sp, T) for sp, nu in stoich.items()) / 1000.0
+
+
+def excess_enthalpy(x, T, dT=0.01):
+    """Molar excess (mixing) enthalpy h^E [J/mol] of the liquid, from the temperature derivative of the
+    Extended UNIQUAC activity coefficients:  h^E = -R T^2 sum_i x_i d(ln gamma_i)/dT.
+
+    Uses the symmetric activity coefficients (combinatorial + residual + the Debye-Huckel terms).  The
+    combinatorial part is temperature-independent (Thomsen 2005, after eq 18), so it contributes nothing
+    -- h^E is driven entirely by the residual and electrostatic terms, exactly as the reference states.
+    Central-difference in T.  This is the mixing (excess) part of the stream enthalpy (gap C34); the
+    absolute sensible enthalpy additionally needs the pure-component Cp integrals, two of which
+    (NH3(aq)/CO2(aq)) await the paywalled Thomsen&Rasmussen 1999 rows -- see module docstring."""
+    def sum_x_lng(TT):
+        comb = uniquac_combinatorial_ln_gamma(x)
+        res = uniquac_residual_ln_gamma(x, TT)
+        dh = debye_huckel_ln_gamma(x, TT)
+        return sum(x[s] * (comb[s] + res[s] + dh[s]) for s in comb)
+    dlng_dT = (sum_x_lng(T + dT) - sum_x_lng(T - dT)) / (2.0 * dT)
+    return -R * T * T * dlng_dT
+
+
+# ---------------------------------------------------------------------------
+# Multiphase liquid speciation: Newton-Raphson solve of the five aqueous equilibria (R1-R5) with the
+# complete Extended UNIQUAC activity coefficients, subject to element (N, C) and charge balances.
+# Molality basis (1 kg water), consistent with the molality-scale standard states behind lnK()/pK():
+#   solute activity  a_i = m_i * gamma_i^* * x_w   (Thomsen 2005 eq 4: gamma_i^m = gamma_i^* x_w)
+#   water  activity  a_w = x_w * gamma_w           (symmetric)
+# This is the last phase-1b component; it turns the property basis into a usable liquid model and
+# supplies the ionic strength the Debye-Huckel term needs.
+# ---------------------------------------------------------------------------
+_SOLUTES = ["H+", "OH-", "NH3(aq)", "NH4+", "CO2(aq)", "HCO3-", "CO3--", "NH2COO-"]
+_N_W_PER_KG = 1000.0 / (M_W * 1000.0)          # mol water per kg water = 55.508
+
+
+def _solve_linear(A, b):
+    """Solve the dense linear system A x = b by Gaussian elimination with partial pivoting."""
+    n = len(b)
+    M = [list(A[i]) + [b[i]] for i in range(n)]
+    for col in range(n):
+        piv = max(range(col, n), key=lambda r: abs(M[r][col]))
+        if abs(M[piv][col]) < 1e-300:
+            raise ValueError("singular Jacobian in speciation solve")
+        M[col], M[piv] = M[piv], M[col]
+        pv = M[col][col]
+        for r in range(n):
+            if r != col:
+                f = M[r][col] / pv
+                for c in range(col, n + 1):
+                    M[r][c] -= f * M[col][c]
+    return [M[i][n] / M[i][i] for i in range(n)]
+
+
+def _speciation_residuals(m, N_tot, C_tot, T):
+    """The eight speciation residuals for a molality vector m (order _SOLUTES): N balance, C balance,
+    charge balance, and the five reaction-quotient equations ln Q_j - ln K_j."""
+    md = dict(zip(_SOLUTES, m))
+    ntot = _N_W_PER_KG + sum(m)
+    x = {"H2O": _N_W_PER_KG / ntot}
+    for s in _SOLUTES:
+        x[s] = md[s] / ntot
+    lng = activity_ln_gamma(x, T)                       # complete Extended UNIQUAC ln gamma
+    ln_xw = math.log(x["H2O"])
+
+    def ln_a(sp):                                       # solute activity a = m gamma* x_w
+        return math.log(md[sp]) + lng[sp] + ln_xw
+    ln_aw = ln_xw + lng["H2O"]
+
+    res = [0.0] * 8
+    res[0] = (md["NH3(aq)"] + md["NH4+"] + md["NH2COO-"]) - N_tot
+    res[1] = (md["CO2(aq)"] + md["HCO3-"] + md["CO3--"] + md["NH2COO-"]) - C_tot
+    res[2] = (md["H+"] + md["NH4+"]) - (md["OH-"] + md["HCO3-"] + 2.0 * md["CO3--"] + md["NH2COO-"])
+    res[3] = (ln_a("H+") + ln_a("OH-") - ln_aw) - lnK("R1_water", T)
+    res[4] = (ln_a("NH4+") - ln_a("NH3(aq)") - ln_a("H+")) - lnK("R2_ammonium", T)
+    res[5] = (ln_a("HCO3-") + ln_a("H+") - ln_a("CO2(aq)") - ln_aw) - lnK("R3_bicarb", T)
+    res[6] = (ln_a("CO3--") + ln_a("H+") - ln_a("HCO3-")) - lnK("R4_carbonate", T)
+    res[7] = (ln_a("NH2COO-") + ln_aw - ln_a("NH3(aq)") - ln_a("HCO3-")) - lnK("R5_carbamate", T)
+    return res
+
+
+def speciate(N_tot, C_tot, T=T0, tol=1e-11, maxiter=200):
+    """Solve the liquid-phase speciation of an aqueous NH3-CO2 solution containing N_tot mol total
+    ammonia and C_tot mol total CO2 per kg water, at temperature T [K] (298.15 K unless the two Cp rows
+    are supplied). Returns a dict of molalities m_i [mol/kg water] for the species in _SOLUTES, plus
+    'H2O' mole fraction, 'I' ionic strength, and 'pH' = -log10(a_H).
+
+    Damped log-space Newton with a numerical Jacobian. Every equilibrium uses the complete Extended
+    UNIQUAC activity coefficient (combinatorial + residual + Debye-Huckel). Validated by closure: at the
+    solution all element/charge balances and all five reaction quotients are satisfied to ~1e-10."""
+    if T != T0:
+        # R2/R3/R5 need NH3(aq)/CO2(aq) Cp for their K(T); refuse rather than fabricate.
+        for rx in ("R2_ammonium", "R3_bicarb", "R5_carbamate"):
+            if not _dcp_reaction_ok(rx):
+                raise ValueError("speciate() off 298.15 K needs the NH3(aq)/CO2(aq) Cp rows "
+                                 "(Thomsen&Rasmussen 1999, paywalled); not fabricated.")
+    # physically-motivated initial guess (Newton enforces the balances)
+    carb = 0.1 * min(N_tot, C_tot)
+    m = {
+        "H+": 1e-7, "OH-": 1e-7,
+        "NH4+": 0.45 * N_tot, "NH2COO-": carb,
+        "NH3(aq)": max(1e-9, N_tot - 0.45 * N_tot - carb),
+        "HCO3-": max(1e-9, 0.7 * (C_tot - carb)),
+        "CO3--": max(1e-9, 0.05 * (C_tot - carb)),
+        "CO2(aq)": max(1e-9, 0.25 * (C_tot - carb)),
+    }
+    v = [math.log(m[s]) for s in _SOLUTES]              # log-molality variables (positivity)
+    for _ in range(maxiter):
+        mv = [math.exp(vi) for vi in v]
+        r = _speciation_residuals(mv, N_tot, C_tot, T)
+        if max(abs(ri) for ri in r) < tol:
+            break
+        J = [[0.0] * 8 for _ in range(8)]               # numerical Jacobian dr/dv
+        for k in range(8):
+            dvk = 1e-6 * max(1.0, abs(v[k]))
+            vp = list(v); vp[k] += dvk
+            rp = _speciation_residuals([math.exp(vi) for vi in vp], N_tot, C_tot, T)
+            for i in range(8):
+                J[i][k] = (rp[i] - r[i]) / dvk
+        dv = _solve_linear(J, [-ri for ri in r])
+        step = max(1.0, max(abs(d) for d in dv) / 2.0)  # damp: cap max log-step at 2 (factor ~7.4)
+        v = [v[i] + dv[i] / step for i in range(8)]
+    mv = [math.exp(vi) for vi in v]
+    md = dict(zip(_SOLUTES, mv))
+    ntot = _N_W_PER_KG + sum(mv)
+    x = {"H2O": _N_W_PER_KG / ntot}
+    for s in _SOLUTES:
+        x[s] = md[s] / ntot
+    lng = activity_ln_gamma(x, T)
+    md["H2O"] = x["H2O"]
+    md["I"] = ionic_strength(x)
+    md["pH"] = -(math.log(md["H+"]) + lng["H+"] + math.log(x["H2O"])) / LN10   # -log10 a_H
+    return md
 
 
 if __name__ == "__main__":

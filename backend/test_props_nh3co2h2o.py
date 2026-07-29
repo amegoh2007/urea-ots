@@ -202,6 +202,215 @@ def test_short_range_finite_across_desorber_envelope():
         assert all(abs(v) < 60.0 for v in g.values())
 
 
+# --------------------------------------------------- Debye-Huckel long-range electrostatic term
+def test_debye_huckel_A_anchor():
+    """A(298.15 K) reproduces the literature Debye-Huckel slope ~1.174 (kg/mol)^0.5 (Thomsen 2005 eq 6);
+    A(273.15 K) equals the leading polynomial coefficient 1.131."""
+    assert abs(P.debye_huckel_A(298.15) - 1.1717) < 1e-3
+    assert abs(P.debye_huckel_A(273.15) - 1.131) < 1e-9
+
+
+def test_debye_huckel_matches_equations():
+    """debye_huckel_ln_gamma reproduces Thomsen 2005 eqs 8 (ions) and 9 (water) exactly for a speciated
+    electroneutral solution -- a direct check the code equals the published equations."""
+    x = {"H2O": 0.96, "NH4+": 0.02, "HCO3-": 0.02}
+    T = 298.15
+    g = P.debye_huckel_ln_gamma(x, T)
+    A = P.debye_huckel_A(T)
+    I = P.ionic_strength(x)
+    sI = math.sqrt(I)
+    b = P.B_DH
+    for ion in ("NH4+", "HCO3-"):
+        z = P.CHARGE[ion]
+        assert abs(g[ion] - (-(z * z) * A * sI / (1.0 + b * sI))) < 1e-12
+    gw = P.M_W * (2.0 * A / b ** 3) * (1.0 + b * sI - 1.0 / (1.0 + b * sI) - 2.0 * math.log(1.0 + b * sI))
+    assert abs(g["H2O"] - gw) < 1e-12
+
+
+def test_debye_huckel_limiting_law():
+    """The ion contribution approaches the Debye-Huckel limiting law: the ratio ln g_i^DH / (-z^2 A sqrt(I))
+    equals 1/(1+b sqrt(I)), which -> 1 as I -> 0 with deviation bounded exactly by b sqrt(I). The deviation
+    must shrink monotonically as the solution is diluted."""
+    T = 298.15
+    A = P.debye_huckel_A(T)
+    b = P.B_DH
+    prev_dev = None
+    for s in (1e-4, 1e-5, 1e-6):
+        x = {"H2O": 1.0 - 2 * s, "NH4+": s, "HCO3-": s}
+        g = P.debye_huckel_ln_gamma(x, T)
+        sI = math.sqrt(P.ionic_strength(x))
+        ratio = g["NH4+"] / (-1.0 * A * sI)                 # z = 1
+        dev = abs(ratio - 1.0)
+        assert dev < b * sI + 1e-12                         # exact analytic bound 1/(1+b sqrt(I))
+        if prev_dev is not None:
+            assert dev < prev_dev                           # deviation shrinks toward the limiting law
+        prev_dev = dev
+
+
+def test_debye_huckel_water_vanishes_at_zero_ionic_strength():
+    """With no ions present, ionic strength is 0 and the water DH term is exactly 0."""
+    g = P.debye_huckel_ln_gamma({"H2O": 0.9, "NH3(aq)": 0.1}, 298.15)
+    assert abs(g["H2O"]) < 1e-15
+
+
+def test_debye_huckel_satisfies_gibbs_duhem():
+    """The DH contribution alone satisfies Gibbs-Duhem along an electroneutral NH4HCO3-water path:
+    sum_i x_i d(ln g_i^DH)/ds = 0. The unsymmetric normalization is composition-independent, so it drops
+    out of the derivative -- an incorrect DH differentiation would violate this grossly."""
+    T = 298.15
+    h = 1e-7
+
+    def lng(s):
+        return P.debye_huckel_ln_gamma({"H2O": 1.0 - 2 * s, "NH4+": s, "HCO3-": s}, T)
+
+    for s in (0.01, 0.03, 0.05):
+        gp, gm = lng(s + h), lng(s - h)
+        d = {k: (gp[k] - gm[k]) / (2.0 * h) for k in gp}
+        x = {"H2O": 1.0 - 2 * s, "NH4+": s, "HCO3-": s}
+        gd = sum(x[k] * d[k] for k in x)
+        assert abs(gd) < 1e-5, f"Gibbs-Duhem(DH) = {gd} at s={s}"
+
+
+def test_activity_reduces_to_short_range_without_ions():
+    """With no charged species the Debye-Huckel term is zero, so the full Extended UNIQUAC activity
+    coefficient equals the validated short-range (combinatorial+residual) result."""
+    x = {"H2O": 0.8, "NH3(aq)": 0.15, "CO2(aq)": 0.05}
+    T = 350.0
+    full = P.activity_ln_gamma(x, T)
+    sr = P.short_range_ln_gamma(x, T, unsymmetric_species={"NH3(aq)", "CO2(aq)"})
+    for s in x:
+        assert abs(full[s] - sr[s]) < 1e-12
+
+
+# ------------------------------------------------------------------------- SRK gas-phase fugacity
+def test_srk_ideal_gas_limit():
+    """At very low pressure the SRK fugacity coefficient -> 1 and Z -> 1 for every species."""
+    y = {"H2O": 0.5, "NH3": 0.3, "CO2": 0.2}
+    phi, Z = P.srk_phi(y, 400.0, 100.0)                    # 100 Pa
+    assert abs(Z - 1.0) < 1e-3
+    for s in y:
+        assert abs(phi[s] - 1.0) < 1e-3
+
+
+def test_srk_real_gas_below_unity():
+    """A compressible gas: CO2 at 320 K, 40 bar has Z<1 and fugacity coefficient <1."""
+    phi, Z = P.srk_phi({"CO2": 1.0}, 320.0, 40.0e5)
+    assert 0.7 < Z < 1.0
+    assert 0.6 < phi["CO2"] < 1.0
+
+
+def test_srk_fugacity_monotone_in_pressure():
+    """The fugacity coefficient decreases monotonically from 1 as pressure rises (CO2, 320 K)."""
+    prev = None
+    for Pbar in (1, 5, 10, 20, 40):
+        phi, _ = P.srk_phi({"CO2": 1.0}, 320.0, Pbar * 1e5)
+        if prev is not None:
+            assert phi["CO2"] < prev
+        prev = phi["CO2"]
+
+
+# ------------------------------------------------------- explicit reaction enthalpy (gap C43)
+def test_reaction_enthalpies_match_textbook():
+    """dH_reaction from formation enthalpies reproduces textbook aqueous reaction enthalpies at 25 C:
+    water ionization +55.8, NH4+ formation (NH3+H+ -> NH4+) -52.2, CO2 first ionization ~+7.6,
+    bicarbonate ionization +14.9 kJ/mol -- validating the standard-state dHf set that closes gap C43."""
+    assert abs(P.dH_reaction("R1_water") - 55.815) < 0.5
+    assert abs(P.dH_reaction("R2_ammonium") - (-52.22)) < 0.5
+    assert abs(P.dH_reaction("R3_bicarb") - 7.64) < 1.0
+    assert abs(P.dH_reaction("R4_carbonate") - 14.85) < 0.5
+
+
+def test_reaction_enthalpy_offT0_needs_cp():
+    """Off 25 C, dH_reaction needs each species' Cp; reactions containing NH3(aq)/CO2(aq) must refuse
+    (not fabricate). Water and carbonate reactions, whose species all have open-source Cp, succeed."""
+    assert math.isfinite(P.dH_reaction("R1_water", 320.0))
+    assert math.isfinite(P.dH_reaction("R4_carbonate", 320.0))
+    for rx in ("R2_ammonium", "R3_bicarb", "R5_carbamate"):
+        try:
+            P.dH_reaction(rx, 320.0)
+            assert False, f"dH_reaction({rx}) off 25 C should have raised"
+        except ValueError:
+            pass
+
+
+# ------------------------------------------------- excess (mixing) enthalpy machinery (gap C34)
+def test_excess_enthalpy_pure_water_zero():
+    """h^E of pure water is exactly 0 (no mixing, no ionic strength, no residual)."""
+    assert abs(P.excess_enthalpy({"H2O": 1.0}, 298.15)) < 1e-6
+
+
+def test_excess_enthalpy_finite_across_envelope():
+    """h^E stays finite and physically bounded for a speciated desorber liquid across 40-150 C."""
+    x = {"H2O": 0.90, "NH3(aq)": 0.05, "CO2(aq)": 0.02, "NH4+": 0.015, "HCO3-": 0.015}
+    for T in (313.15, 373.15, 423.15):
+        h = P.excess_enthalpy(x, T)
+        assert math.isfinite(h)
+        assert abs(h) < 1.0e5                              # J/mol, physically bounded
+
+
+# ------------------------------------------------- Newton speciation solver (gap C36 phase 1b)
+def test_speciation_closes_all_balances():
+    """The Newton speciation solver drives every residual -- N balance, C balance, charge balance, and
+    all five reaction quotients -- to ~1e-9 across a range of NH3/CO2 loadings. This is the decisive
+    correctness test: the composed solver (validated K's + full activity coefficients) is self-consistent."""
+    for N, C in ((2.0, 1.0), (4.0, 1.0), (1.0, 1.0), (6.0, 2.0), (0.5, 0.5)):
+        r = P.speciate(N, C)
+        res = P._speciation_residuals([r[s] for s in P._SOLUTES], N, C, P.T0)
+        assert max(abs(x) for x in res) < 1e-9, f"N={N} C={C}: max residual {max(abs(x) for x in res)}"
+
+
+def test_speciation_conserves_elements_and_charge():
+    """Independent re-check (not via the solver's own residuals) that total N, total C, and net charge
+    are conserved by the returned speciation."""
+    N, C = 3.0, 1.5
+    r = P.speciate(N, C)
+    assert abs((r["NH3(aq)"] + r["NH4+"] + r["NH2COO-"]) - N) < 1e-8
+    assert abs((r["CO2(aq)"] + r["HCO3-"] + r["CO3--"] + r["NH2COO-"]) - C) < 1e-8
+    charge = r["H+"] + r["NH4+"] - r["OH-"] - r["HCO3-"] - 2.0 * r["CO3--"] - r["NH2COO-"]
+    assert abs(charge) < 1e-8
+
+
+def test_speciation_reaction_quotients_equal_K():
+    """At the converged solution every reaction's activity quotient equals its equilibrium constant."""
+    r = P.speciate(2.5, 1.0)
+    x = {"H2O": r["H2O"]}
+    ntot = P._N_W_PER_KG + sum(r[s] for s in P._SOLUTES)
+    for s in P._SOLUTES:
+        x[s] = r[s] / ntot
+    lng = P.activity_ln_gamma(x, P.T0)
+    ln_xw = math.log(x["H2O"])
+    ln_a = {s: math.log(r[s]) + lng[s] + ln_xw for s in P._SOLUTES}
+    ln_aw = ln_xw + lng["H2O"]
+    assert abs((ln_a["NH2COO-"] + ln_aw - ln_a["NH3(aq)"] - ln_a["HCO3-"]) - P.lnK("R5_carbamate", P.T0)) < 1e-7
+    assert abs((ln_a["NH4+"] - ln_a["NH3(aq)"] - ln_a["H+"]) - P.lnK("R2_ammonium", P.T0)) < 1e-7
+
+
+def test_speciation_le_chatelier_ammonia_raises_pH():
+    """Adding ammonia at fixed CO2 raises the pH and drives more carbon into carbamate/carbonate --
+    the qualitative behaviour Thomsen (2005) Fig. 4 and the Stamicarbon recovery chemistry require."""
+    low = P.speciate(1.5, 1.0)
+    high = P.speciate(4.0, 1.0)
+    assert high["pH"] > low["pH"]
+    assert high["NH2COO-"] > low["NH2COO-"]
+    assert high["CO2(aq)"] < low["CO2(aq)"]
+
+
+def test_speciation_carbamate_peaks_in_alkaline_window():
+    """A significant fraction of carbon sits as carbamate at pH 9-11 (Thomsen 2005 Fig. 4)."""
+    r = P.speciate(3.0, 1.0)
+    assert 9.0 < r["pH"] < 11.0
+    assert r["NH2COO-"] / 1.0 > 0.3            # >30% of total C as carbamate
+
+
+def test_speciation_refuses_off_reference_temperature():
+    """Off 298.15 K the R2/R3/R5 constants need the paywalled NH3(aq)/CO2(aq) Cp; speciate must refuse."""
+    try:
+        P.speciate(2.0, 1.0, T=333.15)
+        assert False, "speciate() off 25 C should have raised"
+    except ValueError:
+        pass
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     fails = 0
