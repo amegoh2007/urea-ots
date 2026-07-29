@@ -61,14 +61,34 @@ clip = packet["SPECIES_323_324"]["clip_resid_kgh"]
 check("downstream component balances close",
       all(abs(value) <= 1e-6 for value in clip.values()), clip)
 
+thermo_diag = {tag: main._DIAG[tag] for tag in ("E001", "E003")}
+check("Unit 324 VLE is routed through the Extended-UNIQUAC boundary",
+      all(diag.get("thermo_model") == main.extended_uniquac.MODEL_NAME
+          for diag in thermo_diag.values()),
+      {tag: {key: diag[key] for key in (
+          "thermo_model", "thermo_validity", "thermo_px_residual_bara",
+          "iteration_count", "iteration_residual", "converged",
+      )} for tag, diag in thermo_diag.items()})
+
+zero_feed = {species: 0.0 for species in main.MW_COMP}
+zero_strip = main.stripper_322e001(
+    0.0, main.STRIP_STEAM_T_DES_C, main.STRIP_P_DES_BARA,
+    overflow_kmolh=zero_feed,
+)
+check("322E001 reaction extents are bounded by available reactants",
+      zero_strip["xi_hyd"] == 0.0 and zero_strip["xi_biu"] == 0.0
+      and zero_strip["top_kgh"] == 0.0 and zero_strip["bot_kgh"] == 0.0,
+      {key: zero_strip[key] for key in ("xi_hyd", "xi_biu", "top_kgh", "bot_kgh")})
+
 q328 = packet["ABSORB_328"]["D003"]
 q328_evidence = {key: q328[key] for key in ("Q328_in_kW", "Q328_out_kW", "Q328_resid_kW")}
 check("unit 328 energy balance closes",
       abs(q328["Q328_resid_kW"]) <= 1.0, q328_evidence)
 
-check("recycle tear convergence is measured",
-      "RECYCLE_CONVERGENCE" in packet,
-      {"metric_present": "RECYCLE_CONVERGENCE" in packet})
+tear_metric = packet.get("RECYCLE_TEAR_RESIDUAL", {})
+check("recycle tear residual is observed without claiming an inner solve",
+      tear_metric.get("is_solver_convergence") is False,
+      tear_metric)
 
 
 # Live pressure must reach the canonical stream state.

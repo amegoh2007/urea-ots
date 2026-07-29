@@ -73,11 +73,12 @@ def test_9bar_header_demand_changes_pressure():
     assert state.P_9 < steam_system.P_MP_BARA
 
 
-def test_recycle_convergence_is_reported():
+def test_recycle_tear_residual_is_reported_without_solver_claim():
     main.state = main.State()
     packet = main.step_sim(0.1)
-    convergence = packet["RECYCLE_CONVERGENCE"]
-    assert convergence["method"] == "dynamic_transport_tears"
-    assert convergence["max_relative_residual"] >= 0.0
-    assert convergence["tolerance"] > 0.0
-    assert isinstance(convergence["converged"], bool)
+    residual = packet["RECYCLE_TEAR_RESIDUAL"]
+    assert residual["method"] == "observed_dynamic_transport_tears"
+    assert residual["is_solver_convergence"] is False
+    assert residual["max_relative_residual"] >= 0.0
+    assert residual["tolerance"] > 0.0
+    assert isinstance(residual["settled"], bool)

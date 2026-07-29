@@ -39,6 +39,7 @@
 | 24 | 2026-07-27 | branch `master` | Corrected the 328D003 instrument service from the approved operator mapping: LT-328507 indicates physical compartment I and LT-328508 indicates physical compartment II, both open-loop. This supersedes the earlier P&ID-only visual association of 328508 with compartment III. Compartment III remains the calculated accumulation state with no approved LT assignment. |
 | 25 | 2026-07-29 | branch `master` | Closed C39: classified the five Unit-328 one-tick tears. Streams 748/750/775 are algebraic recycles (vapour/reflux lines, no inventory) resolved by bounded one-tick direct substitution — certified contractive ($|z|\approx0.95<1$), monotone, non-oscillatory, bit-exact at design; 718A is physical transport (retained 45 s liquid-leg lag); 931 is an FFIC-controlled LP-steam utility feed, not a recycle. No engine equation changed. See §22.14 and `backend/test_c39_recycle_tears.py`. |
 | 26 | 2026-07-29 | branch `master` | Delivered the first-principles closure engines for the C34/C35/C36/C40/C43 cluster, standalone (no `main.py` change; design pin intact). Completed the Extended UNIQUAC basis `props_nh3co2h2o.py` (Debye-Hückel long-range term, complete activity coefficient, SRK gas fugacity, Newton speciation, explicit reaction enthalpy = C43 core, excess enthalpy = C34 excess part; 37/37) transcribed verbatim from Thomsen 2005 IUPAC; the Crowe reconciliation engine `reconcile_crowe.py` (C35; 6/6); and the Huang 1-D ejector core `ejector_huang.py` (C40; 11/11). Remaining per gap is external data (paywalled NH3(aq)/CO2(aq) Cp; approved sensor covariance; vendor ejector geometry) or engine wiring — none fabricated. See §22.15. |
+| 27 | 2026-07-29 | branch `codex/full-simulation-extended-uniquac-audit` | Re-audited every simulated unit, equation class, thermodynamic state, and D/S edge. Unit 324 now uses a provenance-bearing neutral H2O/urea Extended-UNIQUAC boundary with explicit extrapolation status and nonlinear residuals. Reactant-free stripper generation, the dead 323F010 inventory equation, Unit-324 A/B routing, live steam-header propagation, reversed PV-329207B, and missing condensate terms were corrected. Recycle telemetry now reports observed tear residuals rather than solver convergence. Remaining evidence-gated equations are listed only in `handoff.md`. See §22.16 and `FULL_SIMULATION_EXTENDED_UNIQUAC_AUDIT_2026-07-29.md`. |
 
 ### Revision Delta — changes since the Rev-1 (2026-06-05) snapshot
 
@@ -1821,6 +1822,56 @@ gas-dynamics tables ($\gamma=1.4$: critical pressure ratio 0.5283, $A/A^*$ at $M
 $M_1=2$ gives $M_2=0.5774$, $p_2/p_1=4.5$, $p_{02}/p_{01}=0.7209$; choked air flux matches
 $0.0404\,P_0A/\sqrt{T_0}$). *Remaining input:* the vendor throat/exit/mixing geometry for
 324F002/F004/F005 and the downstream tie pressures (F004/E006) that fix the shock position.
+
+### 22.16 Full-simulation Extended-UNIQUAC and connectivity audit (2026-07-29)
+
+The complete audit is recorded in `FULL_SIMULATION_EXTENDED_UNIQUAC_AUDIT_2026-07-29.md`; open
+equation/data items are in `handoff.md`. The implemented changes are:
+
+1. **Neutral Unit-324 thermodynamic boundary.** `backend/thermo_extended_uniquac.py` implements the
+   H2O/urea neutral limit of Extended UNIQUAC from the Voskov-Voronin supplementary source. With
+   no ions, $I=0$ and the Debye-Hückel term is zero. Binary structural fractions and interactions
+   are
+   $$\phi_i=\frac{x_i r_i}{\sum_jx_jr_j},\quad
+     \theta_i=\frac{x_i q_i}{\sum_jx_jq_j},\quad
+     \tau_{ij}=\exp(-a_{ij,0}/T-a_{ij,1}),$$
+   with $(r,q)_{H_2O}=(0.92,1.40)$, $(r,q)_{urea}=(2.1408,2.4860)$ and
+   $a_{urea\rightarrow H_2O,0}=-211.9567785927018$ K. The equilibrium residual is
+   $$R_{Px}=x_{H_2O}\gamma_{H_2O}P_{H_2O}^{sat}(T)-P.$$
+   Bisection keeps $w_{urea}\in[0,1]$. The PFD state is retained as an additive design calibration,
+   $w=w_{PFD}+[w_{model}(T,P)-w_{model}(T_d,P_d)]$. Unit-324 diagnostics publish model name,
+   applicability (`DESIGN_ANCHORED_EXTRAPOLATION`), $R_{Px}$, iteration count, coupled T/P residual,
+   and convergence flag. The legacy Fahmy-Nassar runtime path is removed.
+
+2. **Thermodynamic policy.** Process-mixture liquid equilibrium belongs under Extended UNIQUAC;
+   vapor fugacity belongs under its validated EOS. Pure-water steam is an explicit pure-fluid
+   exception and currently uses the bounded Antoine correlation; migration and validation against
+   IAPWS-IF97 remain open in `handoff.md`. It is not mislabeled as UNIQUAC. The Unit-324 vacuum
+   application lies outside the source full-model validation pressure, so numerical closure is not
+   represented as experimental validation.
+
+3. **Conservative equations/connectivity.** 322E001 hydrolysis is bounded by
+   $\min(n_{urea},n_{H_2O})$ and biuret by half the remaining urea; reaction-created negative
+   components are no longer clipped. 323F010 now has an independent gravity outlet
+   $\dot m_{317}=\dot m_{317,d}\sqrt{M/M_d}$. LV-324501A is forward to Unit 335 and B is recycle to
+   323D002 Compartment I; one routed LIC demand is applied to only one valve and mass, composition,
+   and sensible energy follow the selected edge. On A, raw Stream 402G receives UF85 Stream 697 to
+   form normal-forward Stream 609; on B, the raw pre-UF melt recycles and the UF85 interlock is zero.
+   FFIC-335406 closes on measured delivered ratio, its output supplies the FIC-335405 CAS setpoint,
+   and the slave's actual returned flow enters the mixer; FIC MAN remains physically effective.
+   While the slave is MAN or local AUTO, external-reset feedback makes an AUTO ratio master track
+   the achieved ratio, preventing windup and providing a bumpless return to CAS. The untagged
+   condensate-dilution/atmospheric-flash contingency remains open as G12.
+
+4. **Steam network.** E002, E010 and E001 chest pressures use the live LP header; E003 uses the live
+   9-bar header. PV-329207B exports from the LP header to the turbine and C supplies make-up. D009
+   flash follows actual LV-329502 transfer, is deducted from D009 liquid, and LV-329503 enters the LP
+   liquid balance. FT-329407 reports the actual B-valve flow. Six vapor/liquid node residuals are
+   published.
+
+5. **Recycle semantics.** The former `RECYCLE_CONVERGENCE` label is retired. The engine now reports
+   `RECYCLE_TEAR_RESIDUAL`, `is_solver_convergence=false`, and `settled`; this supersedes §22.14's
+   wording wherever it characterized one-tick substitution as a solved nonlinear convergence.
 
 ---
 
