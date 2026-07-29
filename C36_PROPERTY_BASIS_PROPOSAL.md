@@ -54,6 +54,19 @@ interaction-parameter matrix (species volume/surface `r,q` and binary energy `u�
 one artefact that must be transcribed and approved — it is tabulated in Darde et al. (2010) and its
 supporting information. **This is the single "obtain-or-approve" decision the gap turns on.**
 
+**Independent corroboration (2026-07-29).** The owner supplied `References/Resolving Simulator
+Thermodynamics Gaps.docx`, an independent engineering analysis of this same gap cluster
+(C34/C35/C36/C40/C43). It reaches the identical conclusions this proposal recommends: Extended UNIQUAC
+(Darde–Thomsen 2010) as the C36 keystone; excess-enthalpy temperature derivatives for C34/C43;
+Frejacques/Brouwer ~117 kJ/mol carbamate enthalpy; Gorlovskii–Kucheryavyi (1980) for HP reactor
+equilibrium; Huang (1999) 1-D compressible model for the C40 ejectors *pending* downstream
+pressures/throat geometry; and Crowe (1983) projection-matrix reconciliation for C35 *pending* an
+approved measurement-uncertainty covariance. Its **Table 1** (species `r,q`) was cross-checked against
+the delivered `props_nh3co2h2o.py` and matches all nine species exactly — a second-source confirmation
+of the verbatim transcription (`test_rq_cross_check_against_independent_document`). The document adds no
+data that removes the two remaining blockers (paywalled NH3/CO2 Cp rows; C40 geometry; C35 covariance),
+but it authoritatively confirms the model selection this proposal asks to approve.
+
 ## 4. Phased integration plan (design-pin-preserving)
 
 Each phase keeps the bit-exact design fixed point (departure-from-anchor form, as the engine already
@@ -70,8 +83,17 @@ does for cp/rho) and lands behind tests, exactly like the C10 aqueous work.
    Henry constants — all reproduced from the parameters alone. Nothing is wired into the engine.
    *Two honest residuals, not fabricated:* the standard-state Cp coefficients for NH3(aq) and CO2(aq)
    live in Thomsen & Rasmussen (1999, paywalled) and are left `None`, so the two reactions consuming
-   them are exposed at 25 °C only; the module refuses to extrapolate them (asserted by a test). The full
-   Newton speciation + SRK-VLE solver, plus the Debye-Hückel long-range term, are **phase 1b**.
+   them are exposed at 25 °C only; the module refuses to extrapolate them (asserted by a test).
+
+   **Phase 1b — short-range activity term DELIVERED 2026-07-29.** `props_nh3co2h2o.py` now carries the
+   UNIQUAC combinatorial and residual (short-range) activity coefficients with their infinite-dilution
+   limits and a symmetric/unsymmetric combiner (`short_range_ln_gamma`), from the same verbatim `r,q`
+   and `u⁰/uᵀ` parameters. It is validated for **thermodynamic consistency** — Gibbs-Duhem closes to
+   < 1e-9, `ln γ = 0` at every pure-component limit, the numeric infinite-dilution limit matches the
+   closed form, and the unsymmetric `ln γ*` vanishes at infinite dilution (18/18 tests pass). Remaining
+   phase-1b work: the **Debye-Hückel** long-range electrostatic term, the multiphase **Newton
+   speciation** solver, and the **SRK-VLE** gas-phase closure — after which phases 2-5 (enthalpy datum,
+   live vectors, C43 rework, Unit-324 VLE) proceed.
 2. **Enthalpy datum (C34):** derive per-stream specific enthalpy = sensible (existing cited cp) +
    excess (UNIQUAC) + formation/reaction terms, on one declared datum. Populate the `enthalpy_kJkg`
    field the records already carry. Only after phase 1 validates — a sensible-only enthalpy now would

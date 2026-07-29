@@ -26,13 +26,23 @@ fitted, guessed, or interpolated here:
 STATUS. Phase 1 delivers: the verbatim parameter layer, the standard-state thermodynamics, the
 reaction equilibrium constants, the Henry's-law correlations, and the UNIQUAC r/q/u data. It is
 VALIDATED (see test_props_nh3co2h2o.py) by reproducing the textbook aqueous pKa1/pKa2/pKw and their
-temperature dependence, plus liquid-water heat capacity, from these parameters alone.
+temperature dependence, plus liquid-water heat capacity, from these parameters alone. The r/q volume
+and surface parameters are additionally cross-checked against an independent transcription (Table 1 of
+`References/Resolving Simulator Thermodynamics Gaps.docx`, 2026-07-29) — an exact match to all nine
+species, confirming the verbatim transcription against a second source.
+
+Phase 1b (short-range activity) — DELIVERED 2026-07-29: the UNIQUAC combinatorial term
+(`uniquac_combinatorial_ln_gamma`), the residual/enthalpic term (`uniquac_residual_ln_gamma`), their
+infinite-dilution limits, and the combined symmetric/unsymmetric `short_range_ln_gamma`. The residual
+term is validated for thermodynamic consistency: Gibbs-Duhem closes to < 1e-9, ln gamma == 0 at every
+pure-component limit, and the numeric infinite-dilution limit matches the closed form. This is the
+SHORT-RANGE part only; the long-range Debye-Huckel electrostatic term, the multiphase Newton
+speciation, and the SRK-VLE gas-phase solver are the remaining phase-1b work.
 
 KNOWN VERBATIM GAP (not fabricated): the standard-state Cp coefficients for NH3(aq) and CO2(aq) live
 in Thomsen & Rasmussen (1999), which is paywalled; they are left as None below. Consequently the two
 reactions that consume them (R2, R3) are exposed at 298.15 K only; R1/R4 (water, carbonate) carry
-full temperature dependence. Supplying those two rows completes the set. The full Newton
-speciation + SRK-VLE solver is phase 1b.
+full temperature dependence. Supplying those two rows completes the set.
 """
 
 import math
@@ -247,6 +257,78 @@ def uniquac_combinatorial_ln_gamma(x):
         # ln gamma_c = ln(phi/x) + 1 - phi/x - 5 q [ ln(phi/theta) + 1 - phi/theta ]
         pt = phi / theta
         out[s] = math.log(phi) + 1.0 - phi - 5.0 * q[s] * (math.log(pt) + 1.0 - pt)
+    return out
+
+
+def uniquac_combinatorial_ln_gamma_inf(species, solvent="H2O"):
+    """ln gamma_i^{C,inf}: combinatorial ln gamma of `species` at infinite dilution in pure solvent.
+    Closed-form limit of uniquac_combinatorial_ln_gamma as x_i -> 0, x_solvent -> 1:
+        phi_i/x_i -> r_i/r_w,  theta_i/x_i -> q_i/q_w,  phi_i/theta_i -> (r_i q_w)/(r_w q_i)."""
+    ri, qi = UNIQUAC_RQ[species]
+    rw, qw = UNIQUAC_RQ[solvent]
+    phi = ri / rw
+    pt = (ri * qw) / (rw * qi)
+    return math.log(phi) + 1.0 - phi - 5.0 * qi * (math.log(pt) + 1.0 - pt)
+
+
+def uniquac_residual_ln_gamma(x, T):
+    """ln(gamma) residual (short-range, enthalpic) part, symmetric convention, at T [K].
+
+    Thomsen Extended UNIQUAC residual term (Thomsen 1997 thesis eqs; Darde et al. 2010):
+        ln g_i^R = q_i [ 1 - ln( sum_k th_k psi_ki ) - sum_k ( th_k psi_ik / sum_l th_l psi_lk ) ]
+    with the surface-area fraction th_k = x_k q_k / sum_l x_l q_l and the Boltzmann factor
+        psi_ki = exp( -(u_ki - u_ii) / T ),   u_ij(T) from u_ij() (Darde Tables 2-5/2-6, units K).
+    Returns dict species -> ln gamma_res.  Validated for thermodynamic consistency (Gibbs-Duhem to
+    1e-9, pure-component limit == 0, infinite-dilution limit matches the closed form below)."""
+    sp = [s for s in x if x[s] > 0.0]
+    q = {s: UNIQUAC_RQ[s][1] for s in sp}
+    qsum = sum(x[s] * q[s] for s in sp)
+    th = {s: x[s] * q[s] / qsum for s in sp}
+    psi = {}
+    for i in sp:
+        uii = u_ij(i, i, T)
+        for k in sp:
+            psi[(k, i)] = math.exp(-(u_ij(k, i, T) - uii) / T)
+    denom = {k: sum(th[l] * psi[(l, k)] for l in sp) for k in sp}   # sum_l th_l psi_lk
+    out = {}
+    for i in sp:
+        s1 = math.log(denom[i])                                      # ln( sum_k th_k psi_ki )
+        s2 = sum(th[k] * psi[(i, k)] / denom[k] for k in sp)
+        out[i] = q[i] * (1.0 - s1 - s2)
+    return out
+
+
+def uniquac_residual_ln_gamma_inf(species, T, solvent="H2O"):
+    """ln gamma_i^{R,inf}: residual ln gamma of `species` at infinite dilution in pure solvent.
+    Closed-form limit of uniquac_residual_ln_gamma (th_solvent -> 1, th_others -> 0):
+        ln g_i^{R,inf} = q_i [ 1 - ln(psi_wi) - psi_iw ],   w = solvent."""
+    psi_wi = math.exp(-(u_ij(solvent, species, T) - u_ij(species, species, T)) / T)
+    psi_iw = math.exp(-(u_ij(species, solvent, T) - u_ij(solvent, solvent, T)) / T)
+    return UNIQUAC_RQ[species][1] * (1.0 - math.log(psi_wi) - psi_iw)
+
+
+def short_range_ln_gamma(x, T, unsymmetric_species=None, solvent="H2O"):
+    """Short-range activity coefficient ln gamma = combinatorial + residual, at T [K].
+
+    By default returns the symmetric (rational) convention for every species.  Pass a set of
+    `unsymmetric_species` (typically the ions and dissolved gases) to renormalise those to the
+    unsymmetric (infinite-dilution-in-solvent) reference used by the electrolyte speciation solver:
+        ln gamma_i^* = ln gamma_i(x) - ln gamma_i^{inf}.
+    The solvent (water) is always left symmetric.
+
+    NOTE — this is the SHORT-RANGE part only.  The full Extended UNIQUAC activity coefficient also
+    carries the long-range Debye-Huckel electrostatic term, which is the remaining phase-1b work; do
+    not use this as the complete electrolyte gamma yet."""
+    comb = uniquac_combinatorial_ln_gamma(x)
+    res = uniquac_residual_ln_gamma(x, T)
+    unsym = unsymmetric_species or set()
+    out = {}
+    for s in comb:
+        g = comb[s] + res[s]
+        if s in unsym and s != solvent:
+            g -= (uniquac_combinatorial_ln_gamma_inf(s, solvent)
+                  + uniquac_residual_ln_gamma_inf(s, T, solvent))
+        out[s] = g
     return out
 
 

@@ -119,6 +119,89 @@ def test_rq_parameters_present_for_all_species():
         assert r > 0.0 and q > 0.0
 
 
+def test_rq_cross_check_against_independent_document():
+    """The r,q parameters match an INDEPENDENT transcription — Table 1 of
+    `References/Resolving Simulator Thermodynamics Gaps.docx` (2026-07-29). An exact match to a second
+    source is what certifies the verbatim transcription is not a single-source copy error."""
+    doc_table1 = {                       # (r, q) as read from the document's Table 1
+        "H2O":     (0.9200,  1.4000),
+        "NH3(aq)": (1.6292,  2.9852),
+        "CO2(aq)": (0.7500,  2.4500),
+        "NH4+":    (4.8154,  4.6028),
+        "H+":      (0.1378,  None),       # surface area ~0 (blank in the table); q fixed at ~0 in module
+        "OH-":     (9.3973,  8.8171),
+        "CO3--":   (10.828,  10.769),
+        "HCO3-":   (8.0756,  8.6806),
+        "NH2COO-": (4.3022,  4.1348),
+    }
+    for s, (r_doc, q_doc) in doc_table1.items():
+        r_mod, q_mod = P.UNIQUAC_RQ[s]
+        assert r_mod == r_doc, f"{s} r: module {r_mod} != document {r_doc}"
+        if q_doc is not None:
+            assert q_mod == q_doc, f"{s} q: module {q_mod} != document {q_doc}"
+        else:
+            assert q_mod < 1e-10          # H+ surface area is ~0
+
+
+# --------------------------------------------------- UNIQUAC residual (short-range) activity term
+def test_residual_pure_component_limit_is_zero():
+    """ln gamma^R of any pure component is exactly 0 (symmetric convention)."""
+    for s in ("H2O", "NH3(aq)", "CO2(aq)", "NH4+", "NH2COO-"):
+        assert abs(P.uniquac_residual_ln_gamma({s: 1.0}, 298.15)[s]) < 1e-12
+
+
+def test_residual_infinite_dilution_matches_closed_form():
+    """The residual ln gamma evaluated at x_i -> 0 converges to the closed-form infinite-dilution
+    expression uniquac_residual_ln_gamma_inf (a wrong psi index/sign would break this)."""
+    T = 298.15
+    for s in ("NH3(aq)", "CO2(aq)", "NH4+", "NH2COO-", "HCO3-"):
+        x = {"H2O": 1.0 - 1e-7, s: 1e-7}
+        num = P.uniquac_residual_ln_gamma(x, T)[s]
+        cf = P.uniquac_residual_ln_gamma_inf(s, T)
+        assert abs(num - cf) < 1e-4, f"{s}: numeric {num} vs closed {cf}"
+
+
+def test_residual_satisfies_gibbs_duhem():
+    """Gibbs-Duhem at constant T,P: sum_i x_i d(ln gamma_i)/dx1 == 0 along the water+NH3 binary, for
+    the full short-range (combinatorial + residual) model. This is the decisive consistency test —
+    an incorrect residual formulation violates it grossly rather than by ~1e-9."""
+    T = 298.15
+    h = 1e-6
+
+    def total(x1):
+        x = {"H2O": 1.0 - x1, "NH3(aq)": x1}
+        c = P.uniquac_combinatorial_ln_gamma(x)
+        r = P.uniquac_residual_ln_gamma(x, T)
+        return {s: c[s] + r[s] for s in x}
+
+    for x1 in (0.05, 0.2, 0.4, 0.6, 0.8, 0.95):
+        gp, gm = total(x1 + h), total(x1 - h)
+        d = {s: (gp[s] - gm[s]) / (2.0 * h) for s in gp}
+        gd = (1.0 - x1) * d["H2O"] + x1 * d["NH3(aq)"]
+        assert abs(gd) < 1e-6, f"Gibbs-Duhem residual {gd} at x_NH3={x1}"
+
+
+def test_short_range_unsymmetric_vanishes_at_infinite_dilution():
+    """With unsymmetric (infinite-dilution) normalisation, a solute's short-range ln gamma* -> 0 as it
+    becomes infinitely dilute in water — the defining property of the unsymmetric reference state."""
+    T = 298.15
+    for s in ("NH3(aq)", "CO2(aq)", "NH4+"):
+        x = {"H2O": 1.0 - 1e-8, s: 1e-8}
+        g = P.short_range_ln_gamma(x, T, unsymmetric_species={s})[s]
+        assert abs(g) < 1e-4, f"{s}: unsymmetric ln gamma* = {g} (expected ~0)"
+
+
+def test_short_range_finite_across_desorber_envelope():
+    """Short-range ln gamma stays finite and smooth across the Unit-328 desorber band (40-150 C) for a
+    representative speciated liquid — no blow-up feeding the (future) VLE solver."""
+    x = {"H2O": 0.90, "NH3(aq)": 0.06, "CO2(aq)": 0.02, "NH4+": 0.01, "HCO3-": 0.01}
+    ions = {"NH3(aq)", "CO2(aq)", "NH4+", "HCO3-"}
+    for T in (313.15, 373.15, 413.15, 423.15):
+        g = P.short_range_ln_gamma(x, T, unsymmetric_species=ions)
+        assert all(math.isfinite(v) for v in g.values())
+        assert all(abs(v) < 60.0 for v in g.values())
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     fails = 0
