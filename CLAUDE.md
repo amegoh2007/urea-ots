@@ -6,9 +6,7 @@
 
 
 ## 2. Core Physics & References
-* **Strict Source:** `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`.[cite: 1] PFD values strictly override coded constants.[cite: 1]
-* **Modeling:** Dynamic state-space, 100% conservation, rigorous kinetics, no fabricated constants.[cite: 1]
-* **Design Anchor:** Off-design states MUST resolve bit-exact with 100% steady-state HMB.[cite: 1]
+* **Strict Source:** `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`.
 
 ## 3. Autonomous Workflow & Testing
 * **Execution:** Do not halt for approval;[cite: 1]
