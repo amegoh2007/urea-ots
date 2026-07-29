@@ -11,6 +11,13 @@ speciation/enthalpy basis. `C36_PROPERTY_BASIS_PROPOSAL.md` (2026-07-29) is the 
 approvable path for that basis; on approval it closes C36, then C34 and C43 in dependency order.
 No property, sink, or curve was fabricated to force closure.
 
+**Phase 1 of that plan is delivered** (`backend/props_nh3co2h2o.py` + `test_props_nh3co2h2o.py`,
+12/12 pass): the Extended UNIQUAC parameter matrix (Darde 2011 / Thomsen 1997 / CODATA / Rumpf-Maurer)
+is transcribed verbatim and the standard-state thermodynamics are validated against textbook
+pKw(T)/pKa1/pKa2(T)/pKa(NH4+)/Cp/Henry data. Standalone — not yet wired into the engine. Remaining to
+finish C36: source the NH3(aq)/CO2(aq) Cp coefficients (Thomsen & Rasmussen 1999), then phase 1b (the
+Newton speciation + SRK-VLE + Debye-Hückel solver), then phases 2-5 (engine integration).
+
 ## Model-compliance gaps
 
 ### C34 — canonical stream graph and enthalpy

@@ -59,9 +59,19 @@ supporting information. **This is the single "obtain-or-approve" decision the ga
 Each phase keeps the bit-exact design fixed point (departure-from-anchor form, as the engine already
 does for cp/rho) and lands behind tests, exactly like the C10 aqueous work.
 
-1. **Property module** `props_nh3co2h2o.py`: implement Extended UNIQUAC speciation + activity from the
-   approved parameter matrix; validate against Darde (2010) published speciation/VLE points and the
-   PFD anchors. No engine wiring yet.
+1. **Property module** `props_nh3co2h2o.py` — **DELIVERED 2026-07-29** (`backend/props_nh3co2h2o.py`,
+   `backend/test_props_nh3co2h2o.py`, 12/12 pass). The full Extended UNIQUAC parameter matrix is
+   transcribed verbatim from open sources (Darde 2011 thesis Tables 2-2…2-6 for r/q + u0/uT interaction
+   + fitted formation/Cp; Thomsen 1997 thesis Table 5.7 for base-species Cp; CODATA/NIST for base
+   ΔGf/ΔHf; Rumpf-Maurer 1993 Henry's law). The standard-state thermodynamics, reaction equilibrium
+   constants and Henry's law are **validated against independent textbook data**: liquid-water Cp
+   (75.3 J/mol/K), pKw and its temperature curve (14.94 @0 °C, 14.00 @25 °C, 13.03 @60 °C), carbonic-acid
+   pKa1 (6.35) and pKa2 with T-dependence (10.56→10.17, 0→50 °C), ammonium pKa (9.25), and the NH3/CO2
+   Henry constants — all reproduced from the parameters alone. Nothing is wired into the engine.
+   *Two honest residuals, not fabricated:* the standard-state Cp coefficients for NH3(aq) and CO2(aq)
+   live in Thomsen & Rasmussen (1999, paywalled) and are left `None`, so the two reactions consuming
+   them are exposed at 25 °C only; the module refuses to extrapolate them (asserted by a test). The full
+   Newton speciation + SRK-VLE solver, plus the Debye-Hückel long-range term, are **phase 1b**.
 2. **Enthalpy datum (C34):** derive per-stream specific enthalpy = sensible (existing cited cp) +
    excess (UNIQUAC) + formation/reaction terms, on one declared datum. Populate the `enthalpy_kJkg`
    field the records already carry. Only after phase 1 validates — a sensible-only enthalpy now would
