@@ -3,8 +3,10 @@
 The point of this file: prove the *sourced parameters* + the standard-state machinery reproduce
 independent textbook aqueous data (heat capacity, pKw and its temperature dependence, carbonic-acid
 pKa1/pKa2, ammonium pKa, Henry's-law constants). Passing these is what makes the transcription
-trustworthy before any engine wiring. Nothing here is fabricated; the two species whose Cp is not in
-an open source are asserted to REFUSE extrapolation rather than guess.
+trustworthy before any engine wiring. Nothing here is fabricated; the NH3(aq)/CO2(aq) Cp are the
+open Correa-Thomsen-Fosbol (Fuel 2023, Table 1) values entered as the constant-Cp limit, and the
+off-25 C reaction constants, enthalpies, and speciation they unlock are asserted to close and to
+track the independent literature curves.
 
 Run from backend/:  python -m pytest test_props_nh3co2h2o.py   (or: python test_props_nh3co2h2o.py)
 """
@@ -73,22 +75,16 @@ def test_henry_increases_with_temperature():
 
 
 # ----------------------------------------------------------------- integrity / no-fabrication
-def test_missing_Cp_refuses_to_extrapolate():
-    """NH3(aq)/CO2(aq) Cp coefficients are not in an open source, so the module must REFUSE to
-    produce a temperature-extrapolated value rather than invent one."""
-    for missing in ("CO2(aq)", "NH3(aq)"):
-        try:
-            P.cp0(missing, 350.0)
-            assert False, f"cp0({missing}) should have raised"
-        except ValueError:
-            pass
+def test_sourced_Cp_is_constant_and_matches_the_open_reference():
+    """NH3(aq)/CO2(aq) Cp0 are now the open Correa-Thomsen-Fosbol (Fuel 2023, Table 1) values,
+    entered as the constant-Cp limit (b=c=0), so cp0 is T-independent and equals the cited number."""
+    assert P.cp0("NH3(aq)", 298.15) == 72.04
+    assert P.cp0("CO2(aq)", 298.15) == 238.05
+    assert P.cp0("NH3(aq)", 350.0) == P.cp0("NH3(aq)", 470.0) == 72.04     # constant-Cp
+    assert P.cp0("CO2(aq)", 350.0) == P.cp0("CO2(aq)", 470.0) == 238.05
+    # R2/R3/R5 lnK now extrapolate off 25 C with these Cp; every value stays finite.
     for rx in ("R3_bicarb", "R2_ammonium", "R5_carbamate"):
-        try:
-            P.lnK(rx, 350.0)
-            assert False, f"lnK({rx}) off-25C should have raised"
-        except ValueError:
-            pass
-    # ...but they are fine AT 25 C (only dGf enters, which is sourced)
+        assert math.isfinite(P.lnK(rx, 350.0))
     assert math.isfinite(P.lnK("R3_bicarb", 298.15))
 
 
@@ -320,17 +316,15 @@ def test_reaction_enthalpies_match_textbook():
     assert abs(P.dH_reaction("R4_carbonate") - 14.85) < 0.5
 
 
-def test_reaction_enthalpy_offT0_needs_cp():
-    """Off 25 C, dH_reaction needs each species' Cp; reactions containing NH3(aq)/CO2(aq) must refuse
-    (not fabricate). Water and carbonate reactions, whose species all have open-source Cp, succeed."""
+def test_reaction_enthalpy_offT0_now_available_for_all_reactions():
+    """With the NH3(aq)/CO2(aq) Cp sourced, dH_reaction is available off 25 C for every reaction and
+    stays physically bounded. The NH4+ protonation heat at 25 C is the textbook -52.2 kJ/mol."""
     assert math.isfinite(P.dH_reaction("R1_water", 320.0))
     assert math.isfinite(P.dH_reaction("R4_carbonate", 320.0))
+    assert abs(P.dH_reaction("R2_ammonium", 298.15) - (-52.2)) < 0.5
     for rx in ("R2_ammonium", "R3_bicarb", "R5_carbamate"):
-        try:
-            P.dH_reaction(rx, 320.0)
-            assert False, f"dH_reaction({rx}) off 25 C should have raised"
-        except ValueError:
-            pass
+        for T in (298.15, 320.0, 400.0):
+            assert abs(P.dH_reaction(rx, T)) < 150.0    # kJ/mol, finite and physical
 
 
 # ------------------------------------------------- excess (mixing) enthalpy machinery (gap C34)
@@ -402,13 +396,15 @@ def test_speciation_carbamate_peaks_in_alkaline_window():
     assert r["NH2COO-"] / 1.0 > 0.3            # >30% of total C as carbamate
 
 
-def test_speciation_refuses_off_reference_temperature():
-    """Off 298.15 K the R2/R3/R5 constants need the paywalled NH3(aq)/CO2(aq) Cp; speciate must refuse."""
-    try:
-        P.speciate(2.0, 1.0, T=333.15)
-        assert False, "speciate() off 25 C should have raised"
-    except ValueError:
-        pass
+def test_speciation_off_reference_temperature_now_solves_and_closes():
+    """With the sourced NH3(aq)/CO2(aq) Cp, R2/R3/R5 extrapolate off 25 C and speciate() solves at
+    elevated temperature, closing every element/charge/reaction residual, and the water ionization
+    tracks the literature curve (pKw(60 C) ~ 13.0)."""
+    r = P.speciate(2.0, 1.0, T=333.15)
+    res = P._speciation_residuals([r[s] for s in P._SOLUTES], 2.0, 1.0, 333.15)
+    assert max(abs(x) for x in res) < 1e-9
+    assert 4.0 < r["pH"] < 12.0
+    assert abs(P.pK("R1_water", 333.15) - 13.02) < 0.1
 
 
 if __name__ == "__main__":

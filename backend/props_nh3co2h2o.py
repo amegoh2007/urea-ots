@@ -48,14 +48,20 @@ All validated (see test_props_nh3co2h2o.py, 37/37): Debye-Huckel reproduces eqs 
 law and satisfies Gibbs-Duhem; SRK -> ideal-gas at low P; reaction enthalpies match textbook aqueous
 values (+55.8/-52.2/+14.9 kJ/mol); speciation closes every balance and reaction quotient to ~1e-10.
 
-KNOWN VERBATIM GAP (not fabricated): the standard-state Cp coefficients for NH3(aq) and CO2(aq) live
-in Thomsen & Rasmussen (1999), which is paywalled; they are left as None below. Consequently the R2/R3/
-R5 constants, off-25 C reaction enthalpies, `speciate` above 25 C, and the ABSOLUTE (as opposed to
-excess) stream enthalpy that closes gap C34 are exposed at 298.15 K only or refuse to extrapolate.
-Supplying those two rows completes the set; the whole framework above is already parametrized on them.
-Deep web research on 2026-07-29 (Plyasunov & Shock 2000; Thomsen & Rasmussen 1999) did not surface an
-open, temperature-resolved Cp(T) for these two species usable in the 3-parameter Helgeson form without
-fitting unpublished data, so they remain the one documented external input rather than a guessed value.
+STANDARD-STATE Cp FOR NH3(aq)/CO2(aq) — SOURCED 2026-07-30 (constant-Cp): the standard-state heat
+capacities for NH3(aq) and CO2(aq) are taken from the open-access, peer-reviewed parameter set of
+  L. F. F. Correa, K. Thomsen, P. L. Fosbol, "Thermodynamic modelling of MDEA(aq)-NH3(aq)-K2CO3(aq)-
+  CO2(aq) using the Extended UNIQUAC model", Fuel 335 (2023) 126863, Table 1 (DOE PAGES OSTI 2418163,
+  Elsevier open-access user licence): Cp0(NH3(aq)) = 72.04, Cp0(CO2(aq)) = 238.05 J/mol/K at 298.15 K.
+These are the same Extended-UNIQUAC lineage as Thomsen&Rasmussen (1999)/Darde (2011) — the paper's
+dGf/dHf for both species match this module's existing NIST values exactly — and both Cp0 agree with the
+well-established literature partial-molar heat capacities of aqueous CO2 (~238-243) and NH3 (~72-80), so
+they are corroborated rather than single-source. They enter the Helgeson form Cp0 = a + bT + c/(T-200)
+as the CONSTANT-Cp limit (a = Cp0, b = c = 0), exactly as this module already treats NH4+; the full
+3-parameter T-dependence from the paywalled Thomsen&Rasmussen (1999) remains the one accuracy refinement
+(bounded relevance because dissolved CO2(aq)/NH3(aq) are minority species in the hot stripped liquors).
+This unlocks R2/R3/R5 lnK, off-25 C reaction enthalpies, `speciate` off 25 C, and absolute stream
+enthalpy. Nothing is fabricated: every number is transcribed from the cited open source.
 """
 
 import math
@@ -77,9 +83,9 @@ STANDARD_STATE = {
     "H2O":      (-237.140,   -285.830,   (58.370,  0.03896,  523.88)),   # Thomsen'97 T5.7
     "H+":       (   0.0,        0.0,      (0.0,     0.0,      0.0)),      # reference ion
     "OH-":      (-157.244,   -230.015,   (1418.2, -3.4446,  -51473.0)),  # Thomsen'97 T5.7
-    "NH3(aq)":  ( -26.50,     -80.29,     None),                         # Cp: Thomsen&Rasmussen'99 (paywalled)
+    "NH3(aq)":  ( -26.50,     -80.29,     (72.04,   0.0,      0.0)),      # Cp0: Correa-Thomsen-Fosbol'23 T1 (const-Cp)
     "NH4+":     ( -79.31,    -132.51,     (71.008,  0.0,      0.0)),      # Thomsen'97 T5.7
-    "CO2(aq)":  (-385.98,    -413.80,     None),                         # Cp: Thomsen&Rasmussen'99 (paywalled)
+    "CO2(aq)":  (-385.98,    -413.80,     (238.05,  0.0,      0.0)),      # Cp0: Correa-Thomsen-Fosbol'23 T1 (const-Cp)
     "HCO3-":    (-586.77,    -691.99,     (585.75, -1.3612,  -21374.0)), # Thomsen'97 T5.7
     "CO3--":    (-527.81,    -677.14,     (850.61, -2.8040,  -21308.0)), # Thomsen'97 T5.7
     "NH2COO-":  (-379.355,   -502.863,    (-203.9191, 0.082259, 0.55163)),  # Darde'11 T2-3/T2-4 (fitted)
