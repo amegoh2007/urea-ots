@@ -2344,12 +2344,16 @@ R324_HIC9606_DES_PCT = 50.0       # % HIC-329606 design opening (HV-329606 motiv
 R324_F004_MOTIVE_DES = 1220.0     # kg/h PFD stream 927, first deep-vacuum ejector motive steam
 R324_F005_MOTIVE_DES = 180.0      # kg/h PFD stream 929, second deep-vacuum ejector motive steam
 
-# --- LIC-324501 routed melt drain. LV-A is forward to granulation; LV-B is
-#     recycle to 323D002 Compartment I. The route selector sends the same LIC
-#     demand to exactly one valve, so total outflow and inventory remain
-#     conservative through a route change.
+# --- LIC-324501 routed melt drain (gap G12 operability, approved). LV-324501A level-controls the
+#     324F003 drain (LIC-324501 on LT-324501) and EXPORTS the urea melt to Battery Limit (BL) -- a
+#     boundary, until the granulation section (335) is simulated. LV-324501B is a NORMALLY-CLOSED
+#     overpressure relief that opens only when the 335 melt-header pressure PIC-335201 rises above
+#     R335_LVB_RELIEF_BARG, diverting the melt back to 323D002 Compartment I. The route selector sends
+#     the same LIC demand to exactly one valve, so total outflow and inventory stay conservative.
 R324_LIC501_OP_DES = 75.0
 R324_LVA_SPAN      = R324_P2_DES / (R324_LIC501_OP_DES/100.0)   # kg/h at 100 % routed drain stroke
+R335_LVB_RELIEF_BARG = 3.8      # PIC-335201 setpoint (bar g) above which LV-324501B opens (approved G12 datum)
+R335_PIC201_DES_BARG = 3.5      # design/normal 335 melt-header pressure (bar g); BL boundary input, < relief
 
 # --- PFD-21 finishing boundary: 402G + 697 = 609 on route A -------------------
 R324_M402G_PFD     = 85_405.0                        # kg/h raw melt, stream 402G
@@ -4541,7 +4545,8 @@ class State:
         self.HIC_329605 = R324_HIC9605_DES_PCT       # % opening (operator hand valve, no controller mode)
         self.HIC_329606 = R324_HIC9606_DES_PCT       # % HV-329606 324F004/F005 motive-steam hand valve
         self.HIC_323605 = R323_HIC605_DES_PCT        # % HV-323605 323F010 gas-outlet hand valve (stream 790)
-        self.LV_324501_RECYCLE = False               # False: A->335; True: B->323D002 Comp I
+        self.PIC_335201 = R335_PIC201_DES_BARG       # bar g, 335 melt-header pressure (BL boundary input);
+                                                     # LV-324501B opens (recycle to 323D002) when > R335_LVB_RELIEF_BARG
         # ---- FFIC-335406 UF85 ratio station -> FIC-335405 flow slave -----------
         self.FFIC_335406 = {"mode": "AUTO", "op": R324_UF_RATIO,
                             "sp": R324_UF_RATIO, "pv": R324_UF_RATIO,
@@ -6693,14 +6698,18 @@ def step_sim(dt: float) -> dict:
     lvl_f003   = clamp(s.r324_f003_M / R324_F003_M_FULL * 100.0, 0.0, 100.0)
     lic501_op  = _ctrl_ipd(s.LIC_324501, lvl_f003, dt)
     routed_op  = clamp(lic501_op, 0.0, 100.0)
-    recycle_selected = bool(s.LV_324501_RECYCLE)
+    # G12 (approved operability): LV-324501A level-controls the drain and exports melt to BL;
+    # LV-324501B is a NORMALLY-CLOSED overpressure relief that opens only when the 335 melt-header
+    # PIC-335201 exceeds R335_LVB_RELIEF_BARG, diverting the melt to 323D002. UF85 injection is a
+    # granulation (335) function and is deferred until that section is simulated, so the live path
+    # carries no UF85 (uf_ratio = 0) and the forward export is the raw urea melt.
+    recycle_selected = s.PIC_335201 > R335_LVB_RELIEF_BARG                    # LV-324501B relief trip
     lva_stroke = 0.0 if recycle_selected else routed_op
     lvb_stroke = routed_op if recycle_selected else 0.0
-    m_402g     = routed_op/100.0 * R324_LVA_SPAN                              # raw 402G from 324F003 (kg/h)
-    uf_cascade = step_uf85_cascade(s, m_402g, recycle_selected, dt)
-    uf_ratio   = (uf_cascade["delivered_kgh"] / m_402g) if m_402g > 1.0e-12 else 0.0
+    m_402g     = routed_op/100.0 * R324_LVA_SPAN                              # melt drain from 324F003 (kg/h)
+    uf_cascade = step_uf85_cascade(s, m_402g, True, dt)                       # UF85 deferred (granulation off) -> 0
     route501   = route_lv324501(m_402g, s.w_e003, s.r324_e003_T,
-                                recycle_selected, uf_ratio=uf_ratio)
+                                recycle_selected, uf_ratio=0.0)              # raw melt to BL / recycle, no UF85
     m_fwd      = route501["forward_kgh"]                                      # mixed 609 -> 335 on A
     m_recyc    = route501["recycle_kgh"]                                      # raw 402G -> 323D002 on B
     m_f003_out = m_402g                                                        # UF85 is external to 324F003
@@ -7434,8 +7443,8 @@ def step_sim(dt: float) -> dict:
                 "LI_324F003":  round(s.r324_f003_M / R324_F003_M_FULL * 100.0, 1),
                 "feed_th":     round(feed2_m / 1000.0, 2),                    # 95% melt from Stage 1 (t/h)
                 "vapour_th":   round(v2_m / 1000.0, 2),                       # water vapour -> 324E005 (t/h)
-                "melt_fwd_th": round(m_fwd / 1000.0, 2),                      # mixed stream 609 via LV-A -> 335 (t/h)
-                "recyc_th":    round(m_recyc / 1000.0, 2),                    # raw stream 402G via LV-B -> 323D002 (t/h)
+                "melt_fwd_th": round(m_fwd / 1000.0, 2),                      # urea melt via LV-324501A -> BL (t/h)
+                "recyc_th":    round(m_recyc / 1000.0, 2),                    # melt via LV-324501B relief -> 323D002 (t/h)
                 "route":       route501["route"],
                 "selector_stream": route501["selector_stream"],
                 "selector_feed_th": round(route501["selector_feed_kgh"] / 1000.0, 3),
@@ -7450,14 +7459,16 @@ def step_sim(dt: float) -> dict:
                     k: round(v, 9) for k, v in route501["species_residual_kgh"].items()
                 },
                 "route_energy_residual_kw": round(route501["energy_residual_kw"], 9),
-                "LV_324501A":  round(lva_stroke, 1),                          # forward-to-granulation stroke (%)
-                "LV_324501B":  round(lvb_stroke, 1),                          # recycle stroke (%)
-                "recycle_selected": bool(recycle_selected),
+                "LV_324501A":  round(lva_stroke, 1),                          # level-controlled melt export to BL (%)
+                "LV_324501B":  round(lvb_stroke, 1),                          # normally-closed relief -> 323D002 (%)
+                "PIC_335201":  round(s.PIC_335201, 2),                        # 335 melt-header pressure (bar g, BL boundary)
+                "LVB_relief_barg": R335_LVB_RELIEF_BARG,                      # LV-324501B opens above this (bar g)
+                "recycle_selected": bool(recycle_selected),                  # True when PIC-335201 > relief (LV-B open)
                 "urea_pct":    round(w2_live * 100.0, 1),                     # AUDIT F-5: LIVE product conc (97.71 % @design)
                 "AY_324701":   round(conc_infer_324(w2_live, R324_E003_T_SP_C, R324_F003_P_BARA,
                                                     s.r324_e003_T, s.r324_f003_P), 1),   # live conc soft-sensor (wt %)
-                "product_th":  round(m_product / 1000.0, 2),                  # final melt + UF85 -> 335 (t/h)
-                "uf85_kgh":    round(m_uf, 1),                                # UF85 injection (kg/h)
+                "product_th":  round(m_product / 1000.0, 2),                  # urea melt -> BL (t/h; UF85 deferred)
+                "uf85_kgh":    round(m_uf, 1),                                # UF85 injection (kg/h; 0 until 335 simulated)
                 "uf85_m3h":    round(m_uf / R324_UF85_RHO, 2),                # UF85 injection (m3/h @1305 kg/m3)
                 "p_chest_bara":round(p_chest_e003, 2),                        # steam chest press. (bar a)
                 "Q_kW":        round(Q_e003_kw, 0),                           # Evap-II duty (kW)
@@ -8011,14 +8022,21 @@ def handle_cmd(cmd: dict):
         if "op" in cmd:
             s.HIC_323605 = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
-    elif t == "lv324501_route_set":            # A: 402G+697=609 -> 335; B: raw 402G -> 323D002
+    elif t == "pic335201_set":                 # 335 melt-header pressure (bar g); LV-324501B relief input
+        if "op" in cmd:
+            s.PIC_335201 = clamp(_finite(cmd["op"], "op"), 0.0, 15.0)
+
+    elif t == "lv324501_route_set":            # deprecated: A = normal export to BL; B = force relief recycle
+        # Retained for the older UI/command API. LV-324501B is now the PIC-335201 overpressure relief,
+        # so "route B" simulates the overpressure that opens it and "route A" restores the design header.
         if "route" in cmd:
             route = str(cmd["route"]).strip().upper()
             if route not in ("A", "B"):
                 raise ValueError("LV-324501 route must be A or B")
-            s.LV_324501_RECYCLE = route == "B"
+            force_b = route == "B"
         else:                                   # backward-compatible API used by older layouts/tests
-            s.LV_324501_RECYCLE = bool(cmd.get("recycle", False))
+            force_b = bool(cmd.get("recycle", False))
+        s.PIC_335201 = (R335_LVB_RELIEF_BARG + 0.5) if force_b else R335_PIC201_DES_BARG
 
     elif t == "steam_supply_set":              # MP supply valve (utility import -> MP header)
         if "op" in cmd:

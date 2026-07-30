@@ -67,13 +67,14 @@ def test_lv324501_route_selector_uses_documented_a_and_b_destinations() -> None:
     original_state = main.state
     try:
         main.state = main.State()
-        assert main.state.LV_324501_RECYCLE is False
+        # G12: LV-324501B is the PIC-335201 overpressure relief; normally closed at the design header.
+        assert main.state.PIC_335201 < main.R335_LVB_RELIEF_BARG
 
-        main.handle_cmd({"type": "lv324501_route_set", "route": "B"})
-        assert main.state.LV_324501_RECYCLE is True
+        main.handle_cmd({"type": "lv324501_route_set", "route": "B"})     # deprecated alias forces relief
+        assert main.state.PIC_335201 > main.R335_LVB_RELIEF_BARG
 
-        main.handle_cmd({"type": "lv324501_route_set", "route": "A"})
-        assert main.state.LV_324501_RECYCLE is False
+        main.handle_cmd({"type": "lv324501_route_set", "route": "A"})     # restores the design header
+        assert main.state.PIC_335201 < main.R335_LVB_RELIEF_BARG
 
         with pytest.raises(ValueError, match="route must be A or B"):
             main.handle_cmd({"type": "lv324501_route_set", "route": "C"})

@@ -84,15 +84,22 @@ def test_recycle_route_sends_raw_402g_and_interlocks_uf85_off() -> None:
     assert route["energy_residual_kw"] == pytest.approx(0.0, abs=1.0e-9)
 
 
-def test_route_command_accepts_ui_a_and_b_labels() -> None:
+def test_pic335201_relief_opens_and_closes_lv324501b() -> None:
+    """G12: LV-324501B is the PIC-335201 overpressure relief. It is normally closed (design header
+    pressure below the relief) and opens only above R335_LVB_RELIEF_BARG. The direct pic335201_set
+    command and the retained lv324501_route_set alias both drive it via that header pressure."""
     original_state = main.state
     try:
         main.state = main.State()
-        main.handle_cmd({"type": "lv324501_route_set", "route": "B"})
-        assert main.state.LV_324501_RECYCLE is True
+        assert main.state.PIC_335201 < main.R335_LVB_RELIEF_BARG          # normally closed at design
 
-        main.handle_cmd({"type": "lv324501_route_set", "route": "A"})
-        assert main.state.LV_324501_RECYCLE is False
+        main.handle_cmd({"type": "pic335201_set", "op": main.R335_LVB_RELIEF_BARG + 0.4})
+        assert main.state.PIC_335201 > main.R335_LVB_RELIEF_BARG          # relief opens LV-324501B
+
+        main.handle_cmd({"type": "lv324501_route_set", "route": "A"})     # deprecated alias -> design header
+        assert main.state.PIC_335201 < main.R335_LVB_RELIEF_BARG
+        main.handle_cmd({"type": "lv324501_route_set", "route": "B"})     # deprecated alias -> force relief
+        assert main.state.PIC_335201 > main.R335_LVB_RELIEF_BARG
     finally:
         main.state = original_state
 
@@ -170,6 +177,54 @@ def test_uf85_master_tracks_disconnected_slave_for_bumpless_cas_return(
     returned = main.step_uf85_cascade(cascade, PFD_402G_KGH, False, 1.0)
 
     assert returned["delivered_kgh"] == pytest.approx(local_flow, rel=2.0e-3)
+
+
+def _find_324_melt_block(packet: dict) -> dict:
+    """Locate the 324 melt-drain telemetry block (carries LV_324501B / PIC_335201) without
+    hard-coding the packet key path."""
+    def walk(node):
+        if isinstance(node, dict):
+            if "LV_324501B" in node and "PIC_335201" in node:
+                return node
+            for value in node.values():
+                found = walk(value)
+                if found is not None:
+                    return found
+        return None
+    block = walk(packet)
+    assert block is not None, "324 melt-drain telemetry block not found"
+    return block
+
+
+def test_gap_G12_lvb_normally_closed_and_relief_recycles_to_d002() -> None:
+    """G12 closure gate (approved operability). LV-324501A level-controls the drain and exports the
+    urea melt to BL; LV-324501B is NORMALLY CLOSED and opens only when PIC-335201 > 3.8 bar(g),
+    diverting the melt to 323D002. Assert both regimes on the live engine."""
+    original_state = main.state
+    try:
+        main.state = main.State()
+        packet = None
+        for _ in range(400):
+            packet = main.step_sim(0.1)
+        design = _find_324_melt_block(packet)
+        # normally closed at design: header below relief, LV-B shut, all melt exports to BL
+        assert design["PIC_335201"] < main.R335_LVB_RELIEF_BARG
+        assert design["LV_324501B"] == 0.0
+        assert design["recyc_th"] == 0.0
+        assert design["melt_fwd_th"] > 0.0
+        assert design["uf85_kgh"] == 0.0                       # UF85 deferred until 335 is simulated
+
+        # raise the 335 melt-header pressure above the relief: LV-B opens and recycles to 323D002
+        main.state.PIC_335201 = main.R335_LVB_RELIEF_BARG + 0.5
+        relief = None
+        for _ in range(200):
+            relief = main.step_sim(0.1)
+        relieved = _find_324_melt_block(relief)
+        assert relieved["LV_324501B"] > 0.0
+        assert relieved["recyc_th"] > 0.0
+        assert relieved["melt_fwd_th"] == 0.0                  # full drain diverted on the binary relief
+    finally:
+        main.state = original_state
 
 
 def test_recycle_arrives_at_d002_next_tick_with_total_species_and_energy() -> None:

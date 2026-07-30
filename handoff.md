@@ -139,25 +139,3 @@ equipment inventories one tag at a time.
 
 **Acceptance:** momentum/pressure residuals close against vendor duty points and Unit 335 exposes
 mass, component, energy, hydraulic, and control states with connected streams.
-
-## G12 - Melt-recycle dilution: only the condensate injection tag/flow remains
-
-**Evidence:** the branch order is now resolved from the approved evaporation datasheets
-(`324-1b Equipment Descriprion and Datasheet 1/3`): LV-324501A is the forward melt to the granulator
-and LV-324501B recycles the pre-UF 98.6% melt back to the Urea Solution Tank 323D002, with UF85
-injection (335P002, HIC-335609/610) hard-interlocked to zero stroke when LV-324501A closes -- exactly
-the routing and interlock the simulator already implements. The datasheets also confirm the
-`References/323D002.md` requirement that "pure steam condensate must be actively injected into the
-recycle line" on B to keep the tank from over-concentrating, but still give **no tagged condensate
-stream number, flow, temperature, or valve** for that injection. The strict PFD closes forward
-Stream 609 as 402G melt + 697 UF85 (`85405 + 694 = 86100 kg/h`). Sensible mixing of the tabulated
-140 C melt with 40 C UF85 predicts about 138.62 C versus the rounded PFD 140 C; no heat-of-mixing
-datum explains the gap, so the runtime injects no compensating heat.
-
-**Required solution:** obtain the condensate injection tag and operating envelope (flow, temperature,
-valve/interlock, endpoint). Add the condensate as an explicit water/enthalpy inlet on the B-recycle
-path and solve the tank flash through the shared Extended-UNIQUAC/IAPWS-IF97 boundary; do not infer a
-dilution rate from a narrative.
-
-**Acceptance:** the B-recycle path carries a measured condensate mass and enthalpy input and the
-323D002 component and energy residuals close through the A/B route toggle without a concentration pin.

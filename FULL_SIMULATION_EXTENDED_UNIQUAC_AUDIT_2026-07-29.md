@@ -158,6 +158,24 @@ any pinned `main.py` design balance:
    operator action is reversed. HV-323605 is a hand valve (HIC), so "fail position" is operator-set,
    not an automatic trip.
 
+5. **G12 (Unit-324 melt-drain routing) CLOSED by approved operability spec.** The two prior blockers
+   -- the LV-324501B branch trigger and the melt-recycle dilution datum -- are resolved by the approved
+   324 melt-header control philosophy: **LV-324501A** level-controls the 324F010 drain (LT-324501) and
+   **exports the urea melt to battery limit** (granulation Unit 335 is out of scope until introduced),
+   while **LV-324501B is normally closed** and opens only as an **overpressure relief when PIC-335201 >
+   3.8 bar(g)** (`R335_LVB_RELIEF_BARG`), diverting the drain back to the Urea Solution Tank 323D002.
+   Because B is a rare relief rather than a continuous recycle and A no longer mixes UF85 at the drain,
+   the missing tagged condensate-injection stream is no longer on the runtime path -- the dilution gap
+   dissolves instead of being pinned. `main.py` now carries a `PIC_335201` boundary state (design
+   3.5 bar(g), below relief), the binary selector `recycle_selected = PIC_335201 > 3.8`, UF85 deferred
+   (`uf_ratio = 0`), a `pic335201_set` command (the `lv324501_route_set` A/B alias is retained and drives
+   the same header), and BL-relabelled melt telemetry exposing `PIC_335201`/`LVB_relief_barg`. Live-engine
+   gate `test_lv324501_routing.py::test_gap_G12_lvb_normally_closed_and_relief_recycles_to_d002` asserts
+   both regimes (design: header<3.8, LV-B=0, recycle=0, melt exports to BL, UF85=0; relief: header>3.8,
+   LV-B open, recycle>0 to 323D002, BL export=0). The `route_lv324501`/UF85 mixing functions and their
+   tests are retained unchanged for the future granulation build. No pinned design balance changed:
+   at the design header B is shut, so all melt exports and the 323D002 recycle inflow is zero.
+
 Repository hygiene: 13 superseded audit/plan/prompt documents and ~285 one-off scratch/probe scripts
 and snapshots were deleted (see git history); `References/`, the live docs, the code, and the
 `backend/tests` QA harness are retained. `audit_model_compliance.py` now reports **9 passes / 3 open
