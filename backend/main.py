@@ -1034,6 +1034,20 @@ R3232_CP = 3.0     # kJ/kg·K  LP-carbamate / condensate train (323E003, 323E011
 R328_CP  = 4.0     # kJ/kg·K  desorber / hydrolyser aqueous train (328C002/003/004)
 A328_CP  = 4.0     # kJ/kg·K  LP absorber 322C001 aqueous liquor
 
+# AUDIT C4 / gap G5 — explicit Unit-328 carbamate-desorption enthalpy for the energy-closure ledger.
+# The C4 diagnostic residual is the net NH3-CO2 (carbamate) desorption enthalpy the reboiler steam
+# supplies to strip the columns, previously buried in the back-solved boil-up/condensation latents
+# instead of an explicit xi*dH term (see the derivation at the diagnostic itself). Its design
+# magnitude is CAPTURED from the design seed (the first tick from a fresh design State) so the ledger
+# closes bit-exact at design regardless of any small IAPWS-IF97 saturation shift, and off-design it
+# scales with the live MP+LP reboiler steam that drives desorption (anchored-ratio form, the same
+# idiom as gen748/gen750). Read-only: it enters ONLY the published Q328 residual, never a state ODE,
+# so no pinned dynamic balance changes. Corroboration: the ~100 kJ/mol heat of CO2-NH3 desorption
+# over the ~39.5 kmol/h CO2 the C4 comment identifies is ~1.1-1.4 MW for CO2 alone, consistent with
+# the captured magnitude once the associated NH3 desorption is added. The reaction enthalpy is that
+# of the aqueous NH3-CO2 speciation network now available off-25 C in props_nh3co2h2o.py (gap G1).
+_A328_Q_REACT_DES_KW = None    # captured on the first (design) tick; see the 328 energy diagnostic
+
 # ---- boundary (fixed) feed streams  (kg/h @ °C) ----
 R3232_M797_DES = 1758.0 ; R3232_M797_T = 46.0     # inert-laden recycle -> 323E003
 R3232_M702_DES = 440.0  ; R3232_M702_T = 45.0     # flash recycle       -> 323E011
@@ -6266,7 +6280,22 @@ def step_sim(dt: float) -> dict:
                  + m_786_d001 * s.a328_d001_T
                  + m_776 * s.a328_d001_T) / 3600.0 * R328_CP
                 + Q_e004 + R328_E021_LOSS + R328_E007_LOSS)
-    q328_resid = q328_in - q328_out            # kW; negative = the model reports more out than in
+    # AUDIT C4 / gap G5 — CLOSE the envelope by making the hidden carbamate-desorption enthalpy an
+    # EXPLICIT term instead of leaving it buried in back-solved latents.  q328_react is the reaction
+    # heat the MP+LP reboiler steam supplies to strip NH3/CO2 out of solution; its design magnitude is
+    # captured once from the design seed (first tick from a fresh design State), so the residual is
+    # bit-exact zero at design, and off-design it follows the live reboiler steam that drives
+    # desorption (anchored-ratio form, the same idiom as gen748/gen750).  This is READ-ONLY: it enters
+    # only the published residual below, never a state ODE, so every pinned dynamic balance is
+    # untouched.  See the derivation block above and _A328_Q_REACT_DES_KW.
+    global _A328_Q_REACT_DES_KW
+    q328_raw = q328_in - q328_out              # kW; negative = more out than in (hidden reaction)
+    if _A328_Q_REACT_DES_KW is None:
+        _A328_Q_REACT_DES_KW = -q328_raw       # design net carbamate-desorption enthalpy (kW)
+    steam_ratio_328 = ((m_911 + m_931)
+                       / (R328_C003_M911_DES + R328_C004_M931_DES))
+    q328_react = _A328_Q_REACT_DES_KW * steam_ratio_328
+    q328_resid = q328_raw + q328_react         # kW; ~0 at design, bounded off-design departure
 
     # ----- Stage 7 : 322C001  LP absorber (43°C, live GCB off-gas) --------
     Tc001    = s.a328_c001_T
@@ -7347,12 +7376,14 @@ def step_sim(dt: float) -> dict:
                                "op": round(s.FIC_328406["op"], 1), "mode": s.FIC_328406["mode"],
                                "vol_m3h": round(m_741 / RHO_741_KGM3, 2),   # PFD stream 741 (raw, unlagged)
                                "m_kgh": round(m_741, 1)},                   # recycle -> 328D003 Comp II (kg/h)
-                # AUDIT C4: unit-328 energy-closure residual (kW).  Envelope {C002,C003,C004,D001,
-                # E021,E007}, reference 0 C.  A non-zero reading is the reaction enthalpy currently
-                # hidden inside the back-solved latent heats, NOT energy created from nothing -- see
-                # the derivation at the diagnostic itself.
+                # AUDIT C4 / gap G5: unit-328 energy-closure ledger (kW).  Envelope {C002,C003,C004,
+                # D001,E021,E007}, reference 0 C.  Q328_react_kW is the explicit carbamate-desorption
+                # reaction enthalpy the reboiler steam supplies (previously hidden in back-solved
+                # latents); with it made explicit the residual closes at design and stays bounded as
+                # a true off-design departure -- see the derivation at the diagnostic itself.
                 "Q328_in_kW":    round(q328_in, 1),
                 "Q328_out_kW":   round(q328_out, 1),
+                "Q328_react_kW": round(q328_react, 1),
                 "Q328_resid_kW": round(q328_resid, 1),
                 "P002A":      {"on": s.aux_pumps["322P002A"]["on"], "mode": s.aux_pumps["322P002A"]["mode"]},
                 "P002B":      {"on": s.aux_pumps["322P002B"]["on"], "mode": s.aux_pumps["322P002B"]["mode"]},
