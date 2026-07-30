@@ -17,11 +17,15 @@ The thermodynamic policy is a gamma-phi boundary:
 
 - liquid phase: Extended UNIQUAC, including its neutral-species UNIQUAC limit;
 - vapor phase: a fugacity model/EOS where validated data exist;
-- pure-water steam utility: an explicit Antoine pure-fluid exception, because UNIQUAC is a mixture
-  excess-Gibbs model and cannot replace a pure-steam equation of state; replacement and validation
-  against IAPWS-IF97 remain open;
+- pure-water steam utility: the shared IAPWS-IF97 boundary (`backend/iapws_if97.py`, Regions 1/2/4),
+  because UNIQUAC is a mixture excess-Gibbs model and cannot replace a pure-steam equation of state.
+  This closed gap G11 (2026-07-30): saturation, latent heat, and condensate enthalpy for the 329 steam
+  network and every steam-heated shell now come from IF97, validated bit-exact against the official
+  IF97 verification points; the former Antoine correlation is retained only as a comparison oracle;
 - unsupported temperature, pressure, composition, or absolute-enthalpy requests fail or remain
-  data-gated instead of extrapolating silently.
+  data-gated instead of extrapolating silently. The one aqueous-species data blocker cited in G1 --
+  NH3(aq)/CO2(aq) standard-state Cp -- is now sourced (Correa-Thomsen-Fosbol, Fuel 2023), so the
+  NH3-CO2-H2O property basis solves speciation and reaction/absolute enthalpy off 25 C.
 
 Primary basis: [Thomsen's Extended UNIQUAC review](https://publications.iupac.org/pac/77/3/0531/index.html),
 [Zhang et al. high-pressure urea-loop formulation](https://ureaknowhow.com/pdflib/510_2005%20Zhang%20IPE%20CAS%20Modeling%20and%20simulation%20of%20high%20pressure%20urea%20synthesis%20loop.pdf),
@@ -60,7 +64,7 @@ Legend: `OK` implemented and connected; `REDUCED` conservative but calibrated/re
 | 328C004 desorber II | Total/species inventory present | Back-solved latent | Kremser/O'Connell soft-sensor layer | C003 to E007/product-water train | OPEN: reactive Extended-UNIQUAC MESH |
 | 328D001/E004, E021, E007, D003 | Scalar/species nodes present | Calibrated condensation, epsilon-NTU and reaction duties | Vessel/pump dynamics present where specified | Condensate and recovery network connected | OPEN: combined Unit-328 energy ledger does not close |
 | 328P003/P006/P007 | Pump continuity present | N/A | Reduced pump/control equations | Correct adjacent nodes | REDUCED |
-| 329 HP/MP/9-bar/LP steam network | Per-node mass inventories present | Saturated-water constants/pure-fluid exception | Valve square-root flows and level/pressure controls | Header users and condensate drums | FIXED valve direction and missing liquid terms; full user ledger OPEN |
+| 329 HP/MP/9-bar/LP steam network | Per-node mass inventories present | IAPWS-IF97 saturation/enthalpy (G11 closed) | Valve square-root flows and level/pressure controls | Header users and condensate drums | FIXED valve direction, missing liquid terms, and pure-water boundary (IF97); full user ledger OPEN |
 | 335 finishing | Boundary total flow and UF85 ratio only | No equipment thermodynamics | No equipment inventory | Receives 324 melt | OPEN: Unit 335 is not a simulated flowsheet |
 
 ## Governing equation coverage
@@ -112,3 +116,29 @@ New passing controls cover the Unit-324 Extended-UNIQUAC boundary, zero-feed str
 truthful dynamic-tear diagnostics, live steam-header coupling, and corrected pressure/demand paths.
 The four failures remain the registry/enthalpy coverage, three design-strength component residuals,
 and the Unit-328 absolute-energy residual listed above; none is suppressed or renamed as a pass.
+
+## Addendum 2026-07-30 -- thermodynamic-boundary closures
+
+Two data/boundary gaps were closed after deep research into open primary sources, without altering
+any pinned `main.py` design balance:
+
+1. **G11 (steam-condensate -> IAPWS-IF97) CLOSED.** New `backend/iapws_if97.py` implements IF97
+   Regions 4/1/2 (saturation, liquid, vapour) and is validated bit-exact (<1e-9 rel.) against the
+   official IF97 verification points (`backend/test_iapws_if97.py`). `main.tsat_steam`,
+   `main.psat_water_bara`, and `thermo_extended_uniquac.water_psat_bara` now delegate to it; Antoine is
+   retained as a comparison oracle. Design points are preserved by construction (each UA/eta_T anchor
+   is itself `tsat_steam(P_design)`), so only off-design slopes moved (worst 0.02 C at the 19.7 bar
+   stripper design point).
+
+2. **G1 aqueous Cp data blocker RESOLVED.** The NH3(aq)/CO2(aq) standard-state heat capacities in
+   `backend/props_nh3co2h2o.py`, previously the one documented external input, are now sourced from
+   Correa-Thomsen-Fosbol, Fuel 335 (2023) 126863, Table 1 (72.04 / 238.05 J/mol/K, constant-Cp limit).
+   The property basis now solves off-25 C speciation, reaction enthalpy, and absolute enthalpy
+   (`test_props_nh3co2h2o.py` 37/37; pKw(60 C)=13.03 vs lit 13.02). Runtime integration into the HP/LP/
+   absorber/desorber units remains the open G1 work; G5's required reference-state enthalpy interface
+   is now enabled by this plus IF97.
+
+Repository hygiene: 13 superseded audit/plan/prompt documents and ~285 one-off scratch/probe scripts
+and snapshots were deleted (see git history); `References/`, the live docs, the code, and the
+`backend/tests` QA harness are retained. The executable `audit_model_compliance.py` baseline (8 passes,
+4 open failures) is unchanged because no pinned design balance was modified by these boundary closures.

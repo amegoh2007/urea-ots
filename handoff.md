@@ -12,16 +12,22 @@ remaining equation or datum cannot be supplied honestly by the current repositor
 **Evidence:** `backend/props_nh3co2h2o.py` implements the Thomsen/Darde
 NH3-CO2-H2O Extended-UNIQUAC/SRK/speciation core, but the HPCC, reactor, stripper, scrubber,
 LP absorber, and Unit-328 columns still use calibrated splits or reduced correlations in
-`backend/main.py`. The property package also lacks urea in the reactive runtime phase set and lacks
-approved off-temperature aqueous NH3/CO2 standard-state heat capacities.
+`backend/main.py`. The property package still lacks urea in the reactive runtime phase set. The
+off-temperature aqueous NH3(aq)/CO2(aq) standard-state heat capacities were the one documented data
+blocker; they are now sourced (Correa-Thomsen-Fosbol, Fuel 2023, Table 1: 72.04 / 238.05 J/mol/K,
+constant-Cp limit), so the property basis now solves speciation and reaction/absolute enthalpy off
+25 C. The full 3-parameter Cp(T) from the paywalled Thomsen&Rasmussen 1999 remains an accuracy
+refinement, not a blocker.
 
 **Required solution:** construct one true-species gamma-phi MESH boundary: Extended UNIQUAC liquid,
 SRK/PHS vapor fugacity, electroneutral speciation, chemical-equilibrium residuals, and explicit
 reaction/excess enthalpy. Add urea and validate against the licensor design point plus independent
 high-pressure data before replacing each empirical unit, one unit at a time.
 
-**Missing evidence:** approved NH3(aq)/CO2(aq) heat-capacity functions and a validated parameter set
-covering the plant composition, 99-200 C, and vacuum through 144 bar(a).
+**Remaining work:** runtime integration of the (now off-T-capable) property basis into each HP/LP/
+absorber/desorber unit in flow order, urea added to the reactive phase set, and validation against
+the licensor design point. No open data blocker remains for the aqueous NH3-CO2-H2O sub-model;
+the urea reactive parameters and the licensor high-pressure design point are the integration inputs.
 
 **Acceptance:** every process-mixture phase-equilibrium/enthalpy call reports model, domain status,
 fugacity/energy residual, and closes MESH without an empirical split override.
@@ -83,7 +89,11 @@ isolation does not establish a consistent reference state.
 
 **Required solution:** implement a single reference-state enthalpy interface from G1, including
 ideal/standard-state, excess, vapor, and reaction contributions. Replace one back-solved latent at a
-time and retain an explicit boundary ledger.
+time and retain an explicit boundary ledger. The enabling pieces now exist: `iapws_if97.py` supplies
+absolute pure-water/steam enthalpy and latent heat (G11), and `props_nh3co2h2o.py` now supplies
+off-25 C reaction and excess enthalpy for the reactive species (G1 Cp sourced). The remaining work is
+wiring these into an explicit Unit-328 boundary ledger in `main.py` without disturbing the pinned
+design balances (each duty replaced one at a time, verified against the full regression gate).
 
 **Acceptance:** Unit 328 total/component balances close and the independent energy residual is within
 1 kW at design and remains bounded under a feed/steam perturbation.
