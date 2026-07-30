@@ -842,9 +842,21 @@ Composition unchanged across the valve.
 Valid ~239–372 K; used for sub-cooling margin PDY:
 $$\log_{10}(P_{bar}) = A - \frac{B}{T_K + C}, \qquad A = 4.86886,\ B = 1113.928,\ C = -10.409$$
 
-### 3.12 Saturated Steam Temperature (Antoine for Water)
-Valid 100–374 °C; $P$ in bar a, converted to mmHg internally:
-$$T_{sat}(P) = \frac{1810.94}{8.14019 - \log_{10}(P\times 750.0617)} - 244.485 \quad [\text{°C}]$$
+### 3.12 Saturated Steam / Condensate Properties (IAPWS-IF97)
+Pure-water saturation, latent heat, and condensate enthalpy come from one shared IAPWS-IF97
+(R7-97) boundary, `backend/iapws_if97.py`. Saturation temperature/pressure use Region 4 (Eqs. 30/31),
+saturated-liquid enthalpy and density use Region 1, and saturated-vapour enthalpy uses Region 2:
+$$P^{sat}=\left(\frac{2C}{-B+\sqrt{B^2-4AC}}\right)^4,\qquad
+T^{sat}=\tfrac{1}{2}\!\left(n_{10}+D-\sqrt{(n_{10}+D)^2-4(n_9+n_{10}D)}\right),$$
+$$h^{L}=RT\,\tau\,\gamma^{I}_{\tau},\qquad h^{V}=RT\,\tau\,(\gamma^{o}_{\tau}+\gamma^{r}_{\tau}),\qquad
+h_{vap}=h^{V}-h^{L}.$$
+Verified bit-exact (<10⁻⁹ rel.) against the official IF97 verification points in
+`test_iapws_if97.py`. The legacy Antoine form
+$T_{sat}(P)=1810.94/(8.14019-\log_{10}(P\times750.0617))-244.485$ is retained only as a versioned
+comparison oracle (`_tsat_steam_antoine`). Because every UA/$\eta_T$ anchor is itself defined as
+`tsat_steam(P_design)` and each live duty divides by the same call, the design point is preserved
+by construction; only the off-design slope now follows IF97 (worst Antoine→IF97 shift 0.02 °C at
+the 19.7 bar stripper design point, up to +1.7 °C at 0.033 bar vacuum).
 
 ---
 
@@ -1845,10 +1857,12 @@ equation/data items are in `handoff.md`. The implemented changes are:
 
 2. **Thermodynamic policy.** Process-mixture liquid equilibrium belongs under Extended UNIQUAC;
    vapor fugacity belongs under its validated EOS. Pure-water steam is an explicit pure-fluid
-   exception and currently uses the bounded Antoine correlation; migration and validation against
-   IAPWS-IF97 remain open in `handoff.md`. It is not mislabeled as UNIQUAC. The Unit-324 vacuum
-   application lies outside the source full-model validation pressure, so numerical closure is not
-   represented as experimental validation.
+   exception now served by the shared IAPWS-IF97 boundary (`backend/iapws_if97.py`), validated
+   against the official IF97 verification points; the same boundary supplies the pure-water fugacity
+   reference inside the Unit-324 urea-water UNIQUAC VLE, so there is one pure-water reference state
+   plant-wide. It is not mislabeled as UNIQUAC. The Unit-324 vacuum application lies outside the
+   source full-model validation pressure, so numerical closure is not represented as experimental
+   validation.
 
 3. **Conservative equations/connectivity.** 322E001 hydrolysis is bounded by
    $\min(n_{urea},n_{H_2O})$ and biuret by half the remaining urea; reaction-created negative

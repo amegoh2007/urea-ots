@@ -22,10 +22,11 @@ This first integration is guarded to a bounded OTS operating envelope:
 not a claim that the source fitted vacuum pressure. The published full-model
 validation envelope is 408.15-503.15 K and 35-450 bar absolute, so Unit 324
 is explicitly classified as a design-anchored extrapolation. Water fugacity is
-temporarily represented by the simulator's existing pure-water Antoine
-correlation.  That is an explicit ``PURE_WATER_STEAM`` exception, not an
-Extended-UNIQUAC property.  No electrolyte speciation, gas EOS, Poynting
-correction, or absolute enthalpy is provided by this module.
+represented by the shared IAPWS-IF97 pure-water saturation line (``iapws_if97``),
+the same reference state the 329 steam network uses; the former Antoine
+``PURE_WATER_STEAM`` exception is retained only as a comparison oracle.  No
+electrolyte speciation, gas EOS, Poynting correction, or absolute enthalpy is
+provided by this module.
 
 All compositions are true fractions, not percentages.  Public temperature
 arguments are kelvin and pressure arguments are bar absolute.
@@ -35,6 +36,8 @@ from __future__ import annotations
 
 import math
 from functools import lru_cache
+
+import iapws_if97  # shared pure-water saturation reference (IAPWS-IF97 R7-97)
 
 
 MODEL_NAME = "Extended UNIQUAC neutral H2O/urea limit (Voskov-Voronin)"
@@ -196,19 +199,28 @@ def water_activity(urea_mass_fraction: float, temperature_k: float) -> float:
     return x_water * math.exp(ln_gamma_water)
 
 
-def water_psat_bara(temperature_k: float) -> float:
-    """Return pure-water saturation pressure [bar(a)] via Antoine.
+def _water_psat_antoine(temperature_k: float) -> float:
+    """Retained Antoine pure-water Psat oracle (superseded by IAPWS-IF97)."""
 
-    This is intentionally the current simulator correlation, isolated here as
-    a pure-water exception until an IAPWS boundary replaces it.
-    """
-
-    _validate_temperature(temperature_k)
     temperature_c = temperature_k - 273.15
     pressure_mmhg = 10.0 ** (
         8.14019 - 1810.94 / (244.485 + temperature_c)
     )
     return pressure_mmhg / 750.0616827
+
+
+def water_psat_bara(temperature_k: float) -> float:
+    """Return pure-water saturation pressure [bar(a)] via IAPWS-IF97.
+
+    The pure-water fugacity reference for this neutral H2O/urea VLE now comes
+    from the shared IAPWS-IF97 Region-4 saturation line (``iapws_if97``), the
+    same boundary the 329 steam network uses.  This removes the former Antoine
+    ``PURE_WATER_STEAM`` exception so there is a single pure-water reference
+    state across the plant.  The activity model itself is unchanged UNIQUAC.
+    """
+
+    _validate_temperature(temperature_k)
+    return iapws_if97.psat_bara(temperature_k - 273.15)
 
 
 def px_equilibrium_residual(

@@ -1,6 +1,6 @@
 # Open Simulation Gaps Only
 
-Updated: 2026-07-29
+Updated: 2026-07-30
 Strict source: `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`
 Audit: `FULL_SIMULATION_EXTENDED_UNIQUAC_AUDIT_2026-07-29.md`
 
@@ -29,10 +29,12 @@ fugacity/energy residual, and closes MESH without an empirical split override.
 ## G2 - Unit-324 UNIQUAC vacuum use is a design-anchored extrapolation
 
 **Evidence:** the new `backend/thermo_extended_uniquac.py` uses the open Voskov-Voronin binary
-H2O/urea parameters. The published full-model validation envelope is 135-230 C and 3.5-45 MPa;
-324E001/F001 and 324E003/F003 operate at 130/140 C and 0.33/0.131 bar(a). The implementation marks
-this `DESIGN_ANCHORED_EXTRAPOLATION`. At 130 C/0.33 bar the raw model root is about 0.9204 urea mass
-fraction versus the PFD's 0.9431; at 140 C/0.131 bar it is about 0.9767 versus 0.9771.
+H2O/urea parameters (standard UNIQUAC; the neutral-species Extended-UNIQUAC limit). Its pure-water
+fugacity reference now comes from the shared IAPWS-IF97 saturation line (G11 closed). The published
+full-model validation envelope is 135-230 C and 3.5-45 MPa; 324E001/F001 and 324E003/F003 operate at
+130/140 C and 0.33/0.131 bar(a). The implementation marks this `DESIGN_ANCHORED_EXTRAPOLATION`. At
+130 C/0.33 bar the raw model root is about 0.9209 urea mass fraction versus the PFD's 0.9431; at
+140 C/0.131 bar it is about 0.9768 versus 0.9771.
 
 **Required solution:** obtain primary ebulliometric/VLE data or a validated parameter regression at
 the two vacuum-stage domains, fit only inside a versioned data-reconciliation layer, and rerun the
@@ -153,24 +155,6 @@ directional perturbation test.
 
 **Acceptance:** opening/closing action, upstream/downstream nodes, and fail position agree across
 P&ID, DCS faceplate, telemetry, and pressure response.
-
-## G11 - Pure-water steam properties still use Antoine, not IAPWS-IF97
-
-**Evidence:** `backend/main.py::tsat_steam` and
-`backend/thermo_extended_uniquac.py::water_psat_bara` use the same Antoine saturation-pressure
-correlation. This is an explicit pure-fluid exception to the Extended-UNIQUAC mixture policy, but it
-has not been implemented or regression-validated as IAPWS-IF97. The current correlation is adequate
-only for the bounded saturation use stated in code; it supplies neither general steam enthalpy nor
-two-phase derivatives.
-
-**Required solution:** introduce one shared IAPWS-IF97 pure-water boundary for saturation
-temperature/pressure, liquid and vapor enthalpy, density, and derivatives. Replace duplicated Antoine
-calls one property at a time and retain the current correlation as a versioned comparison oracle
-during migration.
-
-**Acceptance:** saturation and enthalpy tests cover every HP/MP/9-bar/LP/vacuum operating boundary,
-agree with the official IAPWS release within declared tolerances, and all steam consumers call the
-shared property interface without changing design mass balances.
 
 ## G12 - Melt-recycle dilution and Stream-609 identity need approved routing data
 

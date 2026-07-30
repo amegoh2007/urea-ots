@@ -33,6 +33,7 @@ from typing import Optional, Set
 
 import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
 import thermo_extended_uniquac as extended_uniquac
+import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-97)
 from controllers import Controller
 import steam_system
 from steam_system import SteamState, step_steam  # MP/LP steam-header dynamics (quarantined)
@@ -42,27 +43,48 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
-def tsat_steam(p_bara: float) -> float:
-    """Saturated-steam temperature [deg C] from absolute pressure [bar a].
+def _tsat_steam_antoine(p_bara: float) -> float:
+    """Retained Antoine saturation-T oracle (superseded by IAPWS-IF97).
 
     Antoine equation for water (valid 100-374 C), pressure in mmHg:
         log10(P_mmHg) = 8.14019 - 1810.94 / (244.485 + T_C)
-    inverted for temperature, with P_mmHg = P_bara * 750.0617.  Reproduces the
-    steam tables and the plant reference (saturated-steam T-vs-P, Fig. 9) to
-    <0.2 % over the 18-23 bar a HP-steam band.
+    inverted for temperature, with P_mmHg = P_bara * 750.0617.  Kept only as a
+    versioned comparison oracle during the IF97 migration (G11).
     """
     p_mmhg = max(p_bara, 0.01) * 750.0616827
     return 1810.94 / (8.14019 - math.log10(p_mmhg)) - 244.485
 
 
+def _psat_water_antoine(T_C: float) -> float:
+    """Retained Antoine saturation-P oracle (superseded by IAPWS-IF97)."""
+    p_mmhg = 10.0 ** (8.14019 - 1810.94 / (244.485 + T_C))
+    return p_mmhg / 750.0616827
+
+
+def tsat_steam(p_bara: float) -> float:
+    """Saturated-steam temperature [deg C] from absolute pressure [bar a].
+
+    Now backed by the shared IAPWS-IF97 pure-water boundary (Region 4, Eq.31),
+    which reproduces the official IF97 saturation line to <1e-9 relative error.
+    Every steam-heated shell and the 329 header network share this one call so
+    saturation, latent heat, and condensate enthalpy come from one reference
+    state.  The design point is preserved by construction: each UA/eta_T anchor
+    is itself defined as ``tsat_steam(P_design)`` and every live duty divides by
+    the same call, so a design-pressure query returns the design temperature and
+    only the off-design slope now follows IF97 instead of Antoine (worst
+    Antoine->IF97 shift 0.02 C at the 19.7 bar stripper design point).
+    """
+    return iapws_if97.tsat_c(p_bara)
+
+
 def psat_water_bara(T_C: float) -> float:
     """Saturated-water vapour pressure [bar a] from temperature [deg C].
 
-    Forward form of the tsat_steam Antoine correlation (same coefficients):
-        log10(P_mmHg) = 8.14019 - 1810.94 / (244.485 + T_C),  P_bara = P_mmHg / 750.0617.
+    Analytic partner of tsat_steam, now the IAPWS-IF97 forward saturation
+    pressure (Region 4, Eq.30).  tsat_steam(psat_water_bara(T)) == T holds to
+    IF97 inversion tolerance, so every bubble-point round trip is preserved.
     """
-    p_mmhg = 10.0 ** (8.14019 - 1810.94 / (244.485 + T_C))
-    return p_mmhg / 750.0616827
+    return iapws_if97.psat_bara(T_C)
 
 
 def conc_infer_324(w_des: float, T_des: float, P_des: float,

@@ -1,9 +1,9 @@
 """Focused tests for the neutral H2O/urea UNIQUAC boundary.
 
 The numerical expectations below are literal, hand-evaluated values from the
-Voskov-Voronin UNIQUAC equations and the currently approved water Antoine
-exception.  They intentionally do not call a second implementation to build
-their expected values.
+Voskov-Voronin UNIQUAC equations and the shared IAPWS-IF97 pure-water
+saturation reference.  They intentionally do not call a second implementation
+to build their expected values.
 """
 
 from __future__ import annotations
@@ -68,11 +68,12 @@ def test_pure_urea_water_activity_limit_is_zero() -> None:
     assert thermo.water_activity(1.0, 403.15) == 0.0
 
 
-def test_pure_water_exception_matches_literal_antoine_value() -> None:
+def test_pure_water_reference_matches_literal_if97_value() -> None:
     thermo = _thermo()
 
+    # IAPWS-IF97 Region-4 saturation pressure at 373.15 K (100 C).
     assert thermo.water_psat_bara(373.15) == pytest.approx(
-        1.0189297473505128, abs=1.0e-12
+        1.0141797792130998, abs=1.0e-12
     )
 
 
@@ -81,7 +82,7 @@ def test_px_residual_matches_first_stage_design_evaluation() -> None:
 
     residual = thermo.px_equilibrium_residual(0.9431, 403.15, 0.33)
 
-    assert residual == pytest.approx(-0.09414494805149266, abs=1.0e-12)
+    assert residual == pytest.approx(-0.09278190070628659, abs=1.0e-12)
 
 
 def test_solver_matches_first_stage_design_root() -> None:
@@ -89,7 +90,7 @@ def test_solver_matches_first_stage_design_root() -> None:
 
     result = thermo.solve_urea_mass_fraction(403.15, 0.33)
 
-    assert result == pytest.approx(0.9204110746605021, abs=2.0e-10)
+    assert result == pytest.approx(0.9208687078148713, abs=2.0e-10)
 
 
 def test_solver_closes_second_stage_design_residual() -> None:
