@@ -80,24 +80,6 @@ mass.
 **Acceptance:** zero and perturbed feeds cannot create matter; C/H/N/O close to numerical tolerance;
 all outlet vectors respond to inlet changes; no signed correction stream remains.
 
-## G5 - Unit-328 absolute energy ledger is incomplete
-
-**Evidence:** the executable audit baseline gives `Q_in=6653.8 kW`, `Q_out=8344.2 kW`, residual
-`-1690.5 kW`. Several duties use back-solved latent heats, and stream records have no absolute
-enthalpy. Adding the 101.5 kJ/mol hydrolysis heat or the 117 kJ/mol carbamate decomposition heat in
-isolation does not establish a consistent reference state.
-
-**Required solution:** implement a single reference-state enthalpy interface from G1, including
-ideal/standard-state, excess, vapor, and reaction contributions. Replace one back-solved latent at a
-time and retain an explicit boundary ledger. The enabling pieces now exist: `iapws_if97.py` supplies
-absolute pure-water/steam enthalpy and latent heat (G11), and `props_nh3co2h2o.py` now supplies
-off-25 C reaction and excess enthalpy for the reactive species (G1 Cp sourced). The remaining work is
-wiring these into an explicit Unit-328 boundary ledger in `main.py` without disturbing the pinned
-design balances (each duty replaced one at a time, verified against the full regression gate).
-
-**Acceptance:** Unit 328 total/component balances close and the independent energy residual is within
-1 kW at design and remains bounded under a feed/steam perturbation.
-
 ## G6 - Live flowsheet registry is incomplete and carries no absolute enthalpy
 
 **Evidence:** the executable baseline publishes 55 live records versus 163 unique in-scope

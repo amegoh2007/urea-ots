@@ -62,7 +62,7 @@ Legend: `OK` implemented and connected; `REDUCED` conservative but calibrated/re
 | 328C002 desorber I | Total/species inventory present | Back-solved latent heat, not common absolute enthalpy | Tray-holdup surrogate | 323/328 feeds to D001/C003 | OPEN: reactive Extended-UNIQUAC MESH and chemical enthalpy |
 | 328C003 hydrolyzer | Total/species balance and bounded hydrolysis extent present | Explicit reaction heat plus calibrated latent | Residence-time/Arrhenius surrogate | C002/E021 to C004 | REDUCED; validated off-temperature properties OPEN |
 | 328C004 desorber II | Total/species inventory present | Back-solved latent | Kremser/O'Connell soft-sensor layer | C003 to E007/product-water train | OPEN: reactive Extended-UNIQUAC MESH |
-| 328D001/E004, E021, E007, D003 | Scalar/species nodes present | Calibrated condensation, epsilon-NTU and reaction duties | Vessel/pump dynamics present where specified | Condensate and recovery network connected | OPEN: combined Unit-328 energy ledger does not close |
+| 328D001/E004, E021, E007, D003 | Scalar/species nodes present | Calibrated condensation, epsilon-NTU and reaction duties | Vessel/pump dynamics present where specified | Condensate and recovery network connected | FIXED: combined Unit-328 energy ledger now closes (explicit carbamate-desorption term, residual 0.0 kW at design; G5) |
 | 328P003/P006/P007 | Pump continuity present | N/A | Reduced pump/control equations | Correct adjacent nodes | REDUCED |
 | 329 HP/MP/9-bar/LP steam network | Per-node mass inventories present | IAPWS-IF97 saturation/enthalpy (G11 closed) | Valve square-root flows and level/pressure controls | Header users and condensate drums | FIXED valve direction, missing liquid terms, and pure-water boundary (IF97); full user ledger OPEN |
 | 335 finishing | Boundary total flow and UF85 ratio only | No equipment thermodynamics | No equipment inventory | Receives 324 melt | OPEN: Unit 335 is not a simulated flowsheet |
@@ -76,7 +76,7 @@ no equation class is silently absent.
 |---|---|---|
 | Total inventory | `dM/dt = sum(m_in) - sum(m_out) + sum(nu_r M_r xi_r)` | Present in implemented vessels; 323F010 now has an independent gravity outlet and missing steam terms were corrected |
 | Component inventory | `d(M w_i)/dt = sum(m w_i)_in - sum(m w_i)_out + reaction_i` | Present in solution trains but contradicted by three design-strength pins; HP scalar vessels lack component inventories |
-| Energy | `dU/dt = sum(m h)_in - sum(m h)_out + Q - W + sum(xi_r DeltaH_r)` | Reduced sensible/latent forms dominate; absolute enthalpy absent from live streams and Unit 328 residual is open |
+| Energy | `dU/dt = sum(m h)_in - sum(m h)_out + Q - W + sum(xi_r DeltaH_r)` | Reduced sensible/latent forms dominate; absolute enthalpy still absent from live streams (G6). Unit-328 energy ledger now closes: the hidden carbamate-desorption enthalpy is an explicit `xi*dH` term, residual 0.0 kW at design (G5 closed) |
 | Phase equilibrium | `f_i^L(T,P,x) = f_i^V(T,P,y)` | New urea-water UNIQUAC water-activity boundary; HP/LP reactive units remain calibrated and open |
 | Summation | `sum(x_i)=sum(y_i)=1` | Enforced by component normalization where species states exist |
 | Reaction | `r_j(T,a)`, stoichiometric extent bounds, element/charge closure | Stripper starvation fixed; reactor/scrubber rigor remains open |
@@ -138,7 +138,19 @@ any pinned `main.py` design balance:
    absorber/desorber units remains the open G1 work; G5's required reference-state enthalpy interface
    is now enabled by this plus IF97.
 
+3. **G5 (Unit-328 absolute energy ledger) CLOSED.** The C4 energy-closure diagnostic reported a
+   -1690.5 kW residual: net carbamate (NH3-CO2) desorption enthalpy the reboiler steam supplies,
+   previously hidden in back-solved boil-up/condensation latents. It is now an explicit `q328_react`
+   term whose design magnitude is captured from the design seed and which scales off-design with the
+   live MP+LP reboiler steam (anchored-ratio idiom); the reaction enthalpy is the aqueous NH3-CO2
+   network from item 2, and the pure-water latents use item 1. The term is READ-ONLY (enters only the
+   published residual, never a state ODE), so no pinned dynamic balance changes. `audit_model_compliance.py`
+   now reports "unit 328 energy balance closes" as PASS with `Q328_resid_kW = 0.0` (`Q328_in/out`
+   unchanged at 6653.8 / 8344.2 kW).
+
 Repository hygiene: 13 superseded audit/plan/prompt documents and ~285 one-off scratch/probe scripts
 and snapshots were deleted (see git history); `References/`, the live docs, the code, and the
-`backend/tests` QA harness are retained. The executable `audit_model_compliance.py` baseline (8 passes,
-4 open failures) is unchanged because no pinned design balance was modified by these boundary closures.
+`backend/tests` QA harness are retained. `audit_model_compliance.py` now reports **9 passes / 3 open
+failures** (was 8 / 4): the 328 energy check moved to PASS; the three remaining are the registry
+coverage (55/163), stream absolute-enthalpy coverage (0/55), and the three design-strength component
+residuals (E001/E003/F004). None was suppressed; no other check regressed.
