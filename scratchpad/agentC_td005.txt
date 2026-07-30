@@ -1,9 +1,0 @@
-design (valve shut)    m741=      0.0 kg/h   LIC504_op= 50.000  m739=  33724.0 kg/h   CompI_M=  139128.0 kg  CompI_T= 56.000 C  CompII_M=83476.8
-MAN 50 % t=600s        m741=  16862.0 kg/h   LIC504_op= 50.040  m739=  33750.7 kg/h   CompI_M=  141886.6 kg  CompI_T= 55.898 C  CompII_M=83476.8
-MAN 50 % t=1800s       m741=  16862.0 kg/h   LIC504_op= 52.000  m739=  35073.1 kg/h   CompI_M=  147105.3 kg  CompI_T= 55.718 C  CompII_M=83476.8
-MAN 50 % t=3600s       m741=  16862.0 kg/h   LIC504_op= 53.793  m739=  36282.6 kg/h   CompI_M=  154240.7 kg  CompI_T= 55.492 C  CompII_M=83476.8
-
-741 recycle injected      :   16862.0 kg/h
-739/740 export change     :   +2558.6 kg/h   (must be  -16862.0 if it is a real DIVERSION)
-Comp-I holdup change      :  +15112.7 kg over 3600 s
-VERDICT: MASS CREATED FROM NOTHING

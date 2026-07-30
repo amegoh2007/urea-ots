@@ -1,5 +1,0 @@
-Traceback (most recent call last):
-  File "D:\Work\Urea Simulation\scratchpad\regress.py", line 20, in <module>
-    with open(out, "w", encoding="utf-8") as f:
-         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-FileNotFoundError: [Errno 2] No such file or directory: 'scratchpad/pin_B.json'
