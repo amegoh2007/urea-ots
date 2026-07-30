@@ -125,9 +125,13 @@ FT-329407 equals connected stream 932 and reproduces the PFD design value withou
 
 ## G9 - Vendor/equipment equations are data-gated
 
-**Evidence:** 322F001 and the 324 vacuum ejectors use reduced entrainment laws; no approved nozzle,
-mixing-throat, diffuser geometry, or performance map exists. Several vessel/valve hydraulic models
-lack verified Cv/elevation data. Unit 335 is only a melt-plus-UF85 boundary, not simulated equipment.
+**Evidence:** 322F001 and the 324 vacuum ejectors use reduced entrainment laws. The 324 evaporation
+datasheets supply a single design point per ejector (324F002 motive 650 / suction 94 kg/h @ 0.2 bar,
+discharge 744 kg/h @ 1.0 bar 123 C; 324F004 motive 927=600 / suction 712=634 kg/h @ 0.122 bar;
+324F005 motive 929=505 kg/h) but explicitly confirm that no pull curve, shut-off/overload point,
+critical backpressure, motive-pressure correction, or nozzle/mixing/diffuser geometry exists -- "a
+polynomial cannot be identified from one point". Several vessel/valve hydraulic models still lack
+verified Cv/elevation data, and Unit 335 is only a melt-plus-UF85 boundary, not simulated equipment.
 
 **Required solution:** obtain vendor ejector geometry/maps, valve Cv/trim and elevation data, plus
 Unit-335 equipment/P&ID/datasheets. Then integrate the existing Huang ejector core and conservative
@@ -136,36 +140,24 @@ equipment inventories one tag at a time.
 **Acceptance:** momentum/pressure residuals close against vendor duty points and Unit 335 exposes
 mass, component, energy, hydraulic, and control states with connected streams.
 
-## G10 - One mapping conflict remains unresolved
+## G12 - Melt-recycle dilution: only the condensate injection tag/flow remains
 
-**Evidence:** the available 323 mapping gives internally conflicting direction/role evidence for
-HV-323605 in the 323F010 vacuum path. Changing its sign or endpoints from code inspection alone
-would risk reversing an operator action.
+**Evidence:** the branch order is now resolved from the approved evaporation datasheets
+(`324-1b Equipment Descriprion and Datasheet 1/3`): LV-324501A is the forward melt to the granulator
+and LV-324501B recycles the pre-UF 98.6% melt back to the Urea Solution Tank 323D002, with UF85
+injection (335P002, HIC-335609/610) hard-interlocked to zero stroke when LV-324501A closes -- exactly
+the routing and interlock the simulator already implements. The datasheets also confirm the
+`References/323D002.md` requirement that "pure steam condensate must be actively injected into the
+recycle line" on B to keep the tank from over-concentrating, but still give **no tagged condensate
+stream number, flow, temperature, or valve** for that injection. The strict PFD closes forward
+Stream 609 as 402G melt + 697 UF85 (`85405 + 694 = 86100 kg/h`). Sensible mixing of the tabulated
+140 C melt with 40 C UF85 predicts about 138.62 C versus the rounded PFD 140 C; no heat-of-mixing
+datum explains the gap, so the runtime injects no compensating heat.
 
-**Required solution:** resolve against the approved P&ID or field valve action sheet, then add a
-directional perturbation test.
+**Required solution:** obtain the condensate injection tag and operating envelope (flow, temperature,
+valve/interlock, endpoint). Add the condensate as an explicit water/enthalpy inlet on the B-recycle
+path and solve the tank flash through the shared Extended-UNIQUAC/IAPWS-IF97 boundary; do not infer a
+dilution rate from a narrative.
 
-**Acceptance:** opening/closing action, upstream/downstream nodes, and fail position agree across
-P&ID, DCS faceplate, telemetry, and pressure response.
-
-## G12 - Melt-recycle dilution and Stream-609 identity need approved routing data
-
-**Evidence:** the strict PFD table closes Stream 609 as Stream 402G melt plus Stream 697 UF85
-(`85405 + 694 = 86099 kg/h`, rounded to `86100 kg/h`). A P&ID-oriented equipment narrative states
-that UF85 injection stops when LV-324501A closes, which makes LV-324501B a raw-402G recycle. The
-separate `References/323D002.md` narrative instead calls Stream 609 the recycle and requires cool
-steam-condensate injection downstream of LV-324501B. No approved condensate stream number, flow,
-temperature, valve/interlock, or endpoint is available. The simulator therefore routes the evidenced
-raw melt conservatively but cannot yet model the dilution or resulting atmospheric flash. Sensible
-mixing of the tabulated 140 C melt with 40 C UF85 predicts about 138.62 C for forward Stream 609,
-whereas the rounded PFD row remains 140 C; no heat-tracing duty or heat-of-mixing datum explains the
-difference, so the runtime does not inject compensating heat.
-
-**Required solution:** resolve the branch order and Stream-609 endpoints from the approved P&ID/line
-list, then obtain the condensate injection tag and operating envelope. Add the condensate as an
-explicit water/enthalpy inlet and solve the tank flash through the shared Extended-UNIQUAC/pure-water
-boundary; do not infer a dilution rate from a narrative.
-
-**Acceptance:** A-forward and B-recycle selections each have one exclusive producer/consumer path;
-UF85 follows its documented interlock; condensate mass and enthalpy are measured inputs; the
-323D002 component and energy residuals close through a route toggle without a concentration pin.
+**Acceptance:** the B-recycle path carries a measured condensate mass and enthalpy input and the
+323D002 component and energy residuals close through the A/B route toggle without a concentration pin.

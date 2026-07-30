@@ -148,6 +148,16 @@ any pinned `main.py` design balance:
    now reports "unit 328 energy balance closes" as PASS with `Q328_resid_kW = 0.0` (`Q328_in/out`
    unchanged at 6653.8 / 8344.2 kW).
 
+4. **G10 (HV-323605 mapping conflict) CLOSED.** The approved `References/Mapping of Evaporation
+   Section.md` resolves the former direction/role ambiguity: HV-323605 is the gas-outlet hand valve on
+   the 323F010 overhead (stream 790, HIC-323605), and opening it deepens the 323F010 vacuum and lowers
+   the 324E002 shell it feeds via stream 705. The engine already implements exactly this sign
+   (`main.py` `pull_f010`, telemetry "opening drops P"); a dedicated closure gate,
+   `test_vacuum_valve_rules.py::test_gap_G10_hv323605_position_and_action_are_resolved`, now asserts the
+   endpoint, design-seed identity, and pressure-response direction all agree with that mapping, so no
+   operator action is reversed. HV-323605 is a hand valve (HIC), so "fail position" is operator-set,
+   not an automatic trip.
+
 Repository hygiene: 13 superseded audit/plan/prompt documents and ~285 one-off scratch/probe scripts
 and snapshots were deleted (see git history); `References/`, the live docs, the code, and the
 `backend/tests` QA harness are retained. `audit_model_compliance.py` now reports **9 passes / 3 open
