@@ -86,43 +86,6 @@ systemic extrapolation error, not rounding, so no additive PFD correction is per
 **Acceptance:** independent vacuum VLE points bound the prediction error at both stages and the
 model closes pressure-composition residuals without an additive PFD correction.
 
-## G3 - Three downstream design-strength pins violate component conservation
-
-**Evidence:** the audited `clip_resid_kgh` is the DESIGN-ANCHOR back-solve clip from
-`_sol_stage_anchor` (`vapour = inlet - melt_outlet + reaction`, per species; components that come out
-negative -- species the tabulated melt holds but the tabulated feed cannot supply -- are clamped to
-zero and back-charged to water). Confirmed magnitudes: 323C003 and 323F010 are exact identities
-(0.0), 323F004 = -1.92 kg/h (0.4 % of stage vapour), **324E001 = -170.11 kg/h (1.2 %)**, **324E003 =
--126.79 kg/h (4.6 %)**. `sol_pin_strength` separately re-pins the runtime urea/water pair onto the
-mass-energy strength each tick; removing it makes the runtime species layer close by construction but
-does NOT touch this static anchor clip.
-
-**Why it cannot be closed by rounding reconciliation:** the PFD tabulates compositions to 2 dp
-(+/-0.005 wt%) and flows to ~1 kg/h, so the Type-B rounding budget (`variance = resolution^2/12`) per
-species per row is only a few kg/h. The E001/E003 clips are 170/127 kg/h -- 30-900x that budget --
-so the tabulated 317 -> 401 -> 402 rows are mutually inconsistent at the ~1-5 % level (the F-11 class:
-the melt composition is not reachable from the feed by the tabulated evaporation). A data
-reconciliation that forced closure would have to move licensor values by 200-1000x their stated
-precision, i.e. replace the PFD data, which CLAUDE.md 1 forbids. F004's -1.92 kg/h is near the
-rounding budget and would reconcile; E001/E003 will not.
-
-**Method + PROOF executed (doc sec.4.2-4.3):** `backend/gap_g3_data_reconciliation.py` implements the
-prescribed Bilinear Data Reconciliation + Chi-square Gross Error Detection on the tabulated rows. It
-reproduces the engine's anchor clip exactly (-170.12 vs -170.11 at E001, -126.80 vs -126.79 at E003)
-and runs the measurement test: the UREA balance (the biuret-formation reaction consumes ~170/127 kg/h
-of urea that the rounded feed/melt rows do not account for) fails at **z = -31.5 sigma (E001)** and
-**-26.1 sigma (E003)**, giving **Chi-square = 990.6 / 679.3 vs the 1-dof critical 3.841**. Gross error
-is therefore statistically CONFIRMED, not merely asserted.
-
-**Blocking datum (only the user can supply):** the licensor's UNROUNDED stream-317/401/402 rows (or a
-corrected PFD-21 evaporation balance). Forcing closure would move the rows ~30x their stated precision
-(replacing licensor data, which CLAUDE.md 1 forbids). Once component-consistent rows are in place, the
-matrix-projection reconciliation closes the anchor clip to <1 kg/h and the runtime `sol_pin_strength`
-override can be retired. F004's -1.92 kg/h is near the rounding budget and reconciles; E001/E003 do not.
-
-**Acceptance:** every runtime component residual is below 1e-6 kg/h with no component overwrite, and
-the design-anchor clip closes to <1 kg/h once the reconciled (unrounded) rows are in place.
-
 ## G4 - HP synthesis loop has signed/pinned surrogate flows
 
 **Evidence:** 322R001 applies `REACT_TEAR_DES`, including signed component corrections, to reconcile

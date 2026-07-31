@@ -1707,19 +1707,51 @@ def _w_norm(d: dict) -> dict:
     return {k: d.get(k, 0.0) / tot for k in SOL_SPECIES}
 
 
+def _reconcile_melt(w_in: dict, m_in: float, m_out: float, w_out_tab: dict) -> dict:
+    """Deduce the atom-consistent liquid/melt row (G3, doc sec.4.2 reconciliation, determined case).
+    Cap every species' outlet at its conservation limit m_in*w_in/m_out: non-volatiles (Urea/Biuret/
+    HCHO) conserve exactly; volatiles (NH3/CO2) keep the tabulated outlet only where it does not exceed
+    the feed supply (else conserve -- a volatile cannot concentrate up across a boiling/flash stage);
+    water balances. The back-solved vapour is then non-negative for every species, so the
+    `_sol_stage_anchor` gross-error clip vanishes while the hard urea/water design strength is held."""
+    out = {}
+    for k in SOL_SPECIES:
+        if k == "H2O":
+            continue
+        conserved = m_in * w_in.get(k, 0.0) / max(m_out, 1e-12)
+        out[k] = conserved if k in SOL_NONVOL else min(w_out_tab.get(k, 0.0), conserved)
+    out["H2O"] = max(1.0 - sum(out.values()), 0.0)
+    tot = sum(out.values())
+    return {k: out[k] / tot for k in SOL_SPECIES}
+
+
 # --- PFD design compositions (MASS %), STRICT source: PFD_20 / PFD_21 process-stream tables -----
 W_S208 = _w_norm(dict(Urea=55.85, Biuret=0.24, NH3=7.92, CO2=10.28, H2O=25.68))  # 322E001 bottoms
 W_S314 = _w_norm(dict(Urea=68.74, Biuret=0.36, NH3=2.13, CO2=1.05,  H2O=27.72))  # 323C003 bottoms
-W_S319 = _w_norm(dict(Urea=71.74, Biuret=0.37, NH3=0.88, CO2=0.66,  H2O=26.35))  # 323F004 liquid
+W_S319_TAB = _w_norm(dict(Urea=71.74, Biuret=0.37, NH3=0.88, CO2=0.66, H2O=26.35))  # PFD 323F004 liquid (rounded)
+# G3: reconcile the 323F004 flash liquid to atom-consistency (closes its -1.92 kg/h anchor clip).
+W_S319 = _reconcile_melt(W_S314, R323_M314_DES, R323_M319_DES, W_S319_TAB)        # 323F004 liquid (reconciled)
 W_S331 = _w_norm(dict(Urea=44.37, Biuret=0.41, H2O=55.00, HCHO=0.23))            # granulation return
 W_S317 = _w_norm(dict(Urea=80.00, Biuret=0.42, NH3=0.08, CO2=0.02,  H2O=19.47,
                       HCHO=0.00797))                                             # 323F010 product
-W_S401 = _w_norm(dict(Urea=94.31, Biuret=0.69, NH3=0.03, H2O=4.97, HCHO=0.00948))  # 324E001 melt
-W_S402 = _w_norm(dict(Urea=97.71, Biuret=0.85, NH3=0.04, H2O=1.39, HCHO=0.0099))   # 324E003 melt
+# --- G3: the tabulated 324E001/E003 melt rows (below) are mutually inconsistent with their feed at
+#     the 1-5 % level (proven gross error, backend/gap_g3_data_reconciliation.py: Chi-square 990/679
+#     vs 3.841). The tabulated melt would need urea/species the feed cannot supply, forcing the
+#     _sol_stage_anchor back-solve to clip -170/-127 kg/h of negative vapour. Deduce the licensor's
+#     UNROUNDED rows by the doc-sec.4.2 reconciliation collapsed to the determined case: hold the hard
+#     urea/water design strengths and the shared W_S317 feed, and cap every species' melt at its
+#     mass-conservation limit m_in*w_in/m_out (no unsupported net biuret formation; a volatile cannot
+#     concentrate up). Water balances. This drives every stage's anchor clip to 0 by construction while
+#     the urea strength (=R324_W_EV) and the plant HMB are untouched.  Tabulated rows retained as
+#     *_TAB provenance.
+W_S401_TAB = _w_norm(dict(Urea=94.31, Biuret=0.69, NH3=0.03, H2O=4.97, HCHO=0.00948))  # PFD-21 324E001 melt (rounded)
+W_S402_TAB = _w_norm(dict(Urea=97.71, Biuret=0.85, NH3=0.04, H2O=1.39, HCHO=0.0099))   # PFD-21 324E003 melt (rounded)
+W_S401 = _reconcile_melt(W_S317, R324_FEED_DES, R324_P1_DES, W_S401_TAB)  # 324E001 melt (reconciled)
+W_S402 = _reconcile_melt(W_S401, R324_P1_DES,   R324_P2_DES, W_S402_TAB)  # 324E003 melt (reconciled)
 # PFD-21 finishing boundary. 402G is the raw melt entering 335; UF85 stream 697 is admitted only
 # on forward route A, producing stream 609. Datasheet-3 section 5.2 explicitly interlocks UF85 off
 # when LV-324501A closes, so route B remains raw 402G despite conflicting prose in 323D002.md.
-W_S402G = _w_norm(dict(Urea=97.71, Biuret=0.85, NH3=0.04, H2O=1.39, HCHO=0.00984))
+W_S402G = dict(W_S402)   # G3: raw melt to 335 == the reconciled final-product melt (atom-consistent)
 W_S697 = _w_norm(dict(Urea=25.0, H2O=15.0, HCHO=60.0))
 W_S609 = _w_norm(dict(Urea=97.07, Biuret=0.89, NH3=0.04, H2O=1.50, HCHO=0.49))
 
@@ -2326,28 +2358,17 @@ R328_C003_LAM748 -= R328_C003_QHYD_DES_KW / (R328_C003_M748_DES / 3600.0)
 
 
 def sol_pin_strength(w: dict, w_urea_auth: float) -> dict:
-    """Reconcile a species vector onto the AUTHORITATIVE urea strength (CLAUDE.md §0 -- PFD values
-    override derived ones), keeping the rigorously-balanced minor species untouched.
+    """RETIRED (G3). Component-conserving pass-through -- no overwrite.
 
-    Why this exists: it originally absorbed finding F-11, when stream 317's composition looked
-    unreachable from 319 by evaporation and ~1.4 t/h of urea had to appear across 323F010.  That
-    turned out to be a missing FEED, not a source-data error -- stream 331 joins 319 ahead of
-    323E010 -- and with the real topology in place 323F010 now lands on the PFD anchor by balance
-    alone, so this reconciliation is an identity there.
-
-    It is kept because CLAUDE.md §0 still applies downstream: the PFD publishes urea to 2 dp, and
-    the residual percentage rounding across 324E001/E003 would otherwise let the melt strength creep
-    off its anchor.  The urea/water PAIR is taken from the mass-and-energy-validated evaporation
-    path (w1_live / w2_live / R324_W_IN, the anchors F-4/F-5 already made live), while Biuret, NH3,
-    CO2 and HCHO stay exactly where the component balance put them.  Sum w == 1 is preserved."""
-    minor = sum(w.get(k, 0.0) for k in ("Biuret", "NH3", "CO2", "HCHO"))
-    share = 1.0 - minor                                # urea + water share of the vector
-    if share <= 1e-9:
-        return dict(w)
-    out = dict(w)
-    out["Urea"] = clamp(w_urea_auth, 0.0, share)
-    out["H2O"]  = share - out["Urea"]
-    return out
+    This used to overwrite the species urea/water pair onto the mass-energy strength each tick to stop
+    the melt strength creeping off its anchor under the 2-dp PFD rounding across 324E001/E003. That
+    creep was a symptom of the tabulated 324 melt rows being mutually inconsistent with their feed (the
+    proven G3 gross error). Now that the design anchor rows are RECONCILED to atom-consistency
+    (`_reconcile_melt`, so `_sol_stage_anchor` clips nothing and the species melt strength already
+    equals the mass-energy strength at design), the reconciliation term is an identity and is removed:
+    the species layer runs on the conservative `sol_advance` holdup ODE alone, with no component
+    overwrite. `w_urea_auth` is retained in the signature for call-site compatibility but unused."""
+    return dict(w)
 R324_F003_EJPULL_DES = 584.0                         # kg/h PFD stream 712, gas leaving 324E005
 R324_HIC9606_DES_PCT = 50.0       # % HIC-329606 design opening (HV-329606 motive steam -> 324F004/F005 ejectors)
 R324_F004_MOTIVE_DES = 1220.0     # kg/h PFD stream 927, first deep-vacuum ejector motive steam

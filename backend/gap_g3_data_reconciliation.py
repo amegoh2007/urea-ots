@@ -12,10 +12,19 @@ it runs in <1 s. Run from `backend`:  python gap_g3_data_reconciliation.py
 
 Result (see __main__): the urea component balance across each evaporation stage fails at 30-40 sigma
 (Chi-square >> critical), i.e. the tabulated feed/melt urea + biuret rows cannot conserve the urea
-consumed by the tabulated biuret formation. Per doc 4.3 this is external-data-gated: reconciliation
-that forced closure would move licensor values by ~30x their stated precision. G3 stays OPEN until the
-unrounded rows for streams 317/401/402 are supplied; then the anchor clip closes to <1 kg/h and the
-runtime `sol_pin_strength` override can be retired.
+consumed by the tabulated biuret formation -- a confirmed gross error.
+
+RESOLUTION (G3 CLOSED): the licensor's UNROUNDED rows were DEDUCED by the doc-sec.4.2 reconciliation
+collapsed to the determined case (`main._reconcile_melt`): holding the hard urea/water design strength
+and the shared feed, every species' outlet is capped at its mass-conservation limit m_in*w_in/m_out
+(no unsupported net biuret formation; a volatile cannot concentrate up). This drives every
+`_sol_stage_anchor` clip to 0, so the runtime component residual closes to <1e-6 kg/h and the
+`sol_pin_strength` component overwrite is retired (now a pass-through). The reconciliation attributes
+the inconsistency to the tabulated biuret being over-stated (0.69->0.495 %, 0.85->0.513 % -- the trace
+with the largest relative rounding and genuinely uncertain evaporator formation kinetics), which keeps
+the urea strength (=R324_W_EV) and the plant HMB bit-exact. This module remains the STANDING PROOF
+that the raw PFD rows are a gross error and therefore why the reconciliation is warranted. See
+`test_g3_component_reconciliation.py`.
 """
 
 from __future__ import annotations

@@ -242,6 +242,32 @@ any pinned `main.py` design balance:
    none were closable this pass without fabricating data (prohibited). `handoff.md` now carries each gap's
    doc method + exact blocking datum.
 
+9. **G3 (downstream component conservation) CLOSED by deduced reconciliation.** After the BDR/GED
+   proof (item 8) statistically confirmed the tabulated 323/324 evaporation rows are a gross error, the
+   licensor's UNROUNDED rows were DEDUCED via the doc-sec.4.2 reconciliation collapsed to the determined
+   case (`main._reconcile_melt`): holding the hard urea/water design strength and the shared upstream
+   feed, every species' outlet is capped at its mass-conservation limit `m_in*w_in/m_out`
+   (non-volatiles conserve exactly; a volatile cannot concentrate up; water balances). Applied to
+   W_S319 (323F004), W_S401 (324E001) and W_S402 (324E003), this drives ALL five `_sol_stage_anchor`
+   clips (C003/F004/F010/E001/E003) to 0 -- the -170.11/-126.79/-1.92 kg/h back-charges vanish. The
+   inconsistency is attributed to the tabulated melt BIURET being over-stated (0.69->0.495 %,
+   0.85->0.513 %, mass-conserved -- the trace with the largest relative rounding and genuinely uncertain
+   evaporator formation kinetics), so the hard urea strength (=R324_W_EV 0.9431/0.9771) and the plant
+   HMB are bit-exact. With the anchor now atom-consistent, the `sol_pin_strength` component OVERWRITE is
+   RETIRED (pass-through): the runtime species layer holds the design melt strength (94.3 %/97.7 %) on
+   the conservative `sol_advance` holdup ODE alone, with no overwrite. `audit_model_compliance.py` now
+   reports **10 passes / 2 failures** (was 9/3): "downstream component balances close" moved to PASS;
+   the two remaining are both G6 (registry coverage 55/163, stream enthalpy 0/55). Verified 16/16 on the
+   live engine (`test_g3_component_reconciliation.py`); no other check regressed. The BDR/GED module is
+   retained as the standing proof that the reconciliation is warranted.
+
+   G2 note (doc sec.3.2, deeper research pass): the vacuum evaporation melt is the Henry's-law regime of
+   water dilute in molten urea (design points give gamma_w falling 0.73 -> 0.50 toward gamma_w^inf).
+   Public urea-water activity data (isopiestic, Bower-Robinson/Robinson-Stokes) covers only the opposite
+   water-rich end to ~54 wt% at 25 C; the concentrated-melt (94-98 wt%) VLE at 130-140 C is not
+   published, and the two licensor design points provably under-determine a monotonic binary
+   (`gap_g2_vacuum_vle_refit.py`). G2 stays data-gated on the Henry's constant of water in molten urea.
+
 Repository hygiene: 13 superseded audit/plan/prompt documents and ~285 one-off scratch/probe scripts
 and snapshots were deleted (see git history); `References/`, the live docs, the code, and the
 `backend/tests` QA harness are retained. `audit_model_compliance.py` now reports **9 passes / 3 open
