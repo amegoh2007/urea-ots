@@ -220,6 +220,28 @@ any pinned `main.py` design balance:
    consistent with the 39.63 MW HPCC datasheet). That pre-existing HPCC-duty magnitude question is
    independent of this turbine-export closure and is flagged for a separate check.
 
+8. **2026-07-31 -- strategy-doc methodology EXECUTED on the remaining gaps.** Per
+   `References/Strategic Resolution of Thermodynamic and Topological Simulation Gaps in High-Pressure
+   Urea Synthesis.md`, the doc's own prescribed methods were implemented and run to decide, not assert,
+   which gaps its methods can close:
+   - **G3 (doc sec.4.2-4.3):** `backend/gap_g3_data_reconciliation.py` runs Bilinear Data Reconciliation
+     + Chi-square Gross Error Detection on the 324 rows. It reproduces the engine's anchor clip exactly
+     (-170.12/-126.80 kg/h) and returns Chi-square = 990.6 / 679.3 vs the 1-dof critical 3.841 (urea at
+     -31.5 / -26.1 sigma): gross error STATISTICALLY CONFIRMED. Closure needs the unrounded licensor
+     rows (doc sec.4.3 says so itself). Stays OPEN.
+   - **G2 (doc sec.3.2):** `backend/gap_g2_vacuum_vle_refit.py` runs the ebulliometric refit. A two-param
+     (u0,u1) fit hits both vacuum design points but FLIPS the fixed-pressure T-monotonicity (unphysical);
+     a one-param fit preserves monotonicity but degrades stage 2 to 0.9838 (+0.67 pp). No physical
+     single binary reproduces both licensor points -- independent multi-point ebulliometric VLE (not
+     public for the 90-99 wt% melt) is required. Neither refit committed (both degrade the model). Stays
+     OPEN.
+   - **G1/G4** remain a multi-week universal Extended-UNIQUAC+SRK-HV+kinetics build gated on urea reactive
+     parameters + the licensor HP design point; **G6** catalogue is executable but its live-enthalpy half
+     is G1-gated; **G9** needs a second ejector duty point + Unit-335 datasheets that do not exist.
+   Net: executing the doc's methods rigorously CONFIRMS the remaining gaps are data-gated or multi-week;
+   none were closable this pass without fabricating data (prohibited). `handoff.md` now carries each gap's
+   doc method + exact blocking datum.
+
 Repository hygiene: 13 superseded audit/plan/prompt documents and ~285 one-off scratch/probe scripts
 and snapshots were deleted (see git history); `References/`, the live docs, the code, and the
 `backend/tests` QA harness are retained. `audit_model_compliance.py` now reports **9 passes / 3 open
