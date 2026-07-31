@@ -10,7 +10,7 @@ remaining equation or datum cannot be supplied honestly by the current repositor
 carries the peer-reviewed **Method** to apply (from the closure-methodology doc above) and the exact
 **Blocking datum** that must arrive before that method can close it. A 2026-07-31 research pass
 (open literature + the doc's own cited sources) confirmed the blocking data below is either flagged
-by the doc itself as user-supplied (G2, G3) or is not publicly available (G9 pull curves / Unit-335),
+by the doc itself as user-supplied (G2) or is not publicly available (G9 pull curves / Unit-335),
 so these are genuinely gated, not oversights. Fabricating closure is prohibited (CLAUDE.md 1).
 
 ## G1 - Runtime reactive thermodynamics is not plant-wide Extended UNIQUAC
@@ -55,7 +55,7 @@ fugacity/energy residual, and closes MESH without an empirical split override.
 
 **Evidence:** the new `backend/thermo_extended_uniquac.py` uses the open Voskov-Voronin binary
 H2O/urea parameters (standard UNIQUAC; the neutral-species Extended-UNIQUAC limit). Its pure-water
-fugacity reference now comes from the shared IAPWS-IF97 saturation line (G11 closed). The published
+fugacity reference now comes from the shared IAPWS-IF97 saturation line. The published
 full-model validation envelope is 135-230 C and 3.5-45 MPa; 324E001/F001 and 324E003/F003 operate at
 130/140 C and 0.33/0.131 bar(a). The implementation marks this `DESIGN_ANCHORED_EXTRAPOLATION`. At
 130 C/0.33 bar the raw model root is about 0.9209 urea mass fraction versus the PFD's 0.9431; at
@@ -117,7 +117,7 @@ pump flow rather than actual outlet state. Numbered rows also lack a complete en
 
 **Required solution:** maintain two artifacts: (1) a strict-source design catalogue for all numbered
 rows, explicitly marked static/unresolved, and (2) a live registry only for implemented producer-
-consumer edges. Add live streams from actual state vectors and use G1/G5 for enthalpy; never promote
+consumer edges. Add live streams from actual state vectors and use G1 for enthalpy; never promote
 a PFD row to a live stream without known endpoints.
 
 **Method (doc sec.4.4) + split:** the 163-row STATIC catalogue is executable now from the strict PFD
