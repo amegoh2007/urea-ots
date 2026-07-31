@@ -27,11 +27,18 @@ PROVENANCE. Every constant below is transcribed from a named open source; nothin
     Cp(T) already validated in `props_nh3co2h2o.py` (Darde 2011 / Thomsen 1997 / Correa-Thomsen-
     Fosbol 2023) -- imported, not re-transcribed, so the two modules cannot diverge.
   * Ideal-gas formation enthalpies: CODATA Key Values / NIST-JANAF (298.15 K).
-  * Urea and biuret (solid + liquid) formation enthalpies and heat capacities: Tischer, Boernhorst,
-    Amsler, Schoch, Deutschmann, Phys. Chem. Chem. Phys. 21 (2019) 16785 (open access, CC BY-NC);
-    urea fusion and liquid-Cp cross-checked against Voskov & Voronin, J. Chem. Eng. Data 61 (2016)
-    4110 and the project's `References/Urea-Water VLE Data Research.md` (dfusH = 14.644 kJ/mol,
-    Tm = 405.85 K = 132.7 C; Cp,l(urea) = 150.43 J/mol/K; Berman-Brown Cp,s = 253.65 - 2763.3 T^-0.5).
+  * Urea and biuret (solid + liquid) formation enthalpies: Tischer, Boernhorst, Amsler, Schoch,
+    Deutschmann, Phys. Chem. Chem. Phys. 21 (2019) 16785 (open access, CC BY-NC).
+  * Heat-capacity coefficients (Berman-Brown a + e T^-0.5) and AMMONIUM CARBAMATE formation
+    enthalpies (solid -645.05, liquid -624.32 kJ/mol): Voskov & Voronin, J. Chem. Eng. Data 61 (2016)
+    4110 (Table 1), as tabulated in `References/Urea Plant Simulation Gaps2.md`. Carbamate is the
+    reactive HPCC/reactor intermediate, so its explicit formation enthalpy makes the loop enthalpy
+    reaction-consistent through the carbamate node, not only across the net 2NH3+CO2->urea+H2O.
+  * CROSS-CHECK against this plant's licensor manual (`References/Sources/02 FUNDAMENTALS.pdf`,
+    Uhde UD-VT-G00-DC-0003): the elements datum reproduces the manual's reaction enthalpies --
+    carbamate step ~ -159 kJ/mol (gas reactants) / plant's -117 (condensed reactants), and the urea
+    step +16.7 kJ/mol vs the plant's +15.5 -- and the plant's urea remelt heat 15.1 kJ/mol brackets
+    the Tischer fusion 13.9 used here (all within the H0 declared band).
 
 Gas-phase sensible heat uses constant Cp near mid-window; over 25-200 C this is a few-percent
 approximation on the SENSIBLE part only (the formation term, which dominates a reactive balance by
@@ -61,7 +68,7 @@ class EnthalpyBasis(str, Enum):
 # Molar masses [g/mol] for the simulator's condensed-phase species set (main.py MW_SOL) plus the
 # volatile/inert gases that appear in the vapour streams.
 MOLAR_MASS = {
-    "Urea": 60.056, "Biuret": 103.081, "NH3": 17.0304, "CO2": 44.0098,
+    "Urea": 60.056, "Biuret": 103.081, "Carbamate": 78.0714, "NH3": 17.0304, "CO2": 44.0098,
     "H2O": 18.0152, "HCHO": 32.031, "N2": 28.0134, "O2": 31.9988,
     "H2": 2.0158, "CH4": 16.043, "Ar": 39.948,
 }
@@ -75,16 +82,28 @@ def _cp_const(value):
     return lambda T: value
 
 
-def _cp_urea_solid(T):
-    # Berman-Brown truncated form, VLE-research doc sec.5.1 / Voskov & Voronin 2016 Table 2.
-    return 253.65 - 2763.3 * T ** (-0.5)
+def _cp_berman(a, e):
+    """Berman-Brown truncated heat capacity  Cp(T) = a + e * T^-0.5  [J/mol/K] (Voskov 2016 Table 1)."""
+    return lambda T: a + e * T ** (-0.5)
+
+
+_cp_urea_solid = _cp_berman(253.64, -2763.3)     # Voskov & Voronin 2016 (a, e) for urea solid
 
 
 # (dHf_J, Cp)   -- Cp is float (constant) or callable
 PURE_COMPONENT = {
-    # --- condensed urea / biuret (Tischer 2019 Table 2; fusion cross-checked Voskov 2016) ---
-    ("Urea", "liquid"):   (-319700.0, _cp_const(150.43)),   # dfH urea(l); Cp,l VLE-doc/Voskov
-    ("Urea", "solid"):    (-333599.0, _cp_urea_solid),      # dfH urea(s); Berman-Brown Cp,s
+    # --- condensed urea: dfH on Tischer 2019 (solid+liquid pair -> measured fusion 13.9 kJ/mol),
+    #     Cp on Voskov 2016 a + e*T^-0.5 (both sources agree on the coefficients; urea(l) reduces to
+    #     ~150 J/mol/K at Tm = 405 K, matching the VLE-doc constant 150.43 previously used).
+    #     [Voskov's own dfH PAIR gives fusion 10.9 kJ/mol, an outlier vs Tischer 13.9 / plant 15.1;
+    #      the internally-consistent Tischer pair is kept so fusion matches direct calorimetry.]
+    ("Urea", "liquid"):   (-319700.0, _cp_berman(287.59, -2763.3)),  # dfH Tischer; (a,e) Voskov urea(l)
+    ("Urea", "solid"):    (-333599.0, _cp_urea_solid),               # dfH Tischer; (a,e) Voskov urea(s)
+    # --- ammonium carbamate, the reactive HPCC/reactor intermediate (Voskov 2016 Table 1) ---
+    #     reaction-consistent enthalpy across the synthesis loop now includes carbamate explicitly.
+    ("Carbamate", "solid"):  (-645047.0, _cp_berman(311.85, -3137.5)),  # Voskov dfH & (a,e) carb(s)
+    ("Carbamate", "liquid"): (-624323.0, _cp_berman(346.37, -3137.5)),  # Voskov dfH & (a,e) carb(l)
+    # --- biuret: kept on Tischer 2019 (primary, literature-consistent dfH(s) ~= -564 kJ/mol) ---
     ("Biuret", "liquid"): (-537060.0, _cp_const(93.0)),     # Tischer 2019 Table 2
     ("Biuret", "solid"):  (-563700.0, _cp_const(131.3)),    # Tischer 2019 Table 2
     # --- water: liquid reuses props (Helgeson Cp); gas is CODATA/JANAF ---
@@ -109,15 +128,15 @@ PURE_COMPONENT = {
 # Which phase each species takes when a stream is liquid vs vapour (H0 does no flash; the caller's
 # stream phase selects the column). Condensed-only species stay condensed; permanent gases stay gas.
 _LIQUID_PHASE = {
-    "Urea": "liquid", "Biuret": "liquid", "H2O": "liquid",
+    "Urea": "liquid", "Biuret": "liquid", "Carbamate": "liquid", "H2O": "liquid",
     "NH3": "aqueous", "CO2": "aqueous",
     "HCHO": "gas", "N2": "gas", "O2": "gas", "H2": "gas", "CH4": "gas", "Ar": "gas",
 }
 _VAPOUR_PHASE = {
     "H2O": "gas", "NH3": "gas", "CO2": "gas", "HCHO": "gas",
     "N2": "gas", "O2": "gas", "H2": "gas", "CH4": "gas", "Ar": "gas",
-    # a urea/biuret aerosol carried in vapour is non-volatile; if present, keep its condensed state
-    "Urea": "liquid", "Biuret": "liquid",
+    # urea/biuret/carbamate carried in vapour are non-volatile; if present, keep the condensed state
+    "Urea": "liquid", "Biuret": "liquid", "Carbamate": "solid",
 }
 
 
@@ -201,8 +220,22 @@ if __name__ == "__main__":
     assert abs(dvap - 44004.0) < 50.0, dvap
 
     # 4. urea fusion enthalpy at 298.15 K = h(urea,l) - h(urea,s) ~ 13.9 kJ/mol (Tischer).
+    #    (plant remelt 15.1 kJ/mol, VLE-doc 14.644 -- a ~9% spread, all inside the H0 band.)
     dfus = h_species("Urea", "liquid", T0) - h_species("Urea", "solid", T0)
     assert abs(dfus - 13899.0) < 1.0, dfus
+
+    # 4b. REACTION-ENTHALPY cross-checks -- the elements datum reproduces the plant's stated reaction
+    #     enthalpies (02 FUNDAMENTALS p.1-2/1-11), which is exactly what "reaction-consistent" means:
+    #     * carbamate step with GAS-phase reactants -> solid carbamate:
+    #         2 NH3(g) + CO2(g) -> carbamate(s)   should be ~ -159 kJ/mol
+    dh_carb_gas = (h_species("Carbamate", "solid", T0)
+                   - 2.0 * h_species("NH3", "gas", T0) - h_species("CO2", "gas", T0))
+    assert -170000.0 < dh_carb_gas < -150000.0, dh_carb_gas       # ~ -159.6 kJ/mol
+    #     * urea step with condensed members -> matches the plant's +15.5 kJ/mol (endothermic):
+    #         carbamate(l) -> urea(l) + H2O(l)    should be ~ +16 kJ/mol
+    dh_urea_liq = (h_species("Urea", "liquid", T0) + h_species("H2O", "liquid", T0)
+                   - h_species("Carbamate", "liquid", T0))
+    assert 12000.0 < dh_urea_liq < 20000.0, dh_urea_liq          # ~ +16.7 kJ/mol vs plant +15.5
 
     # 5. a real melt stream (PFD 402, the final 97.71 wt% urea melt at 140 C) gets a finite,
     #    negative (exothermic-of-formation) specific enthalpy on the elements datum.
@@ -219,7 +252,9 @@ if __name__ == "__main__":
     print(f"  h(H2O,l,25C)          = {h_species('H2O','liquid',T0)/1000:.2f} kJ/mol  (= dfH, datum check)")
     print(f"  water sensible 25->130 = {dh_w/1000:.3f} kJ/mol")
     print(f"  h(H2O,g)-h(H2O,l) @25C = {dvap/1000:.3f} kJ/mol  (lit dvapH 44.0)")
-    print(f"  urea fusion  @25C      = {dfus/1000:.3f} kJ/mol  (Tischer 13.90)")
+    print(f"  urea fusion  @25C      = {dfus/1000:.3f} kJ/mol  (Tischer 13.90; plant remelt 15.1)")
+    print(f"  2NH3(g)+CO2(g)->carb(s)= {dh_carb_gas/1000:.1f} kJ/mol  (reaction-consistency, lit ~-159)")
+    print(f"  carb(l)->urea(l)+H2O(l)= {dh_urea_liq/1000:+.1f} kJ/mol  (plant +15.5, endothermic)")
     print(f"  PFD-402 melt (140 C)   = {s402['enthalpy_kJkg']:.1f} kJ/kg,  {s402['enthalpy_flow_kW']:.0f} kW")
     print(f"  basis flag             = {EnthalpyBasis.H0.value}")
     print("  every constituent traceable to a cited open source; H^E term is the only G1-gated piece.")

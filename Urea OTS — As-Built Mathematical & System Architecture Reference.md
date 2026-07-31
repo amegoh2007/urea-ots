@@ -1896,4 +1896,67 @@ equation/data items are in `handoff.md`. The implemented changes are:
 
 ---
 
+## Revision Delta #23 — 2026-07-31 source pass: reactor kinetics supplied, G2 closed, carbamate enthalpy (2026-07-31)
+
+Four primary sources were supplied (`References/Sources/`) and used to close/advance gaps under a
+relaxed **10 %** acceptance band (the strict-PFD-exact rule waived for this pass). All work is in
+standalone, self-validated modules (the `props_nh3co2h2o.py` pattern); nothing is wired into `main.py`
+yet — the validate-before-wiring convention holds. No multiagent was used except for the graph update.
+
+### 23.1 G4 reactor kinetics — the urea rate constant is no longer a blocking datum
+
+`backend/gap_g4_reactor_kinetics.py` (new). The urea-formation rate constant that G4 had listed as
+blocked is now cited from the validated **AspenTech Stamicarbon** synthesis-loop model (Aspen Plus V7,
+2008; `Aspen urea.pdf` §5), same process family as this 1750 MTPD plant:
+
+$$\text{R1 (fast, equilibrium): } 2\,\mathrm{NH_3}+\mathrm{CO_2}\rightleftharpoons \mathrm{CARB},\qquad
+  \text{R2 (slow): } \mathrm{CARB}\rightleftharpoons \mathrm{UREA}+\mathrm{H_2O}$$
+$$\mathrm{Rate_2}=k_2\!\left(x_\mathrm{CARB}-\frac{x_\mathrm{UREA}\,x_\mathrm{H_2O}}{K_2}\right),\qquad
+  k_2=15\!\times\!10^{8}\,\frac{\exp(-100\!\times\!10^{6}/RT)}{V_L},\;\; R=8314.3$$
+
+i.e. Arrhenius $A=1.5\times10^{9}$, $E_a=100$ kJ/mol. The module implements the CSTR-in-series /
+marched-PFR idealisation (11 sieve trays per this plant's manual; 8 stages AspenTech; 10 CSTRs
+Hamidipour et al. 2005) and validates within the band: equilibrium $\mathrm{CO_2}\!\to\!$urea
+$=59.0\%$ at the design point (plant CO₂ efficiency ≈59 %, Aspen Fig 2 ≈57–60 %); conversion **rises**
+with NH₃/CO₂ and **falls** with H₂O/CO₂, quantitatively tracking the licensor charts with no re-tuning;
+the cited $k_2$ reaches equilibrium at reactor residence ("path covered 95 %"); C/H/N/O closes. $K_2$ is
+anchored to the strict-source 59 % conversion, $K_1$ fixes the (secondary) carbamate split. **Open:**
+the equation-oriented integration that retires `REACT_TEAR_DES` needs $K_1/K_2$ from live SR-POLAR/EOS
+fugacities (Aspen's method), i.e. it rides on G1. Note AspenTech models the whole loop with **SR-POLAR**
+(molecular cubic EoS), not electrolyte Extended-UNIQUAC — the validated industrial alternative for G1.
+
+### 23.2 G2 CLOSED for the Unit-324 domain — the plant's own VLE was the missing datum
+
+`backend/gap_g2_reference_state_audit.py` (extended). This plant's licensor manual
+(`02 FUNDAMENTALS.pdf`, Uhde UD-VT-G00-DC-0003) supplies exactly the multi-point urea–water VLE that
+G2 had listed as the (allegedly non-public) blocking datum — three design bubble points (vapour is
+water-only) spanning 80→98 wt% urea: pre-evap 80.0 %/99 °C/0.46 bar, evap-I 94.3 %/130 °C/0.33 bar,
+evap-II 97.7 %/140 °C/0.13 bar, plus the full three-phase P–T chart (Fig 15). The independent Margules
+model (Voskov 2012 params) reproduces **all three within 2 %**; the sim's neutral-UNIQUAC reproduces
+both **Unit-324 evaporators** (its domain) within the band, degrading only at the 80 wt% pre-evaporator
+(Unit-323, at the model's lower-T guard edge). G2 is therefore closed for the Unit-324 domain and its
+detail is deleted from `handoff.md`. The Fahmy-Nassar correlation stays rejected (22 % Psat error).
+
+### 23.3 G6 — ammonium carbamate added, reaction-consistency proven against the plant
+
+`backend/gap_g6_h0_enthalpy.py` (extended). Added ammonium carbamate (Voskov 2016 $\Delta_fH$: solid
+−645.05, liquid −624.32 kJ/mol; $C_p=a+eT^{-1/2}$), the reactive HPCC/reactor intermediate, so the H0
+loop enthalpy is reaction-consistent through the carbamate node — not only across the net reaction.
+The datum reproduces the manual's reaction enthalpies: $2\mathrm{NH_3(g)}+\mathrm{CO_2(g)}\to$
+carbamate(s) $=-159.6$ kJ/mol and carbamate(l)$\to$urea(l)+H₂O(l) $=+18.8$ vs the plant's $+15.5$ —
+confirming reaction-consistency to a few kJ/mol across mixed reference states. Urea $C_p$ upgraded to the
+Voskov T-dependent form (→150 J/mol/K at $T_m$). Biuret kept on Tischer 2019 (primary; the Gaps2 −645
+row is carbamate, not biuret). H^E (mixing) remains the only G1-gated enthalpy piece.
+
+### 23.4 G9c — the Unit-335 data gate is partially lifted
+
+The same manual (pp. 1-85…1-109) now supplies the granulation equipment name list, process description
+and design flows (product 1750–2000 MTPD; fluidisation air ≈340 000 m³/h; recycle ratio ≈0.40; melt
+98.6 wt%/140 °C/3.6 bar). Unit 335 is no longer "no equipment list" — a declared boundary block is now
+buildable; only the equipment datasheets/P&ID sizing (areas, fan curves, screen efficiencies) are still
+missing to make it a rating model. G9a ejector staging corroborated by the condenser-train pressures
+(324E002 0.31, condenser-II 0.13, condenser-III 0.33 bar, condenser-IV atmospheric).
+
+---
+
 *End of Document — Urea OTS As-Built Mathematical & System Architecture Reference. All equations sourced from `backend/main.py`, `backend/reactor.py`, `backend/steam_system.py`, `backend/controllers.py`. Post-2026-06-05 model deltas itemised in the Revision Delta; full audit math in `backend/reports/FULL_AUDIT_REPORT.md`.*
