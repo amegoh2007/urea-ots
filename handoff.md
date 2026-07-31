@@ -52,17 +52,30 @@ model closes pressure-composition residuals without an additive PFD correction.
 
 ## G3 - Three downstream design-strength pins violate component conservation
 
-**Evidence:** `backend/audit_model_compliance.py` reports nonzero component corrections at 323F004,
-324E001, and 324E003. `sol_pin_strength` overwrites urea/water after the conservative ODE to retain
-rounded PFD strengths. This is a reconciliation action inside runtime physics.
+**Evidence:** the audited `clip_resid_kgh` is the DESIGN-ANCHOR back-solve clip from
+`_sol_stage_anchor` (`vapour = inlet - melt_outlet + reaction`, per species; components that come out
+negative -- species the tabulated melt holds but the tabulated feed cannot supply -- are clamped to
+zero and back-charged to water). Confirmed magnitudes: 323C003 and 323F010 are exact identities
+(0.0), 323F004 = -1.92 kg/h (0.4 % of stage vapour), **324E001 = -170.11 kg/h (1.2 %)**, **324E003 =
+-126.79 kg/h (4.6 %)**. `sol_pin_strength` separately re-pins the runtime urea/water pair onto the
+mass-energy strength each tick; removing it makes the runtime species layer close by construction but
+does NOT touch this static anchor clip.
 
-**Required solution:** reconcile the strict design rows outside the ODE using documented uncertainty,
-then initialize the conservative component states from the reconciled data. Use the documented
-rounding interval as Type-B uncertainty (`variance = resolution^2 / 12`); use online-sensor weights
-only after approved covariance is supplied.
+**Why it cannot be closed by rounding reconciliation:** the PFD tabulates compositions to 2 dp
+(+/-0.005 wt%) and flows to ~1 kg/h, so the Type-B rounding budget (`variance = resolution^2/12`) per
+species per row is only a few kg/h. The E001/E003 clips are 170/127 kg/h -- 30-900x that budget --
+so the tabulated 317 -> 401 -> 402 rows are mutually inconsistent at the ~1-5 % level (the F-11 class:
+the melt composition is not reachable from the feed by the tabulated evaporation). A data
+reconciliation that forced closure would have to move licensor values by 200-1000x their stated
+precision, i.e. replace the PFD data, which CLAUDE.md 1 forbids. F004's -1.92 kg/h is near the
+rounding budget and would reconcile; E001/E003 will not.
 
-**Acceptance:** every runtime component residual is below 1e-6 kg/h with no component overwrite,
-while reconciled design rows remain inside their documented uncertainty intervals.
+**Required data (only the user can supply):** the licensor's UNROUNDED stream-317/401/402 rows (or a
+corrected PFD-21 evaporation balance). With component-consistent design rows the anchor clip goes to
+zero and the runtime pin can be retired.
+
+**Acceptance:** every runtime component residual is below 1e-6 kg/h with no component overwrite, and
+the design-anchor clip closes to <1 kg/h once the reconciled (unrounded) rows are in place.
 
 ## G4 - HP synthesis loop has signed/pinned surrogate flows
 
@@ -94,20 +107,6 @@ a PFD row to a live stream without known endpoints.
 **Acceptance:** every implemented outlet has exactly one producing state, declared consumers,
 conserved splits, and calculated enthalpy; catalogue coverage is reported separately from live
 connectivity coverage.
-
-## G7 - Recycle loops are observed, not solved
-
-**Evidence:** Unit 328 and synthesis recycles are one-tick sequential-modular tears. Telemetry now
-correctly reports `RECYCLE_TEAR_RESIDUAL` with `is_solver_convergence=false`; there is no inner
-fixed-point or Newton solve. Unit-324 T/P loops are bounded Picard iterations, but the larger
-flowsheet tears are dynamic states.
-
-**Required solution:** retain dynamic tears for real transport delays. For algebraic recycles only,
-add a bounded Wegstein/Anderson inner solve with scaling, maximum iterations, residual norm, and a
-safe last-state fallback.
-
-**Acceptance:** each recycle is classified dynamic or algebraic; algebraic loops meet a declared
-residual tolerance and dynamic loops report residence/transport state rather than convergence.
 
 ## G8 - Steam-network user ledger is still partial
 

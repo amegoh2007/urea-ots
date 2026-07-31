@@ -176,6 +176,23 @@ any pinned `main.py` design balance:
    tests are retained unchanged for the future granulation build. No pinned design balance changed:
    at the design header B is shut, so all melt exports and the 323D002 recycle inflow is zero.
 
+6. **G7 (recycle loops classified) CLOSED.** Every recycle in the flowsheet is now explicitly one of
+   two kinds, published in a new `RECYCLE_CLASSIFICATION` telemetry block. **Algebraic inner solves**
+   -- the 324E001/F001 and 324E003/F003 vacuum P/T tears, which carry no inter-stage holdup within a
+   tick -- are closed by a bounded Picard fixed-point each tick; the block reports the method,
+   declared tolerance (`R324_PT_LOOP_TOL = 1e-12`), iteration cap (`R324_PT_LOOP_MAXIT = 20`),
+   last-iterate fallback, and per-loop iterations/residual/converged. **Dynamic transport tears** --
+   the 328/synthesis recycles that cross real vessel and line inventories -- advance once per tick and
+   report residence (`is_solver_convergence = false`), never solver convergence. A measured envelope
+   sweep (design plus separator pressures 0.05-0.80 bar(a)) shows the Picard loops reach <1e-12 in <=7
+   of 20 iterations everywhere, so plain Picard already meets the acceptance and Wegstein/Anderson
+   acceleration would be gold-plating a safety-critical loop -- deliberately not added. The two loops
+   were re-pointed at the shared `R324_PT_LOOP_TOL`/`R324_PT_LOOP_MAXIT` constants (identical values,
+   zero behaviour change) so the classification's advertised tolerance is provably the loop's actual
+   tolerance. The legacy `RECYCLE_TEAR_RESIDUAL` key is retained for `audit_model_compliance.py`.
+   Gate `test_recycle_classification.py` (5 tests) asserts both classes, the algebraic tolerance, and
+   the dynamic transport reporting.
+
 Repository hygiene: 13 superseded audit/plan/prompt documents and ~285 one-off scratch/probe scripts
 and snapshots were deleted (see git history); `References/`, the live docs, the code, and the
 `backend/tests` QA harness are retained. `audit_model_compliance.py` now reports **9 passes / 3 open

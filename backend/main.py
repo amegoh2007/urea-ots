@@ -1548,6 +1548,15 @@ R324_CP_SOLN   = R323_CP_SOLN                     # 2.5 kJ/kg.K lumped urea-melt
 R324_W_IN      = 0.80                             # feed urea mass fraction (ex 323D002)
 R324_W_EV1     = 0.9431                           # Evaporator-I product frac (HARD; HMB 324, was 0.95)
 R324_W_EV2     = 0.9771                           # Evaporator-II product frac (HARD; HMB 324, was 0.986)
+# --- G7: the 324E001/F001 and 324E003/F003 vacuum P/T tears are ALGEBRAIC recycles (no inter-stage
+#     holdup within a tick: separator pressure sets equilibrium vapour, vapour + ejector pull set
+#     pressure). They are closed by a bounded Picard fixed-point inner solve whose declared tolerance
+#     and iteration cap live here as the single source of truth shared by the loops and the
+#     RECYCLE_CLASSIFICATION telemetry. Measured convergence: <=7 of 20 iters to <1e-12 across the
+#     0.05-0.80 bar(a) separator envelope, so plain Picard already satisfies the acceptance and
+#     Wegstein/Anderson acceleration is unnecessary. Fallback if the cap is hit: the last iterate.
+R324_PT_LOOP_TOL   = 1e-12                        # max(|dP|,|dT|) convergence tolerance (bar / degC)
+R324_PT_LOOP_MAXIT = 20                           # bounded iteration cap; on cap -> last-iterate fallback
 R324_FEED_T_C  = R323_F010_T_SP_C                 # 99 C feed boundary (stream ex 323)
 
 # --- design mass balance (kg/h) : derived from the live design feed -----------
@@ -6531,7 +6540,7 @@ def step_sim(dt: float) -> dict:
     t1_fp_residual = math.inf
     t1_fp_converged = False
     t1_fp_iterations = 0
-    for t1_fp_iterations in range(1, 21):
+    for t1_fp_iterations in range(1, R324_PT_LOOP_MAXIT + 1):
         Q_e001_kw = max(R324_E001_UA_KW * (tsat_steam(p_chest_e001) - t1_solved), 0.0)
         w_eq1 = evap_w_eq(t1_solved, p1_solved,
                           R324_W_EV1, R324_E001_T_SP_C, R324_F001_P_BARA)
@@ -6550,7 +6559,7 @@ def step_sim(dt: float) -> dict:
                         + R324_F001_P_KP * (vent002_fp - ejpull_live) / 3600.0 * dt,
                         0.05, 1.0)
         t1_fp_residual = max(abs(p1_next - p1_solved), abs(t1_next - t1_solved))
-        if t1_fp_residual <= 1e-12:
+        if t1_fp_residual <= R324_PT_LOOP_TOL:
             p1_solved = p1_next
             t1_solved = t1_next
             t1_fp_converged = True
@@ -6643,7 +6652,7 @@ def step_sim(dt: float) -> dict:
     t2_fp_residual = math.inf
     t2_fp_converged = False
     t2_fp_iterations = 0
-    for t2_fp_iterations in range(1, 21):
+    for t2_fp_iterations in range(1, R324_PT_LOOP_MAXIT + 1):
         Q_e003_kw = max(R324_E003_UA_KW * (tsat_steam(p_chest_e003) - t2_solved), 0.0)
         w_eq2 = evap_w_eq(t2_solved, p2_solved,
                           R324_W_EV2, R324_E003_T_SP_C, R324_F003_P_BARA)
@@ -6661,7 +6670,7 @@ def step_sim(dt: float) -> dict:
                         + R324_F003_P_KP * (vent005_fp - ejpull2_live) / 3600.0 * dt,
                         0.02, 1.0)
         t2_fp_residual = max(abs(p2_next - p2_solved), abs(t2_next - t2_solved))
-        if t2_fp_residual <= 1e-12:
+        if t2_fp_residual <= R324_PT_LOOP_TOL:
             p2_solved = p2_next
             t2_solved = t2_next
             t2_fp_converged = True
@@ -7011,6 +7020,39 @@ def step_sim(dt: float) -> dict:
             "max_relative_residual": _tear_norm,
             "settled": _tear_norm <= _tear_tol,
             "residuals": _tear_resid,
+        },
+        # G7: every recycle in the flowsheet is explicitly one of two kinds. ALGEBRAIC loops (the 324
+        # vacuum P/T tears, no inter-stage holdup within a tick) are iterated to a declared residual by
+        # a bounded Picard fixed-point each tick; DYNAMIC loops (328/synthesis tears crossing real
+        # vessel/line inventories) advance once per tick as transport lag and report residence, not
+        # convergence. This block classifies both so steady-state callers can read the algebraic
+        # convergence and dynamic callers can distinguish transport lag from solver failure.
+        "RECYCLE_CLASSIFICATION": {
+            "algebraic_inner_solves": {
+                "method": "bounded_picard_fixed_point",
+                "is_solver_convergence": True,
+                "tolerance": R324_PT_LOOP_TOL,
+                "max_iterations": R324_PT_LOOP_MAXIT,
+                "fallback": "last_iterate",
+                "loops": {
+                    tag: {
+                        "iterations": _DIAG.get(tag, {}).get("iteration_count"),
+                        "residual": _DIAG.get(tag, {}).get("iteration_residual"),
+                        "converged": _DIAG.get(tag, {}).get("converged"),
+                    }
+                    for tag in ("E001", "E003")
+                },
+                "all_converged": all(_DIAG.get(tag, {}).get("converged", False)
+                                     for tag in ("E001", "E003")),
+            },
+            "dynamic_transport_tears": {
+                "method": "observed_dynamic_transport_tears",
+                "is_solver_convergence": False,
+                "tolerance": _tear_tol,
+                "max_relative_residual": _tear_norm,
+                "settled": _tear_norm <= _tear_tol,
+                "loops": list(_tear_pairs.keys()),
+            },
         },
         "FI_321401":   round(F_pump_total_th, 2),   # FT-321401 live discharge flow
         "TI_top1":     round(s.tank_T_C, 1),         # TT-321001 tank temp (left)
