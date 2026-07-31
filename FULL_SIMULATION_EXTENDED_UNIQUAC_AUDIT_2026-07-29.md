@@ -193,6 +193,33 @@ any pinned `main.py` design balance:
    Gate `test_recycle_classification.py` (5 tests) asserts both classes, the algebraic tolerance, and
    the dynamic transport reporting.
 
+7. **G8 (LP steam-network user ledger) CLOSED against its acceptance.** Using the authoritative
+   `References/Mapping of the steam system.md` connectivity, the 4-bar/LP header (322D001) was
+   reconciled so turbine 320MT02 becomes an explicit connected edge instead of being hidden inside the
+   `M_USERS_LP == HPCC-generation` load-following aggregate. `steam_system.py`: added `M_TURBINE_DES`
+   (PFD-26 stream 932 = 16 707 kg/h), sized `K_207B` from a design-seed `BIAS_207B_PCT` so PV-329207B
+   passes exactly that at the 4.4->3.9 bar differential, and gave PIC-329207B the anchored-bias biased-PI
+   idiom (two-sided integral) already used by PV-329204/PV-329205A. `main.py` boot: `M_USERS_LP =
+   m_hpcc_des - M_TURBINE_DES` (the H.Ex user boundary now receives the generation NOT exported to the
+   turbine). Design closure `generation == M_USERS_LP + M_TURBINE_DES + vent(0)` holds, so **P_LP stays
+   4.4 bar bit-exact** and the Tsat(P_LP)->HPCC coupling (hence the plant H&MB) is unchanged, while
+   FT-329407 now reads the PFD 16 707 kg/h **from the connected valve** at design (not a shut-valve
+   reference). A boot-cache bug was fixed along the way: `_apply_pin` derived both the generation anchor
+   `M_HPCC_DES_LIVE` and the 322D001 make-up sizing `M_504_DES` from `M_USERS_LP`, correct only while
+   users==generation; the cache now stores the generation separately so both boot paths agree (the
+   undersized make-up would otherwise drain the 322D001 level). Verified 17/17 on the live engine
+   (fresh-boot AND cache paths): P_MP/P_9/P_LP anchors, turbine==16 707, node residuals ~0, make-up
+   sizing, level hold, and off-design turbine response/recovery. Standalone gate
+   `test_g8_lp_turbine_export.py` (6 tests) plus the mapping added under `References/`.
+
+   Transparent residuals (acceptance met; noted, not hidden): (a) the H.Ex USERS remain a single
+   PFD-derived boundary (generation - turbine); wiring each IMPLEMENTED consumer (324E001/328C004/
+   323E002/323E010) as its own live edge that dynamically loads the header is a future refinement, not
+   required by the acceptance. (b) The model's design LP GENERATION (`M_HPCC_DES_LIVE` ~= 29.77 kg/s ~=
+   107 t/h, from the captured HPCC duty ~63 MW) runs above PFD-26 stream 917 (68.9 t/h ~= 19.1 kg/s,
+   consistent with the 39.63 MW HPCC datasheet). That pre-existing HPCC-duty magnitude question is
+   independent of this turbine-export closure and is flagged for a separate check.
+
 Repository hygiene: 13 superseded audit/plan/prompt documents and ~285 one-off scratch/probe scripts
 and snapshots were deleted (see git history); `References/`, the live docs, the code, and the
 `backend/tests` QA harness are retained. `audit_model_compliance.py` now reports **9 passes / 3 open

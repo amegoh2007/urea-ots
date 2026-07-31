@@ -108,36 +108,6 @@ a PFD row to a live stream without known endpoints.
 conserved splits, and calculated enthalpy; catalogue coverage is reported separately from live
 connectivity coverage.
 
-## G8 - Steam-network user ledger is still partial
-
-**Evidence:** PV-329207B/C directions, D009 flashing, and liquid transfers are corrected, and
-FT-329407 now reports the actual B-valve export. However, `M_USERS_LP` remains an aggregate boot
-calibration rather than the sum of every live LP heater/ejector draw. The model design state can
-therefore show zero actual turbine export while PFD stream 932 is 16.707 t/h.
-
-**Data location (NOT a blocker):** the full 4-bar/LP header is tabulated in
-`References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`, section
-`PFD_No__26_Steam_and_Condensate` -- ~20 LP-steam streams at 4.4/3.9 bar(a): the turbine export
-932 = 16 707 kg/h plus generation/consumer edges 915 (3 062), 917 (68 928), 918 (9 027), 919
-(18 489), 923-931, 934, 938, 949, 965 (729), 998/999, and the 963 let-down. So the reconciliation is
-executable from strict source; this gap is NOT waiting on user data.
-
-**Why it is still open (scope, not data):** the runtime implements almost none of that LP topology --
-its only LP SOURCE is HPCC steam-raising (`M_HPCC_DES = 3.0 kg/s = 10.8 t/h`), an order below the
-PFD's LP generation (stream 917 alone is 68.9 t/h), so `M_USERS_LP` is pinned to HPCC output and the
-turbine export self-balances to ~0 against the PFD's 16.707 t/h. Closing it "without synthesis"
-therefore means building the PFD-26 LP header as explicit generation/consumer/turbine edges -- a
-large steam-network expansion coupled to the currently-unimplemented downstream users (overlaps G9),
-not a spot fix. It touches the core header energy balance (whose audit checks currently pass), so it
-warrants a dedicated, separately-verified pass rather than a rushed change.
-
-**Required solution:** connect each LP consumer's condensate/motive flow to its named PFD-26 header
-edge, derive the residual unimplemented-user boundary from the PFD-26 totals once, and remove the
-boot-time load-following aggregate.
-
-**Acceptance:** HP, 9-bar, and LP vapor/liquid node residuals close independently; actual
-FT-329407 equals connected stream 932 (16 707 kg/h) and reproduces the PFD design value without synthesis.
-
 ## G9 - Vendor/equipment equations are data-gated
 
 **Evidence:** 322F001 and the 324 vacuum ejectors use reduced entrainment laws. The 324 evaporation

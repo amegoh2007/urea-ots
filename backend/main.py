@@ -3128,12 +3128,13 @@ FT403_S903_DES   = 1754.0        # PFD stream 903  BL 25-bar -> 329D009 MP drum 
 FT403_S963_DES   = 0.0           # PFD stream 963  -> 322D001A/B (static 0 at 100% load)
 M_STRIP_DES_KGS  = 39400.0 / 1850.0   # == steam_system.M_STRIP_DES (design strip-steam consumption, kg/s)
 #
-#   FT-329407 is the actual PV-329207B export from the 4-bar header to turbine 320MT02
-#   (stream 932). The PFD design value is retained as an audit reference, never synthesized
-#   from HPCC duty when the connected valve is shut.
+#   FT-329407 is the actual PV-329207B export from the 4-bar header to turbine 320MT02 (stream 932).
+#   G8: the valve now carries the design 4-bar surplus at its anchored bias, so FT-329407 reads the
+#   PFD 16 707 kg/h from the CONNECTED valve at design (not a shut-valve reference); the value emerges
+#   from the header balance generation == M_USERS_LP + M_TURBINE_DES, not synthesis.
 FT407_S932_DES   = 16707.0       # PFD stream 932  excess 4-bar -> PV-329207B -> 320MT02 turbine
-M_HPCC_DES_LIVE  = None          # design LP steam-raising anchor (kg/s); set at boot (_pin_hpcc_ua /
-                                 #   _apply_pin) == M_USERS_LP == duty_des/HPCC_LATENT_4BAR == 29.774299
+M_HPCC_DES_LIVE  = None          # design LP steam-raising anchor (kg/s); set at boot ==
+                                 #   M_USERS_LP + steam_system.M_TURBINE_DES == duty_des/HPCC_LATENT_4BAR (~29.774)
 
 # ----- 322R001 HP Urea Reactor (reduced calibrated split-fraction, pinned to design HMB) -----
 #   Products pinned to shared HMB:  ṅᵒᵛ_i = νᵒᵛ_des,i · s · (φ/φ_des) ;  ṅᵒᵍ_i = νᵒᵍ_des,i · s
@@ -8531,8 +8532,11 @@ def _pin_hpcc_ua():
     _duty_des    = _cap2["r"]["duty_kw"]             #   is garbage). Plateau duty is flat ticks 3000-6000.
     _m_hpcc_des    = _duty_des / HPCC_LATENT_4BAR
     global M_HPCC_DES_LIVE
-    M_HPCC_DES_LIVE = _m_hpcc_des  # FT-329407 live LP-generation normalization anchor (== M_USERS_LP)
-    _ss.M_USERS_LP = _m_hpcc_des   # 4-bar users load-follow HPCC steam-raising -> m_pic == 0 at design
+    M_HPCC_DES_LIVE = _m_hpcc_des  # design LP steam-raising anchor (kg/s), == generation into the 4-bar header
+    # G8: the 4-bar header exports the design surplus to turbine 320MT02 (PFD-26 stream 932); the H.Ex
+    # user boundary gets the generation NOT exported, so generation == users + turbine + vent(0) holds
+    # at design with P_LP=4.4 bit-exact and FT-329407 == 16 707 kg/h from the connected PV-329207B.
+    _ss.M_USERS_LP = max(_m_hpcc_des - _ss.M_TURBINE_DES, 0.0)   # 4-bar H.Ex boundary = generation - turbine
     _ss.M_504_DES  = max(_m_hpcc_des - _ss.M_503_DES, 0.0)  # makeup is the LP boiloff not supplied by LV503
                                    #   so at the seed m_lv503 + m_valve == m_hpcc -> dm == 0 and
                                    #   322D001A/B level holds; the static 3.0 placeholder undersized the
@@ -8615,9 +8619,14 @@ def _apply_pin(d: dict) -> None:
     REACT_W_FEED_DES   = d["REACT_W_FEED_DES"]
     REACT_X_DES        = d["REACT_X_DES"]
     HPCC_NC_DES_LIVE   = d.get("HPCC_NC_DES_LIVE", REACT_L_FEED_DES)   # bubble_p fN anchor (design melt N/C)
+    # G8: the cache stores the design LP GENERATION (M_HPCC_DES_LIVE == users + turbine) separately
+    # from the reduced 4-bar user boundary, so both the generation anchor and the 322D001 make-up
+    # sizing (M_504_DES == boil-off replaced) match the fresh-boot path. Deriving them from the
+    # turbine-reduced M_USERS_LP would undersize the make-up valve and mis-anchor FT-329407.
+    _gen_des           = d.get("M_HPCC_DES_LIVE", d["M_USERS_LP"])   # fallback: pre-G8 cache (users==gen)
     _ss.M_USERS_LP     = d["M_USERS_LP"]
-    _ss.M_504_DES      = max(d["M_USERS_LP"] - _ss.M_503_DES, 0.0)
-    M_HPCC_DES_LIVE    = d["M_USERS_LP"]   # FT-329407 anchor mirrors design LP boil-off (cache path)
+    _ss.M_504_DES      = max(_gen_des - _ss.M_503_DES, 0.0)
+    M_HPCC_DES_LIVE    = _gen_des          # design LP generation anchor (cache path)
     A328_GCB_DES       = d["A328_GCB_DES"]
     A328_GCB_T         = d["A328_GCB_T"]
     A328_PHI_ABS       = d["A328_PHI_ABS"]
@@ -8640,6 +8649,7 @@ def _collect_pin() -> dict:
         "REACT_W_FEED_DES":   REACT_W_FEED_DES,
         "REACT_X_DES":        REACT_X_DES,
         "HPCC_NC_DES_LIVE":   HPCC_NC_DES_LIVE,
+        "M_HPCC_DES_LIVE":    M_HPCC_DES_LIVE,   # design LP generation (== users + turbine); G8 cache key
         "M_USERS_LP":         _ss.M_USERS_LP,
         "A328_GCB_DES":       A328_GCB_DES,
         "A328_GCB_T":         A328_GCB_T,

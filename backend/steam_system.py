@@ -104,12 +104,22 @@ M_PIC_CLAMP  = 10.0     # anti-windup clamp on the integral contribution [ kg/s 
 #       PIC-329207B (turbine 320MT02 export)        SP = master            (== header master)
 #       PIC-329207C (BL 25-bar admit PV-329207C)    SP = master - DB_LP   (lowest  -> opens first on under-P)
 #   MASTER OFF: the three loops are independent (operator sets each SP / mode / MAN opening).
-#   At design P_LP=4.400 (master 4.4 -> SP_A=4.5/SP_B=4.4/SP_C=4.3): eA=-0.1 & eC=-0.1 floor both
-#   one-sided integrals at 0, eB=0 -> all three valves shut -> m_vent=m_turbine=m_963=0 -> net trim 0.
-#   Header self-balances (M_USERS_LP == M_HPCC_DES == 3.0) so the fixed point is bit-for-bit unchanged.
+#   At design P_LP=4.400 (master 4.4 -> SP_A=4.5/SP_B=4.4/SP_C=4.3): eA=-0.1 & eC=-0.1 floor the
+#   one-sided A/C integrals at 0 so the vent PV-329207A and BL-admit PV-329207C stay shut; leg B has
+#   eB=0 so it holds its anchored bias (BIAS_207B_PCT), exporting M_TURBINE_DES to the turbine.  The
+#   header balances at 4.4 bar because design generation == M_USERS_LP + M_TURBINE_DES (G8), so P_LP
+#   and the Tsat(P_LP) coupling to the HPCC are bit-for-bit unchanged.
 DB_LP      = 0.1        # bar, master-SP stagger: A=SP+DB_LP (vent) / C=SP-DB_LP (make-up)
 K_207A     = 3.0        # PV-329207A vent valve coeff  (P_LP -> atm)          [ (kg/s)/sqrt(bar) ]
-K_207B     = 2.0        # PV-329207B turbine 320MT02 export coeff (LP -> 3.9 bar) [ (kg/s)/sqrt(bar) ]
+# G8: PV-329207B carries the DESIGN 4-bar surplus to turbine 320MT02 (PFD-26 stream 932 = 16 707 kg/h).
+#   Anchored-bias idiom (same as PV-329204 / PV-329205A): at design P_LP=4.4 the leg-B error is zero,
+#   so the valve sits at BIAS_207B_PCT and passes exactly M_TURBINE_DES; K_207B is sized so that bias
+#   opening delivers the design export at the design differential (4.4 -> 3.9 bar). This makes
+#   FT-329407 read its PFD design value from the connected valve (not a shut-valve synthesis) while
+#   the header still balances at 4.4 bar bit-exact (see M_USERS_LP below).
+M_TURBINE_DES = 16707.0 / 3600.0   # kg/s, PFD-26 stream 932 turbine 320MT02 export at design (4.64083)
+BIAS_207B_PCT = 50.0               # design-seed PV-329207B opening (anchored bias; eB==0 at design)
+K_207B     = M_TURBINE_DES / ((BIAS_207B_PCT / 100.0) * (P_LP_BARA - P_TURBINE_OUT_BARA) ** 0.5)  # ~13.128
 K_PIC_207  = 120.0      # sub-controller proportional gain                    [ %/bar ]
 KI_PIC_207 = 6.0        # sub-controller integral gain                        [ %/(bar.s) ]
 I207_CLAMP = 100.0 / KI_PIC_207   # one-sided integral clamp (integral term <= 100 %)
@@ -140,11 +150,16 @@ I204_CLAMP   = 50.0 / KI_PIC_204   # two-sided integral clamp (integral term wit
 M_STRIP_DES = 39400.0 / 1850.0   # kg/s (21.297), design MP steam consumed by HP-stripper reboiler == STRIP_DUTY_DES_KW / lambda_MP (main.py design duty; MP header consume is design-pinned constant)
 M_HPCC_DES  = 3.0      # kg/s, design LP steam raised in the HP carbamate condenser
 
-# ---------------------------------------------------------------- fixed LP design consumers
-#   Turbine 320MT02 (FV-329407 + PV-329207B) load-follows the HPCC steam raising at design; the
-#   4-bar H.Ex users are later units (out of scope -> 0).  Set equal to the design HPCC generation
-#   so the 4-bar header self-balances at 4.4 bar with ~zero PIC vent/make-up at design; the live PIC
-#   trims the residual off-design.
+# ---------------------------------------------------------------- LP 4-bar consumer boundary (G8)
+#   M_USERS_LP is the aggregate 4-bar H.Ex user draw (322D001 mapping section C consumers: 323E002/
+#   323E010/324E001/324F002/F004/F005/328C004/melt-line/tracing/storage/granulation), per PFD-26
+#   until each is wired as its own live edge.  The turbine 320MT02 export is now a SEPARATE connected
+#   edge (M_TURBINE_DES via PV-329207B), no longer folded into this aggregate.  Design closure:
+#       generation (HPCC steam-raising) = M_USERS_LP + M_TURBINE_DES + vent(0)
+#   so at runtime main.py's boot sets M_USERS_LP = m_hpcc_des - M_TURBINE_DES (the users get the
+#   generation NOT exported to the turbine), the header holds 4.4 bar bit-exact, and FT-329407 reads
+#   the design 16 707 kg/h from the connected valve.  The module default below is only the standalone
+#   probe placeholder (main.py overrides it at boot from the live design HPCC duty).
 M_USERS_LP = M_HPCC_DES
 
 # ---------------------------------------------------------------- 9-bar flash source and consumers
@@ -369,11 +384,15 @@ def step_steam(state: SteamState, dt: float,
     # MAN: pv207a_pct frozen; i_207a held -> bumpless return to AUTO
     m_vent = _valve_flow(K_207A, state.pv207a_pct, state.P_LP, 1.01325)
 
-    # -- PIC-329207B turbine 320MT02 export (P_LP > SP_B -> open PV-329207B) --
+    # -- PIC-329207B turbine 320MT02 export: biased PI holds P_LP at SP_B by trimming the design
+    #    export around BIAS_207B_PCT (G8).  At design eB==0 & i_pic==0 -> valve sits at the bias and
+    #    passes M_TURBINE_DES exactly; the integral is TWO-SIDED so it trims symmetrically off-design
+    #    (over-P opens above bias, under-P closes below it) with no steady-state offset.
     if state.pic207_mode == "AUTO":
         eB = state.P_LP - state.pic207_sp
-        state.i_pic = max(0.0, min(I207_CLAMP, state.i_pic + eB * dt))
-        state.pv207b_pct = max(0.0, min(100.0, K_PIC_207 * eB + KI_PIC_207 * state.i_pic))
+        state.i_pic = max(-I207_CLAMP, min(I207_CLAMP, state.i_pic + eB * dt))
+        state.pv207b_pct = max(0.0, min(100.0,
+            BIAS_207B_PCT + K_PIC_207 * eB + KI_PIC_207 * state.i_pic))
     # MAN: pv207b_pct frozen; i_pic held -> bumpless return to AUTO
     m_turbine = _valve_flow(K_207B, state.pv207b_pct, state.P_LP, P_TURBINE_OUT_BARA)
 
@@ -435,7 +454,9 @@ def step_steam(state: SteamState, dt: float,
 if __name__ == "__main__":
     DT = 0.5
 
-    def settle(st, n, m_strip=M_STRIP_DES, m_hpcc=M_HPCC_DES):
+    # G8: standalone design generation must feed BOTH the local users (M_HPCC_DES placeholder) and
+    # the turbine export (M_TURBINE_DES), so the 4-bar header closes at 4.4 with leg B at its bias.
+    def settle(st, n, m_strip=M_STRIP_DES, m_hpcc=M_HPCC_DES + M_TURBINE_DES):
         for _ in range(n):
             step_steam(st, DT, m_strip, m_hpcc)
         return st
