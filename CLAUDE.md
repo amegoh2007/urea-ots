@@ -1,12 +1,12 @@
 # OTS Directives Summary
 
 ## 1. Mandatory Skills & Standing Commands
-* **Caveman Mode:** MUST be ON every session for prose replies (code/commits remain normal English).[cite: 1]
-* **Graphify:** MUST be ON every session.[cite: 1] Update via `%LOCALAPPDATA%\Python\pythoncore-3.14-64\Scripts\graphify.exe`.[cite: 1] Do NOT run AST-only; requires semantic extraction (subagents/API key) to prevent graph collapse.[cite: 1] Fix `manifest.json` if aborted post-`save_manifest`.[cite: 1]
-
+* **Caveman Mode:** MUST be ON every sessio
+* **Multiagents:** **MANDATORY** not to use multiagents
 
 ## 2. Core Physics & References
 * **Strict Source:** `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`.
+* **Equipment Database:** Always look for equipment database in the folder: `D:\Work\Urea Simulation\References\Datasheets` for data related to datasheet (Eg. Dimensions, instrument position in equipment any other data required for modelling).
 
 ## 3. Autonomous Workflow & Testing
 * **Execution:** Do not halt for approval;[cite: 1]
