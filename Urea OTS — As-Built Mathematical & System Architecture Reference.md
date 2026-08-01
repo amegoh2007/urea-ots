@@ -1959,4 +1959,60 @@ missing to make it a rating model. G9a ejector staging corroborated by the conde
 
 ---
 
+## Revision Delta #24 — 2026-08-01 datasheet pass: G9 ejector/condenser/evaporator/droplet rating cores (2026-08-01)
+
+The plant's own **Uhde/Koerting vendor equipment datasheets** (`References/Sources/324F002/F004/F005
+Datasheet.pdf`, `324E002 Datasheet.pdf`) plus the **Gaps Closure** methodology docx supplied the data to
+turn three G9 sub-models from spec-flow blocks into physics cores, under the same relaxed **10 %** band.
+Standalone modules, each <1 s, cited line-by-line, nothing wired into `main.py`. No multiagent except the
+graph update.
+
+### 24.1 G9a ejectors — vendor duty points lift the "second duty point" gate
+
+The vendor design data sheets give complete, mass-consistent ejector duties, closing the datum G9a was
+blocked on and resolving the motive-flow conflict the previous pass could not: **two independent vendor
+documents (Uhde DDS + Koerting) agree** on 927=600 / 929=505 kg/h, superseding the strict-PFD 1220/180
+under the relaxed-PFD directive. Adopted: 324F002 motive 650 / suction 94 @ 0.20 bar (MW 24.13) / disch
+744 @ 1.0 bar (650+94=744 exact, ω=0.145); 324F004 motive 600 / suction 634 @ 0.12 bar (MW 21.6, gas
+48.1 % H₂O/20.4 % NH₃/27.9 % CO₂/3.6 % air, ω=1.06). The 324F002 suction (94 kg/h @ 0.20 bar/45 °C)
+equals the **324E002 condenser vent** (100 kg/h, independent datasheet) to 6 % — a cross-unit validation.
+Fitted $A_3/A_t$ = 5.5 (F002) / 32.9 (F004) confirms these deep-vacuum steam ejectors sit **outside**
+Huang's refrigeration band (6.44–10.64). Design-duty acceptance (residuals close against vendor points)
+is now MET; the sole residual is the off-design curve **shape** — the mixing bore wants a second
+suction-pressure load the DDS does not give (F002 lists a 40–100 % control range; F005's suction is
+vendor-optimised).
+
+### 24.2 G9 condenser + urea evaporator — datasheet-validated $UA\Delta T_{LM}$ rating (new module)
+
+`backend/gap_g9_evaporator_condenser.py`. The primary vacuum condenser **324E002** has a full vendor
+shell-and-tube DDS/PDS (surface 1079 m², duty 25 720 kW, 2329 tubes × 5900 mm, both stream sides). Two
+independent duty closures fall out of the one sheet: cooling-water sensible $\dot m c_p\Delta T=25.75$ MW
+= stated 25.72 MW (0.1 %), and $U=Q/(A\,\Delta T_{LM})$ with $\Delta T_{LM}=37.3$ °C gives **U ≈ 640
+W/m²K** (textbook CW vapour condenser). The urea evaporator now closes mass/component/energy with an
+**intrinsic boiling-point elevation** from the G2-validated neutral-UNIQUAC VLE (vapour water-only, urea
+conserved), IAPWS latent heat, and LP-steam LMTD, returning water evaporated + steam duty + required $UA$
+per effect; a target whose $T_{boil}$ exceeds the steam $T_{sat}$ is correctly flagged undrivable. Open:
+the per-effect evaporator $UA$ datasheets (only the condenser sheet is in the set) + wiring.
+
+### 24.3 G9c Unit-335 droplet — Lagrangian solidification physics (new module)
+
+`backend/gap_g9c_droplet.py`. Implements the research methodology's droplet mechanics: a Lagrangian force
+balance $dv/dt=g(1-\rho_a/\rho_p)-\tfrac{3C_d\rho_a v_{rel}^2}{4\rho_p d}$ with Schiller-Naumann $C_d(Re)$,
+integrated by RK4; Ranz-Marshall $Nu=2+0.6Re^{1/2}Pr^{1/3}$ / $Sh=2+0.6Re^{1/2}Sc^{1/3}$ heat-and-mass
+transfer with a Stefan-flow blowing factor $\theta=\ln(1+B)/B\in(0,1)$; and a fusion plateau anchored to
+the **G6 enthalpy datum** (231.4 kJ/kg = dfusH/MW), so phase energy is reaction-consistent. Validated:
+terminal velocity 3.5–7.6 m/s over 1.0–2.2 mm prills, $Nu,Sh\ge2$, full solidification in a finite tower
+height (6.8–39.7 m) that shrinks monotonically with droplet size. Open: Unit-335 bed/tower geometry, fan
+curves and screen efficiencies (datasheets not in the set) + wiring.
+
+### 24.4 G1 — the SR-POLAR route is now datum-bounded, not datum-gated
+
+The closure methodology quantifies the Voskov-Voronin (2016) **SR-POLAR** parameter set and its validity
+box — T 135–230 °C, P 3.5–45 MPa, N/C 2.0–5.5, W/C −0.75..1.2 — which covers the whole loop (reactor
+180–185 °C / 140–150 bar / N-C 2.95 and the evaporators), with biuret pure data from NIST/DECHEMA
+(vapour pressure + binaries = urea's). So G1's remaining work is the multi-week runtime integration, not a
+missing datum. Folded into `handoff.md` G1 and the chemical-modelling `mesh-equations.md` reference.
+
+---
+
 *End of Document — Urea OTS As-Built Mathematical & System Architecture Reference. All equations sourced from `backend/main.py`, `backend/reactor.py`, `backend/steam_system.py`, `backend/controllers.py`. Post-2026-06-05 model deltas itemised in the Revision Delta; full audit math in `backend/reports/FULL_AUDIT_REPORT.md`.*

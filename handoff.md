@@ -1,12 +1,16 @@
 # Open Simulation Gaps Only
 
-Updated: 2026-07-31 (source pass)
+Updated: 2026-08-01 (datasheet pass)
 Strict source: `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`
 Plant licensor manual (this plant): `References/Sources/02 FUNDAMENTALS.pdf` (Uhde UD-VT-G00-DC-0003)
 Validated reactor kinetics: `References/Sources/Aspen urea.pdf` (AspenTech Stamicarbon loop, V7 2008)
 CSTR-in-series corroboration: `References/Sources/Modeling the synthesis section...pdf` (Hamidipour 2005)
+Vendor equipment datasheets (this plant, Uhde/Koerting 2004): `References/Sources/324F002/F004/F005
+Datasheet.pdf` (steam-jet ejectors, complete duty points), `324E002 Datasheet.pdf` (primary vacuum
+condenser, full shell-and-tube DDS/PDS), `Merged_Searchable_PIDs.pdf` (P&IDs).
 Audit: `FULL_SIMULATION_EXTENDED_UNIQUAC_AUDIT_2026-07-29.md`
-Research passes applied: `References/Gaps solution.md`, `References/Urea Plant Simulation Gaps2.md`
+Research passes applied: `References/Gaps solution.md`, `References/Urea Plant Simulation Gaps2.md`,
+`References/Gaps Closure/Gaps Closure .docx` (evaporator/droplet/SR-POLAR closure methodology)
 
 Closed items are intentionally deleted from this file. Each item below is still open because the
 remaining equation or datum cannot be supplied honestly by the current repository evidence. Each
@@ -18,7 +22,8 @@ Standalone, self-validated closure/analysis modules (the "validate on its own be
 `props_nh3co2h2o.py`); each runs in <1 s and is cited line-by-line. What they closed is deleted below;
 what they left open is sharpened. Modules: `gap_g6_static_catalogue.py`, `gap_g6_h0_enthalpy.py`,
 `gap_g9a_ejector_envelope.py`, `gap_g2_reference_state_audit.py`, `gap_g4_conservation_harness.py`,
-`gap_g4_reactor_kinetics.py` (new: the cited two-reaction Stamicarbon reactor kinetics).
+`gap_g4_reactor_kinetics.py`, `gap_g9_evaporator_condenser.py` (new: datasheet-validated condenser +
+urea-evaporator rating), `gap_g9c_droplet.py` (new: Unit-335 Lagrangian droplet solidification).
 
 ## G1 - Runtime reactive thermodynamics is not plant-wide Extended UNIQUAC
 
@@ -40,11 +45,15 @@ from the reactive runtime phase set.
   Interface either way = apparent-composition handover on the common elements-at-298.15 K enthalpy datum
   (`gap_g6_h0_enthalpy.py`, now including carbamate) with domain-flag propagation.
 
-**Blocking datum:** the urea/ion reactive parameters (Voskov-Voronin set is OPEN and can seed the fit;
-SR-POLAR binaries are fittable to the plant VLE) plus the licensor 100%-load HP design point
-(user-supplied) for plant reconciliation only. Thermodynamic validation can use Voskov & Voronin's
-conversion/bubble-point grids, the Aspen Gorlovskii-Kucheryavyi equilibrium map, and this plant's manual
-(reactor CO2 efficiency 59 %, outlet 183 C, N/C 2.95). Full runtime integration into each HP/LP unit in
+**Blocking datum:** the urea/ion reactive parameters. The 2026 closure methodology (`Gaps Closure.docx`)
+QUANTIFIES the SR-POLAR route's parameter set and its validity box: the Voskov-Voronin (2016) SR-POLAR
+binaries for the NH3/CO2/H2O/urea quaternary are regressed at urea-synthesis conditions and bound the
+target plant exactly -- T 135-230 C, P 3.5-45 MPa, N/C 2.0-5.5, W/C -0.75..1.2 (covers reactor 180-185 C
+/ 140-150 bar / N-C 2.95 and the evaporators). Biuret pure-component data from NIST/DECHEMA with its
+vapour pressure + binaries assumed equal to urea's (thermodynamically consistent, no unavailable data).
+Pure-component data for NH3/CO2/H2O/urea/carbamate/N2/O2/H2 from the standard AspenPlus databank. So the
+route is no longer datum-gated -- the set is OPEN and bounded; what remains is the licensor 100%-load HP
+design point (user-supplied) for reconciliation only. Full runtime integration into each HP/LP unit in
 flow order is multi-week scope; it is the largest remaining build.
 
 **Acceptance:** every process-mixture phase-equilibrium/enthalpy call reports model, domain status,
@@ -112,40 +121,52 @@ and a basis-tagged enthalpy; catalogue coverage is reported separately from live
 
 ## G9 - Vendor/equipment equations
 
-**G9a ejectors - materially advanced** (`gap_g9a_ejector_envelope.py`). The primary-nozzle throat area
-is now FIRST-PRINCIPLES for all three units (324F002/F004/F005) from the strict-PFD motive states via
-choked flow (d = 14.9 / 26.3 / 10.1 mm; primary-exit Mach matches the datasheet's "Mach 3-4"), so A_t
-is no longer a fitted parameter. The model adds an off-design pull curve (double-choke Munday-Bagster/
-Huang idealisation) and a molecular-weight entrainment response (heavier suction gas entrains more
-mass, derived from the choked secondary flux) that the constant-omega surrogate lacks. All three duty
-points close mass on the strict PFD (motive+suction=discharge, exact). Correction to the research pass:
-solving for the mixing-area ratio that reproduces each design entrainment ratio gives A3/At ~ 4.4-20.6,
-which STRADDLES/EXCEEDS Huang's refrigeration band (6.44-10.64), so that band does not bound these
-deep-vacuum steam ejectors and cannot be used to draw an envelope. The off-design curve is instead
-design-anchored with A3/At pinned by the single strict-PFD point.
-Provenance note: the Koerting datasheet motive flows (927=600, 929=505 kg/h) conflict with the strict
-PFD (927=1220, 929=180 kg/h); per CLAUDE.md 2 the PFD is used (it is mass-consistent). This module is
-NOT yet wired into main.py's 324 ejector suction ODE -- that is the documented follow-on.
+**G9a ejectors - design-duty acceptance now MET against vendor datasheets** (`gap_g9a_ejector_envelope.py`).
+The primary-nozzle throat area is FIRST-PRINCIPLES for all units from choked motive flow (A_t not a fit);
+the model carries an off-design pull curve (double-choke Munday-Bagster/Huang) and a molecular-weight
+entrainment response the constant-omega surrogate lacks. The 2026 datasheet pass LIFTS the former
+blocking datum: this plant's Uhde vendor design data sheets (`324F002 Datasheet.pdf` DDS p.2, `324F004
+Datasheet.pdf` vacuum-unit stream table p.6) supply complete, mass-consistent duty points, and TWO
+independent vendor documents (Uhde DDS + Koerting) AGREE on the motive flows the PFD disputed
+(927=600, 929=505 kg/h), so that conflict is resolved in the datasheet's favour under the relaxed-PFD
+directive. Adopted vendor duties: 324F002 motive 650 / suction 94 @ 0.20 bar (MW 24.13) / disch 744 @
+1.0 bar (650+94=744 exact, omega 0.145); 324F004 motive 600 / suction 634 @ 0.12 bar (MW 21.6) / disch
+0.33 bar (omega 1.06). The 324F002 suction (94 kg/h @ 0.20 bar/45 C) equals the vent of primary
+condenser 324E002 (100 kg/h, its datasheet) to 6% -- an independent cross-unit validation. Fitted A3/At
+= 5.5 (F002) / 32.9 (F004) still STRADDLES/EXCEEDS Huang's refrigeration band (6.44-10.64), confirming
+that band does not bound these deep-vacuum steam ejectors.
+**Residual (G9a):** only the off-design curve SHAPE -- the mixing bore A3/At wants a second suction-
+PRESSURE load (the DDS gives one design point + a 40-100% control range, and 324F005's internal suction
+is vendor-optimised/unspecified), so the pull curve stays design-anchored. Not yet wired into main.py's
+324 ejector suction ODE -- the documented follow-on.
 
-The condenser-train staging is now corroborated by this plant's manual (02 FUNDAMENTALS p.1-70/72):
-324F002 pulls condenser 324E002 (0.31 bar) to the atmospheric absorber; 324F004 pulls condenser II
-(0.13 bar system) to condenser III (0.33 bar); 324F005 pulls condenser III (0.33 bar) to condenser IV
-(atmospheric). These fix the real per-ejector compression ratios (corroboration, not a 2nd duty point).
-
-**Blocking datum (G9a):** a SECOND ejector duty point (or nozzle/mixing geometry) per 324F002/F004/F005
-to pin A3/At independently and validate the pull-curve shape. The residual uncertainty is now
-quantified (one free geometric parameter) rather than asserted.
+**G9 condensers + urea evaporators - rating cores BUILT and datasheet-validated** (`gap_g9_evaporator_
+condenser.py`, new). The primary vacuum condenser 324E002 has a complete vendor shell-and-tube DDS/PDS
+(`324E002 Datasheet.pdf`: surface 1079 m2, duty 25 720 kW, both stream sides, 2329 tubes). Two
+independent duty closures fall out of the one sheet: the cooling-water sensible duty m cp dT = 25.75 MW
+matches the stated 25.72 MW to 0.1%, and the U-A-LMTD back-calc gives U ~ 640 W/m2K (textbook CW vapour
+condenser). The urea evaporator now has a closed mass/component/energy balance (F=L+V, urea non-volatile
+so the vapour is water-only and urea is conserved) with an INTRINSIC boiling-point elevation from the
+G2-validated neutral-UNIQUAC VLE (reproduces the plant evaporator points within the band) plus the IAPWS
+latent heat and LP-steam LMTD, returning water evaporated, steam duty and required U*A per effect.
+**Residual (G9 evap):** the per-effect evaporator U*A datasheets (only the condenser sheet 324E002 is in
+the source set) to turn the design-U rating into a rating-mode model; and wiring both into the 324
+concentration ODEs.
 
 **G9b valve hydraulics:** C_v back-calculable from rated flow and dP with declared single-point
-provenance; elevation heads from the P&ID; trim characteristic remains open. Not built this pass.
+provenance; elevation heads from the P&ID (`Merged_Searchable_PIDs.pdf` now in the source set); trim
+characteristic remains open. Not built this pass.
 
-**G9c Unit 335 - data gate PARTIALLY lifted (2026 source pass):** this plant's licensor manual
-(02 FUNDAMENTALS pp.1-85..1-109) now supplies the full granulation equipment name list, the process
-description, and many design flows (product 1750-2000 MTPD; fluidisation air ~340000 m3/h; sprayer air
-~36820 m3/h; recycle ratio ~0.40; UF at 0.5 wt%; melt 98.6 wt% at 140 C / 3.6 bar). So Unit 335 is no
-longer "no equipment list" -- a declared boundary block closing mass/atom/energy with exposed states can
-now be built from the manual. **Still missing:** the equipment DATASHEETS / P&ID sizing (heat-transfer
-areas, fan curves, screen efficiencies) needed to make it a rating model rather than a spec-flow block.
+**G9c Unit 335 - droplet solidification physics BUILT** (`gap_g9c_droplet.py`, new). The manual already
+lifted Unit 335 to a spec-flow boundary block (product 1750-2000 MTPD; fluidisation air ~340000 m3/h;
+sprayer air ~36820 m3/h; recycle 0.40; melt 98.6 wt% @ 140 C / 3.6 bar). This pass adds the droplet
+PHYSICS the research methodology specifies: a Lagrangian force balance (weight-buoyancy-drag, Schiller-
+Naumann Cd) integrated by RK4, Ranz-Marshall Nu/Sh heat-and-mass transfer with a Stefan-flow blowing
+correction, and a fusion plateau anchored to the G6 enthalpy datum (231.4 kJ/kg). Validated: terminal
+velocity 3.5-7.6 m/s over 1.0-2.2 mm prills, Nu/Sh >= 2, blowing factor in (0,1), and full solidification
+in a finite tower height (6.8-39.7 m) that shrinks monotonically with droplet size. **Residual:** Unit-335
+bed/tower geometry, fan curves and screen efficiencies (datasheets not in the source set) for a full
+tower rating model, plus wiring.
 
 **Acceptance:** momentum/pressure residuals close against vendor duty points and Unit 335 exposes mass,
 component, energy, hydraulic and control states with connected streams.
