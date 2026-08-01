@@ -25,6 +25,99 @@ what they left open is sharpened. Modules: `gap_g6_static_catalogue.py`, `gap_g6
 `gap_g4_reactor_kinetics.py`, `gap_g9_evaporator_condenser.py` (new: datasheet-validated condenser +
 urea-evaporator rating), `gap_g9c_droplet.py` (new: Unit-335 Lagrangian droplet solidification).
 
+## Open gaps at a glance -- what each is, and the equipment it touches (tag -> name)
+
+Plain-language summary of every still-open gap and the exact equipment (tag number + name) it affects.
+Tags are verified against the strict-source PFD, the licensor equipment descriptions, and `backend/
+main.py`. Units: 322 = HP synthesis loop (~140-150 bar); 323 = LP recirculation + pre-evaporation;
+324 = vacuum evaporation + vacuum system; 328 = desorption/hydrolysis; 329 = steam/vacuum utilities;
+335 = finishing/granulation.
+
+**G1 -- one plant-wide reactive-property model.** *What:* the runtime still uses locally-calibrated
+phase/reaction splits instead of one reactive thermodynamic package (Extended-UNIQUAC or SR-POLAR) that
+closes every phase-equilibrium and enthalpy call across the loop. This is the largest remaining build
+and G4/G6's remaining pieces ride on it. *Equipment (every unit that makes a reactive phase/enthalpy
+call):*
+
+| Tag | Name | Role in G1 |
+|-----|------|-----------|
+| 322R001 | Urea Reactor (11 sieve trays) | reactive VLE + kinetics |
+| 322E001 | HP Stripper (CO2 stripper) | reactive VLE |
+| 322E002 | HP Carbamate Condenser (HPCC / pool condenser) | reactive VLE + enthalpy |
+| 322E003 | HP Scrubber | reactive VLE |
+| 322F001 | HP Carbamate Ejector (liquid-liquid jet pump) | carbamate stream property |
+| 322C001 | Atmospheric / LP Absorber | Tier-B Extended UNIQUAC |
+| 323C003 | LP Rectifying Column (stage-1 decomposer) | Tier-B VLE |
+| 323E002 / 323E003 / 323E011 | Stage-1 heater / LP Carbamate Condenser (LPCC) / LP condenser | Tier-B VLE + enthalpy |
+| 323F004 | LP Flash Tank | flash VLE |
+| 323E010 + 323F010 | Pre-evaporator heater + separator | Tier-C melt VLE (delivered) |
+| 324E001 + 324F001 | Evaporator I (falling-film) + separator | Tier-C melt VLE (delivered) |
+| 324E003 + 324F003 | Evaporator II + separator | Tier-C melt VLE (delivered) |
+| 328C002 / 328C003 / 328C004 | Desorber I / Hydrolyser / Desorber II | Tier-B VLE + hydrolysis kinetics |
+
+**G4 -- equation-oriented HP synthesis loop.** *What:* the HP loop is reconciled by a sequential tear
+(`REACT_TEAR_DES`) with signed component corrections; it must become a simultaneous atom-balanced solve.
+The reactor kinetics themselves are now supplied (closed); only the EO integration remains, and it rides
+on G1. *Equipment (the four HP loop units + the ejector that feeds them):*
+
+| Tag | Name | Role in G4 |
+|-----|------|-----------|
+| 322R001 | Urea Reactor | `REACT_TEAR_DES` + reduced-conversion surrogate to retire |
+| 322E002 | HP Carbamate Condenser (HPCC) | anchored flash to replace with reactive package |
+| 322E001 | HP Stripper | atom-balance node in the simultaneous solve |
+| 322E003 | HP Scrubber | pinned discharges to free |
+| 322F001 | HP Carbamate Ejector | recycle carbamate feed into the loop |
+
+**G6 -- live registry coverage + tiered enthalpy.** *What:* H0 absolute-enthalpy datum is delivered
+(incl. ammonium carbamate); still open is wiring it into the live stream registry and raising live
+coverage above 55/163 streams as G1/G4/G9 model the currently-unmodelled units. *Equipment:* plant-wide
+(all 264 catalogued streams / ~163 in-scope). The carbamate reaction-consistency node specifically
+spans 322R001 (reactor) and 322E002 (HPCC); coverage grows as every tag above and below gets modelled.
+
+**G9a -- vacuum steam-jet ejectors (design duty MET; off-design shape open).** *What:* the three-stage
+vacuum ejector train that holds the evaporator vacuum. Design-duty acceptance is met against the vendor
+datasheets; the residual is the off-design pull-curve shape (mixing bore not independently pinned) and
+wiring into main.py. *Equipment:*
+
+| Tag | Name | Role in G9a |
+|-----|------|-----------|
+| 324F002 | Steam-jet Ejector I | pulls Condenser I; vendor duty 650/94/744 kg/h |
+| 324F004 | Steam-jet Ejector II | pulls Condenser II -> Condenser III; duty 600/634 kg/h |
+| 324F005 | Steam-jet Ejector III | pulls Condenser III -> Condenser IV; motive 505 kg/h |
+| 324E002 | Vacuum Condenser I (primary) | back-pressure ~0.2-0.3 bar; vent = F002 suction |
+| 324E005 / 324E006 / 324E007 | Vacuum Condenser II / III / IV | interstage back-pressures 0.12 / 0.33 / atm |
+
+**G9 -- vacuum condensers + urea evaporators (rating cores BUILT; per-effect U*A + wiring open).**
+*What:* datasheet-validated condenser U-A-LMTD rating and a urea-evaporator mass/energy + boiling-point-
+elevation rating exist as standalone cores; the residual is the per-effect evaporator U*A datasheets and
+wiring into the 324 concentration ODEs. *Equipment:*
+
+| Tag | Name | Role in G9 evap/condenser |
+|-----|------|-----------|
+| 324E002 | Vacuum Condenser I | full DDS (1079 m2, 25.72 MW) -> validated U ~ 640 W/m2K |
+| 324E005 / 324E006 / 324E007 | Vacuum Condenser II / III / IV | interstage condensers (rating cores; datasheets partial) |
+| 324E001 + 324F001 | Evaporator I (falling-film) + separator | 94.3 wt% / 130 C / 0.33 bar effect |
+| 324E003 + 324F003 | Evaporator II + separator | 97.7 wt% / 140 C / 0.13 bar effect |
+| 323E010 + 323F010 | Pre-evaporator heater + separator | 80 wt% / 99 C / 0.46 bar effect |
+| 323E003 / 323E011 | LP Carbamate Condenser (LPCC) / LP condenser | LP-side condensation duty |
+
+**G9b -- control-valve hydraulics (not built this pass).** *What:* C_v back-calculable from rated flow
+and dP; elevation heads from the P&ID; trim characteristic still open. *Equipment (control valves, not
+vessels):* HV-322602 (322F001 NH3-nozzle spindle), HV-322605 (322R001 reactor overflow), LV-322501
+(322E001 stripper bottoms letdown), LV-323501 (323F004 flash drain), HV-323605 / HIC-323605 (323F010
+vent 790), HV-329605 (324F002 ejector motive), XV-322902 (CO2 feed isolation to 322E001), TV-329005.
+
+**G9c -- Unit-335 granulation (droplet physics BUILT; tower geometry open).** *What:* the finishing
+section that turns the 98.6 wt% melt into product. Droplet solidification/evaporation physics is built;
+the residual is the bed/tower geometry, fan curves and screen efficiencies for a full rating model, plus
+wiring. *Equipment:*
+
+| Tag | Name | Role in G9c |
+|-----|------|-----------|
+| 335 (unit) | Granulation / prilling section -- tower, melt sprayers, fluidisation fans, screens, recycle | droplet fall + solidification + moisture evaporation |
+| 324E003 + 324F003 | Evaporator II (upstream) | supplies the 98.6 wt% / 140 C / 3.6 bar melt feed |
+| 335D007 | Unit-335 auxiliary drum | off-envelope boundary |
+
 ## G1 - Runtime reactive thermodynamics is not plant-wide Extended UNIQUAC
 
 **Evidence:** `backend/props_nh3co2h2o.py` implements the Thomsen/Darde NH3-CO2-H2O Extended-UNIQUAC/
