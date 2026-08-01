@@ -8,9 +8,15 @@ CSTR-in-series corroboration: `References/Sources/Modeling the synthesis section
 Vendor equipment datasheets (this plant, Uhde/Koerting 2004): `References/Sources/324F002/F004/F005
 Datasheet.pdf` (steam-jet ejectors, complete duty points), `324E002 Datasheet.pdf` (primary vacuum
 condenser, full shell-and-tube DDS/PDS), `Merged_Searchable_PIDs.pdf` (P&IDs).
+Vendor DESIGN CALCULATIONS (AD 2000-Merkblatt mechanical, Koerting/Uhde 2004): `References/Datasheets/
+322F001, 324F002, 324F004, 324F005 Design Calculations.pdf` -- as-built internal flow-path geometry
+(body bore Di, suction-nozzle di, diffuser-throat, steam-chest bore) + design P/T for the ejectors;
+authoritative over any earlier deduction (2026 design-calc pass).
 Audit: `FULL_SIMULATION_EXTENDED_UNIQUAC_AUDIT_2026-07-29.md`
 Research passes applied: `References/Gaps solution.md`, `References/Urea Plant Simulation Gaps2.md`,
-`References/Gaps Closure/Gaps Closure .docx` (evaporator/droplet/SR-POLAR closure methodology)
+`References/Gaps Closure/Gaps Closure .docx` (evaporator/droplet/SR-POLAR closure methodology),
+`References/Gaps Closure/Gaps Closure 2.docx` (ejector AD-2000 geometry, Chun-Seban falling film,
+Nile cooling-water bound, ISA 75.01 valve hydraulics, Karra/Whiten-Beta screens)
 
 Closed items are intentionally deleted from this file. Each item below is still open because the
 remaining equation or datum cannot be supplied honestly by the current repository evidence. Each
@@ -21,9 +27,12 @@ outputs within **10 %** of the plant design values are accepted (the strict-PFD-
 Standalone, self-validated closure/analysis modules (the "validate on its own before wiring" pattern as
 `props_nh3co2h2o.py`); each runs in <1 s and is cited line-by-line. What they closed is deleted below;
 what they left open is sharpened. Modules: `gap_g6_static_catalogue.py`, `gap_g6_h0_enthalpy.py`,
-`gap_g9a_ejector_envelope.py`, `gap_g2_reference_state_audit.py`, `gap_g4_conservation_harness.py`,
-`gap_g4_reactor_kinetics.py`, `gap_g9_evaporator_condenser.py` (new: datasheet-validated condenser +
-urea-evaporator rating), `gap_g9c_droplet.py` (new: Unit-335 Lagrangian droplet solidification).
+`gap_g9a_ejector_envelope.py` (+ AD-2000 as-built geometry pinning the mixing bore),
+`gap_g2_reference_state_audit.py`, `gap_g4_conservation_harness.py`, `gap_g4_reactor_kinetics.py`,
+`gap_g9_evaporator_condenser.py` (datasheet-validated condenser + urea-evaporator rating + Chun-Seban
+falling-film U + Nile cooling-water bound), `gap_g9b_valve_hydraulics.py` (new: ISA 75.01.01 severe-
+service choked/flashing valve sizing), `gap_g9c_droplet.py` (Unit-335 Lagrangian droplet solidification
++ Karra/Whiten-Beta screen classification).
 
 ## Open gaps at a glance -- what each is, and the equipment it touches (tag -> name)
 
@@ -74,18 +83,21 @@ coverage above 55/163 streams as G1/G4/G9 model the currently-unmodelled units. 
 (all 264 catalogued streams / ~163 in-scope). The carbamate reaction-consistency node specifically
 spans 322R001 (reactor) and 322E002 (HPCC); coverage grows as every tag above and below gets modelled.
 
-**G9a -- vacuum steam-jet ejectors (design duty MET; off-design shape open).** *What:* the three-stage
-vacuum ejector train that holds the evaporator vacuum. Design-duty acceptance is met against the vendor
-datasheets; the residual is the off-design pull-curve shape (mixing bore not independently pinned) and
-wiring into main.py. *Equipment:*
+**G9a -- vacuum steam-jet ejectors (design duty MET; off-design bore now PINNED by geometry).** *What:*
+the three-stage vacuum ejector train that holds the evaporator vacuum. Design-duty acceptance is met
+against the vendor datasheets, and the 2026 design-calc pass adds the as-built AD-2000 geometry that
+independently pins the mixing bore (324F004 diffuser throat 106.5 mm ID gives A3/At = 33.3, confirming
+the duty-fit 32.9 to +1.2%); the design-P/T envelope caps the off-design range. Only wiring into
+main.py remains. *Equipment (bore Di / suction di / design from the Design Calculations.pdf):*
 
 | Tag | Name | Role in G9a |
 |-----|------|-----------|
-| 324F002 | Steam-jet Ejector I | pulls Condenser I; vendor duty 650/94/744 kg/h |
-| 324F004 | Steam-jet Ejector II | pulls Condenser II -> Condenser III; duty 600/634 kg/h |
-| 324F005 | Steam-jet Ejector III | pulls Condenser III -> Condenser IV; motive 505 kg/h |
+| 324F002 | Steam-jet Ejector I ("DN 80") | body Di 101.7 / suction 77.7 mm; vendor duty 650/94/744 kg/h; A3/At 5.5 |
+| 324F004 | Steam-jet Ejector II | body Di 328 / suction 260.4 / **diffuser throat 106.5** mm; duty 600/634; A3/At 33 |
+| 324F005 | Steam-jet Ejector III | body Di 103 / suction 77.7 mm (F002 twin); motive 505 kg/h |
 | 324E002 | Vacuum Condenser I (primary) | back-pressure ~0.2-0.3 bar; vent = F002 suction |
 | 324E005 / 324E006 / 324E007 | Vacuum Condenser II / III / IV | interstage back-pressures 0.12 / 0.33 / atm |
+| 322F001 | HP Carbamate Ejector (liquid jet pump) | 205 barg/200 C; body Di 44 / diffuser 160 mm (G1/G4, not G9a aero) |
 
 **G9 -- vacuum condensers + urea evaporators (rating cores BUILT; per-effect U*A + wiring open).**
 *What:* datasheet-validated condenser U-A-LMTD rating and a urea-evaporator mass/energy + boiling-point-
@@ -101,20 +113,25 @@ wiring into the 324 concentration ODEs. *Equipment:*
 | 323E010 + 323F010 | Pre-evaporator heater + separator | 80 wt% / 99 C / 0.46 bar effect |
 | 323E003 / 323E011 | LP Carbamate Condenser (LPCC) / LP condenser | LP-side condensation duty |
 
-**G9b -- control-valve hydraulics (not built this pass).** *What:* C_v back-calculable from rated flow
-and dP; elevation heads from the P&ID; trim characteristic still open. *Equipment (control valves, not
-vessels):* HV-322602 (322F001 NH3-nozzle spindle), HV-322605 (322R001 reactor overflow), LV-322501
-(322E001 stripper bottoms letdown), LV-323501 (323F004 flash drain), HV-323605 / HIC-323605 (323F010
-vent 790), HV-329605 (324F002 ejector motive), XV-322902 (CO2 feed isolation to 322E001), TV-329005.
+**G9b -- control-valve hydraulics (ISA 75.01.01 form BUILT; Pv/Pc G1-gated).** *What:* the severe-
+service liquid-sizing form (Kv/Cv with the choked/flashing limit dP_allow = FL^2(P1-FF*Pv), FF =
+0.96-0.28*sqrt(Pv/Pc)) is now built and validated -- the HP carbamate letdown LV-322501 is correctly
+detected as choked+flashing, the LP flash drain unchoked. Residual: mixture Pv/Pc from G1 SR-POLAR and
+the vendor trim FL/datasheets. *Equipment (control valves, not vessels):* LV-322501 (322E001 stripper
+bottoms letdown, choked+flashing), HV-322605 (322R001 reactor overflow, choked), LV-323501 (323F004
+flash drain, unchoked), HV-322602 (322F001 NH3-nozzle spindle), HV-323605 / HIC-323605 (323F010 vent
+790, gas sizing), HV-329605 (324F002 ejector motive steam, gas sizing), XV-322902 (CO2 feed isolation,
+on/off), TV-329005.
 
-**G9c -- Unit-335 granulation (droplet physics BUILT; tower geometry open).** *What:* the finishing
-section that turns the 98.6 wt% melt into product. Droplet solidification/evaporation physics is built;
-the residual is the bed/tower geometry, fan curves and screen efficiencies for a full rating model, plus
-wiring. *Equipment:*
+**G9c -- Unit-335 granulation (droplet physics + screen classification BUILT; tower geometry open).**
+*What:* the finishing section that turns the 98.6 wt% melt into product. Both halves are now built --
+Lagrangian droplet solidification/evaporation AND product classification (Karra d50 + Whiten-Beta
+partition, reproducing the manual's 0.40 recycle within the band). The residual is the bed/tower
+geometry, fan curves and deck capacity/aperture datasheets for absolute sizing, plus wiring. *Equipment:*
 
 | Tag | Name | Role in G9c |
 |-----|------|-----------|
-| 335 (unit) | Granulation / prilling section -- tower, melt sprayers, fluidisation fans, screens, recycle | droplet fall + solidification + moisture evaporation |
+| 335 (unit) | Granulation / prilling section -- tower, melt sprayers, fluidisation fans, screens, recycle | droplet fall + solidification + moisture evaporation + screen classification (recycle 0.40) |
 | 324E003 + 324F003 | Evaporator II (upstream) | supplies the 98.6 wt% / 140 C / 3.6 bar melt feed |
 | 335D007 | Unit-335 auxiliary drum | off-envelope boundary |
 
@@ -228,10 +245,20 @@ directive. Adopted vendor duties: 324F002 motive 650 / suction 94 @ 0.20 bar (MW
 condenser 324E002 (100 kg/h, its datasheet) to 6% -- an independent cross-unit validation. Fitted A3/At
 = 5.5 (F002) / 32.9 (F004) still STRADDLES/EXCEEDS Huang's refrigeration band (6.44-10.64), confirming
 that band does not bound these deep-vacuum steam ejectors.
-**Residual (G9a):** only the off-design curve SHAPE -- the mixing bore A3/At wants a second suction-
-PRESSURE load (the DDS gives one design point + a 40-100% control range, and 324F005's internal suction
-is vendor-optimised/unspecified), so the pull curve stays design-anchored. Not yet wired into main.py's
-324 ejector suction ODE -- the documented follow-on.
+**Off-design bore now PINNED by as-built geometry** (2026 design-calc pass, `322F001/324F002/324F004/
+324F005 Design Calculations.pdf`, AD 2000-Merkblatt). The former residual -- "the mixing bore A3/At
+wants a second suction-pressure load the datasheet does not give" -- is closed by the vendor mechanical
+design calcs, which supply the as-built internal flow-path geometry: body bore Di (F002 101.7, F004 328,
+F005 103 mm), suction-nozzle di (F002/F005 77.7 = DN80, F004 260.4 mm), and for 324F004 the full
+diffuser cones (Pos.16/18) giving a constant-area throat 116.5 mm OD -> 106.5 mm ID. The geometric
+A3/At = A_throat/A_t = 33.3 CONFIRMS the duty-fitted 32.9 to +1.2% -- the independent second datum the
+pull curve was gated on. F002's fitted A3/At = 5.5 gives a 45 mm mixing tube that fits inside its 101.7
+mm body (bound 28) and under the 53.2 mm steam-chest opening; F005 is F002's geometric twin (bodies
+101.7 ~ 103, both DN80), so its bore is bounded even with suction unspecified. The mechanical design-P/T
+envelope (body -1/+2 barg, steam-chest -1/+6 barg, 165 C for F004/F005; 6 barg for F002) caps the
+off-design range. Note the design-calc sheet corrects the docx table, which had conflated F004's large
+suction nozzle (260.4 mm) with the mixing bore -- the true A3 is the 106.5 mm diffuser throat.
+**Residual (G9a):** only wiring the geometry-pinned pull curve into main.py's 324 ejector suction ODE.
 
 **G9 condensers + urea evaporators - rating cores BUILT and datasheet-validated** (`gap_g9_evaporator_
 condenser.py`, new). The primary vacuum condenser 324E002 has a complete vendor shell-and-tube DDS/PDS
@@ -242,24 +269,40 @@ condenser). The urea evaporator now has a closed mass/component/energy balance (
 so the vapour is water-only and urea is conserved) with an INTRINSIC boiling-point elevation from the
 G2-validated neutral-UNIQUAC VLE (reproduces the plant evaporator points within the band) plus the IAPWS
 latent heat and LP-steam LMTD, returning water evaporated, steam duty and required U*A per effect.
-**Residual (G9 evap):** the per-effect evaporator U*A datasheets (only the condenser sheet 324E002 is in
-the source set) to turn the design-U rating into a rating-mode model; and wiring both into the 324
-concentration ODEs.
+**Per-effect U now FIRST-PRINCIPLES** (2026 Gaps Closure 2 pass): the Chun-Seban (1971) falling-film
+correlation (wavy-laminar Nu = 0.821 Re^-0.22, turbulent Nu = 3.8e-3 Re^0.4 Pr^0.65, transition Re_tr =
+5840 Pr^-1.06; Re = 4 Gamma/mu) replaces the assumed U=1000: the regime-aware film h (~1500-2300 W/m2K
+for the melt) in series with a condensing-steam h and the tube wall gives overall U ~ 1150 W/m2K, which
+now drives the effect rating. **Nile cooling-water boundary** (Helwan climate + Nile +3 C thermal-
+discharge limit -> CW band 31-34 C) floors the 324E002 condensing temperature at ~40 C and hence the
+324F002 ejector suction pressure at Psat(40 C) = 0.074 bar; the operating 0.20 bar sits above it, so the
+vacuum system cannot converge on a physically impossible level.
+**Residual (G9 evap):** measured melt transport properties (mu/k/cp) and per-effect tube counts to fix
+the ABSOLUTE area/U (narrowed from "no rating model"); and wiring both into the 324 concentration ODEs.
 
-**G9b valve hydraulics:** C_v back-calculable from rated flow and dP with declared single-point
-provenance; elevation heads from the P&ID (`Merged_Searchable_PIDs.pdf` now in the source set); trim
-characteristic remains open. Not built this pass.
+**G9b valve hydraulics - ISA 75.01.01 form BUILT** (`gap_g9b_valve_hydraulics.py`, new). The severe-
+service liquid-sizing standard the methodology specifies is implemented and validated: Kv/Cv with the
+choked/flashing limit dP_allow = FL^2 (P1 - FF*Pv), FF = 0.96 - 0.28 sqrt(Pv/Pc), FL 0.90-0.95 for
+multi-stage anti-flashing trim. The HP carbamate letdown LV-322501 (140 -> 4 bar) is correctly detected
+as choked AND flashing (P2 < Pv) and sized on the allowable dP; the reactor overflow HV-322605 as
+choked (cavitating); the LP flash drain LV-323501 as unchoked. **Residual:** the mixture Pv and Pc from
+the G1 SR-POLAR package (declared representative here) and vendor trim FL/datasheets to replace the
+screening values -- narrowed from "not built" to "form built, two inputs G1-gated". Steam/vapour valves
+(HV-329605 ejector motive, HV-323605/HIC-323605 vent) are recorded for gas sizing.
 
-**G9c Unit 335 - droplet solidification physics BUILT** (`gap_g9c_droplet.py`, new). The manual already
-lifted Unit 335 to a spec-flow boundary block (product 1750-2000 MTPD; fluidisation air ~340000 m3/h;
-sprayer air ~36820 m3/h; recycle 0.40; melt 98.6 wt% @ 140 C / 3.6 bar). This pass adds the droplet
-PHYSICS the research methodology specifies: a Lagrangian force balance (weight-buoyancy-drag, Schiller-
-Naumann Cd) integrated by RK4, Ranz-Marshall Nu/Sh heat-and-mass transfer with a Stefan-flow blowing
-correction, and a fusion plateau anchored to the G6 enthalpy datum (231.4 kJ/kg). Validated: terminal
-velocity 3.5-7.6 m/s over 1.0-2.2 mm prills, Nu/Sh >= 2, blowing factor in (0,1), and full solidification
-in a finite tower height (6.8-39.7 m) that shrinks monotonically with droplet size. **Residual:** Unit-335
-bed/tower geometry, fan curves and screen efficiencies (datasheets not in the source set) for a full
-tower rating model, plus wiring.
+**G9c Unit 335 - droplet solidification + screen classification BUILT** (`gap_g9c_droplet.py`). The
+manual lifted Unit 335 to a spec-flow boundary block (product 1750-2000 MTPD; fluidisation air ~340000
+m3/h; sprayer air ~36820 m3/h; recycle 0.40; melt 98.6 wt% @ 140 C / 3.6 bar). This work adds BOTH the
+droplet PHYSICS -- a Lagrangian force balance (weight-buoyancy-drag, Schiller-Naumann Cd) integrated by
+RK4, Ranz-Marshall Nu/Sh heat-and-mass transfer with a Stefan-flow blowing correction, and a fusion
+plateau anchored to the G6 enthalpy datum (231.4 kJ/kg) -- AND the CLASSIFICATION (2026 Gaps Closure 2):
+the Karra (1979) corrected cut size and the Whiten-Beta oversize partition across a double deck. Droplet
+validated: terminal velocity 3.5-7.6 m/s over 1.0-2.2 mm prills, Nu/Sh >= 2, blowing factor in (0,1),
+finite freeze height (6.8-39.7 m) shrinking monotonically with droplet size. Screen validated: E(d50) =
+0.5, imperfection falls with sharpness, mass closes, and the double-deck recycle = 0.406 reproduces the
+manual's 0.40 within the band. **Residual:** Unit-335 bed/tower geometry, fan curves and deck capacity/
+aperture datasheets (not in the source set) for absolute tower height and the Karra d50 loading term,
+plus wiring.
 
 **Acceptance:** momentum/pressure residuals close against vendor duty points and Unit 335 exposes mass,
 component, energy, hydraulic and control states with connected streams.

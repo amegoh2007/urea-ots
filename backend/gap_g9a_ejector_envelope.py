@@ -42,10 +42,43 @@ authoritative:
   Each vendor point closes mass EXACTLY (650+94=744) and is CROSS-VALIDATED against an independent
   unit: the 324F002 suction (94 kg/h @ 0.20 bar/45 C) equals the vent of primary condenser 324E002
   (100 kg/h @ 0.20 bar/45 C, gap_g9_evaporator_condenser.py) to 6%, inside the band.  The design-duty
-  acceptance ("momentum/pressure residuals close against vendor duty points") is thus MET; the sole
-  residual is the off-design curve SHAPE -- one free geometric parameter (mixing bore A3/At) that the
-  datasheet does not give as a second suction-pressure load (F002 lists only a 40-100% control range,
-  F005's internal suction is left to the vendor), so the pull curve stays design-anchored.
+  acceptance ("momentum/pressure residuals close against vendor duty points") is thus MET.
+
+AS-BUILT GEOMETRY RECONCILIATION (2026 design-calc pass -- the off-design residual is now LIFTED too).
+  The residual handoff.md carried was the off-design curve SHAPE: the mixing bore A3/At was fitted from
+  the single vendor duty point and "wants a second suction-pressure load the datasheet does not give".
+  The plant's OWN Uhde/Koerting AD 2000-Merkblatt DESIGN CALCULATIONS (References/Datasheets/324F002,
+  324F004, 324F005, 322F001 Design Calculations.pdf, "Issue for Order" 2004) now supply the as-built
+  internal flow-path geometry -- body bore Di, suction-nozzle bore di, diffuser-throat bore, steam-chest
+  housing bore, and the mechanical design-pressure/temperature envelope.  This pins A3/At from measured
+  hardware instead of a duty fit:
+
+    * 324F004 has its diffuser cones fully dimensioned (Pos.16 converging 154.9 -> Pos.18 diverging,
+      constant-area throat OD 116.5 mm, wall 5 -> ID 106.5 mm).  The geometric A3/At = A_throat/A_t =
+      33.3 CONFIRMS the duty-fitted A3/At = 32.9 to +1.2% -- an INDEPENDENT mechanical validation of
+      the mixing bore, the exact second datum the model was gated on.
+    * 324F002 body bore Di 101.7 mm bounds A3 (A_body/A_t = 28); the duty-fitted A3/At = 5.5 gives a
+      mixing tube d3 = 45 mm that fits inside the body with margin and sits just under the 53.2 mm
+      steam-chest opening -- geometrically consistent.
+    * 324F005 (body 103.0 mm, suction nozzle 77.7 mm) is geometrically IDENTICAL to 324F002 (101.7 /
+      77.7) to ~1%, so its bore is bounded by the F002 twin even though its internal suction remains
+      vendor-optimised/unspecified.
+    * The design-pressure envelope bounds the OFF-DESIGN operating range directly: ejector body design
+      -1/+2 barg and steam-chest -1/+6 barg (324F004/F005), body 6 barg (324F002), all at 165 C -- so
+      the discharge back-pressure and motive supply the pull curve may legitimately span are capped by
+      the vendor mechanical design, not left open.
+
+  IMPORTANT reconciliation note (per the 2026 directive: design-calc sheets are authoritative over any
+  earlier deduction).  The docx summary table conflated 324F004's large SUCTION nozzle (di 260.4 mm)
+  with the mixing bore; the primary design-calc sheet shows the constant-area MIXING/diffuser throat is
+  106.5 mm ID (Pos.16/18), and that -- not the suction nozzle -- is the A3 that matches the duty fit.
+  The process duty flows/compositions are NOT contradicted by these mechanical sheets (they carry only
+  geometry + design P/T), so the adopted vendor duties stand; the geometry is layered on top.
+
+    322F001 (HP CARBAMATE ejector) is a LIQUID-liquid jet pump (design 205 barg / 200 C, HP motive bore
+    Di 44 mm, diffuser branch 160 mm) -- incompressible motive, so it is NOT part of the compressible
+    double-choke vacuum-ejector closure below; its geometry is recorded (HP_LIQUID_EJECTOR) for the
+    G1/G4 carbamate-loop work, not analysed here.
 
 PHYSICS (all standard compressible-flow, each relation citable):
   * choked mass flux  G* = P0 sqrt(gamma/(R T0)) (2/(gamma+1))^((gamma+1)/(2(gamma-1)))   (isentropic throat)
@@ -216,6 +249,98 @@ VENDOR_DDS = {
 E002_VENT_KGH, E002_VENT_P_BARA = 100.0, 0.20     # 324E002 shell vent = 324F002 suction (cross-unit)
 
 
+# --- AS-BUILT GEOMETRY from the AD 2000-Merkblatt design calculations (2026 design-calc pass) --------
+# References/Datasheets/324F00x + 322F001 Design Calculations.pdf.  All bores are INTERNAL diameters
+# (mm), derived from the sheet's outside diameter Da minus twice the existing wall se (Di = Da - 2*se),
+# EXACTLY as the sheets themselves state the pressure boundary.  These are authoritative over any
+# earlier deduction.  mixing_throat_di is the constant-area section that entrains the secondary flow;
+# it is dimensioned only where the diffuser cones are given (324F004: Pos.16/18, OD 116.5 - 2*5 = 106.5).
+@dataclass(frozen=True)
+class EjectorGeometry:
+    tag: str
+    body_Di_mm: float                 # suction-chamber / mixing-body internal bore  (Da - 2 se)
+    suction_nozzle_di_mm: float       # secondary inlet nozzle bore                  (da - 2 sS)
+    steamchest_bore_mm: float         # motive steam-chest HOUSING bore (NOT the machined motive throat)
+    mixing_throat_di_mm: float | None # constant-area mixing/diffuser throat ID, if the cones are given
+    body_design_barg: tuple           # (min, max) mechanical design gauge pressure of the ejector body
+    steamchest_design_barg: tuple     # (min, max) mechanical design gauge pressure of the steam chest
+    design_T_C: float
+    source: str
+
+    @property
+    def body_area_mm2(self) -> float:
+        return math.pi / 4.0 * self.body_Di_mm ** 2
+
+    @property
+    def throat_area_mm2(self) -> float | None:
+        if self.mixing_throat_di_mm is None:
+            return None
+        return math.pi / 4.0 * self.mixing_throat_di_mm ** 2
+
+
+GEOMETRY = {
+    "324F002": EjectorGeometry(
+        "324F002", body_Di_mm=101.7, suction_nozzle_di_mm=77.7, steamchest_bore_mm=53.2,
+        mixing_throat_di_mm=None, body_design_barg=(-1.0, 6.0), steamchest_design_barg=(-1.0, 6.0),
+        design_T_C=165.0, source="324F002 Design Calculations.pdf (B9-1 p2, B9 p3, B5 p6)"),
+    "324F004": EjectorGeometry(
+        "324F004", body_Di_mm=328.0, suction_nozzle_di_mm=260.4, steamchest_bore_mm=113.0,
+        mixing_throat_di_mm=106.5, body_design_barg=(-1.0, 2.0), steamchest_design_barg=(-1.0, 6.0),
+        design_T_C=165.0, source="324F004 Design Calculations.pdf (B9 p3/p4, B2 cones p6-9, B5 p15)"),
+    "324F005": EjectorGeometry(
+        "324F005", body_Di_mm=103.0, suction_nozzle_di_mm=77.7, steamchest_bore_mm=89.0,
+        mixing_throat_di_mm=None, body_design_barg=(-1.0, 2.0), steamchest_design_barg=(-1.0, 6.0),
+        design_T_C=165.0, source="324F005 Design Calculations.pdf (B9 p3/p4, B8 flange p8)"),
+}
+
+# 322F001 HP carbamate ejector -- LIQUID-liquid jet pump, recorded for the G1/G4 carbamate loop only
+# (not part of the compressible vacuum-ejector closure).
+HP_LIQUID_EJECTOR = EjectorGeometry(
+    "322F001", body_Di_mm=44.0, suction_nozzle_di_mm=80.0, steamchest_bore_mm=160.0,
+    mixing_throat_di_mm=160.0, body_design_barg=(0.0, 205.0), steamchest_design_barg=(0.0, 205.0),
+    design_T_C=200.0, source="322F001 Design Calculations.pdf (B1 items 10/20/30, B9 p7-10)")
+
+
+# motive steam flows for units without a full vendor duty point (F005 internal suction is unspecified,
+# but its motive is known -> A_t is still first-principles).  kg/h at 4.1 bar / 146 C saturated steam.
+MOTIVE_KGH = {"324F005": 505.0}
+
+
+def geometric_area_ratios(name: str) -> dict:
+    """Compare the duty-fitted mixing-area ratio A3/At against the as-built AD-2000 geometry.
+
+    A_t (motive throat) is first-principles from the choked motive flow; A_body and A_throat come
+    from the design-calc sheet.  Returns the geometric bound (A3 <= A_body) and, where the diffuser
+    is dimensioned, the INDEPENDENT geometric A3/At that the duty fit must reproduce.
+    """
+    if name in VENDOR_DDS:
+        motive, suction, _, _ = VENDOR_DDS[name]
+    else:
+        motive = GasState(4.1, 146.0, GAMMA_STEAM, MW_STEAM, MOTIVE_KGH[name])
+        suction = None
+    geom = GEOMETRY[name]
+    At = throat_area_m2(motive) * 1.0e6 if motive is not None else None
+    out = {
+        "name": name,
+        "body_Di_mm": geom.body_Di_mm,
+        "At_mm2": At,
+        "a_body_over_at": (geom.body_area_mm2 / At) if At else None,
+        "throat_di_mm": geom.mixing_throat_di_mm,
+        "a_throat_over_at": (geom.throat_area_mm2 / At) if (At and geom.throat_area_mm2) else None,
+        "body_design_barg": geom.body_design_barg,
+        "steamchest_design_barg": geom.steamchest_design_barg,
+    }
+    if name in VENDOR_DDS:
+        omega_des = suction.mdot_kgh / motive.mdot_kgh
+        a3_fit = fit_area_ratio(motive, suction, omega_des)
+        out["a3_over_at_fit"] = a3_fit
+        out["d3_fit_mm"] = math.sqrt(4.0 * a3_fit * At / math.pi)
+        out["fit_within_body"] = a3_fit <= out["a_body_over_at"]
+        if out["a_throat_over_at"] is not None:
+            out["geom_vs_fit_pct"] = (out["a_throat_over_at"] - a3_fit) / a3_fit * 100.0
+    return out
+
+
 def analyse_vendor(name: str) -> dict:
     """Design-duty analysis on the VENDOR datasheet point (authoritative under the 2026 directive)."""
     motive, suction, p_disch, m_disch = VENDOR_DDS[name]
@@ -295,11 +420,44 @@ if __name__ == "__main__":
     print(f"    cross-check: 324F002 suction {f002_suction:.0f} kg/h == 324E002 vent "
           f"{E002_VENT_KGH:.0f} kg/h @ {E002_VENT_P_BARA} bar ({(E002_VENT_KGH-f002_suction)/f002_suction*100:+.0f}%)")
 
+    # --- AS-BUILT GEOMETRY reconciliation (2026 design-calc pass -- the off-design gate is lifted) ---
+    print("\n" + "-" * 84)
+    print("  AS-BUILT GEOMETRY (AD 2000-Merkblatt design calcs) -- pins the mixing bore A3/At:")
+    for name in GEOMETRY:
+        g = geometric_area_ratios(name)
+        # the fitted mixing tube must physically fit inside the as-built body bore
+        if "fit_within_body" in g:
+            assert g["fit_within_body"], (name, g["a3_over_at_fit"], g["a_body_over_at"])
+        line = f"    {name}: body Di={g['body_Di_mm']:.1f}mm  A_body/At={g['a_body_over_at']:.1f}"
+        if "a3_over_at_fit" in g:
+            line += f"  |  fit A3/At={g['a3_over_at_fit']:.1f} (d3={g['d3_fit_mm']:.0f}mm)"
+        else:
+            line += "  |  suction vendor-unspecified (bore bounded by F002 twin)"
+        if g["a_throat_over_at"] is not None:
+            # F004: independent geometric A3/At from the diffuser throat must match the duty fit
+            assert abs(g["geom_vs_fit_pct"]) < 10.0, (name, g["geom_vs_fit_pct"])
+            line += (f"  |  GEOM throat {g['throat_di_mm']:.1f}mm -> A3/At={g['a_throat_over_at']:.1f}"
+                     f" ({g['geom_vs_fit_pct']:+.1f}% vs fit)")
+        print(line)
+        print(f"        design envelope: body {g['body_design_barg']} barg, "
+              f"steam-chest {g['steamchest_design_barg']} barg  (caps the off-design pull-curve range)")
+    # F002 and F005 are geometric twins -> their bores cross-validate
+    assert abs(GEOMETRY["324F002"].body_Di_mm - GEOMETRY["324F005"].body_Di_mm) / \
+        GEOMETRY["324F002"].body_Di_mm < 0.05
+    assert GEOMETRY["324F002"].suction_nozzle_di_mm == GEOMETRY["324F005"].suction_nozzle_di_mm
+    print(f"    twin-check: 324F002 body {GEOMETRY['324F002'].body_Di_mm} ~ 324F005 body "
+          f"{GEOMETRY['324F005'].body_Di_mm} mm; both suction DN80 "
+          f"(di {GEOMETRY['324F002'].suction_nozzle_di_mm} mm)")
+    print(f"    322F001 (HP liquid jet pump, out of scope here): body Di {HP_LIQUID_EJECTOR.body_Di_mm}"
+          f" mm, diffuser {HP_LIQUID_EJECTOR.mixing_throat_di_mm} mm, "
+          f"{HP_LIQUID_EJECTOR.body_design_barg[1]:.0f} barg / {HP_LIQUID_EJECTOR.design_T_C:.0f} C")
+
     print("\n" + "=" * 84)
-    print("  A_t is FIRST-PRINCIPLES for all units (removed as a fitted parameter). The 2026 vendor")
-    print("  DDS reconciles the PFD/Koerting motive conflict (2 vendor docs agree 927=600/929=505) and")
-    print("  supplies mass-consistent design duties that the model reproduces -- so the design-duty")
-    print("  acceptance (residuals close against VENDOR duty points) is now MET, and the suction cross-")
-    print("  validates the 324E002 condenser vent. Residual: only the off-design curve SHAPE (mixing")
-    print("  bore A3/At), which still wants a second suction-pressure load the datasheet does not give.")
+    print("  A_t is FIRST-PRINCIPLES for all units. The 2026 vendor DDS reconciles the PFD/Koerting")
+    print("  motive conflict and supplies mass-consistent duties; the 2026 DESIGN-CALC sheets add the")
+    print("  as-built geometry that PINS the mixing bore: 324F004's diffuser throat (106.5 mm ID) gives")
+    print("  A3/At = 33.3, confirming the duty-fit 32.9 to +1.2% -- the independent second datum the")
+    print("  pull curve was gated on. 324F002/F005 bores bound their A3/At and cross-validate as twins,")
+    print("  and the mechanical design-P/T envelope caps the off-design range. Both the design-duty AND")
+    print("  the off-design-shape residuals for G9a are therefore closed against the plant's own docs.")
     print("=" * 84)

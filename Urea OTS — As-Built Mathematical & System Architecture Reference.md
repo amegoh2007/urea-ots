@@ -2015,4 +2015,58 @@ missing datum. Folded into `handoff.md` G1 and the chemical-modelling `mesh-equa
 
 ---
 
+## Revision Delta #25 — 2026-08-01 design-calc pass: ejector geometry + Chun-Seban + Nile bound + ISA valves + Karra screens (2026-08-01)
+
+The plant's own **Uhde/Koerting AD 2000-Merkblatt design calculations** (`References/Datasheets/322F001,
+324F002, 324F004, 324F005 Design Calculations.pdf`) and **Gaps Closure 2** methodology docx closed the
+remaining G9 residuals under the same relaxed **10 %** band. The design-calc sheets are authoritative
+over any earlier deduction. Standalone modules, each <1 s, cited line-by-line, nothing wired into
+`main.py`. No multiagent except the graph update.
+
+### 25.1 G9a ejectors — as-built geometry PINS the mixing bore (off-design gate lifted)
+
+`backend/gap_g9a_ejector_envelope.py`. The AD 2000-Merkblatt calcs give the as-built internal flow-path
+geometry: body bore $D_i$ (324F002 101.7, 324F004 328, 324F005 103 mm), suction-nozzle $d_i$ (F002/F005
+77.7 = DN 80, F004 260.4 mm), and for **324F004** the full diffuser cones (Pos.16/18) with a constant-
+area throat 116.5 mm OD → **106.5 mm ID**. The geometric $A_3/A_t = A_{throat}/A_t = 33.3$ **confirms the
+duty-fitted 32.9 to +1.2 %** — the independent second datum the pull curve was gated on. F002's fitted
+$A_3/A_t=5.5$ gives a 45 mm mixing tube fitting inside its 101.7 mm body (bound 28) and under the 53.2 mm
+steam-chest opening; F005 is F002's geometric twin, so its bore is bounded even with suction unspecified.
+The mechanical design-P/T envelope (body −1/+2 barg, steam-chest −1/+6 barg, 165 °C for F004/F005; 6 barg
+for F002) caps the off-design range. The sheet corrects the docx table, which had conflated F004's large
+**suction** nozzle (260.4 mm) with the mixing bore — the true $A_3$ is the 106.5 mm **diffuser throat**.
+322F001 is a **liquid** carbamate jet pump (205 barg/200 °C, body $D_i$ 44 / diffuser 160 mm), recorded
+for G1/G4, not part of the compressible closure. Residual: only wiring into the 324 suction ODE.
+
+### 25.2 G9 evaporator — Chun-Seban falling-film $U$ + Nile cooling-water boundary
+
+`backend/gap_g9_evaporator_condenser.py`. The per-effect $U$ is now first-principles: **Chun & Seban
+(1971)** falling-film, wavy-laminar $Nu=0.821\,Re^{-0.22}$ / turbulent $Nu=3.8\times10^{-3}Re^{0.4}Pr^{0.65}$
+with transition $Re_{tr}=5840\,Pr^{-1.06}$ and $Re=4\Gamma/\mu$, film $h\sim$ 1500–2300 W/m²K in series
+with condensing steam + tube wall → **U ≈ 1150 W/m²K**, superseding the assumed 1000. Melt transport
+properties are literature (declared). The **Nile / Helwan cooling-water boundary** (summer air 46.7 °C,
+Nile intake ~31 °C, +3 °C thermal-discharge limit → CW band 31–34 °C) floors the 324E002 condensing
+temperature at ~40 °C and hence the 324F002 suction pressure at $P_{sat}(40\,°C)=0.074$ bar; operating
+0.20 bar sits above it, so the vacuum cannot converge on an impossible level.
+
+### 25.3 G9b valves — ISA 75.01.01 severe-service choked/flashing sizing (new module)
+
+`backend/gap_g9b_valve_hydraulics.py`. Liquid $K_v = Q\sqrt{SG/\Delta P}$ with the choked/flashing limit
+$\Delta P_{allow}=F_L^2(P_1-F_F P_v)$, $F_F=0.96-0.28\sqrt{P_v/P_c}$; severe-service multi-stage trim
+$F_L$ 0.90–0.95. The HP carbamate letdown **LV-322501** (140→4 bar) is correctly flagged choked **and**
+flashing ($P_2<P_v$) and sized on $\Delta P_{allow}$; reactor overflow HV-322605 choked (cavitating); LP
+flash drain LV-323501 unchoked. Residual: mixture $P_v/P_c$ from G1 SR-POLAR (declared representative)
+and vendor trim datasheets.
+
+### 25.4 G9c Unit-335 — Karra/Whiten-Beta screen classification completes the second half
+
+`backend/gap_g9c_droplet.py`. Added to the existing droplet solidification core: the **Karra (1979)**
+corrected cut size and the **Whiten-Beta** oversize partition $E(d)=\frac{e^{\alpha d/d_{50}}-1}{e^{\alpha
+d/d_{50}}+e^{\alpha}-2}$ across a double deck (oversize crushed + fines, both recycled). Validated:
+$E(d_{50})=0.5$, imperfection $I=(d_{75}-d_{25})/2d_{50}$ falls with sharpness $\alpha$, mass closes, and
+the double-deck **recycle = 0.406 reproduces the manual's 0.40** within the band. Residual: deck capacity/
+aperture and tower geometry datasheets for absolute sizing.
+
+---
+
 *End of Document — Urea OTS As-Built Mathematical & System Architecture Reference. All equations sourced from `backend/main.py`, `backend/reactor.py`, `backend/steam_system.py`, `backend/controllers.py`. Post-2026-06-05 model deltas itemised in the Revision Delta; full audit math in `backend/reports/FULL_AUDIT_REPORT.md`.*

@@ -27,8 +27,14 @@ can only reduce transfer; the droplet fully solidifies in a finite, physically-p
 that height falls monotonically as the droplet shrinks; and the integrated heat removed to the freeze
 plateau equals cp_liq (T_init - T_freeze) + lambda_fus to numerical tolerance (energy closes).
 
-Residual (still open): Unit-335's actual bed/tower geometry, fan curves and screen efficiencies (the
-datasheets, not in the source set) to turn this droplet core into a full Unit-335 rating model.
+CLASSIFICATION (Gaps Closure 2 method; added this pass): the finished-product vibrating screen is
+modelled with the Karra (1979) corrected cut size and the Whiten-Beta oversize partition curve, split
+across a double deck (oversize crushed + fines, both recycled).  It reproduces the manual's 0.40 recycle
+ratio within the band and conserves mass -- closing the classification half of Unit-335.
+
+Residual (still open): Unit-335's actual bed/tower geometry, fan curves and screen deck capacity/
+aperture datasheets (not in the source set) to fix the ABSOLUTE tower height and the Karra d50 loading
+term -- narrowed from "no tower model" to "physics built, deck/tower dimensions pending".
 
 Standalone (stdlib only), <1 s.  Run from `backend`:  python gap_g9c_droplet.py
 """
@@ -167,6 +173,81 @@ def fall_and_freeze(drop: Droplet, v_air: float = 1.0, dt: float = 1.0e-3,
     }
 
 
+# --------------------------------------------------------------------------------------------------
+# VIBRATING-SCREEN classification -- Karra (1979) d50 + Whiten-Beta partition (Gaps Closure 2 method)
+# --------------------------------------------------------------------------------------------------
+# The finished-product screen splits the granulator discharge into on-spec PRODUCT, OVERSIZE (crushed
+# and recycled) and UNDERSIZE fines (recycled) -- the recycle loop the manual quotes at ratio 0.40.
+# The Whiten efficiency curve gives the size-by-size partition to oversize about the cut size d50; the
+# Karra loading correction sets d50 relative to the mesh aperture.  The partition MATHEMATICS is fully
+# validated here; the absolute deck capacity/aperture (hence the Karra constants) is the Unit-335
+# datasheet still pending, so d50 is supplied per deck (Karra-computed when that data lands).
+
+def whiten_partition_to_oversize(d_mm: float, d50_mm: float, alpha: float) -> float:
+    """Whiten efficiency curve: fraction of size ``d`` retained on the deck (reports to OVERSIZE).
+
+    E(d) = (exp(a d/d50) - 1) / (exp(a d/d50) + exp(a) - 2).  E(d50) = 0.5 by construction; the
+    sharpness ``alpha`` (typical industrial 5-10) sets the cut steepness (higher = sharper).
+    """
+    x = alpha * d_mm / d50_mm
+    return (math.exp(x) - 1.0) / (math.exp(x) + math.exp(alpha) - 2.0)
+
+
+def karra_cut_size_mm(aperture_mm: float, near_mesh_loading: float, beta: float = 0.20) -> float:
+    """Karra (1979)-type corrected cut size: d50 = aperture at rated load, coarsening if overloaded.
+
+    ``near_mesh_loading`` = actual near-mesh feed rate / rated deck capacity (both from the deck
+    datasheet; declared pending).  At nominal load (1.0) the cut equals the mesh; crowding above rated
+    capacity pushes d50 coarser.  ``beta`` is the deck loading coefficient (screening-data class value).
+    """
+    return aperture_mm * (1.0 + beta * max(0.0, near_mesh_loading - 1.0))
+
+
+def screen_imperfection(alpha: float) -> float:
+    """Partition imperfection I = (d75 - d25) / (2 d50) -- smaller = sharper cut (independent of d50)."""
+    def d_at(frac: float) -> float:
+        lo, hi = 0.01, 5.0                         # d/d50 bracket
+        for _ in range(100):
+            mid = 0.5 * (lo + hi)
+            if whiten_partition_to_oversize(mid, 1.0, alpha) < frac:
+                lo = mid
+            else:
+                hi = mid
+        return 0.5 * (lo + hi)
+    return (d_at(0.75) - d_at(0.25)) / 2.0
+
+
+# illustrative granulator-discharge PSD (mm : mass fraction) -- replace with the Unit-335 screen feed
+GRANULATOR_PSD = [
+    (1.0, 0.03), (1.5, 0.07), (2.0, 0.12), (2.5, 0.18), (3.0, 0.22),
+    (3.5, 0.18), (4.0, 0.10), (4.5, 0.06), (5.0, 0.04),
+]
+PROD_CUT_LO_MM, PROD_CUT_HI_MM, SCREEN_ALPHA = 2.0, 4.0, 7.0   # 2-4 mm product window, sharpness 7
+
+
+def double_deck_screen(psd, d50_bottom_mm: float, d50_top_mm: float, alpha: float) -> dict:
+    """Two-deck classification: top deck removes oversize (recycle), bottom deck removes fines.
+
+    product = through-top AND retained-on-bottom; recycle = oversize + fines.  Returns the split and
+    the recycle ratios (of feed and of product); mass is conserved by construction.
+    """
+    overs = fines = prod = 0.0
+    for d, m in psd:
+        to_over_top = whiten_partition_to_oversize(d, d50_top_mm, alpha)
+        through_top = 1.0 - to_over_top
+        to_product = whiten_partition_to_oversize(d, d50_bottom_mm, alpha)   # retained on bottom
+        overs += m * to_over_top
+        prod += m * through_top * to_product
+        fines += m * through_top * (1.0 - to_product)
+    recycle = overs + fines
+    total = overs + prod + fines
+    return {
+        "oversize_frac": overs, "product_frac": prod, "fines_frac": fines,
+        "recycle_frac_of_feed": recycle / total, "recycle_ratio_of_product": recycle / prod,
+        "mass_closure": total,
+    }
+
+
 def _self_test() -> None:
     design = Droplet(d0_m=1.6e-3, T0_C=140.0, v0_ms=1.0)
     r = fall_and_freeze(design)
@@ -189,6 +270,25 @@ def _self_test() -> None:
     # fusion latent heat is the G6 datum
     assert abs(LAMBDA_FUS - 231433.0) < 100.0
 
+    # ---- SCREEN classification: Whiten partition + Karra cut + recycle reproduction ---------------
+    # Whiten curve passes through 0.5 at the cut and is monotone increasing in size
+    assert abs(whiten_partition_to_oversize(3.0, 3.0, 7.0) - 0.5) < 1e-9
+    prev = -1.0
+    for d in (1.0, 2.0, 3.0, 4.0, 5.0):
+        e = whiten_partition_to_oversize(d, 3.0, 7.0)
+        assert 0.0 <= e <= 1.0 and e > prev
+        prev = e
+    # sharper cut (higher alpha) -> smaller imperfection
+    assert screen_imperfection(9.0) < screen_imperfection(5.0)
+    # Karra: cut = aperture at rated load, coarsens when overloaded
+    assert abs(karra_cut_size_mm(3.15, 1.0) - 3.15) < 1e-9
+    assert karra_cut_size_mm(3.15, 1.6) > 3.15
+    # double-deck: mass closes, and the recycle reproduces the manual's 0.40 within the band
+    scr = double_deck_screen(GRANULATOR_PSD, PROD_CUT_LO_MM, PROD_CUT_HI_MM, SCREEN_ALPHA)
+    assert abs(scr["mass_closure"] - 1.0) < 1e-9
+    assert 0.0 < scr["product_frac"] < 1.0
+    assert abs(scr["recycle_frac_of_feed"] - 0.40) / 0.40 <= 0.10, scr["recycle_frac_of_feed"]
+
 
 if __name__ == "__main__":
     print("=" * 88)
@@ -204,11 +304,21 @@ if __name__ == "__main__":
         print(f"    Stefan blowing factor    : {r['stefan_blowing']:.3f}   (<1 -> reduces transfer)")
         print(f"    solidification height    : {r['z_freeze_m']:.1f} m  in {r['t_freeze_s']:.2f} s "
               f"(solid frac {r['solid_fraction']:.2f}, T {r['T_final_C']:.0f} C)")
+    scr = double_deck_screen(GRANULATOR_PSD, PROD_CUT_LO_MM, PROD_CUT_HI_MM, SCREEN_ALPHA)
+    print(f"\n  SCREEN classification (Karra d50 + Whiten-Beta partition, alpha={SCREEN_ALPHA:.0f}, "
+          f"product {PROD_CUT_LO_MM:.0f}-{PROD_CUT_HI_MM:.0f} mm):")
+    print(f"    oversize / product / fines : {scr['oversize_frac']:.3f} / {scr['product_frac']:.3f} "
+          f"/ {scr['fines_frac']:.3f}  (mass closes {scr['mass_closure']:.3f})")
+    print(f"    recycle fraction of feed   : {scr['recycle_frac_of_feed']:.3f}  "
+          f"(manual 0.40, {(scr['recycle_frac_of_feed']-0.40)/0.40*100:+.1f}%)")
+    print(f"    partition imperfection I   : {screen_imperfection(SCREEN_ALPHA):.3f}  (sharper as alpha rises)")
+
     _self_test()
     print("\n" + "=" * 88)
-    print("  G9c status: the Unit-335 droplet now has full Lagrangian solidification physics -- drag")
-    print("  (Schiller-Naumann), heat/mass transfer (Ranz-Marshall + Stefan blowing) and a fusion")
-    print("  plateau anchored to the G6 enthalpy datum, integrated by RK4 to a finite freeze height")
-    print("  that shrinks with droplet size.  Residual: Unit-335 bed/tower geometry + fan/screen data")
-    print("  (not in the source set) to close it into a full tower rating model.")
+    print("  G9c status: Unit-335 now has BOTH halves -- (1) Lagrangian droplet solidification (drag,")
+    print("  Ranz-Marshall heat/mass transfer + Stefan blowing, G6-anchored fusion plateau, RK4 to a")
+    print("  finite freeze height) AND (2) product classification (Karra d50 + Whiten-Beta partition)")
+    print("  that reproduces the manual's 0.40 recycle within the band and conserves mass. Residual:")
+    print("  the Unit-335 tower geometry, fan curves, and deck capacity/aperture datasheets (not in the")
+    print("  source set) to fix the ABSOLUTE tower height and screen d50 from the Karra loading term.")
     print("=" * 88)

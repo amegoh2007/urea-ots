@@ -55,6 +55,18 @@ import thermo_extended_uniquac as uni
 
 CP_WATER_KJKGK = 4.18          # liquid cooling-water specific heat [kJ/kg/K]
 TOL_REL = 0.10                 # 10% acceptance band (2026 task directive)
+G_ACCEL = 9.80665              # m/s2
+
+# Concentrated urea-melt transport properties (~95-98 wt% at 130-140 C).  These are LITERATURE values
+# (Ullmann's "Urea"; molten-urea property compilations) -- the per-effect vendor datasheets are still
+# not in the source set, so the Chun-Seban coefficient below is first-principles in FORM but carries
+# the property uncertainty of these estimates (declared, not hidden).
+MELT = {
+    "rho_kgm3": 1240.0,        # melt density (matches gap_g9c_droplet RHO_UREA)
+    "mu_pas": 2.5e-3,          # dynamic viscosity of ~95% urea melt at ~135 C
+    "k_wmk": 0.55,             # thermal conductivity of the melt
+    "cp_jkgk": 2200.0,         # specific heat of the melt
+}
 
 
 def lmtd(dt1: float, dt2: float) -> float:
@@ -154,6 +166,77 @@ def evaporator_effect(feed_kgh: float, w_urea_feed: float, w_urea_prod: float,
     }
 
 
+# --------------------------------------------------------------------------------------------------
+# FALLING-FILM heat-transfer coefficient -- Chun & Seban (1971), per Gaps Closure 2 methodology
+# --------------------------------------------------------------------------------------------------
+def falling_film_h(gamma_kg_ms: float, rho: float, mu: float, k: float, cp: float,
+                   g: float = G_ACCEL) -> dict:
+    """Local evaporative falling-film coefficient h [W/m2/K]  (Chun & Seban, IJHMT 1971).
+
+    Re = 4 Gamma / mu  (Gamma = liquid mass flow per unit wetted perimeter, kg/m/s).
+    Characteristic length L* = (nu^2 / g)^(1/3); film Nusselt Nu = h L* / k.
+        wavy-laminar :  Nu = 0.821 Re^-0.22
+        turbulent    :  Nu = 3.8e-3 Re^0.4 Pr^0.65
+        transition   :  Re_tr = 5840 Pr^-1.06
+    This is exactly the doc's h = 0.821 (nu^2/(g k^3))^(-1/3) Re^-0.22 form, since
+    (nu^2/(g k^3))^(-1/3) = k / (nu^2/g)^(1/3) = k / L*.
+    """
+    nu = mu / rho
+    Pr = mu * cp / k
+    Re = 4.0 * gamma_kg_ms / mu
+    l_star = (nu * nu / g) ** (1.0 / 3.0)
+    re_tr = 5840.0 * Pr ** (-1.06)
+    nu_lam = 0.821 * Re ** (-0.22)
+    nu_turb = 3.8e-3 * Re ** 0.4 * Pr ** 0.65
+    turbulent = Re > re_tr
+    nu_film = nu_turb if turbulent else nu_lam
+    return {
+        "Re": Re, "Pr": Pr, "Re_transition": re_tr, "regime": "turbulent" if turbulent else "wavy-laminar",
+        "Nu_film": nu_film, "L_star_m": l_star, "h_wm2k": nu_film * k / l_star,
+    }
+
+
+def falling_film_overall_U(h_process: float, h_steam_wm2k: float = 8000.0,
+                           wall_k_wmk: float = 15.0, wall_t_m: float = 0.0016) -> float:
+    """Overall U [W/m2/K] as series resistances: process film + tube wall + condensing LP steam.
+
+    h_steam ~ 6000-10000 for LP steam condensing on a vertical tube; wall = 1.6 mm 1.4571 (k~15);
+    fouling omitted (clean design).  Returns U for the falling-film evaporator tube.
+    """
+    return 1.0 / (1.0 / h_process + wall_t_m / wall_k_wmk + 1.0 / h_steam_wm2k)
+
+
+def gamma_from_flow(liquid_kgh: float, n_tubes: int, tube_id_mm: float) -> float:
+    """Liquid loading per wetted perimeter Gamma [kg/m/s] for a falling film inside n vertical tubes."""
+    perimeter_m = n_tubes * math.pi * (tube_id_mm / 1000.0)
+    return (liquid_kgh / 3600.0) / perimeter_m
+
+
+# --------------------------------------------------------------------------------------------------
+# NILE / HELWAN cooling-water boundary -- locks the condensing floor & ejector suction lower bound
+# --------------------------------------------------------------------------------------------------
+# Gaps Closure 2 docx (Helwan meteorology + Nile thermal-discharge regulation): summer air to 46.7 C,
+# Nile intake ~30-31 C, environmental limit +3 C on the return -> CW band 31-34 C.  With a standard
+# condenser approach this floors the achievable condensing temperature at ~40 C, which in turn floors
+# the ejector-suction pressure at the vapour pressure of the condensing mixture at 40 C.
+NILE_CW = {
+    "intake_C": 31.0, "discharge_rise_max_C": 3.0, "return_max_C": 34.0,
+    "min_condensing_C": 40.0,
+    "source": "Gaps Closure 2 .docx (Helwan climate + Nile thermal-discharge limit)",
+}
+
+
+def suction_pressure_floor_bara(t_condensing_C: float = None) -> float:
+    """Lower bound on the 324F002 ejector suction pressure = Psat of water at the condensing floor.
+
+    Non-condensables (NH3/CO2) and the condenser approach raise the real suction pressure above this
+    pure-water floor, so the operating suction (0.20 bar) must lie ABOVE it -- a physical-consistency
+    bound the model can now enforce (the sim cannot converge on an impossible vacuum).
+    """
+    t = NILE_CW["min_condensing_C"] if t_condensing_C is None else t_condensing_C
+    return iapws_if97.psat_bara(t)
+
+
 # plant urea-water VLE design points (02 FUNDAMENTALS; validated in G2).  (w_urea, T_C, P_bara, label)
 PLANT_VLE = [
     (0.943, 130.0, 0.33, "evap-I 324F001"),
@@ -193,6 +276,33 @@ def _self_test() -> None:
     eff_mild = evaporator_effect(UREA_KGH / 0.943, 0.943, 0.965, 0.13, 130.0, 4.1)
     assert eff2["vapour_kgh"] > eff_mild["vapour_kgh"]
 
+    # ---- CHUN-SEBAN falling-film h: regime transition + physical band + overall U ----------------
+    prev_re = -1.0
+    saw_lam = saw_turb = False
+    for gamma in (0.05, 0.15, 0.30, 0.45, 0.60):
+        r = falling_film_h(gamma, MELT["rho_kgm3"], MELT["mu_pas"], MELT["k_wmk"], MELT["cp_jkgk"])
+        assert r["Re"] > prev_re                                     # Re rises with loading
+        prev_re = r["Re"]
+        assert 500.0 <= r["h_wm2k"] <= 5000.0, (gamma, r["h_wm2k"])  # physical film band
+        saw_lam |= r["regime"] == "wavy-laminar"
+        saw_turb |= r["regime"] == "turbulent"
+    assert saw_lam and saw_turb                                      # both regimes exercised
+    # overall U from the film (not an assumed constant) lands in the falling-film band
+    h_mid = falling_film_h(0.30, MELT["rho_kgm3"], MELT["mu_pas"], MELT["k_wmk"], MELT["cp_jkgk"])["h_wm2k"]
+    u_cs = falling_film_overall_U(h_mid)
+    assert 600.0 <= u_cs <= 1600.0, u_cs
+    # and it can drive the effect rating in place of the assumed U=1000
+    eff_cs = evaporator_effect(UREA_KGH / 0.943, 0.943, 0.977, 0.13, 130.0, 4.1, U_wm2k=u_cs)
+    assert eff_cs["area_m2"] > 0.0
+
+    # ---- NILE cooling-water boundary: consistent floors --------------------------------------------
+    assert abs(NILE_CW["return_max_C"] - (NILE_CW["intake_C"] + NILE_CW["discharge_rise_max_C"])) < 1e-9
+    assert NILE_CW["min_condensing_C"] > NILE_CW["return_max_C"]          # positive approach
+    p_floor = suction_pressure_floor_bara()                              # Psat(40 C) ~ 0.074 bar
+    assert 0.05 < p_floor < 0.12
+    assert E002["shell_P_out_bara"] > p_floor                            # operating vacuum is feasible
+    assert 0.20 > p_floor                                                # F002 suction above the floor
+
 
 if __name__ == "__main__":
     print("=" * 88)
@@ -226,11 +336,30 @@ if __name__ == "__main__":
     print(f"    LP steam Tsat / req. U*A  : {eff2['t_steam_C']:.1f} C  /  {eff2['ua_kw_k']:.0f} kW/K "
           f"(A ~ {eff2['area_m2']:.0f} m2 at U=1000)")
 
+    print("\n  CHUN-SEBAN falling-film coefficient (Gaps Closure 2 methodology; melt props literature):")
+    print("    Gamma kg/m/s   Re     regime         h W/m2K")
+    for gamma in (0.05, 0.15, 0.30, 0.45, 0.60):
+        r = falling_film_h(gamma, MELT["rho_kgm3"], MELT["mu_pas"], MELT["k_wmk"], MELT["cp_jkgk"])
+        print(f"      {gamma:.2f}       {r['Re']:6.0f}  {r['regime']:13s}  {r['h_wm2k']:5.0f}")
+    h_mid = falling_film_h(0.30, MELT["rho_kgm3"], MELT["mu_pas"], MELT["k_wmk"], MELT["cp_jkgk"])["h_wm2k"]
+    u_cs = falling_film_overall_U(h_mid)
+    print(f"    overall U (film {h_mid:.0f} + wall + steam 8000) = {u_cs:.0f} W/m2K  "
+          f"(supersedes the assumed U=1000; Pr={falling_film_h(0.30, MELT['rho_kgm3'], MELT['mu_pas'], MELT['k_wmk'], MELT['cp_jkgk'])['Pr']:.1f})")
+
+    print("\n  NILE / HELWAN cooling-water boundary (Gaps Closure 2 docx):")
+    p_floor = suction_pressure_floor_bara()
+    print(f"    CW band {NILE_CW['intake_C']:.0f}-{NILE_CW['return_max_C']:.0f} C (+{NILE_CW['discharge_rise_max_C']:.0f} C limit)"
+          f" -> condensing floor {NILE_CW['min_condensing_C']:.0f} C")
+    print(f"    -> ejector suction floor = Psat(40 C) = {p_floor:.3f} bar; operating 0.20 bar sits "
+          f"above it ({(0.20-p_floor)/p_floor*100:+.0f}%), so the vacuum is physically feasible")
+
     _self_test()
     print("\n" + "=" * 88)
-    print("  G9 status: the vacuum condenser now has a datasheet-validated U-A-LMTD rating (two")
-    print("  independent duty closures on 324E002, U ~ 640 W/m2K) and the urea evaporator now has a")
-    print("  closed mass/component/energy balance with an intrinsic boiling-point elevation from the")
-    print("  G2-validated VLE.  Residual: the per-effect evaporator U*A datasheets (only the condenser")
-    print("  sheet 324E002 is in the source set) to turn the design-U rating into a rating-mode model.")
+    print("  G9 status: the vacuum condenser has a datasheet-validated U-A-LMTD rating (324E002, two")
+    print("  duty closures, U ~ 640 W/m2K); the urea evaporator has a closed mass/energy balance with")
+    print("  intrinsic boiling-point elevation; the per-effect U is now FIRST-PRINCIPLES from Chun-Seban")
+    print("  (regime-aware film h -> overall U ~ 1150, superseding the assumed 1000); and the Nile CW")
+    print("  boundary floors the condensing T (40 C) and the ejector suction pressure, so the vacuum")
+    print("  system cannot converge on an impossible level. Residual: measured melt transport props and")
+    print("  per-effect tube counts (narrowed from 'no rating model') to fix the ABSOLUTE area/U.")
     print("=" * 88)
