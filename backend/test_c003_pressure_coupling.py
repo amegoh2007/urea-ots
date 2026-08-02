@@ -9,6 +9,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from c003_pressure_coupling import c003_pressure_target_bara  # noqa: E402
 
+import main  # noqa: E402
+
 
 def test_design_point_closes_exactly():
     assert c003_pressure_target_bara(1.0, 1.0, 3.2) == pytest.approx(4.1, abs=1e-12)
@@ -60,3 +62,77 @@ def test_downstream_backpressure_is_monotonic():
 def test_invalid_inputs_raise_value_error(args):
     with pytest.raises(ValueError):
         c003_pressure_target_bara(*args)
+
+
+def _one_step_from_fresh(lv_open_pct=46.1, downstream_pressure_bara=3.2):
+    main.state = main.State()
+    state = main.state
+    state.LIC_322501["mode"] = "MAN"
+    state.LIC_322501["op"] = lv_open_pct
+    state.r3232_d001_P = downstream_pressure_bara
+    pressure_before = state.r323_c003_P
+    packet = main.step_sim(0.1)
+    return pressure_before, state.r323_c003_P, packet
+
+
+def test_runtime_normalizes_design_lv_flow_to_one(monkeypatch):
+    captured = []
+    real_target = main.c003_pressure_target_bara
+
+    def capture(lv_flow_ratio, overhead_flow_ratio, downstream_pressure_bara):
+        captured.append((lv_flow_ratio, overhead_flow_ratio, downstream_pressure_bara))
+        return real_target(lv_flow_ratio, overhead_flow_ratio, downstream_pressure_bara)
+
+    monkeypatch.setattr(main, "c003_pressure_target_bara", capture)
+    main.state = main.State()
+    main.step_sim(0.1)
+    assert captured
+    assert captured[0][0] == pytest.approx(1.0, abs=1e-12)
+
+
+def test_opening_and_closing_lv_give_prompt_signed_pressure_response():
+    p0_open, p_open, _ = _one_step_from_fresh(lv_open_pct=60.0)
+    p0_close, p_close, _ = _one_step_from_fresh(lv_open_pct=30.0)
+    assert p_open > p0_open
+    assert p_close < p0_close
+
+
+def test_runtime_consumes_beginning_of_substep_e003_backpressure():
+    _, p_low, _ = _one_step_from_fresh(downstream_pressure_bara=3.0)
+    _, p_design, _ = _one_step_from_fresh(downstream_pressure_bara=3.2)
+    _, p_high, _ = _one_step_from_fresh(downstream_pressure_bara=3.5)
+    assert p_low < p_design < p_high
+
+
+def test_zero_reboiler_overhead_still_uses_prompt_flash_load():
+    main.state = main.State()
+    state = main.state
+    state.LIC_322501["mode"] = "MAN"
+    state.LIC_322501["op"] = main.LV322501_OPEN_DES
+    state.PIC_329202["mode"] = "MAN"
+    state.PIC_329202["op"] = 0.0
+    state.TIC_323007["mode"] = "MAN"
+    pressure_before = state.r323_c003_P
+
+    packet = main.step_sim(0.1)
+
+    assert packet["RECIRC_323"]["C003"]["v305_th"] == 0.0
+    target = c003_pressure_target_bara(1.0, 0.0, 3.2)
+    expected = pressure_before + (target - pressure_before) / main.R323_C003_P_TAU_S * 0.1
+    assert state.r323_c003_P == pytest.approx(expected, abs=1e-10)
+
+
+def _advance_opening(dt, seconds=2.0):
+    main.state = main.State()
+    state = main.state
+    state.LIC_322501["mode"] = "MAN"
+    state.LIC_322501["op"] = 60.0
+    for _ in range(round(seconds / dt)):
+        main.step_sim(dt)
+    return state.r323_c003_P
+
+
+def test_opening_response_is_consistent_across_supported_steps():
+    fine = _advance_opening(0.1)
+    coarse = _advance_opening(main.STEP_CAP)
+    assert coarse == pytest.approx(fine, abs=2.0e-4)

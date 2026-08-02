@@ -37,6 +37,7 @@ import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-
 from controllers import Controller
 import steam_system
 from steam_system import SteamState, step_steam  # MP/LP steam-header dynamics (quarantined)
+from c003_pressure_coupling import c003_pressure_target_bara
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
@@ -851,14 +852,11 @@ R323_E002_PCHEST_DES = R323_E002_OP_DES / 100.0 * R323_P_STEAM_SUP   # 3.96 bar 
 R323_C003_M_TAU_S   = 120.0                     # s, liquid residence -> holdup sizing
 R323_C003_LVL_SP    = 60.0                      # %, LIC-323501 level setpoint
 R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
-# Dynamic column pressure PT-323201 (hydraulic coupling to LV-322501 via top-vapour flow 305).
-#   First-order relaxation of P_C003 toward a flow-scaled target so opening LV-322501 (drain_kgh up
-#   -> m_feed_323 up -> m_305 up) forward-accumulates head:
-#     P_tgt = P_des + K_P * (m_305 - m_305,des) / m_305,des      [bar a]
-#     dP/dt = (P_tgt - P) / tau_P
-#   Seed-exact: at design m_305 == R323_M305_DES => P_tgt == R323_C003_P_BARA => dP/dt == 0 (pin invariant).
-R323_C003_P_GAIN    = 1.20                      # bar a per unit fractional top-vapour excess
-R323_C003_P_TAU_S   = 90.0                      # s, column vapour-space pressure relaxation
+# Dynamic PT-323201 pressure response. The pure target helper separates prompt flash gas from
+# LV-322501 (`drain_kgh`) from the remaining live overhead/reboiler load (`m_305`), consumes the
+# beginning-of-substep 323E003/323D001 pressure, and closes exactly at the PFD design point.
+# The retained 90 s lag is a simulator dynamic calibration, not a datasheet-derived gas inventory.
+R323_C003_P_TAU_S = 90.0
 
 # --- Stage 2: Flash Tank 323F004 (adiabatic flash 4.1 -> 1.13 bar a, -> 106 C)
 R323_F004_P_BARA    = 1.13                      # bar a, flash pressure
@@ -4373,7 +4371,8 @@ class State:
                              "sp": SYN_P_MAX_BARA + 2.0 * (CO2_P_DES_BARA - SYN_P_DES_BARA),
                              "pv": CO2_P_DES_BARA, "pv_prev": CO2_P_DES_BARA}
         # HP Stripper 322E001 bottom-sump level (LT-322501) + LIC-322501 -> LV-322501.
-        #   AUTO holds the design level (50 %) at the design opening (82 %); direct-acting.
+        #   AUTO holds the design level (50 %) at the field-calibrated design opening (46.1 %);
+        #   direct-acting.
         self.strip_level = STRIP_LEVEL_SP_DES
         self.LIC_322501  = {"mode": "AUTO", "op": LV322501_OPEN_DES,
                             "sp": STRIP_LEVEL_SP_DES, "pv": STRIP_LEVEL_SP_DES, "e_prev": 0.0}
@@ -5713,10 +5712,16 @@ def step_sim(dt: float) -> dict:
     xi_c003    = sol_biuret_xi("C003", M_c003_pre, s.w_c003, s.r323_c003_T)
     s.w_c003   = sol_advance(s.w_c003, M_c003_pre, s.r323_c003_M, m_feed_323, w_feed_323,
                              m_305, y_305, m_314, xi_c003, dt)
-    #  PT-323201 hydraulic coupling: forward pressure accumulation from live top-vapour flow (305).
-    #  Opening LV-322501 raises drain_kgh -> m_feed_323 -> m_305 > design => P relaxes UP toward target.
-    p_c003_tgt = R323_C003_P_BARA + R323_C003_P_GAIN * (m_305 - R323_M305_DES) / R323_M305_DES
-    s.r323_c003_P = clamp(s.r323_c003_P + (p_c003_tgt - s.r323_c003_P) / R323_C003_P_TAU_S * dt, 1.0, 12.0)
+    # PT-323201 reduced-order gas-load coupling. `s.r3232_d001_P` is the beginning-of-substep
+    # E003/D001 pressure; that state is advanced later, preserving the explicit tear.
+    r_lv_c003 = drain_kgh / STRIP_BOT_DES_KGH
+    r_305_c003 = m_305 / R323_M305_DES
+    p_c003_tgt = c003_pressure_target_bara(r_lv_c003, r_305_c003, s.r3232_d001_P)
+    s.r323_c003_P = clamp(
+        s.r323_c003_P + (p_c003_tgt - s.r323_c003_P) / R323_C003_P_TAU_S * dt,
+        1.0,
+        12.0,
+    )
 
     # ---- Stage 2: Flash Tank 323F004  (adiabatic letdown 4.1 -> 1.13 bar, hold 106 C) --------
     # AUDIT F-1 — TRUE isenthalpic flash (was a frozen split fraction of m_314, so a ±30 °C swing

@@ -218,10 +218,11 @@ def t2_valves():
             f"{rows[0]['co2_fy']}->{rows[-1]['co2_fy']}")
 
     # 2d LV-322501 stripper-bottoms drain
-    print("\n  2d  LV-322501 stripper-bottoms drain  (LIC-322501 MAN; design op 82 %)")
+    print(f"\n  2d  LV-322501 stripper-bottoms drain  "
+          f"(LIC-322501 MAN; design op {main.LV322501_OPEN_DES:.1f} %)")
     print(f"   {'LV op':>7} | {'LI501':>6} {'drain':>6} | {'tt004':>6}")
     rows = []
-    for v in [50.0, 65.0, 82.0, 100.0]:
+    for v in [30.0, main.LV322501_OPEN_DES, 60.0, 90.0]:
         def pre(s, v=v):
             s.LIC_322501["mode"] = "MAN"; s.LIC_322501["op"] = v
         def tick(s, v=v):
