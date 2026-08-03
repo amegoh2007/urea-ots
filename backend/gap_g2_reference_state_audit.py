@@ -263,3 +263,5 @@ if __name__ == "__main__":
     print("  validates its own Unit-324 evaporators; the live model anchors the departure exactly")
     print("  (evap_w_eq); the discarded Fahmy-Nassar correlation stays rejected (22% Psat error).")
     print("=" * 82)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

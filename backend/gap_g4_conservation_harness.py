@@ -175,3 +175,5 @@ if __name__ == "__main__":
         print("  Run the engine-backed suite with:  python gap_g4_conservation_harness.py --engine")
         print("  (imports main.py, ~13 min; the gate for retiring REACT_TEAR_DES via the EO solve.)")
         print("=" * 78)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

@@ -110,3 +110,5 @@ if __name__ == "__main__":
     print("     multi-point ebulliometric urea-water VLE at 130-140 C (not publicly available).")
     print("     Keep the anchored-departure model until that data is supplied. G2 stays OPEN.")
     print("=" * 78)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

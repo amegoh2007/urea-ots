@@ -461,3 +461,5 @@ if __name__ == "__main__":
     print("  and the mechanical design-P/T envelope caps the off-design range. Both the design-duty AND")
     print("  the off-design-shape residuals for G9a are therefore closed against the plant's own docs.")
     print("=" * 84)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

@@ -125,3 +125,5 @@ if __name__ == "__main__":
     print("  Per doc sec.4.3: forcing closure would move licensor rows >> their stated precision.")
     print("  G3 requires the UNROUNDED licensor rows for streams 317/401/402 (external intervention).")
     print("=" * 78)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

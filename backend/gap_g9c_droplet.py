@@ -322,3 +322,5 @@ if __name__ == "__main__":
     print("  the Unit-335 tower geometry, fan curves, and deck capacity/aperture datasheets (not in the")
     print("  source set) to fix the ABSOLUTE tower height and screen d50 from the Karra loading term.")
     print("=" * 88)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

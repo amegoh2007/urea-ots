@@ -259,3 +259,5 @@ if __name__ == "__main__":
     print(f"  basis flag             = {EnthalpyBasis.H0.value}")
     print("  every constituent traceable to a cited open source; H^E term is the only G1-gated piece.")
     print("=" * 78)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

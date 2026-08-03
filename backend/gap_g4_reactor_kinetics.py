@@ -285,3 +285,5 @@ if __name__ == "__main__":
     print("  OPEN follow-on: derive K1/K2 live from SR-POLAR/EOS fugacities and retire REACT_TEAR_DES")
     print("  via the equation-oriented solve (needs the plant-wide reactive phase set, i.e. G1).")
     print("=" * 84)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

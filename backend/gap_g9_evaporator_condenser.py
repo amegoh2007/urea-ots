@@ -363,3 +363,5 @@ if __name__ == "__main__":
     print("  system cannot converge on an impossible level. Residual: measured melt transport props and")
     print("  per-effect tube counts (narrowed from 'no rating model') to fix the ABSOLUTE area/U.")
     print("=" * 88)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.

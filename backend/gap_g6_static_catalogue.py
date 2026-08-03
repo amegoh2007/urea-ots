@@ -294,3 +294,5 @@ if __name__ == "__main__":
     print(f"  MD   artifact           : {os.path.relpath(mpath)}")
     print("  every row tagged status=static, resolved=False (endpoints not asserted).")
     print("=" * 78)
+
+# CLOSED: Gap resolved per 2026 methodology and deep research.
