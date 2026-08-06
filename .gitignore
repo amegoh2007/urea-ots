@@ -23,7 +23,10 @@ New folder/
 
 # --- python ---
 __pycache__/
-.boot_pin_cache.json
+# NOTE: backend/.boot_pin_cache.json is intentionally TRACKED (shipped) so fresh clones / operator
+#       launches skip the ~20-30 s design-pin settle. It auto-regenerates on any edit to the keyed
+#       source files (main.py/steam_system.py/reactor.py/controllers.py/thermo_extended_uniquac.py);
+#       regenerate + commit it after such edits, else the first launch eats one settle (still correct).
 *.pyc
 *.pyo
 *.pyd
