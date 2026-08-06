@@ -92,7 +92,7 @@ P_LP_MIN_BARA = 3.5
 #   a PI vent(+)/make-up(-) flow that drives the header to setpoint.  Proportional term is zero and
 #   the integral starts at zero at the design pressure, so the calibrated design balance -- and the
 #   Tsat(P_LP)=146.3 coupling to the HPCC -- is bit-for-bit unchanged.
-P_LP_SP_BARA = 5.01325
+P_LP_SP_BARA = 4.4    # == P_LP_BARA / HPCC_STEAM_P_BARA design (bar a); eB==0 at P_LP=4.4 -> design-neutral. (Was 5.01325 after the c503701 PID retune -- a 4-barg->bar-a slip that drove the header to ~5.0 and pegged the PIC-329207 trio off its 4.4 pin.)
 K_PIC_LP     = 8.0      # proportional vent/make-up gain   [ (kg/s)/bar ]
 KI_PIC_LP    = 0.4      # integral vent/make-up gain        [ (kg/s)/(bar.s) ]
 M_PIC_CLAMP  = 10.0     # anti-windup clamp on the integral contribution [ kg/s ]
@@ -480,8 +480,10 @@ if __name__ == "__main__":
     print(f"      P_MP@19.7 {'PASS' if ok_hp else 'FAIL'} | "
           f"P_9@9.0 {'PASS' if ok_9 else 'FAIL'} | P_LP@4.4 {'PASS' if ok_lp else 'FAIL'}")
 
-    # 2. HP supply crash -> P_MP collapses (stripper steam starvation)
+    # 2. HP supply crash -> P_MP collapses (stripper steam starvation).
+    #    PIC-329204 must be in MAN, else the AUTO loop correctly rejects the valve poke and holds P_MP.
     st2 = SteamState(); settle(st2, 2000)
+    st2.pic204_mode = "MAN"
     st2.valve_supply_pct = 0.0
     settle(st2, 2000)
     print(f"\n  [2] PV-329204 -> 0%%:  P_MP={st2.P_MP:.3f} (expect << 19.7)  "
@@ -489,11 +491,11 @@ if __name__ == "__main__":
 
     # 3. 9-bar over-pressure disturbance -> split-range opens 205B let-down, drives P_9 back to SP
     st3 = SteamState(); settle(st3, 2000)
-    st3.P_9 = 9.6                                                # inject over-pressure
+    st3.P_9 = 10.5                                               # inject over-pressure past the split DB (err9=1.5 > DB_9) so 205B let-down must open
     step_steam(st3, DT, M_STRIP_DES, M_HPCC_DES)                 # one tick: split-range reacts
     ld_open = st3.valve_letdown_pct
     settle(st3, 1200)                                           # recover to SP
-    print(f"\n  [3] 9-bar over-P (P_9<-9.6):  205B opened to {ld_open:.1f}%%  "
+    print(f"\n  [3] 9-bar over-P (P_9<-10.5):  205B opened to {ld_open:.1f}%%  "
           f"-> recovered P_9={st3.P_9:.3f} (9.0)  "
           f"{'PASS' if ld_open > 0.0 and abs(st3.P_9 - P_MP_BARA) < 0.10 else 'FAIL'}")
     ok_split = ld_open > 0.0 and abs(st3.P_9 - P_MP_BARA) < 0.10
