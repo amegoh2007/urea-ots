@@ -5285,11 +5285,24 @@ def step_sim(dt: float) -> dict:
     dP_react_live = dP_des_react * (REACT_OVERFLOW_RHO / max(rho_live_react, 1e-6)) * (m_react_live / max(m_react_des, 1e-6))**2
     react["P_bara"] = hpcc["P_bub"] + dP_react_live
     
-    # Dynamic pressure drop for Reactor Off-Gas
+    # Dynamic Darcy-Weisbach pressure drop for Reactor Off-Gas: dP scales with m^2 / rho.
+    # PARITY FIX (check-#2, stream-composition -> D/S pressure): the two sibling liquid lines above
+    #   (stripper 5143, reactor 5285) already carry the (rho_des/rho_live) Darcy density factor, but this
+    #   GAS line was m^2-only -- a change in off-gas composition (MW) or temperature did NOT move its D/S
+    #   pressure drop.  rho of the compressible off-gas is ideal-gas: rho = P*MW/(R*T), so at a common line
+    #   pressure  rho_des/rho_live = (MW_des/MW_live)*(T_live/T_des).  Density anchored to the reactor
+    #   off-gas DESIGN vector (REACT_OFFGAS_DES) and REACT_OFFGAS_T_C: at the seed react["offgas_kmolh"]
+    #   == REACT_OFFGAS_DES and s.react_T_offgas == REACT_OFFGAS_T_C -> rho_fac == 1.0 -> bit-exact pin.
     dP_des_og = REACT_OFFGAS_P_BARA - SYN_P_DES_BARA
     m_og_live = max(sum(react["offgas_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
     m_og_des  = max(sum(SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
-    react["P_offgas"] = s.p_syn_bara + dP_des_og * (m_og_live / m_og_des)**2
+    _n_og_live = max(sum(react["offgas_kmolh"].get(k, 0.0) for k in MW_COMP), 1e-9)
+    _n_og_des  = max(sum(REACT_OFFGAS_DES.get(k, 0.0) for k in MW_COMP), 1e-9)
+    _mw_og_live = m_og_live / _n_og_live                                          # live off-gas mean MW
+    _mw_og_des  = sum(REACT_OFFGAS_DES.get(k, 0.0) * MW_COMP[k] for k in MW_COMP) / _n_og_des
+    _rho_fac_og = (_mw_og_des / max(_mw_og_live, 1e-9)) \
+                  * ((s.react_T_offgas + 273.15) / (REACT_OFFGAS_T_C + 273.15))   # = rho_des/rho_live (ideal gas)
+    react["P_offgas"] = s.p_syn_bara + dP_des_og * _rho_fac_og * (m_og_live / m_og_des)**2
     
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
