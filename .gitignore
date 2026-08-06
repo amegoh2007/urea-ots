@@ -45,9 +45,6 @@ desktop.ini
 # --- worktrees ---
 .worktrees/
 
-# --- graph tooling output (regenerated) ---
-graphify-out/
-
 # --- obsidian vault (personal notes, nested folder) ---
 .obsidian/
 Urea Simulation/
