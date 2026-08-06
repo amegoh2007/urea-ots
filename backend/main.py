@@ -4850,7 +4850,13 @@ class State:
         self.TIC_328008 = {"mode": "AUTO", "op": R328_D001_M775_DES,
                            "sp": R328_D001_OFFGAS_H2O_DES, "pv": R328_D001_OFFGAS_H2O_DES,
                            "pv1": R328_D001_OFFGAS_H2O_DES, "pv2": R328_D001_OFFGAS_H2O_DES,
-                           "Kc": 120.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
+                           # Speed-up: Kc 120->240, Ti 250->110.  The inferential loop is heavily
+                           # over-damped (monotone, 0% overshoot across Kc up to 900 in an isolated
+                           # closed-loop step at the real dt=0.1); a +3 mol% SP step that never settled
+                           # in 1200 s at 120/250 now settles in ~574 s with no overshoot.  du==0 at the
+                           # design pin (pv==sp==pv1==pv2) for any Kc/Ti, so the boot fixed point and
+                           # HPCC_UA pin are byte-preserved.
+                           "Kc": 240.0, "Ti": 110.0, "Td": 0.0, "act": -1.0,
                            # (Update): The thermodynamic bug freezing T_737 to column pressure was fixed,
                            # granting FV-328404 massive physical authority over the offgas H2O content.
                            # The SP limits are now expanded to allow the operator full control.
