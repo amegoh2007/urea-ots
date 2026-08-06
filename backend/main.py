@@ -4443,23 +4443,23 @@ class State:
         self.TIC_323007 = {"mode": "AUTO", "op": R323_E002_PCHEST_DES,
                            "sp": R323_C003_T_SP_C, "pv": R323_C003_T_SP_C,
                            "pv1": R323_C003_T_SP_C, "pv2": R323_C003_T_SP_C,
-                           "Kc": 2.0, "Ti": 500.0, "Td": 0.0, "act": +1.0,  # official Td=-1 (deriv disabled) -> 0.0
+                           "Kc": 2.0, "Ti": 500.0, "Td": -1.0, "act": +1.0,  # official Td=-1 (deriv disabled) -> 0.0
                            "op_lo": 0.0, "op_hi": R323_P_STEAM_SUP, "sp_lo": 50.0, "sp_hi": 160.0}
         self.PIC_329202 = {"mode": "CAS", "op": R323_E002_OP_DES,
                            "sp": R323_E002_PCHEST_DES, "pv": R323_E002_PCHEST_DES,
                            "pv1": R323_E002_PCHEST_DES, "pv2": R323_E002_PCHEST_DES,
-                           "Kc": 8.0, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.65, "Ti": 30.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": R323_P_STEAM_SUP}
         # -- Stage 1/2 level loops -> LV-323501 / LV-323505 (DIRECT: level above SP -> drain more).
         self.LIC_323501 = {"mode": "AUTO", "op": R323_LV501_OP_DES,
                            "sp": R323_C003_LVL_SP, "pv": R323_C003_LVL_SP,
                            "pv1": R323_C003_LVL_SP, "pv2": R323_C003_LVL_SP,
-                           "Kc": 2.0, "Ti": 120.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.2, "Ti": 100.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         self.LIC_323505 = {"mode": "AUTO", "op": R323_LV505_OP_DES,
                            "sp": R323_F004_LVL_SP, "pv": R323_F004_LVL_SP,
                            "pv1": R323_F004_LVL_SP, "pv2": R323_F004_LVL_SP,
-                           "Kc": 2.0, "Ti": 120.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.0, "Ti": 100.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # -- Stage 3 cascade: TIC-323012 (master, hold 99 C) -> PIC-329208 (steam pressure to 323E010).
         self.TIC_323012 = {"mode": "AUTO", "op": R323_E010_PCHEST_DES,
@@ -4470,7 +4470,7 @@ class State:
         self.PIC_329208 = {"mode": "CAS", "op": R323_E010_OP_DES,
                            "sp": R323_E010_PCHEST_DES, "pv": R323_E010_PCHEST_DES,
                            "pv1": R323_E010_PCHEST_DES, "pv2": R323_E010_PCHEST_DES,
-                           "Kc": 8.0, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.2, "Ti": 60.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": R323_P_STEAM_SUP}
         # -- Stage 4 cascade: LIC-323507 (tank Comp I level, DIRECT) -> FIC-324401 -> FV-324401 (to 324).
         #    LIC-323507 faceplate missing: Ti = hydraulic settling time V_I/Q = 80/(92.75/1.3) ~ 4030 s.
@@ -4483,7 +4483,7 @@ class State:
         self.FIC_324401 = {"mode": "CAS", "op": R323_FV401_OP_DES,
                            "sp": R323_M324_DES / 1000.0, "pv": R323_M324_DES / 1000.0,
                            "pv1": R323_M324_DES / 1000.0, "pv2": R323_M324_DES / 1000.0,
-                           "Kc": 1.5, "Ti": 30.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.4, "Ti": 30.0, "Td": -1.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 150.0}
 
         # ==================================================================
@@ -4521,13 +4521,13 @@ class State:
                            # restored, but re-measuring K_p on the non-relay plant is the precondition.
                            # Velocity form, so pv == sp == pv1 still gives du == 0 and the design
                            # seed stays bit-exact at any Kc/Ti.
-                           "Kc": 0.02, "Ti": 360.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 1.5, "Ti": 320.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": R323_P_STEAM_SUP,
                            "sp_lo": 0.0, "sp_hi": 200.0}
         self.PIC_329203 = {"mode": "CAS", "op": R324_E001_OP_DES,
                            "sp": R324_E001_PCHEST_DES, "pv": R324_E001_PCHEST_DES,
                            "pv1": R324_E001_PCHEST_DES, "pv2": R324_E001_PCHEST_DES,
-                           "Kc": 1.5, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.3, "Ti": 75.0, "Td": -1.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0,
                            "sp_lo": 0.0, "sp_hi": R323_P_STEAM_SUP}
         # ---- Stage 2 steam : TIC-324002 (140 C) -> PIC-329212 (steam chest) ----
@@ -4535,13 +4535,13 @@ class State:
                            "sp": R324_E003_T_SP_C, "pv": R324_E003_T_SP_C,
                            "pv1": R324_E003_T_SP_C, "pv2": R324_E003_T_SP_C,
                            # TD-015 retune, same measurement and rule as TIC-324001 above.
-                           "Kc": 0.02, "Ti": 360.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 2.0, "Ti": 300.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": steam_system.P_MP_BARA,
                            "sp_lo": 0.0, "sp_hi": 200.0}
         self.PIC_329212 = {"mode": "CAS", "op": R324_E003_OP_DES,
                            "sp": R324_E003_PCHEST_DES, "pv": R324_E003_PCHEST_DES,
                            "pv1": R324_E003_PCHEST_DES, "pv2": R324_E003_PCHEST_DES,
-                           "Kc": 1.5, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.65, "Ti": 130.0, "Td": -1.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0,
                            "sp_lo": 0.0, "sp_hi": steam_system.P_MP_BARA}
         # ---- Vacuum : PIC-324202 (324F001) / PIC-324203 (324F003) false air ----
@@ -4549,19 +4549,19 @@ class State:
         self.PIC_324202 = {"mode": "AUTO", "op": R324_PV202_OP_DES,
                            "sp": R324_F001_P_BARA, "pv": R324_F001_P_BARA,
                            "pv1": R324_F001_P_BARA, "pv2": R324_F001_P_BARA,
-                           "Kc": 1.0, "Ti": 40.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 2.0, "Ti": 200.0, "Td": -1.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 1.0}
         self.PIC_324203 = {"mode": "AUTO", "op": R324_PV203_OP_DES,
                            "sp": R324_F003_P_BARA, "pv": R324_F003_P_BARA,
                            "pv1": R324_F003_P_BARA, "pv2": R324_F003_P_BARA,
-                           "Kc": 1.0, "Ti": 40.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 2.0, "Ti": 200.0, "Td": -1.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 1.0}
         # ---- LIC-324501 split-range 324F003 drain : LV-A forward / LV-B recycle
         #      DIRECT acting: level above SP -> drain more (op up).
         self.LIC_324501 = {"mode": "AUTO", "op": R324_LIC501_OP_DES,
                            "sp": R324_F003_LVL_SP, "pv": R324_F003_LVL_SP,
                            "pv1": R324_F003_LVL_SP, "pv2": R324_F003_LVL_SP,
-                           "Kc": 1.2, "Ti": 300.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 0.85, "Ti": 200.0, "Td": -1.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # ---- LIC-329505 324E001 steam-side condensate ("active controlled steam
         #      trap"): LV-329505 drains the shell.  DIRECT: level above SP -> drain
@@ -4569,7 +4569,7 @@ class State:
         self.LIC_329505 = {"mode": "AUTO", "op": R324_LV9505_OP_DES,
                            "sp": R324_E001_COND_LVL_SP, "pv": R324_E001_COND_LVL_SP,
                            "pv1": R324_E001_COND_LVL_SP, "pv2": R324_E001_COND_LVL_SP,
-                           "Kc": 2.50, "Ti": 60.0, "Td": 0.0, "Tf": 0.0, "Dz": 2.0, "act": -1.0,
+                           "Kc": 2.5, "Ti": 60.0, "Td": 0.0, "Tf": 0.0, "Dz": 2.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # ---- HIC-329605 324F002 motive LP steam hand valve (published HIC+HV 1:1)
         self.HIC_329605 = R324_HIC9605_DES_PCT       # % opening (operator hand valve, no controller mode)
@@ -4586,7 +4586,7 @@ class State:
         self.FIC_335405 = {"mode": "CAS", "op": R324_FIC405_OP_DES,
                            "sp": R324_M_UF_DES / 1000.0, "pv": R324_M_UF_DES / 1000.0,
                            "pv1": R324_M_UF_DES / 1000.0, "pv2": R324_M_UF_DES / 1000.0,
-                           "Kc": 1.0, "Ti": 15.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 100.0, "Ti": 15.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 1.0}
         # ---- Unit 324 lumped physical state (seeded at design fixed point) -----
         self.r324_e001_T = R324_E001_T_SP_C          # C  324E001/F001 melt temp
@@ -4667,7 +4667,7 @@ class State:
         self.PIC_323203 = {"mode": "AUTO", "op": R3232_E011_PV_OP_DES,
                            "sp": R3232_E011_P_BARA, "pv": R3232_E011_P_BARA,
                            "pv1": R3232_E011_P_BARA, "pv2": R3232_E011_P_BARA,
-                           "Kc": 5.0, "Ti": 40.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 0.6, "Ti": 100.0, "Td": -1.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.5, "sp_hi": 2.0}
         # LIC-323502 323D001 drum level (master) -> SIC-323901 pump-speed demand (DIRECT).
         self.LIC_323502 = {"mode": "AUTO", "op": R3232_P001_RPM_DES,
@@ -4679,12 +4679,12 @@ class State:
         self.SIC_323901 = {"mode": "CAS", "op": R3232_P001_RPM_DES,
                            "sp": R3232_P001_RPM_DES, "pv": R3232_P001_RPM_DES,
                            "pv1": R3232_P001_RPM_DES, "pv2": R3232_P001_RPM_DES,
-                           "Kc": 1.0, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 1.1, "Ti": 30.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # SIC-323902 323P001 standby pump speed (MAN 0, spare).
         self.SIC_323902 = {"mode": "MAN", "op": 0.0,
                            "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
-                           "Kc": 1.0, "Ti": 20.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 1.1, "Ti": 30.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # LIC-323503 323D011 flash-tank-condenser level tank (LT-323503) -> LV-323503 on the 323P008
         #   lean-carbamate pump discharge header.  DIRECT: level above SP -> op rises -> LV-503 opens ->
@@ -4706,7 +4706,7 @@ class State:
         self.LIC_323503 = {"mode": "AUTO", "op": R3232_LV503_OP_DES,
                            "sp": R3232_D011_LVL_SP, "pv": R3232_D011_LVL_SP,
                            "pv1": R3232_D011_LVL_SP, "pv2": R3232_D011_LVL_SP,
-                           "Kc": 1.80, "Ti": 120.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.8, "Ti": 120.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # TIC-323013 323E003 tempered-water SUPPLY temp (stream 1102, 55 °C) -> split-range TV-323013A/B.
         #   DIRECT: PV above SP -> op rises -> TV-A opens (cold make-up in) and TV-B closes (hot bypass
@@ -4715,7 +4715,7 @@ class State:
         self.TIC_323013 = {"mode": "CAS", "op": R3232_TV13_DES_PCT,
                            "sp": R3232_TW_SUP_T, "pv": R3232_TW_SUP_T,
                            "pv1": R3232_TW_SUP_T, "pv2": R3232_TW_SUP_T,
-                           "Kc": 3.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.0, "Ti": 100.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 45.0, "sp_hi": R3232_TW_RET_T}
         # FIC-323401 328D003 Comp-II flush 401 -> FV-323401 (REVERSE flow). VOLUMETRIC loop (m3/h):
         #   seeds = M401_DES/RHO_401 (PFD stream 734: 1534/992.4 = 1.546 m3/h -> PFD 1.5), sp_hi
@@ -4724,7 +4724,7 @@ class State:
         self.FIC_323401 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E011_M401_DES / RHO_401_KGM3, "pv": R3232_E011_M401_DES / RHO_401_KGM3,
                            "pv1": R3232_E011_M401_DES / RHO_401_KGM3, "pv2": R3232_E011_M401_DES / RHO_401_KGM3,
-                           "Kc": 1.2 * RHO_401_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.1 * RHO_401_KGM3, "Ti": 7.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 2000.0 / RHO_401_KGM3}
         # FIC-323402 328D003 Comp-II wash 402 -> FV-323402 (REVERSE flow).
         #   VOLUMETRIC loop (m3/h): the operator enters SP in m3/h, so the seeds are
@@ -4735,7 +4735,7 @@ class State:
         self.FIC_323402 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E011_M402_DES / RHO_791_KGM3, "pv": R3232_E011_M402_DES / RHO_791_KGM3,
                            "pv1": R3232_E011_M402_DES / RHO_791_KGM3, "pv2": R3232_E011_M402_DES / RHO_791_KGM3,
-                           "Kc": 0.5 * RHO_791_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: loop coef 1-Kc*a*g, a=0.0196. On the PFD-791 design (M402_DES=1534) g=1534/50=30.68, so Kc=0.5 -> coef 0.699, monotone with margin (the old 2931 basis gave g=58.6, coef 0.43; Kc=1.2 there gave coef -0.38 and rang).  Kc*RHO_791 holds the vol-loop coef equal.
+                           "Kc": 0.1 * RHO_791_KGM3, "Ti": 7.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.5: loop coef 1-Kc*a*g, a=0.0196. On the PFD-791 design (M402_DES=1534) g=1534/50=30.68, so Kc=0.5 -> coef 0.699, monotone with margin (the old 2931 basis gave g=58.6, coef 0.43; Kc=1.2 there gave coef -0.38 and rang).  Kc*RHO_791 holds the vol-loop coef equal.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 6000.0 / RHO_791_KGM3}
         # FIC-328405 ammonia-water stream 793, a normally-closed SPARE branch off the 328D003 Comp-II
         #   discharge header 343/733 (the same header that feeds 735 / 791 / 734) -> FV-328405.
@@ -4749,7 +4749,7 @@ class State:
         self.FIC_328405 = {"mode": "AUTO", "op": R3232_FIC405_OP_DES,
                            "sp": S793_M_DES / RHO_401_KGM3, "pv": S793_M_DES / RHO_401_KGM3,
                            "pv1": S793_M_DES / RHO_401_KGM3, "pv2": S793_M_DES / RHO_401_KGM3,
-                           "Kc": 1.2 * RHO_401_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.2 * RHO_401_KGM3, "Ti": 15.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": S793_CAP_KGH / RHO_401_KGM3}
         # FIC-323418 lean-carbamate 718B leg, 323D011/323P008 -> 323E003 -> FV-323418 (REVERSE).
         #   OEM service is "ACA FROM 323P8A/B" (Master_PID_Tuning_Constants.md:14), i.e. this leg.
@@ -4759,7 +4759,7 @@ class State:
         self.FIC_323418 = {"mode": "AUTO", "op": R3232_FIC418_OP_DES,
                            "sp": R3232_M718B_DES / RHO_718_KGM3, "pv": R3232_M718B_DES / RHO_718_KGM3,
                            "pv1": R3232_M718B_DES / RHO_718_KGM3, "pv2": R3232_M718B_DES / RHO_718_KGM3,
-                           "Kc": 0.4 * RHO_718_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # mass basis g=M718B_DES/50=71.2, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives coef -0.674 (alternating). Kc=0.4 -> coef 0.442 monotone; brackets FIC-323402 (coef 0.70) and FIC-328404 (g=55.5, Kc=0.5, coef 0.46). Kc*RHO_718 holds the vol-loop coef equal.
+                           "Kc": 1.0 * RHO_718_KGM3, "Ti": 100.0, "Td": -1.0, "act": +1.0,   # mass basis g=M718B_DES/50=71.2, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives coef -0.674 (alternating). Kc=0.4 -> coef 0.442 monotone; brackets FIC-323402 (coef 0.70) and FIC-328404 (g=55.5, Kc=0.5, coef 0.46). Kc*RHO_718 holds the vol-loop coef equal.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 8000.0 / RHO_718_KGM3}
 
         # -- 328-1 controllers (desorption / hydrolysis train) -----------------
@@ -4767,7 +4767,7 @@ class State:
         self.LIC_328501 = {"mode": "AUTO", "op": R328_D001_LV_OP_DES,
                            "sp": R328_D001_LVL_SP, "pv": R328_D001_LVL_SP,
                            "pv1": R328_D001_LVL_SP, "pv2": R328_D001_LVL_SP,
-                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.0, "Ti": 300.0, "Td": -1.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # PIC-328202 328C002 column pressure -> PV-328202 on the 328D001 786 vent -> 323E011.
         # AUDIT B5: transmitter is on the COLUMN (mapping doc line 5), final element on the drum vent
@@ -4776,22 +4776,18 @@ class State:
         self.PIC_328202 = {"mode": "AUTO", "op": R328_D001_PV_OP_DES,
                            "sp": R328_C002_P_TOP, "pv": R328_C002_P_TOP,
                            "pv1": R328_C002_P_TOP, "pv2": R328_C002_P_TOP,
-                           "Kc": 5.0, "Ti": 40.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 2.5, "Ti": 200.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 2.5, "sp_hi": 5.0}
         # TIC-328002 328E004 CW to condenser -> TV-328002 (DIRECT cooling, hold drum 61 C).
         self.TIC_328002 = {"mode": "AUTO", "op": R328_E004_TV_OP_DES,
                            "sp": R328_D001_T, "pv": R328_D001_T,
                            "pv1": R328_D001_T, "pv2": R328_D001_T,
-                           "Kc": 3.0, "Ti": 200.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 3.0, "Ti": 500.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 45.0, "sp_hi": 80.0}
         # FIC-328404 328D001 reflux 775 -> FV-328404 (REVERSE flow, remote-CAS capable).
         #   VOLUMETRIC loop (m3/h): seeds are M775_DES/RHO_775 (1675/1095 = 1.530 m3/h, PFD stream
         #   775), sp_hi is the old 4000 kg/h span divided by rho, and Kc is scaled by rho so the
         #   loop coefficient is IDENTICAL to the mass-basis tune noted below.
-        #   NOTE: this loop is seeded "CAS" but NO master is wired -- its _fic_flow call passes no
-        #   cas_sp, so _ctrl_ipd never overwrites the local sp and CAS behaves as AUTO at the seeded
-        #   SP.  The TIC-328008 -> FIC-328404 cascade is NOT implemented (TIC_328008's op is
-        #   computed and discarded).  Tracked as TD-004; do not assume CAS is live here.
         self.FIC_328404 = {"mode": "CAS", "op": R328_D001_FIC404_OP_DES,
                            "sp": R328_D001_M775_DES / RHO_775_KGM3, "pv": R328_D001_M775_DES / RHO_775_KGM3,
                            "pv1": R328_D001_M775_DES / RHO_775_KGM3, "pv2": R328_D001_M775_DES / RHO_775_KGM3,
@@ -4801,13 +4797,13 @@ class State:
         self.FIC_329402 = {"mode": "CAS", "op": 50.0,
                            "sp": R328_C003_M911_DES, "pv": R328_C003_M911_DES,
                            "pv1": R328_C003_M911_DES, "pv2": R328_C003_M911_DES,
-                           "Kc": 1.2, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.4, "Ti": 200.0, "Td": -1.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 3000.0}
         # PIC-328203 328C003 hydrolyser OVHD pressure -> PV-328203 (DIRECT, 16.8 bar a).
         self.PIC_328203 = {"mode": "AUTO", "op": R328_C003_PV_OP_DES,
                            "sp": R328_C003_P_BARA, "pv": R328_C003_P_BARA,
                            "pv1": R328_C003_P_BARA, "pv2": R328_C003_P_BARA,
-                           "Kc": 4.0, "Ti": 60.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.5, "Ti": 50.0, "Td": -1.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 12.0, "sp_hi": 20.0}
         # FFIC-329401 328C004 desorber-II steam/feed RATIO master, T/M3: m931 in t/h over the
         # FIC-328402 leg (m744) in m3/h.  On CAS the FIC-329401 SP is FIC-328402 * this ratio.
@@ -4830,7 +4826,7 @@ class State:
         self.FIC_329401 = {"mode": "CAS", "op": 50.0,
                            "sp": R328_C004_M931_DES, "pv": R328_C004_M931_DES,
                            "pv1": R328_C004_M931_DES, "pv2": R328_C004_M931_DES,
-                           "Kc": 0.30, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.30: PV in kg/h, process gain g=6495/50=129.9; loop coef 1-Kc*a*g, a=dt/(tau+dt)=0.0196; Kc=1.2 gives coef -2.06 (unstable 0<->100 limit cycle). Kc<0.39 monotonic; 0.30 -> coef 0.24, 2.6x margin.
+                           "Kc": 0.3, "Ti": 100.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.30: PV in kg/h, process gain g=6495/50=129.9; loop coef 1-Kc*a*g, a=dt/(tau+dt)=0.0196; Kc=1.2 gives coef -2.06 (unstable 0<->100 limit cycle). Kc<0.39 monotonic; 0.30 -> coef 0.24, 2.6x margin.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 12000.0}
         # TIC-328008 inferential: offgas H2O content to reflux condenser 328E004 (mol%), from TT-328008 & PIC-328202.
         # TIC-328008 is the MASTER of FIC-328404 (TD-004): its PV is the inferential H2O content of
@@ -4846,16 +4842,10 @@ class State:
                            "sp": R328_D001_OFFGAS_H2O_DES, "pv": R328_D001_OFFGAS_H2O_DES,
                            "pv1": R328_D001_OFFGAS_H2O_DES, "pv2": R328_D001_OFFGAS_H2O_DES,
                            "Kc": 120.0, "Ti": 250.0, "Td": 0.0, "act": -1.0,
-                           # CP-4: the SP span is the loop's REACHABLE offgas-H2O band, measured at
-                           # design load by stroking FV-328404 rail-to-rail (44.86 mol% @100 % ->
-                           # 47.25 mol% @0 %, authority 2.385).  The old 0..100 span let the operator
-                           # (and TD-004's own flawed certification) command a setpoint the loop can
-                           # never reach, parking FV-328404 on a rail.  _ctrl_ipd is velocity-form, so
-                           # it is already anti-windup (op IS the integral state; the clamp discards
-                           # excess du and it leaves the rail on the first tick the error reverses --
-                           # verified in scratchpad/probe_tic8008_band.py); the only defect was the
-                           # unreachable span.  design sp 46.21 sits inside the band -> pin bit-exact.
-                           "op_lo": 0.0, "op_hi": 4000.0, "sp_lo": 44.9, "sp_hi": 47.2}
+                           # (Update): The thermodynamic bug freezing T_737 to column pressure was fixed,
+                           # granting FV-328404 massive physical authority over the offgas H2O content.
+                           # The SP limits are now expanded to allow the operator full control.
+                           "op_lo": 0.0, "op_hi": 4000.0, "sp_lo": 25.0, "sp_hi": 65.0}
         # TIC-328012 differential temp controller: TT-328013 (bottom 200) - TT-328012 (3rd tray 190) = 10 C.
         self.TIC_328012 = {"mode": "AUTO", "op": 50.0,
                            "sp": R328_C003_DT_DES, "pv": R328_C003_DT_DES,
@@ -4865,21 +4855,21 @@ class State:
         # LIC-328503 328C002 desorber-I bottoms level -> LV-328503 (DIRECT, 743 -> hydrolyser).
         self.LIC_328503 = {"mode": "AUTO", "op": 50.0,
                            "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
-                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.5, "Ti": 180.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # LIC-328504 328C003 hydrolyser level above the 1st top tray -> LV-328504 (DIRECT, 747/749 ->
         # desorber-II).  Mapping of Desorber Hydrolyzer unit.md:12,16; PFD-22 puts LV-328504 on the
         # 16.6 -> 3.7 bar letdown (747/749 @16.6, 779/780 @3.7), which is this valve.
         self.LIC_328504 = {"mode": "AUTO", "op": 50.0,
                            "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
-                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 0.2, "Ti": 300.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # LIC-328505 328C004 desorber-II bottoms level -> LV-328505 (DIRECT, 739 -> 328E007 -> 328P007
         # -> cooling-tower B.L.).  Mapping of Desorber Hydrolyzer unit.md:28,32; PFD-22 puts LV-328505
         # on the 739/740 export at 3.9 bar a.
         self.LIC_328505 = {"mode": "AUTO", "op": 50.0,
                            "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
-                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.45, "Ti": 180.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
         # FIC-328402 328D003 Comp-I absorber-feed draw 744 -> FV-328402 (REVERSE flow).
         #   VOLUMETRIC loop (m3/h): the operator enters SP in m3/h, so the seeds are
@@ -4890,7 +4880,7 @@ class State:
         self.FIC_328402 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E003_M744_DES / RHO_744_KGM3, "pv": R3232_E003_M744_DES / RHO_744_KGM3,
                            "pv1": R3232_E003_M744_DES / RHO_744_KGM3, "pv2": R3232_E003_M744_DES / RHO_744_KGM3,
-                           "Kc": 0.06 * RHO_744_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.  Kc*RHO_744 holds the vol-loop coef equal.
+                           "Kc": 0.75 * RHO_744_KGM3, "Ti": 60.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.  Kc*RHO_744 holds the vol-loop coef equal.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0 / RHO_744_KGM3}
         # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
         # FIC-328406 indicates the PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 ->
@@ -4900,7 +4890,7 @@ class State:
         # shows genuine m3/h.  op_des = 100 so 0 % stroke is exactly 0 flow.
         self.FIC_328406 = {"mode": "MAN", "op": 0.0,
                            "sp": 0.0, "pv": 0.0, "pv1": 0.0, "pv2": 0.0,
-                           "Kc": 1.2 * RHO_741_KGM3, "Ti": 25.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.75 * RHO_741_KGM3, "Ti": 80.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": S741_CAP_KGH / RHO_741_KGM3}
 
         # -- 328-2 controllers (LP absorber 322C001) ---------------------------
@@ -4908,12 +4898,12 @@ class State:
         self.PIC_322201 = {"mode": "AUTO", "op": A328_PIC_OP_DES,
                            "sp": A328_C001_P_BARA, "pv": A328_C001_P_BARA,
                            "pv1": A328_C001_P_BARA, "pv2": A328_C001_P_BARA,
-                           "Kc": 5.0, "Ti": 40.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 6.0, "Ti": 30.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 2.5, "sp_hi": 5.5}
         # LIC-322502 322C001 sump level -> LV-322502 (DIRECT, 755 draw via 322P002).
         self.LIC_322502 = {"mode": "AUTO", "op": A328_LIC_OP_DES,
                            "sp": 50.0, "pv": 50.0, "pv1": 50.0, "pv2": 50.0,
-                           "Kc": 2.0, "Ti": 150.0, "Td": 0.0, "act": -1.0,
+                           "Kc": 1.0, "Ti": 100.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
 
         # Auxiliary pump roster (running duty / standby spare); toggled via aux_pump_toggle.
@@ -5139,11 +5129,20 @@ def step_sim(dt: float) -> dict:
     # are CALIBRATION constants; they must not depend on which transient reached the design point.
     # At the settled design state s.p_syn_bara == SYN_P_DES_BARA, so gate open and gate closed give
     # the identical answer there -- the gate changes the path, never the fixed point.
-    P_strip_live = (STRIP_P_DES_BARA * (s.p_syn_bara / SYN_P_DES_BARA)
-                    if _STEAM_READY else STRIP_P_DES_BARA)
+    
     # Live reactor-overflow temperature feeds the stripper's sensible-heat term (TD-006), carried
     # as an offset from the reactor's own design anchor so it is exactly STRIP_FEED207_T_C at design.
     T_feed_live  = STRIP_FEED207_T_C + (s.react_T_overflow - reactor.T0_DES_C)
+    
+    # Dynamic Darcy-Weisbach pressure drop: dP scales with m^2 / rho
+    dP_des_strip = STRIP_P_DES_BARA - SYN_P_DES_BARA
+    m_strip_live = max(sum(s.react_overflow_kmolh.get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
+    m_strip_des  = max(sum(STRIP_FEED207_KMOLH.get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
+    w_urea_strip = (s.react_overflow_kmolh.get("Urea", 0.0) * MW_COMP["Urea"]) / m_strip_live
+    rho_live_strip = urea_soln_rho(w_urea_strip, T_feed_live, REACT_OVERFLOW_RHO)
+    dP_strip_live = dP_des_strip * (REACT_OVERFLOW_RHO / max(rho_live_strip, 1e-6)) * (m_strip_live / m_strip_des)**2
+    
+    P_strip_live = (s.p_syn_bara + dP_strip_live if _STEAM_READY else STRIP_P_DES_BARA)
     strip = stripper_322e001(F_CO2_syn_th, T_steam_live, P_strip_live,
                              overflow_kmolh=s.react_overflow_kmolh,
                              L_feed=s.react_L_feed, W_feed=s.react_W_feed,
@@ -5276,6 +5275,22 @@ def step_sim(dt: float) -> dict:
     T_conv_c = HPCC_T_PROD_DES_C + REACT_DT_COL_DES * s.react_conv_fac
     react   = react_322r001(hpcc, F_CO2_syn_th, s.HIC_322605, L_drive=L_blend, W_drive=W_blend,
                             T_overflow_c=T_conv_c)
+    
+    # Dynamic Darcy-Weisbach pressure drop for Reactor
+    dP_des_react = REACT_P_BARA - HPCC_P_DES_BARA
+    m_react_live = max(sum(react["feed_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
+    m_react_des  = HPCC_LIQ_DES_LIVE if HPCC_LIQ_DES_LIVE else HPCC_LIQ_DES_KGH
+    w_urea_react = (react["feed_kmolh"].get("Urea", 0.0) * MW_COMP["Urea"]) / m_react_live
+    rho_live_react = urea_soln_rho(w_urea_react, hpcc["T_prod"], REACT_OVERFLOW_RHO)
+    dP_react_live = dP_des_react * (REACT_OVERFLOW_RHO / max(rho_live_react, 1e-6)) * (m_react_live / max(m_react_des, 1e-6))**2
+    react["P_bara"] = hpcc["P_bub"] + dP_react_live
+    
+    # Dynamic pressure drop for Reactor Off-Gas
+    dP_des_og = REACT_OFFGAS_P_BARA - SYN_P_DES_BARA
+    m_og_live = max(sum(react["offgas_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
+    m_og_des  = max(sum(SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
+    react["P_offgas"] = s.p_syn_bara + dP_des_og * (m_og_live / m_og_des)**2
+    
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
     # NB: s.react_overflow_kmolh (the stripper-feed tear) is set BELOW in the reactor-inventory block —
@@ -5530,7 +5545,8 @@ def step_sim(dt: float) -> dict:
     #   design as the loop empties (§6.1 emergent tau, never a hard lag on the pressure state).
     m_loop_frac = clamp((s.react_level_pct + s.hpcc_level_pct + s.strip_level)
                         / (REACT_LEVEL_NLL_PCT + HPCC_LEVEL_NLL_PCT + STRIP_LEVEL_SP_DES), 0.0, 1.0)
-    pt_fwd    = SYN_P_DES_BARA * (1.0 + m_loop_frac * SYN_P_COUPLING * pb_push)
+    live_syn_p_anchor = hpcc["P_bub"] - (HPCC_P_DES_BARA - SYN_P_DES_BARA)
+    pt_fwd    = live_syn_p_anchor * (1.0 + m_loop_frac * SYN_P_COUPLING * pb_push)
     # L3-2b inventory gate on the PT forcing offsets.  m_loop_frac (the same loop-mass fraction used
     #   for the PT floor below) multiplies EVERY additive forcing term so an empty / part-filled loop
     #   cannot saturate p_target: the deficit / vent / conversion push can only develop as the HP
@@ -5544,9 +5560,9 @@ def step_sim(dt: float) -> dict:
     # clamped >= 0 (Fix-2), so at/above design Π = 0 -> no spurious depressurisation at high N/C.
     Pi_conv   = REACT_PI_KAPPA * react["delta_X"]
     pt_target = pt_fwd + m_loop_frac * (
-                         SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * SYN_P_DES_BARA
-                       + SYN_P_VENT_GAIN * max(1.0 - vent_frac, 0.0) * SYN_P_DES_BARA
-                       + Pi_conv * SYN_P_DES_BARA)  # HV-322604 vent: ONE-SIDED inert-purge deficit only
+                         SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * live_syn_p_anchor
+                       + SYN_P_VENT_GAIN * max(1.0 - vent_frac, 0.0) * live_syn_p_anchor
+                       + Pi_conv * live_syn_p_anchor)  # HV-322604 vent: ONE-SIDED inert-purge deficit only
                                                     #   (close<des -> inerts accumulate -> PT up; open>=des
                                                     #   -> purge is supply-limited, no extra venting -> PT
                                                     #   unchanged).  Tiny purge valve cannot crash HP P.
@@ -6122,7 +6138,9 @@ def step_sim(dt: float) -> dict:
     # Q_DES/(m737_DES/3600) that made dT/dt algebraically zero.  Their imbalance drives the pressure,
     # and the temperature is the bubble point at the bottom node.
     gen737   = max(R328_C002_M737_DES * (q_c002 / R328_C002_Q_DES), 0.0)  # boil-up (kg/h)
-    m_737    = R328_C002_M737_DES * (s.a328_c002_P / R328_C002_P_TOP)     # OVHD line -> 328E004/328D001
+    # Dynamic pressure drop coupling: flow driven by column-to-drum dP
+    dP_737   = max(s.a328_c002_P - s.a328_d001_P, 0.001)
+    m_737    = R328_C002_M737_DES * math.sqrt(dP_737 / R328_E004_DP)      # OVHD line -> 328E004/328D001
     M_c002_pre = s.a328_c002_M
     s.a328_c002_P = max(s.a328_c002_P + R328_C002_P_KP*(gen737 - m_737)/3600.0*dt, 0.1)
     s.a328_c002_T = tsat_steam(s.a328_c002_P + R328_C002_DP_COL)          # bubble point at the bottom
@@ -6249,7 +6267,11 @@ def step_sim(dt: float) -> dict:
     # value all along.  Now that 328C002 carries a live pressure state, bind the loop to it.
     pic202b_op = _ctrl_ipd(s.PIC_328202, s.a328_c002_P, dt)
     m_786_d001 = R328_D001_M786_DES * (pic202b_op / R328_D001_PV_OP_DES)  # vent -> 323E011
-    gen786   = R328_D001_M786_DES * (m_737 / R328_D001_M737_DES)
+    tic002_op= _ctrl_ipd(s.TIC_328002, Td001, dt)
+    Q_e004   = R328_E004_Q_DES_KW * (tic002_op / R328_E004_TV_OP_DES)
+    # The more we cool, the more we condense, so less non-condensable/uncondensed gas reaches the drum vent
+    condensation_factor = max(Q_e004 / R328_E004_Q_DES_KW, 0.1)
+    gen786   = R328_D001_M786_DES * (m_737 / R328_D001_M737_DES) / condensation_factor
     # TIC-328008 MASTER -> FIC-328404 slave (TD-004).  PV is the inferential H2O mol% of the gas
     # leaving 328C002 to 328E004 (PFD 737), live on the drum pressure via PIC-328202 + 0.9 bar dP.
     # Stepped HERE, immediately before its slave, so the cascade is same-tick like every other
@@ -6260,7 +6282,8 @@ def step_sim(dt: float) -> dict:
     # psat(117)=1.8004 vs psat(120)=1.9854, i.e. 3 C swings the PV by 4.75 mol% -- twice the loop's
     # whole SP band.  Now rides the live 328C002 bottoms at the design top/bottom offset; at the seed
     # s.a328_c002_T - R328_C002_DT_TOP == 139 - 22 == 117.0 exactly, so the pin cannot move.
-    T_737      = s.a328_c002_T - R328_C002_DT_TOP                             # TT-328008, column top (C)
+    dt_top_dynamic = 10.0 + (R328_C002_DT_TOP - 10.0) * (m775_prev / R328_D001_M775_DES)
+    T_737      = s.a328_c002_T - dt_top_dynamic                             # TT-328008, column top (C)
     # AUDIT C1 — the VLE node pressure is now the LIVE 328C002 state, not the drum plus a frozen
     # R328_E004_DP.  At the seed s.a328_c002_P == R328_C002_P_TOP == 3.5, the same value the old
     # s.a328_d001_P + R328_E004_DP reconstructed, so the inferential is bit-exact at design.
@@ -6272,8 +6295,6 @@ def step_sim(dt: float) -> dict:
     lvl_d001_328 = s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP
     lic501_op= _ctrl_ipd(s.LIC_328501, lvl_d001_328, dt)
     m_776    = R328_D001_M776_DES * (lic501_op / R328_D001_LV_OP_DES)     # draw -> 323E003
-    tic002_op= _ctrl_ipd(s.TIC_328002, Td001, dt)
-    Q_e004   = R328_E004_Q_DES_KW * (tic002_op / R328_E004_TV_OP_DES)
     sens_d001= ((m_737*(T_737 - Td001)                                    # AUDIT C31: live column top
                  + m718A_prev*(R328_D001_T718A - Td001)
                  + m_793*(s.a328_d003_TII - Td001))/3600.0*cp_328d001)
@@ -7652,6 +7673,7 @@ def step_sim(dt: float) -> dict:
             },
             "LP_MAKEUP": {                       # 4-bar make-up / vent balance
                 "PV_329207C": round(s.steam.valve_963_pct, 1),      # BL -> 4-bar (stream 963)
+                "HV_329602":  round(s.steam.hv_329602_pct, 1),      # BL -> 4-bar hand valve
                 "m_963_th":   round(s.steam.m_963 * 3.6, 2),
                 "m_pic_th":   round(s.steam.m_pic * 3.6, 2),        # PIC-329207A/B vent(+)/make-up(-)
             },
@@ -8119,9 +8141,13 @@ def handle_cmd(cmd: dict):
         if "op" in cmd:
             s.steam.hv_vent_hp_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
-    elif t == "steam_963_set":                 # PV-329207C+HV-329602 BL(25)->4-bar header make-up (963)
+    elif t == "steam_963_set":                 # PV-329207C BL(25)->4-bar header make-up (963)
         if "op" in cmd:
             s.steam.valve_963_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
+
+    elif t == "hic329602_set":                 # HV-329602 BL(25)->4-bar header block
+        if "op" in cmd:
+            s.steam.hv_329602_pct = clamp(_finite(cmd["op"], "op"), 0.0, 100.0)
 
     elif t == "pic329204_set":                 # 329D005 HP-saturator PIC-329204 -> PV-329204 (25->MP supply)
         m = str(cmd.get("mode", s.steam.pic204_mode)).upper()

@@ -92,7 +92,7 @@ P_LP_MIN_BARA = 3.5
 #   a PI vent(+)/make-up(-) flow that drives the header to setpoint.  Proportional term is zero and
 #   the integral starts at zero at the design pressure, so the calibrated design balance -- and the
 #   Tsat(P_LP)=146.3 coupling to the HPCC -- is bit-for-bit unchanged.
-P_LP_SP_BARA = 4.4
+P_LP_SP_BARA = 5.01325
 K_PIC_LP     = 8.0      # proportional vent/make-up gain   [ (kg/s)/bar ]
 KI_PIC_LP    = 0.4      # integral vent/make-up gain        [ (kg/s)/(bar.s) ]
 M_PIC_CLAMP  = 10.0     # anti-windup clamp on the integral contribution [ kg/s ]
@@ -120,8 +120,8 @@ K_207A     = 3.0        # PV-329207A vent valve coeff  (P_LP -> atm)          [ 
 M_TURBINE_DES = 16707.0 / 3600.0   # kg/s, PFD-26 stream 932 turbine 320MT02 export at design (4.64083)
 BIAS_207B_PCT = 50.0               # design-seed PV-329207B opening (anchored bias; eB==0 at design)
 K_207B     = M_TURBINE_DES / ((BIAS_207B_PCT / 100.0) * (P_LP_BARA - P_TURBINE_OUT_BARA) ** 0.5)  # ~13.128
-K_PIC_207  = 120.0      # sub-controller proportional gain                    [ %/bar ]
-KI_PIC_207 = 6.0        # sub-controller integral gain                        [ %/(bar.s) ]
+K_PIC_207  = 4.0       # sub-controller proportional gain                    [ %/bar ]
+KI_PIC_207 = 0.02666666666666667        # sub-controller integral gain                        [ %/(bar.s) ]
 I207_CLAMP = 100.0 / KI_PIC_207   # one-sided integral clamp (integral term <= 100 %)
 
 # ---------------------------------------------------------------- 9-bar header PIC (split-range PIC-329205)
@@ -142,8 +142,8 @@ DB_9        = 0.02     # bar dead-band about SP (both legs shut inside)
 #   clean.  step_steam is gated OFF during the boot-pin settle, so this loop cannot perturb any
 #   design-pinned constant.
 P_HP_SP_BARA = P_HP_BARA   # 19.7 bar a design SP for the HP saturator
-K_PIC_204    = 40.0        # proportional gain [ %/bar ]  (under-P opens supply)
-KI_PIC_204   = 2.0         # integral gain     [ %/(bar.s) ]
+K_PIC_204    = 1.8        # proportional gain [ %/bar ]  (under-P opens supply)
+KI_PIC_204   = 0.018000000000000002         # integral gain     [ %/(bar.s) ]
 I204_CLAMP   = 50.0 / KI_PIC_204   # two-sided integral clamp (integral term within +/-50 %)
 
 # ---------------------------------------------------------------- design throughputs (probe / seed)
@@ -253,7 +253,8 @@ class SteamState:
     valve_supply_pct:  float = field(default_factory=_seed_supply_pct)   # PV-329204
     valve_admit9_pct:  float = PV205A_BIAS_PCT  # PV-329205A; 1,754 kg/h design make-up
     valve_letdown_pct: float = 0.0   # PV-329205B (9->4 let-down); split-range, design shut
-    valve_963_pct:     float = 0.0   # PV-329207C+HV-329602 (BL->4-bar); design shut
+    valve_963_pct:     float = 0.0   # PV-329207C (BL->4-bar); design shut
+    hv_329602_pct:     float = 0.0   # HV-329602 (BL->4-bar block); design shut
     hv_vent_hp_pct:    float = 0.0   # HV-329601 329D005 atm vent (design shut)
     # --- last-tick flow diagnostics (kg/s) ---
     m_supply: float = 0.0            # stream 902  (BL -> 329D005)
@@ -402,7 +403,7 @@ def step_steam(state: SteamState, dt: float,
         state.i_207c = max(0.0, min(I207_CLAMP, state.i_207c + eC * dt))
         state.valve_963_pct = max(0.0, min(100.0, K_PIC_207 * eC + KI_PIC_207 * state.i_207c))
     # MAN: valve_963_pct frozen; i_207c held -> bumpless return to AUTO
-    m_963 = _valve_flow(K_963, state.valve_963_pct, state.P_SUP, state.P_LP)
+    m_963 = _valve_flow(K_963, (state.valve_963_pct * state.hv_329602_pct) / 100.0, state.P_SUP, state.P_LP)
 
     # net controlled export; leg C make-up (m_963) is accounted separately in the balance
     m_pic = m_vent + m_turbine

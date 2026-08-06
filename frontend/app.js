@@ -365,9 +365,14 @@ function render322(s){
               'HIC-322604':{t:'hic604_set',f:'op'},    'HV-322604':{t:'hic604_set',f:'op'},
               'HIC-329601':{t:'steam_hpvent_set',f:'op'}, 'HV-329601':{t:'steam_hpvent_set',f:'op'},
               'HIC-329602':{t:'steam_963_set',   f:'op'}, 'HV-329602':{t:'steam_963_set',   f:'op'},
-              'HIC-329605':{t:'hic9605_set',      f:'op'}, 'HV-329605':{t:'hic9605_set',      f:'op'},
+              'HIC-329605':{t:'hic9605_set',      f:'value'}, 'HV-329605':{t:'hic9605_set',      f:'value'},
+              'HIC-329606':{t:'hic9606_set',      f:'value'}, 'HV-329606':{t:'hic9606_set',      f:'value'},
+              'HIC-323605':{t:'hic323605_set',      f:'value'}, 'HV-323605':{t:'hic323605_set',      f:'value'},
               'FT-322404':{t:'cpl_set', f:'value'} };                          // 954 condensate feed -> 322C001 (kg/h, not a %-opening)
   const NOTE={ '322602':'↓ opening ⇒ ↑ 322E003 suction (↑ μ)',
+               '323605':'↓ opening ⇒ ↑ 323F010 pressure (↓ vacuum)',
+               '329605':'↑ opening ⇒ ↑ 324F002 vacuum (↓ 324E002 pressure)',
+               '329606':'↑ opening ⇒ ↑ 324F004/F005 vacuum (↓ 324F003 pressure)',
                '322404':'operator sets 954 condensate feed (kg/h) ⇒ ↑322C001 sump ⇒ LIC-322502 opens ⇒ ↑756 draw ⇒ make dilutes' };
   const TTL ={ '322404':'FT-322404  CONDENSATE 954 → 322C001 (MANUAL, kg/h)' };  // honest title: this is a flow inject, not a HV
   let cur=null;   // overlay currently shown -> drives the SET command + live prefill

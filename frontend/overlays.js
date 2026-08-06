@@ -255,9 +255,9 @@
       { k: 'pic203',  t: 'ind', x: 604,  y: 101, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
         mode: 'LPCC_3232.E011.PIC_323203.mode', note: '323E011/D011 LP node P; flash vapour 701 (LV-323501 -> 323F004) accumulates it. AUTO holds SP via PV-323203; MAN lets P ramp' },
       { k: 'tt004',   t: 'ind', x: 440,  y: 98 , tag: 'TT-323004', bind: 'RECIRC_323.C003.feed_T', u: 'C', dec: 1 },   // rect col top vapour 119C (flash feed T)
-      { k: 'hic605',  t: 'ind', x: 993,  y: 122, tag: 'HIC-323605', bind: 'RECIRC_323.F010.HV_323605', u: '%', dec: 1 },   // 323F010 gas-outlet hand-valve opening
+      { k: 'hic605',  t: 'ind', x: 993,  y: 122, tag: 'HIC-323605', bind: 'RECIRC_323.F010.HV_323605', u: '%', dec: 1, face: 'hic' },   // 323F010 gas-outlet hand-valve opening
       { k: 'pv203',   t: 'ind', x: 1219, y: 115, tag: 'PV-323203', bind: 'LPCC_3232.E011.PIC_323203.op', u: '%', dec: 1 },   // GCB off-gas valve stroke -> vapour 011 to 323C005
-      { k: 'hv605',   t: 'ind', x: 1055, y: 171, tag: 'HV-323605',  bind: 'RECIRC_323.F010.HV_323605', u: '%', dec: 1 },   // 323F010 gas-outlet valve opening
+      { k: 'hv605',   t: 'ind', x: 1055, y: 171, tag: 'HV-323605',  bind: 'RECIRC_323.F010.HV_323605', u: '%', dec: 1, face: 'hic' },   // 323F010 gas-outlet valve opening
       { k: 'pic4202', t: 'ind', x: 1280, y: 188, tag: 'PIC-324202', bind: 'EVAP_324.E001.PIC_324202.pv', u: 'BAR A', dec: 3,
         mode: 'EVAP_324.E001.PIC_324202.mode' },   // 324E002 pressure
       // ---- WHITE FRAMES : unmodelled boundary / downstream (tag only; bind when upstream modelled) ----
@@ -268,6 +268,7 @@
     // coords = STAGE 1366x720 (native 1357x644 scaled x1.006632 / y1.118012).  root LPCC_3232 (+ DESORB_328.D001 / ABSORB_328 cross-refs drawn on this screen).
     'screen-323-2': [
       // ---- 323D001 solution tank + 323E003 heater : E003 block, ~85 C, 4.0 barg, pump-speed pair ----
+      { k: 'tt007',  t: 'ind', x: 200,  y: 150, tag: 'TT-329007' },
       { k: 'tt003',  t: 'ind', x: 292,  y: 434, tag: 'TT-323003',  bind: 'LPCC_3232.E003.TT_323003',    u: 'C',     dec: 1 },   // 85.5 C 323E003 outlet
       { k: 'pic202', t: 'ind', x: 149,  y: 302, tag: 'PIC-323202', bind: 'LPCC_3232.E003.PIC_323202.pv', mode: 'LPCC_3232.E003.PIC_323202.mode', u: 'BAR A', dec: 2, note: 'holds 323D001 off-gas pressure via PV-323202 vent to GCB' },
       { k: 'pv202',  t: 'avalve', x: 38, y: 134, tag: 'PV-323202', bind: 'LPCC_3232.E003.PIC_323202.op', u: '%', dec: 1 },
@@ -387,6 +388,7 @@
     'screen-324-1': [
       // ---- 324E001 / 324F001 vacuum evaporator : E001 block ----
       { k: 'pic4202', t: 'ind', x: 672, y: 67,  tag: 'PIC-324202', bind: 'EVAP_324.E001.PIC_324202.pv', mode: 'EVAP_324.E001.PIC_324202.mode', u: 'BAR A', dec: 3, note: 'holds 324F001 vacuum 0.33 bar a via false-air PV-324202' },
+      { k: 'pv4202',  t: 'avalve', x: 672, y: 120, tag: 'PV-324202', bind: 'EVAP_324.E001.PIC_324202.op', u: '%', dec: 1 },
       { k: 'pt4201',  t: 'ind', x: 455, y: 164, tag: 'PT-324201',  bind: 'EVAP_324.E001.PT_324202', u: 'BAR A', dec: 3, note: '324F001 separator pressure' },
       { k: 'tic4001', t: 'ind', x: 458, y: 282, tag: 'TIC-324001', bind: 'EVAP_324.E001.TIC_324001.pv', mode: 'EVAP_324.E001.TIC_324001.mode', u: 'C', dec: 1, note: 'master: holds melt 130 C; cascades PIC-329203 chest steam-P' },
       { k: 'pic9203', t: 'ind', x: 206, y: 274, tag: 'PIC-329203', bind: 'EVAP_324.E001.PIC_329203.pv', mode: 'EVAP_324.E001.PIC_329203.mode', u: 'BAR A', dec: 2, cas: true, note: 'slave: CAS follows TIC-324001; steam to 324E001 chest via PV-329203' },
@@ -403,8 +405,8 @@
       { k: 'py4201',  t: 'ind', x: 455,  y: 220, tag: 'PY-324201', bind: 'EVAP_324.E001.PY_324201', u: 'wt%', dec: 1, note: '324F001 melt concentration soft-sensor (VLE inversion of PT-324201 / TIC-324001)' },
       { k: 'lic9505', t: 'ind', x: 211,  y: 376, tag: 'LIC-329505', bind: 'EVAP_324.E001.LIC_329505.pv', mode: 'EVAP_324.E001.LIC_329505.mode', u: '%', dec: 1, note: '324E001 steam-condensate level; LV-329505 drains shell (active steam trap)' },
       { k: 'lv9505',  t: 'avalve', x: 189,  y: 432, tag: 'LV-329505', bind: 'EVAP_324.E001.LIC_329505.op', u: '%', dec: 1 },
-      { k: 'hic3605', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605', bind: 'RECIRC_323.F010.HV_323605', u: '%', dec: 1 },   // 323F010 gas-outlet hand-valve opening
-      { k: 'hv3605',  t: 'ind', x: 642,  y: 201, tag: 'HV-323605',  bind: 'RECIRC_323.F010.HV_323605', u: '%', dec: 1 },   // 323F010 gas-outlet valve opening
+      { k: 'hic3605', t: 'ind', x: 557,  y: 172, tag: 'HIC-323605', bind: 'RECIRC_323.F010.HV_323605', u: '%', dec: 1, face: 'hic' },   // 323F010 gas-outlet hand-valve opening
+      { k: 'hv3605',  t: 'ind', x: 642,  y: 201, tag: 'HV-323605',  bind: 'RECIRC_323.F010.HV_323605', u: '%', dec: 1, face: 'hic' },   // 323F010 gas-outlet valve opening
       { k: 'hic9605', t: 'ind', x: 921,  y: 134, tag: 'HIC-329605', bind: 'EVAP_324.E001.HIC_329605', u: '%', dec: 1, face: 'hic', note: '324F002 vacuum-ejector motive LP steam; operator hand valve (HV-329605 tracks 1:1)' },
       { k: 'hv9605',  t: 'avalve', x: 926,  y: 191, tag: 'HV-329605', bind: 'EVAP_324.E001.HV_329605', u: '%', dec: 1, face: 'hic' },
       { k: 'pic3203', t: 'ind', x: 1208, y: 469, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
@@ -448,8 +450,8 @@
       // both 146 C / 4.1 bar a / rho 2.2 -- 1400 kg/h total.  The hand-valve opening is
       // live and drives the 324F003/E005 vacuum pull; its steam draw remains within the
       // lumped LP-user balance so displaying the opening does not double-count flow.
-      { k: 'hic9606w', t: 'ind', x: 683,  y: 111, tag: 'HIC-329606', bind: 'EVAP_324.E003.HIC_329606', u: '%', dec: 1 },
-      { k: 'hv9606w',  t: 'ind', x: 683,  y: 172, tag: 'HV-329606',  bind: 'EVAP_324.E003.HV_329606',  u: '%', dec: 1 },
+      { k: 'hic9606w', t: 'ind', x: 683,  y: 111, tag: 'HIC-329606', bind: 'EVAP_324.E003.HIC_329606', u: '%', dec: 1, face: 'hic' },
+      { k: 'hv9606w',  t: 'ind', x: 683,  y: 172, tag: 'HV-329606',  bind: 'EVAP_324.E003.HV_329606',  u: '%', dec: 1, face: 'hic' },
       { k: 'fic5401w', t: 'ind', x: 907,  y: 322, tag: 'FIC-335401'  },
       { k: 'hic5602w', t: 'ind', x: 980,  y: 369, tag: 'HIC-335602'  },
       { k: 'hv5602w',  t: 'ind', x: 975,  y: 436, tag: 'HV-335602'   },
