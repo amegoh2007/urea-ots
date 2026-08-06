@@ -201,8 +201,8 @@
       { k: 'pv207a',  t: 'avalve', x: 828,  y: 178, tag: 'PV-329207A', bind: 'STEAM_SYSTEM.PIC_329207A.op', u: '%', dec: 1 },   // 4-bar vent valve (leg A)
       { k: 'pv207b',  t: 'avalve', x: 1190, y: 215, tag: 'PV-329207B', bind: 'STEAM_SYSTEM.PIC_329207B.op', u: '%', dec: 1 },   // 320MT02 turbine make-up valve (leg B)
       { k: 'pv207c',  t: 'avalve', x: 301,  y: 383, tag: 'PV-329207C', bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1 },   // BL make-up valve (leg C, stream 963)
-      { k: 'hic602',  t: 'ind',    x: 301,  y: 420, tag: 'HIC-329602', bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1, face: 'hic' },   // 963 make-up hand ctrl -> PV-329207C opening
-      { k: 'hv602',   t: 'ind',    x: 291,  y: 475, tag: 'HV-329602',  bind: 'STEAM_SYSTEM.PIC_329207C.op', u: '%', dec: 1, face: 'hic' },   // 963 make-up isolation -> PV-329207C opening
+      { k: 'hic602',  t: 'ind',    x: 301,  y: 420, tag: 'HIC-329602', bind: 'STEAM_SYSTEM.LP_MAKEUP.HV_329602', u: '%', dec: 1, face: 'hic' },   // hand controller -> HV-329602 opening (loop-independent)
+      { k: 'hv602',   t: 'ind',    x: 291,  y: 475, tag: 'HV-329602',  bind: 'STEAM_SYSTEM.LP_MAKEUP.HV_329602', u: '%', dec: 1, face: 'hic' },   // HV-329602 hand valve position (set by HIC-329602 only)
       { k: 'ft407',   t: 'ind',    x: 1081, y: 141, tag: 'FT-329407', bind: 'STEAM_SYSTEM.FT_329407_th', u: 'T/H', dec: 2 },   // 320MT02 turbine steam flow via PV-329207B
       // ===== 329D005 level (LIC/LV-329502) + O2-scavenger dosing pumps =====
       { k: 'lic502',  t: 'ind',    x: 744, y: 625, tag: 'LIC-329502', bind: 'STEAM_SYSTEM.LIC_329502.pv', u: '%', dec: 1,
