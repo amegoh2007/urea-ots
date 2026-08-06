@@ -65,7 +65,8 @@ K_902 = (39400.0 / 1850.0) / (0.50 * (P_SUP_BARA - P_HP_BARA) ** 0.5)  # PV-3292
 M_903_DES = 1754.0 / 3600.0
 PV205A_BIAS_PCT = 50.0
 K_903 = M_903_DES / ((PV205A_BIAS_PCT / 100.0) * (P_SUP_BARA - P_MP_BARA) ** 0.5)
-K_963 = 2.0         # PV-329207C+HV-329602 : BL(25) -> 4-bar header (design shut)
+K_963 = 2.0         # PV-329207C : BL(25) -> 4-bar header auto make-up (PIC-329207C, design shut)
+K_HV602 = 2.0       # HV-329602  : BL(25) -> 4-bar header HAND valve (HIC-329602 only; parallel to PV-329207C, design shut)
 K_LD9 = 2.0         # PV-329205B  : 329D009 (9) -> 4-bar header let-down (split-range vent)
 
 # ---------------------------------------------------------------- header capacitance ( (kg/s)/bar )
@@ -254,7 +255,7 @@ class SteamState:
     valve_admit9_pct:  float = PV205A_BIAS_PCT  # PV-329205A; 1,754 kg/h design make-up
     valve_letdown_pct: float = 0.0   # PV-329205B (9->4 let-down); split-range, design shut
     valve_963_pct:     float = 0.0   # PV-329207C (BL->4-bar); design shut
-    hv_329602_pct:     float = 0.0   # HV-329602 (BL->4-bar block); design shut
+    hv_329602_pct:     float = 0.0   # HV-329602 (BL->4-bar) HAND valve; positioned ONLY by HIC-329602, loop-independent; design shut
     hv_vent_hp_pct:    float = 0.0   # HV-329601 329D005 atm vent (design shut)
     # --- last-tick flow diagnostics (kg/s) ---
     m_supply: float = 0.0            # stream 902  (BL -> 329D005)
@@ -397,13 +398,21 @@ def step_steam(state: SteamState, dt: float,
     # MAN: pv207b_pct frozen; i_pic held -> bumpless return to AUTO
     m_turbine = _valve_flow(K_207B, state.pv207b_pct, state.P_LP, P_TURBINE_OUT_BARA)
 
-    # -- PIC-329207C BL 25-bar admit (direct: P_LP < SP_C -> open PV-329207C/HV-329602) --
+    # -- PIC-329207C BL 25-bar admit (direct: P_LP < SP_C -> open PV-329207C) --
     if state.pic207c_mode == "AUTO":
         eC = state.pic207c_sp - state.P_LP
         state.i_207c = max(0.0, min(I207_CLAMP, state.i_207c + eC * dt))
         state.valve_963_pct = max(0.0, min(100.0, K_PIC_207 * eC + KI_PIC_207 * state.i_207c))
     # MAN: valve_963_pct frozen; i_207c held -> bumpless return to AUTO
-    m_963 = _valve_flow(K_963, (state.valve_963_pct * state.hv_329602_pct) / 100.0, state.P_SUP, state.P_LP)
+    # HV-329602 is a HAND valve, positioned ONLY by HIC-329602 (hv_329602_pct) -- it is NOT coupled to
+    # any control loop.  The BL(25)->4-bar make-up is therefore the SUM of two independent parallel legs:
+    # the PIC-329207C auto admit (PV-329207C) and the manual HV-329602.  (Previously the two were
+    # MULTIPLIED in series, which both wired the hand valve into the PIC-329207C loop and -- because the
+    # hand valve is design-shut at 0% -- zeroed the automatic make-up entirely.)  Both legs are 0 at the
+    # design point (valve_963_pct=0 & hv_329602_pct=0) -> m_963=0 -> header balance bit-exact.
+    m_963_auto = _valve_flow(K_963,   state.valve_963_pct,  state.P_SUP, state.P_LP)   # PV-329207C (PIC loop)
+    m_hv602    = _valve_flow(K_HV602, state.hv_329602_pct,  state.P_SUP, state.P_LP)   # HV-329602 (hand, HIC-329602)
+    m_963 = m_963_auto + m_hv602
 
     # net controlled export; leg C make-up (m_963) is accounted separately in the balance
     m_pic = m_vent + m_turbine
