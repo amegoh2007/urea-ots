@@ -121,8 +121,8 @@ K_207A     = 3.0        # PV-329207A vent valve coeff  (P_LP -> atm)          [ 
 M_TURBINE_DES = 16707.0 / 3600.0   # kg/s, PFD-26 stream 932 turbine 320MT02 export at design (4.64083)
 BIAS_207B_PCT = 50.0               # design-seed PV-329207B opening (anchored bias; eB==0 at design)
 K_207B     = M_TURBINE_DES / ((BIAS_207B_PCT / 100.0) * (P_LP_BARA - P_TURBINE_OUT_BARA) ** 0.5)  # ~13.128
-K_PIC_207  = 4.0       # sub-controller proportional gain                    [ %/bar ]
-KI_PIC_207 = 0.02666666666666667        # sub-controller integral gain                        [ %/(bar.s) ]
+K_PIC_207  = 10.0      # sub-controller proportional gain                    [ %/bar ]  (retuned 4->10: LP header PIC-329207A/B/C were sluggish -- ~2.5x faster approach to master SP, no overshoot)
+KI_PIC_207 = 0.08      # sub-controller integral gain                        [ %/(bar.s) ]  (retuned 0.0267->0.08 with K; design pin bit-exact since eB=0 -> bias regardless of gain)
 I207_CLAMP = 100.0 / KI_PIC_207   # one-sided integral clamp (integral term <= 100 %)
 
 # ---------------------------------------------------------------- 9-bar header PIC (split-range PIC-329205)
