@@ -268,7 +268,7 @@
     // coords = STAGE 1366x720 (native 1357x644 scaled x1.006632 / y1.118012).  root LPCC_3232 (+ DESORB_328.D001 / ABSORB_328 cross-refs drawn on this screen).
     'screen-323-2': [
       // ---- 323D001 solution tank + 323E003 heater : E003 block, ~85 C, 4.0 barg, pump-speed pair ----
-      { k: 'tt007',  t: 'ind', x: 760,  y: 232, tag: 'TT-329007' },   // 328002 gas line, left of TV-328002 (tagged DCS ref); unmodelled field xmtr -> tag-only slot
+      { k: 'tt007',  t: 'ind', x: 770,  y: 255, tag: 'TT-329007', bind: 'DESORB_328.D001.TT_329007', u: 'C', dec: 1 },   // 328E004 cooling-water OUTLET temp (stream 1016), on the CW return line to TV-328002 (datasheet 34 C normal)
       { k: 'tt003',  t: 'ind', x: 292,  y: 434, tag: 'TT-323003',  bind: 'LPCC_3232.E003.TT_323003',    u: 'C',     dec: 1 },   // 85.5 C 323E003 outlet
       { k: 'pic202', t: 'ind', x: 149,  y: 302, tag: 'PIC-323202', bind: 'LPCC_3232.E003.PIC_323202.pv', mode: 'LPCC_3232.E003.PIC_323202.mode', u: 'BAR A', dec: 2, note: 'holds 323D001 off-gas pressure via PV-323202 vent to GCB' },
       { k: 'pv202',  t: 'avalve', x: 38, y: 134, tag: 'PV-323202', bind: 'LPCC_3232.E003.PIC_323202.op', u: '%', dec: 1 },
