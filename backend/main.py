@@ -1274,11 +1274,13 @@ R328_E004_Q_DES_KW = 4357.0                                 # datasheet condense
 R328_E004_TV_OP_DES = 50.0                                  # TV-328002 CW stroke
 # 328E004 cooling-water side.  Strict-source PFD (Combined_1750, cooling-water block) + Mapping of
 # cooling water.md: 328E004 CW SUPPLY = stream 1028 (30 C), CW RETURN = stream 1029 (38 C), 408 t/h.
-# TV-328002 sits on the CW RETURN line (nozzle N6); TT-329007 reads stream 1029 (the CW OUTLET temp).
-# Anchored to the PFD design return (38 C) and scaled by the live condenser duty (Q_e004 ∝ TIC-328002
-# stroke): T_cw_out = T_in + ΔT_des·(op/op_des) -> 38 C at design, warmer as the valve/duty rises.
+# TIC-328002 controls the opening of TV-328002 (on the CW RETURN line, nozzle N6) = the CW FLOW.
+# TT-329007 reads stream 1029 (the CW return temp): with the process condensation load roughly fixed,
+# the return temp is INVERSE in the CW flow -> opening TV-328002 (more flow) COOLS the return, closing
+# it heats the return:  T_cw_out = T_in + ΔT_des·(op_des/op), = 38 C at the design 50 % opening.
 R328_E004_CW_T_IN_C     = 30.0                              # CW supply (stream 1028) inlet temp, C
 R328_E004_CW_T_OUT_DES_C = 38.0                             # CW return (stream 1029) outlet temp at design, C
+R328_E004_CW_T_MAX_C     = 110.0                            # display clamp: CW flashes near this at the 2.2 bar a return
 # λ737_cond (condensation latent) closes drum energy balance at 61°C:
 R328_D001_SENS = ((R328_D001_M737_DES*(R328_C002_T_TOP - R328_D001_T)
                    + R328_D001_M718A_DES*(R328_D001_T718A - R328_D001_T))
@@ -7445,11 +7447,13 @@ def step_sim(dt: float) -> dict:
                                "m_kgh": round(m_775, 1)},                   # delivered mass -> 328C002 (kg/h, HMB)
                 "TIC_328002": {"pv": round(s.TIC_328002["pv"], 1), "sp": round(s.TIC_328002["sp"], 1),
                                "op": round(s.TIC_328002["op"], 2), "mode": s.TIC_328002["mode"]},
-                # TT-329007: 328E004 cooling-water OUTLET temp = PFD stream 1029 (C). 38 at design,
-                # rides the live condenser duty via the TV-328002 stroke (PFD 1028 30 C in / 1029 38 C out).
-                "TT_329007": round(R328_E004_CW_T_IN_C
-                                   + (R328_E004_CW_T_OUT_DES_C - R328_E004_CW_T_IN_C)
-                                     * (s.TIC_328002["op"] / R328_E004_TV_OP_DES), 1),
+                # TT-329007: 328E004 cooling-water return temp = PFD stream 1029 (C). 38 at the design
+                # TV-328002 opening (50 %); INVERSE in CW flow so opening TV-328002 cools the return and
+                # closing it heats the return (TIC-328002 sets the opening). Clamped at the flash ceiling.
+                "TT_329007": round(min(R328_E004_CW_T_IN_C
+                                       + (R328_E004_CW_T_OUT_DES_C - R328_E004_CW_T_IN_C)
+                                         * (R328_E004_TV_OP_DES / max(s.TIC_328002["op"], 1.0)),
+                                       R328_E004_CW_T_MAX_C), 1),
                 "TIC_328008": {"pv": round(s.TIC_328008["pv"], 1), "sp": round(s.TIC_328008["sp"], 1),
                                "op": round(s.TIC_328008["op"], 2), "mode": s.TIC_328008["mode"]},
             },
