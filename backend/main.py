@@ -1272,13 +1272,13 @@ R328_D001_LV_OP_DES = 50.0                                  # LV-328501 stroke
 R328_D001_FIC404_OP_DES = 30.2                              # FIC-328404 (775 reflux) stroke
 R328_E004_Q_DES_KW = 4357.0                                 # datasheet condenser duty
 R328_E004_TV_OP_DES = 50.0                                  # TV-328002 CW stroke
-# 328E004 cooling-water side (datasheet "328E004 328D001 328P002": streams 1015/1016, 415 t/h CW).
-# TV-328002 sits on the CW RETURN line (nozzle N6); TT-329007 reads that CW OUTLET temperature.
-# Anchored to the datasheet normal return (34 C) at the design duty and scaled by the live condenser
-# duty (Q_e004 ∝ TIC-328002 stroke): T_cw_out = T_in + ΔT_des·(op/op_des); reaches the datasheet
-# 39.9 C max as the valve/duty rises, floors toward the 30 C supply as cooling backs off.
-R328_E004_CW_T_IN_C     = 30.0                              # CW supply (stream 1015) inlet temp, C
-R328_E004_CW_T_OUT_DES_C = 34.0                             # CW return (stream 1016) outlet temp at design, C (39.9 max)
+# 328E004 cooling-water side.  Strict-source PFD (Combined_1750, cooling-water block) + Mapping of
+# cooling water.md: 328E004 CW SUPPLY = stream 1028 (30 C), CW RETURN = stream 1029 (38 C), 408 t/h.
+# TV-328002 sits on the CW RETURN line (nozzle N6); TT-329007 reads stream 1029 (the CW OUTLET temp).
+# Anchored to the PFD design return (38 C) and scaled by the live condenser duty (Q_e004 ∝ TIC-328002
+# stroke): T_cw_out = T_in + ΔT_des·(op/op_des) -> 38 C at design, warmer as the valve/duty rises.
+R328_E004_CW_T_IN_C     = 30.0                              # CW supply (stream 1028) inlet temp, C
+R328_E004_CW_T_OUT_DES_C = 38.0                             # CW return (stream 1029) outlet temp at design, C
 # λ737_cond (condensation latent) closes drum energy balance at 61°C:
 R328_D001_SENS = ((R328_D001_M737_DES*(R328_C002_T_TOP - R328_D001_T)
                    + R328_D001_M718A_DES*(R328_D001_T718A - R328_D001_T))
@@ -7445,8 +7445,8 @@ def step_sim(dt: float) -> dict:
                                "m_kgh": round(m_775, 1)},                   # delivered mass -> 328C002 (kg/h, HMB)
                 "TIC_328002": {"pv": round(s.TIC_328002["pv"], 1), "sp": round(s.TIC_328002["sp"], 1),
                                "op": round(s.TIC_328002["op"], 2), "mode": s.TIC_328002["mode"]},
-                # TT-329007: 328E004 cooling-water OUTLET (return, stream 1016) temp (C). 34 at design,
-                # rides the live condenser duty via the TV-328002 stroke (datasheet 30 C in / 34 C normal / 39.9 max).
+                # TT-329007: 328E004 cooling-water OUTLET temp = PFD stream 1029 (C). 38 at design,
+                # rides the live condenser duty via the TV-328002 stroke (PFD 1028 30 C in / 1029 38 C out).
                 "TT_329007": round(R328_E004_CW_T_IN_C
                                    + (R328_E004_CW_T_OUT_DES_C - R328_E004_CW_T_IN_C)
                                      * (s.TIC_328002["op"] / R328_E004_TV_OP_DES), 1),
