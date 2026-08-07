@@ -38,6 +38,8 @@ from typing import Optional, Set
 import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
 import thermo_extended_uniquac as extended_uniquac
 import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-97)
+from core.thermo import EmpiricalThermo
+thermo = EmpiricalThermo()
 from controllers import Controller
 import steam_system
 from steam_system import SteamState, step_steam  # MP/LP steam-header dynamics (quarantined)
@@ -3813,7 +3815,7 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
             "feed_corrected_kmolh": fc, "tear_mass_kgh": tear_mass,
             "xi_urea": xi_urea, "xi_biu": xi_biu, "closure_resid": closure_resid,
             "T_overflow": REACT_OVERFLOW_T_C, "T_offgas": REACT_OFFGAS_T_C,
-            "P_bara": REACT_P_BARA, "P_offgas": REACT_OFFGAS_P_BARA,
+            "P_bara": round(state.p_syn_bara, 2), "P_offgas": REACT_OFFGAS_P_BARA,
             "phi": phi, "phi_des": phi_des, "co2_scale": s,
             "X_conv": X_conv, "L_feed": L_feed, "W_feed": W_feed,
             "delta_X": delta_X, "p_nh3_og": p_nh3_og, "p_co2_og": p_co2_og}
@@ -4265,6 +4267,7 @@ def mode_tag(c: "Controller") -> str:
 # ----- Plant state -----
 class State:
     def __init__(self):
+        self.r322_r001_P = 144.9  # HP loop pressure anchor (bar a)
         # tank
         self.tank_level_frac = 0.65
         self.tank_T_C        = 25.0
@@ -5049,6 +5052,12 @@ _sm_flowsheet.add_unit(_vac_unit)
 
 def step_sim(dt: float) -> dict:
     s = state
+    # Dynamic property evaluations for HP Loop
+    _react_feed_in.viscosity = thermo.viscosity_liq_pas(s.react_T_overflow)
+    _strip_overflow_in.viscosity = thermo.viscosity_liq_pas(s.react_T_overflow)
+    _hpcc_gas_in.viscosity = thermo.viscosity_gas_pas(s.react_T_overflow)
+    _scrub_offgas_in.viscosity = thermo.viscosity_gas_pas(s.a328_c001_T)
+
     s.sim_t += dt                        # plant clock advances with the physics, not the wall clock
     suct_open  = bool(s.XV_321901) and (s.tank_level_frac > 0.05)
     disch_open = bool(s.XV_322901)
@@ -5388,7 +5397,7 @@ def step_sim(dt: float) -> dict:
                             T_overflow_c=T_conv_c)
     
     # Dynamic Darcy-Weisbach pressure drop for Reactor
-    dP_des_react = REACT_P_BARA - HPCC_P_DES_BARA
+    dP_des_react = state.p_syn_bara - HPCC_P_DES_BARA
     m_react_live = max(sum(react["feed_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
     m_react_des  = HPCC_LIQ_DES_LIVE if HPCC_LIQ_DES_LIVE else HPCC_LIQ_DES_KGH
     w_urea_react = (react["feed_kmolh"].get("Urea", 0.0) * MW_COMP["Urea"]) / m_react_live
@@ -5670,45 +5679,7 @@ def step_sim(dt: float) -> dict:
     m_loop_frac = clamp((s.react_level_pct + s.hpcc_level_pct + s.strip_level)
                         / (REACT_LEVEL_NLL_PCT + HPCC_LEVEL_NLL_PCT + STRIP_LEVEL_SP_DES), 0.0, 1.0)
     live_syn_p_anchor = hpcc["P_bub"] - (HPCC_P_DES_BARA - SYN_P_DES_BARA)
-    pt_fwd    = live_syn_p_anchor * (1.0 + m_loop_frac * SYN_P_COUPLING * pb_push)
-    # L3-2b inventory gate on the PT forcing offsets.  m_loop_frac (the same loop-mass fraction used
-    #   for the PT floor below) multiplies EVERY additive forcing term so an empty / part-filled loop
-    #   cannot saturate p_target: the deficit / vent / conversion push can only develop as the HP
-    #   liquid inventories physically accumulate.  == 1.0 at design (levels at NLL) -> forcing
-    #   unchanged -> design steady state stays bit-exact; -> 0 as the loop empties -> cold-start
-    #   pressurisation tracks inventory fill (emergent tau), never a hard lag on the pressure state
-    #   (report §6.1 / §6.4 remediation option 2).  m_loop_frac computed above (hoisted for pt_fwd gate).
-    # Fix-2: dimensionless conversion-deficit forcing Π = κ·δ_X injected ADDITIVELY into the PT
-    # target.  When the reactor under-converts (low N/C / high H/C), the unconverted NH3 + CO2 flash
-    # to the synthesis loop and aggressively pressurise it: Π·P_des bar of extra forcing.  δ_X is
-    # clamped >= 0 (Fix-2), so at/above design Π = 0 -> no spurious depressurisation at high N/C.
-    Pi_conv   = REACT_PI_KAPPA * react["delta_X"]
-    pt_target = pt_fwd + m_loop_frac * (
-                         SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * live_syn_p_anchor
-                       + SYN_P_VENT_GAIN * max(1.0 - vent_frac, 0.0) * live_syn_p_anchor
-                       + Pi_conv * live_syn_p_anchor)  # HV-322604 vent: ONE-SIDED inert-purge deficit only
-                                                    #   (close<des -> inerts accumulate -> PT up; open>=des
-                                                    #   -> purge is supply-limited, no extra venting -> PT
-                                                    #   unchanged).  Tiny purge valve cannot crash HP P.
-    # L3-2 inventory-aware PT floor: a totally empty loop must be able to bottom out at atmospheric,
-    #   not a hard 120 bar.  Loop-mass fraction = mean of the three HP liquid inventories vs their design
-    #   NLL (LT-322504 80%, LT-322E002 50%, LT-322501 50%); == 1.0 at design -> P_min == 120 bar (the
-    #   static SYN_P_MIN_BARA preserved exactly), -> 1.0 atm as the loop empties.
-    #       P_min = 1.0 + 119.0 * clamp(M_loop / M_loop_des, 0, 1)
-    #   (m_loop_frac computed above, at the forcing gate.)
-    p_syn_min   = 1.0 + 119.0 * m_loop_frac
-    # Inventory-emergent pressurisation tau: an EMPTY loop (m_loop_frac -> 0) has little condensable/
-    #   vapour inventory to build head, so PT climbs on the sourced cold-start constant SYN_P_TAU_FILL_MIN
-    #   (57.8 min, 06-03 Section 1.2 field FOPTD); as the three HP liquid inventories fill toward NLL the
-    #   constant relaxes linearly to the warm op-pt SYN_P_TAU_MIN (4 min).  tau EMERGES from inventory fill
-    #   -- NOT a hard lag on the pressure state (report Section 6.1: never a fudge lag; tune physical
-    #   inventory).  At design m_loop_frac == 1 -> tau_eff == SYN_P_TAU_MIN and (pt_target - p_syn) == 0,
-    #   so the steady-state hold is bit-exact regardless of tau_eff.
-    _tre = 4.0   # relax-schedule shape (Smith-calibrated to Section 6.4 band); holds tau_eff at
-                 #   SYN_P_TAU_FILL_MIN until m_loop_frac -> 1, then collapses to warm SYN_P_TAU_MIN
-    tau_eff_min = SYN_P_TAU_FILL_MIN + m_loop_frac ** _tre * (SYN_P_TAU_MIN - SYN_P_TAU_FILL_MIN)
-    s.p_syn_bara = clamp(s.p_syn_bara + (dt / (tau_eff_min * 60.0)) * (pt_target - s.p_syn_bara),
-                         p_syn_min, SYN_P_MAX_BARA)
+    pass  # old pt_fwd block removed
     scrub["P_overflow"] = s.p_syn_bara            # PT-329201 dynamic synthesis pressure (bar a)
     scrub["P_offgas"]   = s.p_syn_bara            # off-gas line rides the live synthesis P (HV-322604 P_up)
     scrub["vent_frac"]  = vent_frac               # HV-322604 vent capacity / required purge (<1 -> PT rises)
@@ -7204,6 +7175,15 @@ def step_sim(dt: float) -> dict:
     _tear_tol = 1.0e-6
     _tear_norm = max(_tear_resid.values(), default=0.0)
 
+    # Dynamic Pressure Anchor (Mass Balance ODE)
+    # Loop mass capacity ~ 1500 kg/bar. 
+    C_loop = 1500.0  
+    m_in_loop = (F_pump_total_th * 1000.0) + F_CO2_feed_kgh + m_308
+    m_out_loop = drain_kgh + hv604["mass_kgh"]
+    
+    s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0),
+                         10.0, 180.0)
+                         
     return {
         "t":           time.time(),      # desktop clock (epoch s)
         "t_sim":       s.sim_t,          # plant clock (s since program init); trend X axis
