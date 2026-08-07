@@ -6587,7 +6587,8 @@ def step_sim(dt: float) -> dict:
                 + (m_321 - R3232_E011_M321_DES)
                 + (m_402 - R3232_E011_M402_DES))
     pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
-    m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
+    dP_v011  = max(s.r3232_e011_P - 1.0, 0.001)   # C005 is approx 1.0 bar (atmospheric vent node)
+    m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES) * math.sqrt(dP_v011 / (R3232_E011_P_BARA - 1.0))
     gen_v011 = R3232_E011_PHIV * in_e011
     # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 (PFD stream
     # 734) fall in; the 323P008 lean-carbamate pumps draw out through LV-323503 on the common
