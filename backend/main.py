@@ -616,7 +616,7 @@ STRIP_T_TOP_LOAD_K   = 0.5      # overhead (TT-322013) attenuation of the bottom
                                 #   (dT_bot is a liquid/reboiler effect; the top gas feels it only weakly).
                                 #   The G/L strip-cool endotherm (dT_strip) couples to the OVERHEAD at full
                                 #   weight — the rising vapour is first to carry the CO2-sweep flash latent load.
-STRIP_ETA_KT    = 1.50     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
+STRIP_ETA_KT    = 0.15     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
 STRIP_ETA_KN    = 1.50     # eta_T penalty per unit reactor-feed N/C above design (excess NH3 chokes)
 STRIP_ETA_KW    = 1.50     # eta_T penalty per unit reactor-feed H/C above design (dilution chokes)
 STRIP_ETA_FLOOR = 0.50     # min penalty factor (g_NC, g_HC clamp floor)
