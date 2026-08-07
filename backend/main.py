@@ -1076,16 +1076,16 @@ R328_C002_IN_DES   = (R328_C002_M738_DES + R328_C002_M748_DES
 R328_C002_PHI737   = 6665.0 / 40434.0                       # OVHD split -> 328D001 (737)
 R328_C002_M737_DES = R328_C002_PHI737 * R328_C002_IN_DES    # 6665
 R328_C002_M743_DES = R328_C002_IN_DES - R328_C002_M737_DES  # 33769 bottoms -> hydrolyser
-R328_C002_T_BOT = 139.0 ; R328_C002_T_TOP = 117.0
-R328_C002_T738 = 114.0 ; R328_C002_T748 = 188.0 ; R328_C002_T750 = 140.0
+R328_C002_T_BOT_BOT = 139.0 ; R328_C002_T_BOT_TOP = 117.0
+R328_C002_T_BOT738 = 114.0 ; R328_C002_T_BOT748 = 188.0 ; R328_C002_T_BOT750 = 140.0
 R328_D001_T = 61.0                                          # 775 reflux temperature (from 328D001)
 # Holdup: see the F-8 geometry block below -- R328_C002_M_DES is set there from the datasheet.
 R328_C002_LAM748 = 2000.0 ; R328_C002_LAM750 = 2100.0       # kJ/kg condensation of recycle OVHDs
 # sensible net onto the 139°C bottoms (kW), then λ737 closes M·cp·dT/dt = 0:
-R328_C002_SENS = ((R328_C002_M738_DES*(R328_C002_T738 - R328_C002_T_BOT)
-                   + R328_C002_M775_DES*(R328_D001_T   - R328_C002_T_BOT)
-                   + R328_C002_M748_DES*(R328_C002_T748 - R328_C002_T_BOT)
-                   + R328_C002_M750_DES*(R328_C002_T750 - R328_C002_T_BOT))
+R328_C002_SENS = ((R328_C002_M738_DES*(R328_C002_T_BOT738 - R328_C002_T_BOT_BOT)
+                   + R328_C002_M775_DES*(R328_D001_T   - R328_C002_T_BOT_BOT)
+                   + R328_C002_M748_DES*(R328_C002_T_BOT748 - R328_C002_T_BOT_BOT)
+                   + R328_C002_M750_DES*(R328_C002_T_BOT750 - R328_C002_T_BOT_BOT))
                   / 3600.0 * R328_CP)                                     # kW
 R328_C002_LAM737 = ((R328_C002_SENS
                      + R328_C002_M748_DES/3600.0*R328_C002_LAM748
@@ -1126,7 +1126,7 @@ R328_C004_PHI750   = 6833.0 / 40557.0                       # OVHD split -> 328C
 R328_C004_M750_DES = R328_C004_PHI750 * R328_C004_IN_DES    # 6833
 R328_C004_M739_DES = R328_C004_IN_DES - R328_C004_M750_DES  # 33724 bottoms -> 328E007 -> boundary
 R328_C004_T = 143.0 ; R328_C004_T749 = 148.0
-R328_C004_DT_DES = R328_C004_T - R328_C002_T750             # 3 C bottom (143) - top tray (140 = OVHD 750), TT-328004
+R328_C004_DT_DES = R328_C004_T - R328_C002_T_BOT750             # 3 C bottom (143) - top tray (140 = OVHD 750), TT-328004
 # Holdup: see the F-8 geometry block below -- R328_C004_M_DES is set there from the datasheet.
 R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C004_T)
                      + R328_C004_M931_DES/3600.0*R328_C004_M931_DH)
@@ -1287,7 +1287,7 @@ R328_E004_CW_T_IN_C     = 30.0                              # CW supply (stream 
 R328_E004_CW_T_OUT_DES_C = 38.0                             # CW return (stream 1029) outlet temp at design, C
 R328_E004_CW_T_MAX_C     = 110.0                            # display clamp: CW flashes near this at the 2.2 bar a return
 # λ737_cond (condensation latent) closes drum energy balance at 61°C:
-R328_D001_SENS = ((R328_D001_M737_DES*(R328_C002_T_TOP - R328_D001_T)
+R328_D001_SENS = ((R328_D001_M737_DES*(R328_C002_T_BOT_TOP - R328_D001_T)
                    + R328_D001_M718A_DES*(R328_D001_T718A - R328_D001_T))
                   / 3600.0 * R328_CP)                                     # kW
 R328_D001_LAM737 = ((R328_E004_Q_DES_KW - R328_D001_SENS)
@@ -1452,7 +1452,7 @@ R328_E021_LOSS = 54.4                                       # kW shell heat loss
 #   190.0021 C, so it cannot carry the design anchor; the design temperatures give the same
 #   effectiveness exactly and reconstruct the datasheet in the process -- Q_cold = 33769/3600*4.0*51
 #   = 1913.58 kW (~ its 1913.6) and the hot/cold closure 1968.03 - 1913.58 = 54.45 kW (~ its 54.4).
-R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT) / (R328_C003_T - R328_C002_T_BOT)   # 51/61 = 0.83607
+R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT_BOT) / (R328_C003_T - R328_C002_T_BOT_BOT)   # 51/61 = 0.83607
 # Hot-side (stream 749) shell loss in flow-temperature units [kg.K/h], back-solved from the plant's
 # own design state -- the hot duty the cold side does NOT receive:
 #   34062*(200-148) - 33769*(190-139) = 1771224 - 1722219 = 49005 kg.K/h = 49005/3600*4.0 = 54.45 kW,
@@ -1460,12 +1460,12 @@ R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT) / (R328_C003_T - R328_C002_
 # R328_E021_EPS_T above).  Used as an ENERGY-BALANCE closure, not as a second effectiveness, so
 # 328E021 can neither create nor destroy energy off-design.
 R328_E021_LOSS_DT = (R328_C004_M749_DES * (R328_C003_T    - R328_C004_T749)
-                     - R328_C003_M746_DES * (R328_C003_T746 - R328_C002_T_BOT))   # 49005 kg.K/h
+                     - R328_C003_M746_DES * (R328_C003_T746 - R328_C002_T_BOT_BOT))   # 49005 kg.K/h
 R328_E007_EPS  = 0.6667                                     # 328E007 feed/effluent interchanger
 R328_E007_LOSS = 18.3                                       # kW shell heat loss
 R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 boundary (design anchors)
 # AUDIT C10 — 328E007 was DEAD: the two constants above were defined and never referenced, so the
-# 328C002 feed sat on a frozen R328_C002_T738 = 114 and TT-328006 on a frozen 89, i.e. a 2005 kW
+# 328C002 feed sat on a frozen R328_C002_T_BOT738 = 114 and TT-328006 on a frozen 89, i.e. a 2005 kW
 # interchanger duty completely decoupled from its own live hot stream (the 328C004 bottoms).  Wired
 # with the SAME two-part idiom 328E021 already uses: a design-temperature effectiveness for the cold
 # outlet, and an ENERGY-BALANCE closure (not a second effectiveness) for the hot outlet, so 328E007
@@ -1479,10 +1479,10 @@ R328_E007_LOSS_DT = (R328_C004_M739_DES * (R328_C004_T - R328_E007_TH_OUT)
 # 328C002 top-to-bottom design differential: the column top (stream 737 / TT-328008 node, 117 C) sits
 # 22 C below the bottoms state s.a328_c002_T (139 C).  Lets TT-328008 and the TIC-328008 inferential
 # ride the LIVE column instead of a module constant (AUDIT B4 / C31).
-R328_C002_DT_TOP = R328_C002_T_BOT - R328_C002_T_TOP        # 22 C
+R328_C002_DT_TOP = R328_C002_T_BOT_BOT - R328_C002_T_BOT_TOP        # 22 C
 # 328C003 bottoms-to-overhead design differential: stream 748 leaves at 188 C (PFD-22) against the
 # 200 C bulk, so TT-328011 rides the live hydrolyser state at that offset (AUDIT B6).
-R328_C003_DT_748 = R328_C003_T - R328_C002_T748             # 12 C
+R328_C003_DT_748 = R328_C003_T - R328_C002_T_BOT748             # 12 C
 # --- TIC-328008 inferential: H2O mol% in 328C002 offgas (-> 328E004) ---
 # VLE node is the 328C002 OVHD (117 C / 3.5 bar a), NOT the 328D001 drum (2.6 bar a):
 # the drum sits 0.9 bar below the column top across 328E004, so the drum-node Raoult
@@ -1517,14 +1517,14 @@ R328_C002_P_TOP  = 3.5                                      # 328C002 OVHD press
 #             dissolved NH3/CO2 raising the liquor's vapour pressure above pure water, so the
 #             pure-water bubble point slightly overstates it.  Treated as one lumped offset.
 R328_C002_P_KP   = 0.02                                     # bar per (kg/s) net vapour imbalance
-R328_C002_DP_COL = psat_water_bara(R328_C002_T_BOT) - R328_C002_P_TOP     # -0.0104 bar
+R328_C002_DP_COL = psat_water_bara(R328_C002_T_BOT_BOT) - R328_C002_P_TOP     # -0.0104 bar
 R328_C004_P_BARA = 3.7                                      # bar a, PFD-22 stream 750 / 779 / 780
 R328_C004_P_KP   = 0.02                                     # bar per (kg/s) net vapour imbalance
 R328_C004_DP_COL = psat_water_bara(R328_C004_T) - R328_C004_P_BARA        # +0.2041 bar
 R328_E004_DP     = R328_C002_P_TOP - R328_D001_P_BARA       # 0.9 bar drop 328C002 top -> 328D001 drum over 328E004
 R328_D001_OFFGAS_H2O_PFD = 46.21                            # mol% H2O in offgas, Combined_1750 PFD stream 737 @117 C / 3.5 bar a
-R328_D001_OFFGAS_PHI = (R328_D001_OFFGAS_H2O_PFD/100.0) * R328_C002_P_TOP / psat_water_bara(R328_C002_T_TOP)   # H2O activity coeff back-solved to PFD 737; psat(117)=1.8004 -> 0.898328
-R328_D001_OFFGAS_H2O_DES = 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_TOP) / R328_C002_P_TOP   # = 46.21 mol% -> 328E004 (identity anchor; supersedes 62.9 drum-node Raoult)
+R328_D001_OFFGAS_PHI = (R328_D001_OFFGAS_H2O_PFD/100.0) * R328_C002_P_TOP / psat_water_bara(R328_C002_T_BOT_TOP)   # H2O activity coeff back-solved to PFD 737; psat(117)=1.8004 -> 0.898328
+R328_D001_OFFGAS_H2O_DES = 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_BOT_TOP) / R328_C002_P_TOP   # = 46.21 mol% -> 328E004 (identity anchor; supersedes 62.9 drum-node Raoult)
 
 
 # ==========================================================================
@@ -2211,7 +2211,7 @@ def _des_kfac(m_liq: float, m_vap: float, r: float) -> float:
 
 
 DES_STAGES = {
-    "C002": {"a": DES_C002, "w": W_S743, "N": R328_NTHEO_C002, "T": R328_C002_T_BOT,
+    "C002": {"a": DES_C002, "w": W_S743, "N": R328_NTHEO_C002, "T": R328_C002_T_BOT_BOT,
              "M": R328_C002_M_DES,
              "V": R328_C002_M748_DES + R328_C002_M750_DES,   # stripping agent: the two hot OVHDs
              "L": R328_C002_M743_DES},
@@ -4634,7 +4634,7 @@ class State:
         self.r3232_d001_P = R3232_D001_P_BARA
         # ---- 328C002 Desorber-I (bottoms 139 C) / 328D001 reflux drum (61 C, 2.6)
         self.a328_c002_M = R328_C002_M_DES
-        self.a328_c002_T = R328_C002_T_BOT
+        self.a328_c002_T = R328_C002_T_BOT_BOT
         self.a328_c002_P = R328_C002_P_TOP        # AUDIT C1: column OVHD pressure state (3.5 bar a)
         self.a328_d001_M = R328_D001_M_DES
         self.a328_d001_T = R328_D001_T
@@ -6130,7 +6130,7 @@ def step_sim(dt: float) -> dict:
     # aqueous_cp() anchored on ITS OWN design temperature, so every value equals the frozen constant
     # bit-exactly at the design seed (every back-solved lambda/UA and the boot-pinned
     # A328_LAMBDA_ABS are therefore untouched) and tracks IAPWS off design.
-    cp_328c002 = aqueous_cp(R328_CP, R328_C002_T_BOT, s.a328_c002_T)
+    cp_328c002 = aqueous_cp(R328_CP, R328_C002_T_BOT_BOT, s.a328_c002_T)
     cp_328c003 = aqueous_cp(R328_CP, R328_C003_T,     s.a328_c003_T)
     cp_328c004 = aqueous_cp(R328_CP, R328_C004_T,     s.a328_c004_T)
     cp_328d001 = aqueous_cp(R328_CP, R328_D001_T,     s.a328_d001_T)
@@ -6250,8 +6250,8 @@ def step_sim(dt: float) -> dict:
     m_743    = R328_C002_M743_DES * (lic503_op / 50.0)                    # bottoms -> hydrolyser
     sens_c002= ((m_738*(T_738 - Tc002)                                    # AUDIT C10: live 328E007 outlet
                  + m775_prev*(R328_D001_T   - Tc002)
-                 + m748_prev*(R328_C002_T748 - Tc002)
-                 + m750_prev*(R328_C002_T750 - Tc002))/3600.0*cp_328c002)
+                 + m748_prev*(R328_C002_T_BOT748 - Tc002)
+                 + m750_prev*(R328_C002_T_BOT750 - Tc002))/3600.0*cp_328c002)
     # AUDIT F-8: the overhead is ENERGY-limited, not a frozen fraction of the inflow.  What leaves
     # overhead is what the two condensing hot recycle vapours (748 @188, 750 @140) plus the sensible
     # net can actually boil, capped by the throughput ratio.  Anchored-ratio form: both caps evaluate
@@ -6267,8 +6267,11 @@ def step_sim(dt: float) -> dict:
     # and the temperature is the bubble point at the bottom node.
     gen737   = max(R328_C002_M737_DES * (q_c002 / R328_C002_Q_DES), 0.0)  # boil-up (kg/h)
     # Dynamic pressure drop coupling: flow driven by column-to-drum dP
+    _p001_lag = _lag1(s.tlag, 'P_D001_lag', s.a328_d001_P, 2.0, dt)
+    _p002_lag_737 = _lag1(s.tlag, 'P_C002_lag_737', s.a328_c002_P, 2.0, dt)
+    dP_737   = max(_p002_lag_737 - _p001_lag, 0.001)
     dP_737   = max(s.a328_c002_P - s.a328_d001_P, 0.001)
-    m_737    = R328_C002_M737_DES * math.sqrt(dP_737 / R328_E004_DP)      # OVHD line -> 328E004/328D001
+    m_737    = R328_C002_M737_DES * math.sqrt(dP_737 / R328_E004_DP)
     M_c002_pre = s.a328_c002_M
     s.a328_c002_P = max(s.a328_c002_P + R328_C002_P_KP*(gen737 - m_737)/3600.0*dt, 0.1)
     s.a328_c002_T = tsat_steam(s.a328_c002_P + R328_C002_DP_COL)          # bubble point at the bottom
@@ -6368,7 +6371,14 @@ def step_sim(dt: float) -> dict:
     # is the column where it matters most for training: losing the LP strip steam must drop the
     # bottoms temperature and collapse the NH3 stripping, and under the old form it did neither.
     gen750   = max(R328_C004_M750_DES * (q_c004 / R328_C004_Q_DES), 0.0)  # boil-up (kg/h)
-    m_750    = R328_C004_M750_DES * (s.a328_c004_P / R328_C004_P_BARA)    # OVHD line -> 328C002 bottom
+    # Dynamic pressure drop coupling: flow driven by 328C004 to 328C002 dP
+    dP_750_des = R328_C004_P_BARA - R328_C002_P_TOP
+    _p004_lag = _lag1(s.tlag, 'P_C004_lag', s.a328_c004_P, 2.0, dt)
+    _p002_lag = _lag1(s.tlag, 'P_C002_lag', s.a328_c002_P, 2.0, dt)
+    dP_750_live = max(_p004_lag - _p002_lag, 0.001)
+    
+    dP_750_live = max(s.a328_c004_P - s.a328_c002_P, 0.001)
+    m_750    = R328_C004_M750_DES * math.sqrt(dP_750_live / dP_750_des)
     M_c004_pre = s.a328_c004_M
     s.a328_c004_P = max(s.a328_c004_P + R328_C004_P_KP*(gen750 - m_750)/3600.0*dt, 0.1)
     s.a328_c004_T = tsat_steam(s.a328_c004_P + R328_C004_DP_COL)          # bubble point at the bottom
@@ -6406,7 +6416,7 @@ def step_sim(dt: float) -> dict:
     # master in this engine; its PV depends only on constants and s.a328_d001_P, both already
     # settled at this point.  On CAS, FV-328404 strokes to hold TIC-328008.
     # AUDIT C31 — the doc specifies TWO inputs (TT-328008 and PIC-328202); the temperature leg was the
-    # module constant R328_C002_T_TOP, so the PV was live on drum pressure and blind to the column.
+    # module constant R328_C002_T_BOT_TOP, so the PV was live on drum pressure and blind to the column.
     # psat(117)=1.8004 vs psat(120)=1.9854, i.e. 3 C swings the PV by 4.75 mol% -- twice the loop's
     # whole SP band.  Now rides the live 328C002 bottoms at the design top/bottom offset; at the seed
     # s.a328_c002_T - R328_C002_DT_TOP == 139 - 22 == 117.0 exactly, so the pin cannot move.
@@ -7482,7 +7492,7 @@ def step_sim(dt: float) -> dict:
         },
         "DESORB_328": {                          # Screen 328-1 : Desorption / Hydrolysis train
             "C002": {                            # 328C002 Desorber-I (bottoms 139°C)
-                "TT_328C002": round(s.a328_c002_T, 1),                     # bottom temp (C, hold 139)
+                "R328_C002_T_BOT_BOT": round(s.a328_c002_T, 1),                     # bottom temp (C, hold 139)
                 "TT_328007":  round(s.a328_c002_T, 1),                     # bottoms draw -> 328P006 (stream 743, 139C)
                 # AUDIT B4: TT-328008 belongs on the 328C002 OVERHEAD (stream 737, 117 C -> 328E004),
                 # per Mapping of Desorber Hydrolyzer unit.md:46.  It used to be published in the D001
@@ -7527,7 +7537,7 @@ def step_sim(dt: float) -> dict:
                                "op": round(s.TIC_328012["op"], 2), "mode": s.TIC_328012["mode"]},
             },
             "C004": {                            # 328C004 Desorber-II (143°C, LP steam, FFIC ratio)
-                "TT_328C004": round(s.a328_c004_T, 1),                     # temp (C, hold 143)
+                "R328_C004_T": round(s.a328_c004_T, 1),                     # temp (C, hold 143)
                 "TT_328005":  round(s.a328_c004_T, 1),                     # bottoms draw -> 328E007 (stream 739, 143C)
                 "TT_328004":  round(s.a328_c004_T - R328_C004_DT_DES, 1),  # top tray = OVHD 750 (140C), tracks live bottoms
                 "P_bara":     round(s.a328_c004_P, 2),                     # AUDIT C1: live column pressure (3.7 bar a)
@@ -8765,6 +8775,7 @@ def _pin_hpcc_ua():
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
     _cap = {}
     for _ in range(18000):
+        
         res = step_sim(0.1)
     _cap["r"] = res["sm_diagnostics"]["hpcc"]
     _cap["ejm"] = res["sm_diagnostics"]["ej"]["suction_kgh"] / res["sm_diagnostics"]["ej"]["mu"] if res["sm_diagnostics"]["ej"].get("mu", 0) else EJ_MOTIVE_NH3_DES
