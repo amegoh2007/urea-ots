@@ -300,6 +300,69 @@ test('a packet missing a pen path leaves that pen untouched', () => {
   assert.equal(I.slots[0].pts.length, 1);
 });
 
+// ===== ruler =====
+
+function penWith(points) {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.slots[0].pts = points;
+  return I.slots[0];
+}
+
+test('the ruler reports the value each pen held at that instant', () => {
+  const s = penWith([{ t: 10, v: 100 }, { t: 20, v: 200 }, { t: 30, v: 300 }]);
+  assert.equal(trend.valueAt(s, 20), 200);
+});
+
+test('between samples the ruler holds the last reading, as a DCS cursor does', () => {
+  const s = penWith([{ t: 10, v: 100 }, { t: 20, v: 200 }]);
+  assert.equal(trend.valueAt(s, 17), 100, 'must hold, not interpolate or jump forward');
+});
+
+test('hold semantics keep digital pens truthful', () => {
+  reset();
+  trend.addTag('XV-321901', 0);
+  I.slots[0].pts = [{ t: 0, v: 1 }, { t: 50, v: 0 }];
+  assert.equal(trend.valueAt(I.slots[0], 49), 1, 'the valve was still open at t=49');
+  assert.equal(trend.valueAt(I.slots[0], 50), 0);
+});
+
+test('a ruler before a pen has data reads no value rather than a wrong one', () => {
+  const s = penWith([{ t: 100, v: 5 }]);
+  assert.equal(trend.valueAt(s, 50), null);
+});
+
+test('a ruler past the newest sample holds the newest value', () => {
+  const s = penWith([{ t: 10, v: 1 }, { t: 20, v: 2 }]);
+  assert.equal(trend.valueAt(s, 999), 2);
+});
+
+test('an empty pen and an unset ruler both read no value', () => {
+  const s = penWith([]);
+  assert.equal(trend.valueAt(s, 10), null);
+  assert.equal(trend.valueAt(penWith([{ t: 1, v: 1 }]), null), null);
+});
+
+test('the ruler can be set and cleared', () => {
+  reset();
+  trend.setCursor(123);
+  assert.equal(trend.cursor(), 123);
+  trend.setCursor(null);
+  assert.equal(trend.cursor(), null);
+});
+
+test('pens read independently at one ruler instant', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);
+  I.slots[0].pts = [{ t: 10, v: 180 }, { t: 20, v: 190 }];
+  I.slots[1].pts = [{ t: 10, v: 150 }, { t: 20, v: 152 }];
+  trend.setCursor(15);
+  assert.equal(trend.valueAt(I.slots[0], trend.cursor()), 180);
+  assert.equal(trend.valueAt(I.slots[1], trend.cursor()), 150);
+  trend.setCursor(null);
+});
+
 // ===== desktop-clock mapping =====
 
 test('desktop time is interpolated from the plant/desktop pairs', () => {

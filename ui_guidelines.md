@@ -154,8 +154,16 @@ hide it. Closes only via the `X` at top-left. One window only.
 * **Scaling:** every pen normalises to a shared 0–100 grid using its engineering range
   (`rng:[lo,hi]` on the OV entry → unit-default table → auto-scale). The Y axis relabels to
   the **selected** pen's units; labels outside 0–100 % are suppressed.
-* **Pen table:** `# · colour · TAG · value · unit · LOW · HIGH · x`, with a sticky header row.
-  Click a row to select it. Empty rows are drop targets. Booleans render as 0/1 stepped pens.
+* **Pen table:** `# · colour · TAG · VALUE · @ RULER · UNIT · LOW · HIGH · x`, with a sticky
+  header row. Click a row to select it. Empty rows are drop targets. Booleans render as 0/1
+  stepped pens.
+* **Ruler:** click anywhere on the plot to drop a dashed amber vertical ruler at that instant,
+  labelled with plant and desktop time. The `@ RULER` column then shows what every pen read at
+  that moment — last sample at or before the ruler (hold semantics, the only correct reading for
+  a stepped digital pen); `--` before a pen has data. Clicking again moves it; the amber `RULER
+  hh:mm:ss ✕` chip in the header clears it. The ruler auto-clears when it scrolls out of the
+  window rather than stranding a column of stale numbers. Drawn as a Chart.js plugin, so it is
+  captured by the PNG export along with a `RULER` stamp in the header and an `@ RULER` column.
 * **Editable display range:** LOW and HIGH are number inputs per pen. Editing either sets the
   pen's display scale and clears its auto-scale flag; ENTER or blur commits (§12). Blanking a
   field returns the pen to auto-scaling, and auto values render italic/grey to signal they are

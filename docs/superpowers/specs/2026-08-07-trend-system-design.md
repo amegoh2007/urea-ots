@@ -188,8 +188,17 @@ units, so the selected pen reads directly while the rest stay comparable in shap
 two tick rows: plant clock primary, desktop clock beneath (Chart.js second linear x-axis at
 `position: 'bottom'`, sharing the same data range).
 
-**Pen table**, 10 rows under a sticky header: `# · colour chip · TAG · live value · unit · LOW ·
-HIGH · X`. Empty rows read `-- drop indicator here --`. Clicking a row selects that pen and the Y
+**Ruler (added after review).** Clicking the plot drops a dashed amber vertical ruler at that
+instant, labelled with plant and desktop time, and the pen table's `@ RULER` column fills with what
+each pen read there. Lookup is the last sample at or before the ruler — hold semantics, matching a
+DCS cursor and the only correct reading for a stepped digital pen; interpolating would invent a
+half-open valve that never existed. Position is stored as absolute plant time, not a pixel, so it
+stays anchored to the instant as the window scrolls, and auto-clears once it leaves the span rather
+than stranding a column of stale numbers against an invisible line. It is drawn as a Chart.js
+plugin rather than a DOM overlay specifically so the PNG export captures it with no extra code.
+
+**Pen table**, 10 rows under a sticky header: `# · colour chip · TAG · live value · @ RULER · unit ·
+LOW · HIGH · X`. Empty rows read `-- drop indicator here --`. Clicking a row selects that pen and the Y
 axis follows. Fixed 10-colour palette chosen for contrast against `#0a1416`, none relying on
 red/green discrimination alone.
 

@@ -83,6 +83,7 @@
   let span = DEFAULT_SPAN;
   let selected = 0;
   let chart = null, win = null, lastPacket = null;
+  let cursorT = null;                  // ruler position, absolute plant seconds (null = no ruler)
   let nowSim = 0, nowWall = 0;
   let timeMap = [];                    // [t_sim, t_wall] pairs for the desktop tick row
   let dirty = false, redrawTimer = null;
@@ -178,9 +179,54 @@
     slot.lo = lo - pad; slot.hi = hi + pad;
   }
 
+  // Value a pen held at the ruler instant. Hold semantics (last sample at or before), which
+  // is what a DCS cursor reports and the only correct reading for a stepped digital pen.
+  function valueAt(slot, t) {
+    if (t == null || !slot || !slot.pts.length) return null;
+    let best = null;
+    for (const p of slot.pts) {
+      if (p.t > t) break;
+      best = p;
+    }
+    return best ? best.v : null;
+  }
+
+  // Vertical ruler. A plugin rather than a DOM overlay so it draws inside the chart bitmap and
+  // is therefore captured by the PNG export without any extra work.
+  const rulerPlugin = {
+    id: 'otsRuler',
+    afterDatasetsDraw(ch) {
+      if (cursorT == null) return;
+      const area = ch.chartArea;
+      const x = ch.scales.x.getPixelForValue(cursorT - nowSim);
+      if (!(x >= area.left && x <= area.right)) return;
+      const g = ch.ctx;
+      g.save();
+      g.strokeStyle = '#ffd000';
+      g.lineWidth = 1;
+      g.setLineDash([4, 3]);
+      g.beginPath();
+      g.moveTo(x, area.top);
+      g.lineTo(x, area.bottom);
+      g.stroke();
+      g.setLineDash([]);
+      const w = wallAt(cursorT);
+      const label = hms(cursorT) + (w == null ? '' : '  ' + deskClock(w));
+      g.font = 'bold 10px Consolas, monospace';
+      const bw = g.measureText(label).width + 10;
+      const bx = clamp(x - bw / 2, area.left, Math.max(area.left, area.right - bw));
+      g.fillStyle = '#ffd000';
+      g.fillRect(bx, area.top, bw, 14);
+      g.fillStyle = '#241f00';
+      g.fillText(label, bx + 5, area.top + 10);
+      g.restore();
+    },
+  };
+
   function buildChart() {
     const cv = win.querySelector('#tw-canvas');
     chart = new Chart(cv.getContext('2d'), {
+      plugins: [rulerPlugin],
       type: 'line',
       data: { datasets: slots.map((_, i) => ({
         label: 'slot' + i, data: [], parsing: false, borderColor: PENS[i],
@@ -230,6 +276,9 @@
   function redraw() {
     if (!chart || !win || win.style.display === 'none') return;
     const cut = nowSim - span;
+    // Once the ruler scrolls off the left edge its readings are gone with the data; drop it
+    // rather than leave a column of stale numbers pinned to an invisible line.
+    if (cursorT != null && (cursorT < cut || cursorT > nowSim)) setCursor(null);
     chart.options.scales.x.min = -span;
     chart.options.scales.x2.min = -span;
     for (let i = 0; i < SLOTS; i++) {
@@ -250,6 +299,15 @@
     renderRows();
     win.querySelector('#tw-plant').textContent = 'PLANT ' + hms(nowSim);
     win.querySelector('#tw-desk').textContent = 'DESKTOP ' + deskClock(nowWall);
+    const chip = win.querySelector('#tw-ruler');
+    chip.style.display = cursorT == null ? 'none' : 'inline-block';
+    if (cursorT != null) chip.firstChild.textContent = 'RULER ' + hms(cursorT);
+  }
+
+  function setCursor(t) {
+    cursorT = t;
+    dirty = true;
+    if (win && chart) redraw();
   }
   function scheduleRedraw() {
     if (redrawTimer) return;
@@ -264,22 +322,24 @@
       const tr = tb.children[i], slot = slots[i];
       tr.className = (i === selected ? 'sel ' : '') + (slot ? 'full' : 'empty');
       const cells = tr.children;
-      const loI = cells[5].firstChild, hiI = cells[6].firstChild;
+      const loI = cells[6].firstChild, hiI = cells[7].firstChild;
       cells[0].textContent = i + 1;
       cells[1].firstChild.style.background = PENS[i];
       if (!slot) {
         cells[2].textContent = '-- drop indicator here --';
-        cells[3].textContent = ''; cells[4].textContent = '';
+        cells[3].textContent = ''; cells[4].textContent = ''; cells[5].textContent = '';
         loI.value = ''; hiI.value = '';
         loI.disabled = hiI.disabled = true;
-        cells[7].textContent = '';
+        cells[8].textContent = '';
         continue;
       }
       const last = slot.pts.length ? slot.pts[slot.pts.length - 1] : null;
       const stale = last && (nowSim - last.t) > 30;
       cells[2].textContent = slot.tag;
       cells[3].textContent = last ? last.v.toFixed(slot.entry.dec) : '--';
-      cells[4].textContent = stale ? 'STALE' : slot.entry.unit;
+      const at = valueAt(slot, cursorT);
+      cells[4].textContent = cursorT == null ? '' : (at == null ? '--' : at.toFixed(slot.entry.dec));
+      cells[5].textContent = stale ? 'STALE' : slot.entry.unit;
       loI.disabled = hiI.disabled = false;
       // Never overwrite the field the operator is typing into — the 4 Hz redraw would
       // otherwise wipe a half-entered number, the same failure the faceplates guard against.
@@ -287,7 +347,7 @@
       if (document.activeElement !== hiI) hiI.value = slot.hi.toFixed(slot.entry.dec);
       loI.classList.toggle('auto', slot.auto);
       hiI.classList.toggle('auto', slot.auto);
-      cells[7].textContent = 'x';
+      cells[8].textContent = 'x';
     }
   }
 
@@ -368,22 +428,27 @@
     c.font = '12px Consolas, monospace'; c.fillStyle = '#8fb3ab';
     const d = new Date();
     c.fillText('PLANT ' + hms(nowSim) + '    DESKTOP ' + d.toLocaleString() +
-               '    SPAN ' + (SPANS.find(x => x.s === span) || {}).lbl, 12, 44);
+               '    SPAN ' + (SPANS.find(x => x.s === span) || {}).lbl +
+               (cursorT == null ? '' : '    RULER ' + hms(cursorT)), 12, 44);
 
     c.drawImage(cv, 0, headH);
 
     let y = headH + cv.height + 24;
     c.font = 'bold 11px Consolas, monospace'; c.fillStyle = '#82b3a3';
-    c.fillText('#   TAG                     VALUE      UNIT          LOW         HIGH', 12, y);
+    const ruler = cursorT != null;
+    c.fillText('#   TAG                     VALUE' + (ruler ? '   @ RULER' : '') +
+               '      UNIT          LOW         HIGH', 12, y);
     c.font = '11px Consolas, monospace';
     live.forEach((s) => {
       y += rowH;
       const i = slots.indexOf(s);
       const last = s.pts.length ? s.pts[s.pts.length - 1] : null;
+      const at = valueAt(s, cursorT);
       c.fillStyle = PENS[i]; c.fillRect(12, y - 8, 10, 8);
       c.fillStyle = '#d6f3e4';
       c.fillText(String(i + 1).padEnd(4) + s.tag.padEnd(24) +
                  (last ? last.v.toFixed(s.entry.dec) : '--').padStart(9) + '  ' +
+                 (ruler ? (at == null ? '--' : at.toFixed(s.entry.dec)).padStart(9) + '  ' : '') +
                  s.entry.unit.padEnd(8) +
                  s.lo.toFixed(s.entry.dec).padStart(11) + '  ' +
                  s.hi.toFixed(s.entry.dec).padStart(11) +
@@ -429,6 +494,11 @@
 #tw-plant{color:#5fe08f;}
 #tw-hist{display:none;font:10px Consolas,monospace;background:#3a2a08;border:1px solid #b3892f;
   color:#ffd27f;padding:1px 5px;border-radius:3px;}
+#tw-ruler{display:none;font:bold 10px Consolas,monospace;background:#3a2f08;
+  border:1px solid #ffd000;color:#ffd000;padding:1px 6px;border-radius:3px;cursor:pointer;
+  font-variant-numeric:tabular-nums;}
+#tw-ruler:hover{background:#5a4a10;}
+#tw-plot canvas{cursor:crosshair;}
 #tw-spans{margin-left:auto;display:flex;gap:2px;}
 #tw-spans button{font:bold 11px Arial;background:#1b2a30;color:#9bbabb;border:1px solid #2a4a44;
   padding:3px 7px;cursor:pointer;border-radius:3px;}
@@ -452,6 +522,8 @@
 #tw-table td.c-k{width:16px;}
 #tw-table td.c-k i{display:block;width:11px;height:9px;}
 #tw-table td.c-v{text-align:right;width:88px;color:#fff;font-weight:bold;}
+#tw-table td.c-cur{text-align:right;width:88px;color:#ffd000;font-weight:bold;}
+#tw-table th.h-cur{color:#ffd000;}
 #tw-table td.c-u{width:64px;color:#82b3a3;}
 #tw-table th{position:sticky;top:0;background:#0f1a24;color:#82b3a3;text-align:left;
   font:bold 10px "Segoe UI",system-ui;letter-spacing:.5px;padding:3px 6px;
@@ -489,14 +561,15 @@
         '<div id="tw-title">TREND</div>' +
         '<div id="tw-clocks"><span id="tw-plant">PLANT 00:00:00</span>' +
         '<span id="tw-desk">DESKTOP --:--:--</span></div>' +
+        '<span id="tw-ruler" title="Clear the ruler"><span>RULER</span> &#10005;</span>' +
         '<span id="tw-hist">HISTORY UNAVAILABLE — LIVE ONLY</span>' +
         '<div id="tw-spans"></div>' +
         '<button id="tw-save" title="Save trend image">SAVE</button>' +
       '</div>' +
       '<div id="tw-plot"><div id="tw-flash"></div><canvas id="tw-canvas"></canvas></div>' +
       '<div id="tw-table"><table>' +
-        '<thead><tr><th></th><th></th><th>TAG</th><th>VALUE</th><th>UNIT</th>' +
-        '<th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
+        '<thead><tr><th></th><th></th><th>TAG</th><th>VALUE</th><th class="h-cur">@ RULER</th>' +
+        '<th>UNIT</th><th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
         '<tbody id="tw-rows"></tbody></table></div>';
     document.body.appendChild(win);
 
@@ -512,7 +585,7 @@
     for (let i = 0; i < SLOTS; i++) {
       const tr = document.createElement('tr');
       tr.innerHTML = '<td class="c-n"></td><td class="c-k"><i></i></td><td class="c-t"></td>' +
-                     '<td class="c-v"></td><td class="c-u"></td>' +
+                     '<td class="c-v"></td><td class="c-cur"></td><td class="c-u"></td>' +
                      '<td class="c-lo"><input type="number" step="any" disabled ' +
                        'title="Display LOW for this pen. Blank the field to auto-scale."></td>' +
                      '<td class="c-hi"><input type="number" step="any" disabled ' +
@@ -543,6 +616,17 @@
       });
       tb.appendChild(tr);
     }
+
+    // Click anywhere on the plot to drop the ruler at that instant.
+    win.querySelector('#tw-canvas').addEventListener('click', ev => {
+      if (!chart) return;
+      const rect = ev.currentTarget.getBoundingClientRect();
+      const px = ev.clientX - rect.left;
+      const area = chart.chartArea;
+      if (px < area.left || px > area.right) return;
+      setCursor(nowSim + chart.scales.x.getValueForPixel(px));
+    });
+    win.querySelector('#tw-ruler').onclick = () => setCursor(null);
 
     const plot = win.querySelector('#tw-plot');
     plot.addEventListener('dragover', ev => ev.preventDefault());
@@ -690,6 +774,7 @@
 
   const API = {
     open: open, onPacket: onPacket, addTag: addTag, openMenu: openMenu, removeSlot: removeSlot,
+    setCursor: setCursor, cursor: () => cursorT, valueAt: valueAt,
     isBound: t => Registry.bound(t), isOpen: () => !!win && win.style.display === 'block',
   };
   if (typeof window !== 'undefined') {
