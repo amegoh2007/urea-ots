@@ -1,19 +1,25 @@
 'use strict';
-// Globally persistent multi-pen trend window.
+// Multi-pen trend, hosted in a SEPARATE browser window (trend.html).
 //
-// The window is appended to <body>, OUTSIDE #stage, so screen navigation cannot affect it:
-// the screens are sibling divs that toggle .active, and nothing here lives inside them.
-// It closes only via the X button, per requirement.
+// Two runtime roles share this one file:
+//   * POPUP  (trend.html sets window.__OTS_TREND_POPUP__) — builds the full-page trend UI,
+//            opens its OWN WebSocket to /ws, backfills from /api/hist, and owns all rendering.
+//   * LAUNCHER (the main DCS app) — never renders a trend inline; it opens/focuses the popup
+//            window and hands tags across via a localStorage queue + BroadcastChannel. Native
+//            drag from a main-screen indicator onto the popup is preserved with a dragend
+//            screen-rect test, since HTML5 drag payloads do not cross window boundaries.
 //
-// Data path: backend historian (/api/hist) supplies history from process start; the live
-// WebSocket packet extends each pen forward. Both are keyed to the PLANT clock (t_sim), so
-// a "1 hour" span is one hour of plant behaviour whether the sim runs at 1x or 60x.
-//
-// Tag -> packet path resolution goes through window.OV_BINDS (overlays.js BIND_MAP). The
-// legacy .pi screen is not consulted: those elements live inside .screen.shot and are
-// hidden by `.screen.shot > *:not(.ov-layer){display:none;}`.
+// Tag -> packet path resolution uses window.OV_BINDS in the main window; the popup reads the
+// mirror overlays.js writes to localStorage('ots_ov_binds').
 (function () {
+  const POPUP = (typeof window !== 'undefined') && window.__OTS_TREND_POPUP__ === true;
+  const HAS_DOM = (typeof document !== 'undefined');
+
   const LSK = 'ots_trend_v1';
+  const BINDS_KEY = 'ots_ov_binds';
+  const PENDING_KEY = 'ots_trend_pending';
+  const CH_NAME = 'ots_trend';
+  const POPUP_NAME = 'ots_trend_popup';
   const SLOTS = 10;
   const SPANS = [
     { s: 60,    lbl: '1m'  }, { s: 300,   lbl: '5m'  }, { s: 1800,  lbl: '30m' },
@@ -24,14 +30,14 @@
   const REDRAW_MS = 250;              // 4 Hz; packets arrive at 10 Hz
   const LIVE_MIN_DT = 1.0;            // plant-seconds between live samples (matches fast ring)
   const MAX_POINTS = 800;
+  const RULERS_MAX = 5;
+  // Distinct ruler colours, none shared with a pen colour, none red/green-only to tell apart.
+  const RULER_COLORS = ['#ffd000', '#41e0ff', '#ff5db1', '#7CFC00', '#ff8c1a'];
 
-  // Pen palette: ui_guidelines §10 tokens first, then distinct additions. No pair relies on
-  // red/green discrimination alone.
+  // Pen palette: ui_guidelines §10 tokens first, then distinct additions.
   const PENS = ['#22ff22', '#7fd0d8', '#ffd000', '#ff9a3c', '#ff00ff',
                 '#5fe08f', '#e06f6f', '#9bbabb', '#c78fff', '#ffffff'];
 
-  // Engineering ranges by unit, used to normalise every pen onto a shared 0-100 grid.
-  // An explicit rng:[lo,hi] on the OV entry wins; anything unmatched auto-scales.
   const UNIT_RANGE = {
     '%': [0, 100], 'C': [0, 250], 'BAR G': [0, 200], 'BARG': [0, 200], 'BAR A': [0, 200],
     'T/H': [0, 100], 'RPM': [0, 3000], 'A': [0, 200], 'NM3/H': [0, 40000],
@@ -42,7 +48,7 @@
   const clamp = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
   const pad2 = n => (n < 10 ? '0' : '') + n;
 
-  function hms(sec) {                                  // plant clock: elapsed since program init
+  function hms(sec) {
     sec = Math.max(0, Math.floor(sec));
     return pad2(Math.floor(sec / 3600)) + ':' + pad2(Math.floor(sec / 60) % 60) + ':' + pad2(sec % 60);
   }
@@ -57,13 +63,20 @@
   }
 
   // ================= tag registry =================
+  let _bindsCache = null;
+  function binds() {
+    if (typeof window !== 'undefined' && window.OV_BINDS) return window.OV_BINDS;   // main window: live map
+    if (_bindsCache) return _bindsCache;                                            // popup: localStorage mirror
+    try { _bindsCache = JSON.parse((typeof localStorage !== 'undefined' && localStorage.getItem(BINDS_KEY)) || 'null') || {}; }
+    catch (e) { _bindsCache = {}; }
+    return _bindsCache;
+  }
   const Registry = {
     entry(tag) {
-      const b = (window.OV_BINDS || {})[tag];
+      const b = binds()[tag];
       if (!b || !b.bind) return null;
       let u = (b.u || '').toUpperCase();
       let rng = b.rng || UNIT_RANGE[u] || null;
-      // Domain 1a: BAR A tags are displayed as gauge pressure, so trend the same quantity.
       return { tag: tag, path: b.bind, unit: u === 'BAR A' ? 'BARG' : u, dec: b.dec == null ? 1 : b.dec,
                range: rng, gauge: u === 'BAR A' };
     },
@@ -83,14 +96,11 @@
   let span = DEFAULT_SPAN;
   let selected = 0;
   let chart = null, win = null, lastPacket = null;
-  let cursorT = null;                  // ruler position, absolute plant seconds (null = no ruler)
-  // Right edge of the plot, absolute plant seconds. null = live (tracks now). Absolute rather
-  // than an offset from now, so a scrolled-back view stays on the instant it was parked at
-  // instead of drifting forward with every packet.
-  let viewEndT = null;
-  const PAN_FRACTION = 0.25;           // arrows step a quarter window, as DCS trends do
+  let rulers = [];                     // absolute plant seconds; up to RULERS_MAX, coloured by index
+  let viewEndT = null;                 // right edge (abs plant s); null = live
+  const PAN_FRACTION = 0.25;
   let nowSim = 0, nowWall = 0;
-  let timeMap = [];                    // [t_sim, t_wall] pairs for the desktop tick row
+  let timeMap = [];
   let dirty = false, redrawTimer = null;
   let histOK = true;
 
@@ -101,13 +111,8 @@
     const st = saved();
     st.span = span; st.sel = selected;
     st.tags = slots.map(s => s && s.tag);
-    // Only operator-set ranges are persisted; auto-scaled pens re-derive theirs from data.
     st.ranges = slots.map(s => (s && !s.auto) ? [s.lo, s.hi] : null);
-    if (win) {
-      st.open = win.style.display !== 'none';
-      st.x = win.style.left; st.y = win.style.top;
-      st.w = win.style.width; st.h = win.style.height;
-    }
+    st.open = true;
     try { localStorage.setItem(LSK, JSON.stringify(st)); } catch (e) { /* quota: ignore */ }
   }
 
@@ -120,16 +125,14 @@
     const cut = tSim - 28800;
     while (timeMap.length > 2 && timeMap[0][0] < cut) timeMap.shift();
   }
-  function wallAt(tSim) {               // interpolate desktop time for a plant time
+  function wallAt(tSim) {
     if (!timeMap.length) return nowWall;
-    // Before the first observed pair there is no honest desktop time to report; clamping
-    // would print the page-load clock against instants that preceded it.
     if (tSim < timeMap[0][0]) return null;
     if (tSim === timeMap[0][0]) return timeMap[0][1];
     for (let i = timeMap.length - 1; i >= 0; i--) {
       if (timeMap[i][0] <= tSim) {
         const a = timeMap[i], b = timeMap[i + 1];
-        if (!b) return a[1] + (tSim - a[0]);         // extrapolate at 1x past the newest pair
+        if (!b) return a[1] + (tSim - a[0]);
         const f = (tSim - a[0]) / Math.max(1e-9, b[0] - a[0]);
         return a[1] + f * (b[1] - a[1]);
       }
@@ -137,15 +140,13 @@
     return nowWall;
   }
 
-  // Right edge of the visible window in absolute plant seconds.
   function viewEnd() { return viewEndT == null ? nowSim : viewEndT; }
   function isLive() { return viewEndT == null; }
-  // How far back history can be scrolled: never before program start, never past retention.
   function maxPanBack() { return Math.max(0, Math.min(nowSim, 28800) - span); }
 
   function backfill(slot) {
     if (!slot) return Promise.resolve();
-    if (typeof fetch !== 'function') return Promise.resolve();   // headless test context
+    if (typeof fetch !== 'function') return Promise.resolve();
     const url = '/api/hist?paths=' + encodeURIComponent(slot.entry.path) +
                 '&span=' + span + '&max=' + MAX_POINTS +
                 (isLive() ? '' : '&end=' + viewEndT.toFixed(3));
@@ -163,20 +164,19 @@
         pts.push({ t: t, v: slot.entry.gauge ? v - 1.01325 : v });
         noteTime(t, j.t_wall[i]);
       }
-      // History first, then whatever the live feed already collected past its end.
       const edge = pts.length ? pts[pts.length - 1].t : -Infinity;
       slot.pts = pts.concat(slot.pts.filter(p => p.t > edge));
       dirty = true;
     }).catch(() => { histOK = false; markHist(); });
   }
 
-  // ================= chart =================
+  // ================= scaling / readings =================
   function norm(slot, v) {
     const lo = slot.lo, hi = slot.hi;
     if (hi - lo < 1e-12) return 50;
     return (v - lo) / (hi - lo) * 100;
   }
-  function rescale(slot) {              // auto-range pens with no declared engineering range
+  function rescale(slot) {
     if (!slot.auto) return;
     let lo = Infinity, hi = -Infinity;
     const ve = viewEnd(), cut = ve - span;
@@ -191,8 +191,7 @@
     slot.lo = lo - pad; slot.hi = hi + pad;
   }
 
-  // Value a pen held at the ruler instant. Hold semantics (last sample at or before), which
-  // is what a DCS cursor reports and the only correct reading for a stepped digital pen.
+  // Hold semantics: last sample at or before t. Correct for a DCS cursor and a stepped pen.
   function valueAt(slot, t) {
     if (t == null || !slot || !slot.pts.length) return null;
     let best = null;
@@ -203,35 +202,62 @@
     return best ? best.v : null;
   }
 
-  // Vertical ruler. A plugin rather than a DOM overlay so it draws inside the chart bitmap and
-  // is therefore captured by the PNG export without any extra work.
+  // MIN / MAX / AVG over the points currently in view [viewEnd-span, viewEnd].
+  function windowStats(slot) {
+    if (!slot || !slot.pts.length) return null;
+    const ve = viewEnd(), cut = ve - span;
+    let mn = Infinity, mx = -Infinity, sum = 0, n = 0;
+    for (const p of slot.pts) {
+      if (p.t < cut || p.t > ve) continue;
+      if (p.v < mn) mn = p.v;
+      if (p.v > mx) mx = p.v;
+      sum += p.v; n++;
+    }
+    if (!n) return null;
+    return { min: mn, max: mx, avg: sum / n, n: n };
+  }
+
+  // ================= rulers =================
+  function addRuler(t) {
+    if (t == null) return false;
+    if (rulers.some(r => Math.abs(r - t) < 1e-6)) return false;    // no duplicate at the same instant
+    if (rulers.length >= RULERS_MAX) { flash(null, 'MAX 5 RULERS'); return false; }
+    rulers.push(t);
+    dirty = true; if (win && chart) redraw();
+    return true;
+  }
+  function removeRuler(i) {
+    if (i < 0 || i >= rulers.length) return;
+    rulers.splice(i, 1);
+    dirty = true; if (win && chart) redraw();
+  }
+  function clearRulers() { rulers = []; dirty = true; if (win && chart) redraw(); }
+  // Backward-compatible single-ruler shims (kept for the earlier API + tests).
+  function setCursor(t) { if (t == null) clearRulers(); else { rulers = [t]; dirty = true; if (win && chart) redraw(); } }
+
+  // Vertical rulers as a Chart.js plugin: drawn inside the bitmap, so the PNG export gets them free.
   const rulerPlugin = {
-    id: 'otsRuler',
+    id: 'otsRulers',
     afterDatasetsDraw(ch) {
-      if (cursorT == null) return;
-      const area = ch.chartArea;
-      const x = ch.scales.x.getPixelForValue(cursorT - viewEnd());
-      if (!(x >= area.left && x <= area.right)) return;
-      const g = ch.ctx;
-      g.save();
-      g.strokeStyle = '#ffd000';
-      g.lineWidth = 1;
-      g.setLineDash([4, 3]);
-      g.beginPath();
-      g.moveTo(x, area.top);
-      g.lineTo(x, area.bottom);
-      g.stroke();
-      g.setLineDash([]);
-      const w = wallAt(cursorT);
-      const label = hms(cursorT) + (w == null ? '' : '  ' + deskClock(w));
-      g.font = 'bold 10px Consolas, monospace';
-      const bw = g.measureText(label).width + 10;
-      const bx = clamp(x - bw / 2, area.left, Math.max(area.left, area.right - bw));
-      g.fillStyle = '#ffd000';
-      g.fillRect(bx, area.top, bw, 14);
-      g.fillStyle = '#241f00';
-      g.fillText(label, bx + 5, area.top + 10);
-      g.restore();
+      if (!rulers.length) return;
+      const area = ch.chartArea, g = ch.ctx, ve = viewEnd();
+      rulers.forEach((t, i) => {
+        const x = ch.scales.x.getPixelForValue(t - ve);
+        if (!(x >= area.left && x <= area.right)) return;
+        const col = RULER_COLORS[i % RULER_COLORS.length];
+        g.save();
+        g.strokeStyle = col; g.lineWidth = 1; g.setLineDash([4, 3]);
+        g.beginPath(); g.moveTo(x, area.top); g.lineTo(x, area.bottom); g.stroke();
+        g.setLineDash([]);
+        const label = 'R' + (i + 1) + ' ' + hms(t);
+        g.font = 'bold 10px Consolas, monospace';
+        const bw = g.measureText(label).width + 8;
+        const bx = clamp(x - bw / 2, area.left, Math.max(area.left, area.right - bw));
+        const by = area.top + i * 15;                   // stack labels so they never overlap
+        g.fillStyle = col; g.fillRect(bx, by, bw, 13);
+        g.fillStyle = '#101010'; g.fillText(label, bx + 4, by + 9.5);
+        g.restore();
+      });
     },
   };
 
@@ -252,26 +278,21 @@
             type: 'linear', min: -span, max: 0,
             grid: { color: '#1e3a34' },
             ticks: { color: '#8fb3ab', maxTicksLimit: 8, font: { size: 10 },
-                     // blank the region that precedes program start rather than stacking 00:00:00
                      callback: v => (viewEnd() + v) < 0 ? '' : hms(viewEnd() + v) },
-            title: { display: true, text: 'PLANT CLOCK', color: '#5fe08f',
-                     font: { size: 10, weight: 'bold' } },
+            title: { display: true, text: 'PLANT CLOCK', color: '#5fe08f', font: { size: 10, weight: 'bold' } },
           },
           x2: {
             type: 'linear', position: 'bottom', min: -span, max: 0, display: true,
             grid: { drawOnChartArea: false, color: '#16292c' },
             ticks: { color: '#7f9ba8', maxTicksLimit: 8, font: { size: 10 },
                      callback: v => { const w = wallAt(viewEnd() + v); return w == null ? '' : deskClock(w); } },
-            title: { display: true, text: 'DESKTOP CLOCK', color: '#7f9ba8',
-                     font: { size: 10 } },
+            title: { display: true, text: 'DESKTOP CLOCK', color: '#7f9ba8', font: { size: 10 } },
           },
           y: {
             min: -2, max: 102,
             grid: { color: '#1e3a34' },
             ticks: { color: '#d6f3e4', font: { size: 10 }, stepSize: 20,
                      callback: pct => {
-                       // -2..102 gives the pens headroom; label only the real 0-100 % band so
-                       // the axis never prints a value outside the pen's engineering range.
                        if (pct < -0.001 || pct > 100.001) return '';
                        const s = slots[selected];
                        if (!s) return pct + '%';
@@ -286,11 +307,10 @@
   }
 
   function redraw() {
-    if (!chart || !win || win.style.display === 'none') return;
+    if (!chart || !win) return;
     const ve = viewEnd(), cut = ve - span;
-    // Once the ruler leaves the visible window its readings sit against an invisible line;
-    // drop it rather than leave a column of numbers with nothing to point at.
-    if (cursorT != null && (cursorT < cut || cursorT > ve)) setCursor(null);
+    // Drop any ruler that has scrolled out of view — its readings would point at nothing.
+    for (let i = rulers.length - 1; i >= 0; i--) if (rulers[i] < cut || rulers[i] > ve) rulers.splice(i, 1);
     chart.options.scales.x.min = -span;
     chart.options.scales.x2.min = -span;
     for (let i = 0; i < SLOTS; i++) {
@@ -309,25 +329,32 @@
     }
     chart.update('none');
     renderRows();
+    renderRulerChips();
     win.querySelector('#tw-plant').textContent = hms(nowSim);
     win.querySelector('#tw-desk').textContent = deskClock(nowWall);
-    win.querySelector('#tw-rul-plant').textContent = cursorT == null ? '--:--:--' : hms(cursorT);
-    const rw = cursorT == null ? null : wallAt(cursorT);
-    win.querySelector('#tw-rul-desk').textContent = rw == null ? '--:--:--' : deskClock(rw);
-    win.querySelector('#tw-ruler-box').classList.toggle('set', cursorT != null);
     win.querySelector('#tw-live').classList.toggle('hist', !isLive());
     win.querySelector('#tw-live').textContent = isLive() ? 'LIVE' : 'HISTORY';
     win.querySelector('#tw-fwd').disabled = isLive();
     win.querySelector('#tw-back').disabled = (nowSim - viewEnd()) >= maxPanBack() - 1e-6;
   }
 
-  // Scroll the window through history. Steps a quarter span per press and re-backfills, so
-  // scrolling past what the browser has buffered still shows real recorded data.
+  function renderRulerChips() {
+    const box = win.querySelector('#tw-rulers-list');
+    if (!rulers.length) { box.innerHTML = '<span class="rnone">click plot to add (up to 5)</span>'; return; }
+    box.innerHTML = rulers.map((t, i) => {
+      const col = RULER_COLORS[i % RULER_COLORS.length];
+      const w = wallAt(t);
+      return '<span class="rchip" style="color:' + col + ';border-color:' + col + '">R' + (i + 1) + ' ' +
+             hms(t) + (w == null ? '' : ' / ' + deskClock(w)) +
+             ' <b data-ri="' + i + '">&#10005;</b></span>';
+    }).join('');
+  }
+
   function pan(dir) {
     const step = span * PAN_FRACTION * dir;
     let target = viewEnd() + step;
     const oldest = nowSim - maxPanBack();
-    if (target >= nowSim) viewEndT = null;                 // caught up: resume live
+    if (target >= nowSim) viewEndT = null;
     else viewEndT = Math.max(target, oldest);
     Promise.all(slots.filter(Boolean).map(backfill)).then(() => { dirty = true; redraw(); });
     dirty = true; redraw();
@@ -338,12 +365,6 @@
     Promise.all(slots.filter(Boolean).map(backfill)).then(() => { dirty = true; redraw(); });
     dirty = true; redraw();
   }
-
-  function setCursor(t) {
-    cursorT = t;
-    dirty = true;
-    if (win && chart) redraw();
-  }
   function scheduleRedraw() {
     if (redrawTimer) return;
     redrawTimer = setTimeout(() => { redrawTimer = null; if (dirty) { dirty = false; redraw(); } }, REDRAW_MS);
@@ -353,67 +374,75 @@
   function renderRows() {
     if (!win) return;
     const tb = win.querySelector('#tw-rows');
+    // ruler column headers/visibility
+    const th = win.querySelectorAll('#tw-head-row .h-r');
+    for (let r = 0; r < RULERS_MAX; r++) {
+      const on = r < rulers.length;
+      th[r].style.display = on ? '' : 'none';
+      if (on) { th[r].textContent = 'R' + (r + 1); th[r].style.color = RULER_COLORS[r]; }
+    }
     for (let i = 0; i < SLOTS; i++) {
       const tr = tb.children[i], slot = slots[i];
       tr.className = (i === selected ? 'sel ' : '') + (slot ? 'full' : 'empty');
-      const cells = tr.children;
-      const loI = cells[6].firstChild, hiI = cells[7].firstChild;
-      cells[0].textContent = i + 1;
-      cells[1].firstChild.style.background = PENS[i];
+      const q = sel => tr.querySelector(sel);
+      const loI = q('.c-lo input'), hiI = q('.c-hi input');
+      q('.c-n').textContent = i + 1;
+      q('.c-k i').style.background = PENS[i];
+      const rc = tr.querySelectorAll('.c-r');
       if (!slot) {
-        cells[2].textContent = '-- drop indicator here --';
-        cells[3].textContent = ''; cells[4].textContent = ''; cells[5].textContent = '';
-        loI.value = ''; hiI.value = '';
-        loI.disabled = hiI.disabled = true;
-        cells[8].textContent = '';
+        q('.c-t').textContent = '-- drop indicator here --';
+        q('.c-v').textContent = ''; q('.c-min').textContent = ''; q('.c-max').textContent = '';
+        q('.c-avg').textContent = ''; q('.c-u').textContent = '';
+        rc.forEach(c => { c.textContent = ''; c.style.display = 'none'; });
+        loI.value = ''; hiI.value = ''; loI.disabled = hiI.disabled = true;
+        q('.c-x').textContent = '';
         continue;
       }
+      const dec = slot.entry.dec;
       const last = slot.pts.length ? slot.pts[slot.pts.length - 1] : null;
       const stale = last && (nowSim - last.t) > 30;
-      cells[2].textContent = slot.tag;
-      cells[3].textContent = last ? last.v.toFixed(slot.entry.dec) : '--';
-      const at = valueAt(slot, cursorT);
-      cells[4].textContent = cursorT == null ? '' : (at == null ? '--' : at.toFixed(slot.entry.dec));
-      cells[5].textContent = stale ? 'STALE' : slot.entry.unit;
+      q('.c-t').textContent = slot.tag;
+      q('.c-v').textContent = last ? last.v.toFixed(dec) : '--';
+      const st = windowStats(slot);
+      q('.c-min').textContent = st ? st.min.toFixed(dec) : '--';
+      q('.c-max').textContent = st ? st.max.toFixed(dec) : '--';
+      q('.c-avg').textContent = st ? st.avg.toFixed(dec) : '--';
+      for (let r = 0; r < RULERS_MAX; r++) {
+        const cell = rc[r], on = r < rulers.length;
+        cell.style.display = on ? '' : 'none';
+        if (!on) { cell.textContent = ''; continue; }
+        const at = valueAt(slot, rulers[r]);
+        cell.textContent = at == null ? '--' : at.toFixed(dec);
+        cell.style.color = RULER_COLORS[r];
+      }
+      q('.c-u').textContent = stale ? 'STALE' : slot.entry.unit;
       loI.disabled = hiI.disabled = false;
-      // Never overwrite the field the operator is typing into — the 4 Hz redraw would
-      // otherwise wipe a half-entered number, the same failure the faceplates guard against.
-      if (document.activeElement !== loI) loI.value = slot.lo.toFixed(slot.entry.dec);
-      if (document.activeElement !== hiI) hiI.value = slot.hi.toFixed(slot.entry.dec);
+      if (document.activeElement !== loI) loI.value = slot.lo.toFixed(dec);
+      if (document.activeElement !== hiI) hiI.value = slot.hi.toFixed(dec);
       loI.classList.toggle('auto', slot.auto);
       hiI.classList.toggle('auto', slot.auto);
-      cells[8].textContent = 'x';
+      q('.c-x').textContent = 'x';
     }
   }
 
-  // Operator-set display range. Blanking a field hands the pen back to auto-scaling.
   function commitRange(i, which, inp) {
     const slot = slots[i];
     if (!slot) { inp.value = ''; return; }
-    if (inp.value.trim() === '') {
-      slot.auto = true;
-      dirty = true; redraw(); save();
-      return;
-    }
+    if (inp.value.trim() === '') { slot.auto = true; dirty = true; redraw(); save(); return; }
     const v = Number(inp.value);
     const lo = which === 'lo' ? v : slot.lo;
     const hi = which === 'hi' ? v : slot.hi;
-    if (!isFinite(v) || hi - lo <= 0) {     // an inverted or zero span cannot be plotted
-      renderRows();
-      flash(i, 'BAD RANGE');
-      return;
-    }
+    if (!isFinite(v) || hi - lo <= 0) { renderRows(); flash(i, 'BAD RANGE'); return; }
     slot.lo = lo; slot.hi = hi; slot.auto = false;
     dirty = true; redraw(); save();
   }
   function markHist() {
     if (!win) return;
-    const chip = win.querySelector('#tw-hist');
-    chip.style.display = histOK ? 'none' : 'inline-block';
+    win.querySelector('#tw-hist').style.display = histOK ? 'none' : 'inline-block';
   }
 
-  // ================= slot operations =================
-  function addTag(tag, index) {
+  // ================= slot operations (core) =================
+  function coreAddTag(tag, index) {
     const e = Registry.entry(tag);
     if (!e) { flash(index, 'NOT BOUND'); return false; }
     const existing = slots.findIndex(s => s && s.tag === tag);
@@ -422,8 +451,7 @@
     if (i == null) i = slots.findIndex(s => !s);
     if (i == null || i < 0) { flash(null, 'SLOTS FULL'); return false; }
     const rng = e.range;
-    slots[i] = { tag: tag, entry: e, pts: [], colour: PENS[i],
-                 lo: rng ? rng[0] : 0, hi: rng ? rng[1] : 1, auto: !rng };
+    slots[i] = { tag: tag, entry: e, pts: [], colour: PENS[i], lo: rng ? rng[0] : 0, hi: rng ? rng[1] : 1, auto: !rng };
     selected = i;
     backfill(slots[i]).then(() => { dirty = true; scheduleRedraw(); });
     dirty = true; scheduleRedraw(); save();
@@ -433,15 +461,12 @@
   function flash(index, msg) {
     if (!win) return;
     const el = win.querySelector('#tw-flash');
-    el.textContent = msg;
-    el.style.opacity = '1';
+    el.textContent = msg; el.style.opacity = '1';
     setTimeout(() => { el.style.opacity = '0'; }, 1400);
   }
-
   function setSpan(s) {
     span = s;
-    win.querySelectorAll('#tw-spans button').forEach(b =>
-      b.classList.toggle('on', Number(b.dataset.span) === s));
+    win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === s));
     Promise.all(slots.filter(Boolean).map(backfill)).then(() => { dirty = true; redraw(); });
     save();
   }
@@ -449,13 +474,12 @@
   // ================= export =================
   function exportPNG() {
     const cv = win.querySelector('#tw-canvas');
-    const W = cv.width, headH = 58, rowH = 18;
+    const W = Math.max(cv.width, 900), headH = 58, rowH = 18;
     const live = slots.filter(Boolean);
     const H = headH + cv.height + 10 + (live.length + 1) * rowH + 12;
     const out = document.createElement('canvas');
     out.width = W; out.height = H;
     const c = out.getContext('2d');
-
     c.fillStyle = '#0a1416'; c.fillRect(0, 0, W, H);
     c.fillStyle = '#13202c'; c.fillRect(0, 0, W, headH);
     c.fillStyle = '#cfe'; c.font = 'bold 16px "Segoe UI", system-ui';
@@ -464,46 +488,41 @@
     const d = new Date();
     c.fillText('PLANT ' + hms(nowSim) + '    DESKTOP ' + d.toLocaleString() +
                '    SPAN ' + (SPANS.find(x => x.s === span) || {}).lbl +
-               (cursorT == null ? '' : '    RULER ' + hms(cursorT)), 12, 44);
-
+               (rulers.length ? '    RULERS ' + rulers.map(t => hms(t)).join(', ') : ''), 12, 44);
     c.drawImage(cv, 0, headH);
 
     let y = headH + cv.height + 24;
+    const pad = (s, n) => String(s).padStart(n);
+    const rhdr = rulers.map((_, i) => pad('R' + (i + 1), 10)).join('');
     c.font = 'bold 11px Consolas, monospace'; c.fillStyle = '#82b3a3';
-    const ruler = cursorT != null;
-    c.fillText('#   TAG                     VALUE' + (ruler ? '   @ RULER' : '') +
-               '      UNIT          LOW         HIGH', 12, y);
+    c.fillText('#  TAG                 ' + pad('VALUE', 9) + pad('MIN', 9) + pad('MAX', 9) + pad('AVG', 9) +
+               rhdr + '  UNIT      ' + pad('LOW', 10) + pad('HIGH', 10), 12, y);
     c.font = '11px Consolas, monospace';
     live.forEach((s) => {
       y += rowH;
-      const i = slots.indexOf(s);
+      const i = slots.indexOf(s), dec = s.entry.dec;
       const last = s.pts.length ? s.pts[s.pts.length - 1] : null;
-      const at = valueAt(s, cursorT);
+      const st = windowStats(s);
       c.fillStyle = PENS[i]; c.fillRect(12, y - 8, 10, 8);
       c.fillStyle = '#d6f3e4';
-      c.fillText(String(i + 1).padEnd(4) + s.tag.padEnd(24) +
-                 (last ? last.v.toFixed(s.entry.dec) : '--').padStart(9) + '  ' +
-                 (ruler ? (at == null ? '--' : at.toFixed(s.entry.dec)).padStart(9) + '  ' : '') +
-                 s.entry.unit.padEnd(8) +
-                 s.lo.toFixed(s.entry.dec).padStart(11) + '  ' +
-                 s.hi.toFixed(s.entry.dec).padStart(11) +
-                 (s.auto ? '  (auto)' : ''), 28, y);
+      let line = pad(i + 1, 2) + ' ' + s.tag.padEnd(20) +
+        pad(last ? last.v.toFixed(dec) : '--', 9) +
+        pad(st ? st.min.toFixed(dec) : '--', 9) +
+        pad(st ? st.max.toFixed(dec) : '--', 9) +
+        pad(st ? st.avg.toFixed(dec) : '--', 9);
+      rulers.forEach(t => { const at = valueAt(s, t); line += pad(at == null ? '--' : at.toFixed(dec), 10); });
+      line += '  ' + s.entry.unit.padEnd(8) + pad(s.lo.toFixed(dec), 10) + pad(s.hi.toFixed(dec), 10) + (s.auto ? ' (auto)' : '');
+      c.fillText(line, 28, y);
     });
 
     const name = 'Trend_Report_' + stamp(d) + '.png';
     out.toBlob(blob => {
       if (window.showSaveFilePicker) {
-        window.showSaveFilePicker({
-          suggestedName: name,
-          types: [{ description: 'PNG image', accept: { 'image/png': ['.png'] } }],
-        }).then(h => h.createWritable())
-          .then(w => w.write(blob).then(() => w.close()))
-          .catch(() => { /* operator cancelled the dialog */ });
+        window.showSaveFilePicker({ suggestedName: name, types: [{ description: 'PNG image', accept: { 'image/png': ['.png'] } }] })
+          .then(h => h.createWritable()).then(w => w.write(blob).then(() => w.close())).catch(() => {});
       } else {
         const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        a.click();
+        a.href = URL.createObjectURL(blob); a.download = name; a.click();
         setTimeout(() => URL.revokeObjectURL(a.href), 5000);
       }
     }, 'image/png');
@@ -515,11 +534,14 @@
     const st = document.createElement('style');
     st.id = 'tw-css';
     st.textContent = `
+body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
+.tw-popup #trendwin{position:static;width:100vw;height:100vh;min-width:0;min-height:0;border:none;
+  resize:none;display:block;box-shadow:none;}
 #trendwin{position:fixed;z-index:400;display:none;background:#13202c;border:1px solid #4aa587;
   box-shadow:0 8px 28px rgba(0,0,0,.6);color:#cfe;font:13px "Segoe UI",system-ui;
-  min-width:520px;min-height:360px;resize:both;overflow:hidden;}
+  min-width:520px;min-height:360px;overflow:hidden;}
 #tw-head{display:flex;align-items:center;gap:8px;padding:6px 8px;background:#0f1a24;
-  border-bottom:1px solid #2a4a44;cursor:move;user-select:none;}
+  border-bottom:1px solid #2a4a44;user-select:none;}
 #tw-close{width:20px;height:20px;line-height:18px;text-align:center;cursor:pointer;
   background:#3a0d0d;border:1px solid #ff3030;color:#ff8a8a;font-weight:bold;border-radius:3px;}
 #tw-close:hover{background:#5a1414;}
@@ -528,7 +550,7 @@
   color:#ffd27f;padding:1px 5px;border-radius:3px;}
 #tw-plot canvas{cursor:crosshair;}
 #tw-bar{display:flex;align-items:center;gap:8px;padding:4px 8px;background:#0f1a24;
-  border-top:1px solid #2a4a44;border-bottom:1px solid #2a4a44;}
+  border-top:1px solid #2a4a44;border-bottom:1px solid #2a4a44;flex-wrap:wrap;}
 #tw-back,#tw-fwd{font:12px Arial;line-height:1;background:#1b2a30;color:#7fd0d8;
   border:1px solid #4aa587;padding:3px 10px;cursor:pointer;border-radius:3px;}
 #tw-back:hover:not(:disabled),#tw-fwd:hover:not(:disabled){background:#22424a;}
@@ -539,15 +561,15 @@
 #tw-bar .twb{display:flex;align-items:center;gap:6px;padding:2px 8px;border-radius:3px;
   background:#0b1a16;border:1px solid #22363a;}
 #tw-bar .twb label{font:bold 9px "Segoe UI",system-ui;letter-spacing:.6px;color:#82b3a3;}
-#tw-bar .twb span{font:bold 12px Consolas,monospace;font-variant-numeric:tabular-nums;
-  color:#5fe08f;}
+#tw-bar .twb span{font:bold 12px Consolas,monospace;font-variant-numeric:tabular-nums;color:#5fe08f;}
 #tw-bar .twb span+span{color:#7f9ba8;font-weight:normal;}
-#tw-ruler-box span{color:#54706c;}
-#tw-ruler-box.set{border-color:#ffd000;}
-#tw-ruler-box.set span{color:#ffd000;}
-#tw-ruler-box.set span+span{color:#c9a83c;font-weight:normal;}
-#tw-ruler{cursor:pointer;color:#e06f6f !important;font-weight:bold;}
-#tw-ruler:hover{color:#ff3030 !important;}
+#tw-rulers{flex:1 1 260px;min-width:180px;}
+#tw-rulers-list{display:inline-flex;flex-wrap:wrap;gap:4px;}
+#tw-rulers-list .rnone{font:italic 11px Consolas,monospace;color:#54706c;}
+.rchip{font:bold 10px Consolas,monospace;font-variant-numeric:tabular-nums;border:1px solid;
+  border-radius:3px;padding:1px 5px;}
+.rchip b{cursor:pointer;margin-left:3px;opacity:.8;}
+.rchip b:hover{opacity:1;}
 #tw-spans{margin-left:auto;display:flex;gap:2px;}
 #tw-spans button{font:bold 11px Arial;background:#1b2a30;color:#9bbabb;border:1px solid #2a4a44;
   padding:3px 7px;cursor:pointer;border-radius:3px;}
@@ -555,48 +577,44 @@
 #tw-save{font:bold 11px Arial;background:#1b2a30;color:#7fd0d8;border:1px solid #4aa587;
   padding:3px 9px;cursor:pointer;border-radius:3px;}
 #tw-save:hover{background:#22424a;}
-#tw-plot{position:relative;height:calc(100% - 34px - 30px - 250px);min-height:140px;padding:4px 6px 0;}
+#tw-plot{position:relative;height:calc(100% - 34px - 34px - 250px);min-height:140px;padding:4px 6px 0;}
 #tw-flash{position:absolute;top:8px;left:50%;transform:translateX(-50%);opacity:0;
   transition:opacity .25s;background:#3a0d0d;border:1px solid #ff3030;color:#ff8a8a;
   font:bold 11px Consolas,monospace;padding:3px 10px;border-radius:3px;pointer-events:none;z-index:2;}
 #tw-table{height:250px;overflow:auto;}
-#tw-table table{width:100%;border-collapse:collapse;font:11px Consolas,monospace;
-  font-variant-numeric:tabular-nums;}
+#tw-table table{width:100%;border-collapse:collapse;font:11px Consolas,monospace;font-variant-numeric:tabular-nums;}
 #tw-table td{padding:2px 6px;border-bottom:1px solid #16292c;white-space:nowrap;}
 #tw-table tr{cursor:pointer;}
 #tw-table tr.empty td{color:#54706c;font-style:italic;}
 #tw-table tr.sel{background:#16323a;outline:1px solid #7fd0d8;}
 #tw-table tr.drop{background:#1d4d52;}
+#tw-table th{position:sticky;top:0;background:#0f1a24;color:#82b3a3;text-align:left;
+  font:bold 10px "Segoe UI",system-ui;letter-spacing:.5px;padding:3px 6px;border-bottom:1px solid #2a4a44;}
 #tw-table td.c-n{width:22px;color:#82b3a3;}
 #tw-table td.c-k{width:16px;}
 #tw-table td.c-k i{display:block;width:11px;height:9px;}
-#tw-table td.c-v{text-align:right;width:88px;color:#fff;font-weight:bold;}
-#tw-table td.c-cur{text-align:right;width:88px;color:#ffd000;font-weight:bold;}
-#tw-table th.h-cur{color:#ffd000;}
-#tw-table td.c-u{width:64px;color:#82b3a3;}
-#tw-table th{position:sticky;top:0;background:#0f1a24;color:#82b3a3;text-align:left;
-  font:bold 10px "Segoe UI",system-ui;letter-spacing:.5px;padding:3px 6px;
-  border-bottom:1px solid #2a4a44;}
+#tw-table td.c-v{text-align:right;width:78px;color:#fff;font-weight:bold;}
+#tw-table td.c-min{text-align:right;width:70px;color:#7fd0d8;}
+#tw-table td.c-max{text-align:right;width:70px;color:#ff9a3c;}
+#tw-table td.c-avg{text-align:right;width:70px;color:#cfe;}
+#tw-table th.h-min{color:#7fd0d8;} #tw-table th.h-max{color:#ff9a3c;} #tw-table th.h-avg{color:#cfe;}
+#tw-table td.c-r{text-align:right;width:74px;font-weight:bold;}
+#tw-table td.c-u{width:60px;color:#82b3a3;}
 #tw-table td.c-lo,#tw-table td.c-hi{width:78px;}
 #tw-table td.c-lo input,#tw-table td.c-hi input{width:70px;background:#0b1a16;color:#d6f3e4;
-  border:1px solid #2a4a44;font:11px Consolas,monospace;font-variant-numeric:tabular-nums;
-  padding:1px 3px;text-align:right;}
-#tw-table td.c-lo input:focus,#tw-table td.c-hi input:focus{outline:none;border-color:#7fd0d8;
-  background:#0f2a24;}
+  border:1px solid #2a4a44;font:11px Consolas,monospace;font-variant-numeric:tabular-nums;padding:1px 3px;text-align:right;}
+#tw-table td.c-lo input:focus,#tw-table td.c-hi input:focus{outline:none;border-color:#7fd0d8;background:#0f2a24;}
 #tw-table td.c-lo input.auto,#tw-table td.c-hi input.auto{color:#54706c;font-style:italic;}
-#tw-table td.c-lo input:disabled,#tw-table td.c-hi input:disabled{background:transparent;
-  border-color:#16292c;}
+#tw-table td.c-lo input:disabled,#tw-table td.c-hi input:disabled{background:transparent;border-color:#16292c;}
 #tw-table td.c-x{width:18px;text-align:center;color:#e06f6f;font-weight:bold;}
 #tw-table td.c-x:hover{color:#ff3030;}
 .ov[draggable="true"]{cursor:grab;}
-#tw-menu{position:absolute;z-index:420;background:#222;border:1px solid #ccc;color:#fff;
-  font:12px Arial;min-width:150px;display:none;}
+#tw-menu{position:absolute;z-index:420;background:#222;border:1px solid #ccc;color:#fff;font:12px Arial;min-width:150px;display:none;}
 #tw-menu .hd{background:#0aa64d;padding:4px 10px;font-weight:bold;}
 #tw-menu .it{padding:6px 10px;cursor:pointer;}
 #tw-menu .it:hover{background:#444;}
 #tw-menu .it.off{color:#777;cursor:default;}
-#tw-menu .it.off:hover{background:transparent;}
-#tw-menu .sub{max-height:210px;overflow:auto;border-top:1px solid #444;}`;
+#tw-menu .it.off:hover{background:transparent;}`;
     document.head.appendChild(st);
   }
 
@@ -604,29 +622,31 @@
     injectCSS();
     win = document.createElement('div');
     win.id = 'trendwin';
+    let rth = '';                                   // ruler column headers (hidden until placed)
+    for (let r = 0; r < RULERS_MAX; r++) rth += '<th class="h-r" style="display:none"></th>';
+    let rtd = '';
+    for (let r = 0; r < RULERS_MAX; r++) rtd += '<td class="c-r" style="display:none"></td>';
     win.innerHTML =
       '<div id="tw-head">' +
-        '<div id="tw-close" title="Close trend">X</div>' +
+        '<div id="tw-close" title="Close trend window">X</div>' +
         '<div id="tw-title">TREND</div>' +
         '<span id="tw-hist">HISTORY UNAVAILABLE — LIVE ONLY</span>' +
         '<div id="tw-spans"></div>' +
         '<button id="tw-save" title="Save trend image">SAVE</button>' +
       '</div>' +
       '<div id="tw-plot"><div id="tw-flash"></div><canvas id="tw-canvas"></canvas></div>' +
-      // Control strip between plot and pen table: scroll arrows, current time, ruler time.
       '<div id="tw-bar">' +
         '<button id="tw-back" title="Scroll back to older records">&#9664;</button>' +
         '<button id="tw-fwd" title="Scroll forward to newer records">&#9654;</button>' +
         '<span id="tw-live" title="Return to live">LIVE</span>' +
         '<div class="twb"><label>CURRENT</label>' +
           '<span id="tw-plant">00:00:00</span><span id="tw-desk">--:--:--</span></div>' +
-        '<div class="twb" id="tw-ruler-box"><label>RULER</label>' +
-          '<span id="tw-rul-plant">--:--:--</span><span id="tw-rul-desk">--:--:--</span>' +
-          '<span id="tw-ruler" title="Clear the ruler">&#10005;</span></div>' +
+        '<div class="twb" id="tw-rulers"><label>RULERS</label><span id="tw-rulers-list"></span></div>' +
       '</div>' +
       '<div id="tw-table"><table>' +
-        '<thead><tr><th></th><th></th><th>TAG</th><th>VALUE</th><th class="h-cur">@ RULER</th>' +
-        '<th>UNIT</th><th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
+        '<thead><tr id="tw-head-row"><th></th><th></th><th>TAG</th><th>VALUE</th>' +
+        '<th class="h-min">MIN</th><th class="h-max">MAX</th><th class="h-avg">AVG</th>' +
+        rth + '<th>UNIT</th><th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
         '<tbody id="tw-rows"></tbody></table></div>';
     document.body.appendChild(win);
 
@@ -642,12 +662,11 @@
     for (let i = 0; i < SLOTS; i++) {
       const tr = document.createElement('tr');
       tr.innerHTML = '<td class="c-n"></td><td class="c-k"><i></i></td><td class="c-t"></td>' +
-                     '<td class="c-v"></td><td class="c-cur"></td><td class="c-u"></td>' +
-                     '<td class="c-lo"><input type="number" step="any" disabled ' +
-                       'title="Display LOW for this pen. Blank the field to auto-scale."></td>' +
-                     '<td class="c-hi"><input type="number" step="any" disabled ' +
-                       'title="Display HIGH for this pen. Blank the field to auto-scale."></td>' +
-                     '<td class="c-x"></td>';
+        '<td class="c-v"></td><td class="c-min"></td><td class="c-max"></td><td class="c-avg"></td>' +
+        rtd + '<td class="c-u"></td>' +
+        '<td class="c-lo"><input type="number" step="any" disabled title="Display LOW — blank to auto-scale"></td>' +
+        '<td class="c-hi"><input type="number" step="any" disabled title="Display HIGH — blank to auto-scale"></td>' +
+        '<td class="c-x"></td>';
       tr.onclick = ev => {
         if (ev.target.tagName === 'INPUT') { selected = i; dirty = true; redraw(); return; }
         if (ev.target.classList.contains('c-x')) { if (slots[i]) removeSlot(i); return; }
@@ -656,12 +675,7 @@
       [['lo', '.c-lo input'], ['hi', '.c-hi input']].forEach(([which, sel]) => {
         const inp = tr.querySelector(sel);
         inp.addEventListener('change', () => commitRange(i, which, inp));
-        inp.addEventListener('keydown', ev => {
-          if (ev.key !== 'Enter') return;
-          ev.preventDefault();                       // ENTER commits, per ui_guidelines §12
-          commitRange(i, which, inp);
-          inp.blur();
-        });
+        inp.addEventListener('keydown', ev => { if (ev.key === 'Enter') { ev.preventDefault(); commitRange(i, which, inp); inp.blur(); } });
         inp.addEventListener('mousedown', ev => ev.stopPropagation());
       });
       tr.addEventListener('dragover', ev => { ev.preventDefault(); tr.classList.add('drop'); });
@@ -669,132 +683,49 @@
       tr.addEventListener('drop', ev => {
         ev.preventDefault(); tr.classList.remove('drop');
         const tag = ev.dataTransfer.getData('text/ots-tag') || ev.dataTransfer.getData('text/plain');
-        if (tag) addTag(tag, i);
+        if (tag) coreAddTag(tag, i);
       });
       tb.appendChild(tr);
     }
 
-    // Click anywhere on the plot to drop the ruler at that instant.
     win.querySelector('#tw-canvas').addEventListener('click', ev => {
       if (!chart) return;
       const rect = ev.currentTarget.getBoundingClientRect();
-      const px = ev.clientX - rect.left;
-      const area = chart.chartArea;
+      const px = ev.clientX - rect.left, area = chart.chartArea;
       if (px < area.left || px > area.right) return;
-      setCursor(viewEnd() + chart.scales.x.getValueForPixel(px));
+      addRuler(viewEnd() + chart.scales.x.getValueForPixel(px));
     });
-    win.querySelector('#tw-ruler').onclick = () => setCursor(null);
+    win.querySelector('#tw-rulers-list').addEventListener('click', ev => {
+      const b = ev.target.closest('b[data-ri]');
+      if (b) removeRuler(Number(b.dataset.ri));
+    });
     win.querySelector('#tw-back').onclick = () => pan(-1);
     win.querySelector('#tw-fwd').onclick = () => pan(+1);
     win.querySelector('#tw-live').onclick = goLive;
+    win.querySelector('#tw-save').onclick = exportPNG;
+    win.querySelector('#tw-close').onclick = () => { if (POPUP) window.close(); else win.style.display = 'none'; };
 
     const plot = win.querySelector('#tw-plot');
     plot.addEventListener('dragover', ev => ev.preventDefault());
     plot.addEventListener('drop', ev => {
       ev.preventDefault();
       const tag = ev.dataTransfer.getData('text/ots-tag') || ev.dataTransfer.getData('text/plain');
-      if (tag) addTag(tag, null);
-    });
-
-    win.querySelector('#tw-close').onclick = () => {
-      win.style.display = 'none';
-      save();                                   // slot list is retained for the next open
-    };
-    win.querySelector('#tw-save').onclick = exportPNG;
-
-    // title-bar drag
-    const head = win.querySelector('#tw-head');
-    head.addEventListener('mousedown', ev => {
-      if (ev.button !== 0 || ev.target.id === 'tw-close') return;
-      const sx = ev.clientX, sy = ev.clientY;
-      const ox = parseFloat(win.style.left) || win.offsetLeft;
-      const oy = parseFloat(win.style.top) || win.offsetTop;
-      const mm = e => {
-        win.style.left = clamp(ox + e.clientX - sx, 0, window.innerWidth - 120) + 'px';
-        win.style.top  = clamp(oy + e.clientY - sy, 0, window.innerHeight - 40) + 'px';
-      };
-      const mu = () => {
-        document.removeEventListener('mousemove', mm);
-        document.removeEventListener('mouseup', mu);
-        save();
-      };
-      document.addEventListener('mousemove', mm);
-      document.addEventListener('mouseup', mu);
+      if (tag) coreAddTag(tag, null);
     });
 
     new ResizeObserver(() => { if (chart) chart.resize(); }).observe(win);
   }
 
-  function open() {
+  function coreOpen() {
     if (!win) buildWindow();
-    const st = saved();
-    if (win.style.display !== 'block') {
-      win.style.display = 'block';
-      win.style.left = st.x || '120px';
-      win.style.top = st.y || '90px';
-      win.style.width = st.w || '860px';
-      win.style.height = st.h || '560px';
-    }
+    win.style.display = 'block';
     if (!chart) buildChart();
-    win.querySelectorAll('#tw-spans button').forEach(b =>
-      b.classList.toggle('on', Number(b.dataset.span) === span));
+    win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === span));
     markHist();
-    dirty = true; redraw(); save();
+    dirty = true; redraw();
   }
 
-  // ================= context menu =================
-  const HAS_DOM = (typeof document !== 'undefined');
-
-  let menu = null;
-  function closeMenu() { if (menu) menu.style.display = 'none'; }
-  if (HAS_DOM) {
-    // Styles up front, not lazily from buildWindow(): the context menu is reachable before the
-    // window has ever been built, and unstyled it renders unpositioned below the fold.
-    injectCSS();
-    document.addEventListener('click', closeMenu);
-    document.addEventListener('contextmenu', e => { if (!e.target.closest('#tw-menu')) closeMenu(); }, true);
-  }
-
-  function openMenu(ev, tag) {
-    // The menu can be the very first thing an operator touches, before the window has ever been
-    // built. Without this the styles are absent and it renders unpositioned below the fold, so
-    // right-click looks like it does nothing. injectCSS is idempotent.
-    injectCSS();
-    if (!menu) {
-      menu = document.createElement('div');
-      menu.id = 'tw-menu';
-      document.body.appendChild(menu);
-    }
-    const bound = Registry.bound(tag);
-    let html = '<div class="hd">' + tag + '</div>';
-    if (!bound) {
-      html += '<div class="it off">Trend — not bound</div>';
-    } else {
-      html += '<div class="it" data-act="trend">Trend</div>';
-      if (win && win.style.display === 'block') {
-        html += '<div class="sub">';
-        for (let i = 0; i < SLOTS; i++) {
-          const s = slots[i];
-          html += '<div class="it" data-act="slot" data-i="' + i + '">Slot ' + (i + 1) + ' — ' +
-                  (s ? s.tag : 'empty') + '</div>';
-        }
-        html += '</div>';
-      }
-    }
-    menu.innerHTML = html;
-    menu.querySelectorAll('.it[data-act]').forEach(it => {
-      it.onclick = () => {
-        if (it.dataset.act === 'trend') { open(); addTag(tag, null); }
-        else { open(); addTag(tag, Number(it.dataset.i)); }
-        closeMenu();
-      };
-    });
-    menu.style.display = 'block';
-    menu.style.left = Math.min(ev.pageX, window.innerWidth - 170) + 'px';
-    menu.style.top = Math.min(ev.pageY, window.innerHeight - 120) + 'px';
-  }
-
-  // ================= live feed =================
+  // ================= live feed (packet -> pens) =================
   function onPacket(s) {
     lastPacket = s;
     if (typeof s.t_sim === 'number') nowSim = s.t_sim;
@@ -813,51 +744,153 @@
         slot.pts.splice(0, k);
       }
     }
-    dirty = true;
-    scheduleRedraw();
+    dirty = true; scheduleRedraw();
   }
 
-  // ================= restore =================
-  function restore() {
-    const st = saved();
-    if (typeof st.span === 'number' && SPANS.some(x => x.s === st.span)) span = st.span;
-    if (typeof st.sel === 'number') selected = clamp(st.sel, 0, SLOTS - 1);
-    if (!st.open || !Array.isArray(st.tags)) return;
-    open();
-    st.tags.forEach((tag, i) => {
-      if (!tag) return;
-      addTag(tag, i);
-      const r = st.ranges && st.ranges[i];
-      if (slots[i] && Array.isArray(r) && r.length === 2 && r[1] > r[0]) {
-        slots[i].lo = r[0]; slots[i].hi = r[1]; slots[i].auto = false;
+  // ================= cross-window handoff =================
+  // Browser-only: a BroadcastChannel open in headless Node keeps the event loop alive and
+  // hangs `node --test`.
+  let bc = null;
+  try { if (HAS_DOM && typeof BroadcastChannel !== 'undefined') bc = new BroadcastChannel(CH_NAME); } catch (e) {}
+  function readPending() { try { return JSON.parse(localStorage.getItem(PENDING_KEY) || '[]') || []; } catch (e) { return []; } }
+  function enqueueAdd(tag) {
+    const q = readPending(); q.push(tag);
+    try { localStorage.setItem(PENDING_KEY, JSON.stringify(q)); } catch (e) {}
+    if (bc) bc.postMessage({ cmd: 'add' });
+  }
+  function drainPending() {
+    _bindsCache = null;                       // refresh the bind mirror before resolving new tags
+    const q = readPending();
+    try { localStorage.setItem(PENDING_KEY, '[]'); } catch (e) {}
+    q.forEach(tag => coreAddTag(tag, null));
+    if (q.length) { coreOpen(); }
+  }
+
+  // ================= role wiring =================
+  if (POPUP) {
+    // --- popup window: own the UI + a private WebSocket feed ---
+    function connectWS() {
+      const url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws';
+      (function c() {
+        let ws;
+        try { ws = new WebSocket(url); } catch (e) { setTimeout(c, 1000); return; }
+        ws.onmessage = e => { try { onPacket(JSON.parse(e.data)); } catch (_) {} };
+        ws.onclose = () => setTimeout(c, 1000);
+        ws.onerror = () => { try { ws.close(); } catch (_) {} };
+      })();
+    }
+    function popupInit() {
+      document.body.classList.add('tw-popup');
+      buildWindow(); buildChart();
+      const st = saved();
+      if (typeof st.span === 'number' && SPANS.some(x => x.s === st.span)) span = st.span;
+      if (typeof st.sel === 'number') selected = clamp(st.sel, 0, SLOTS - 1);
+      if (Array.isArray(st.tags)) st.tags.forEach((tag, i) => {
+        if (!tag) return;
+        coreAddTag(tag, i);
+        const r = st.ranges && st.ranges[i];
+        if (slots[i] && Array.isArray(r) && r.length === 2 && r[1] > r[0]) { slots[i].lo = r[0]; slots[i].hi = r[1]; slots[i].auto = false; }
+      });
+      win.style.display = 'block';
+      win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === span));
+      drainPending();
+      connectWS();
+      markHist(); redraw();
+      document.title = 'Trend — Urea OTS';
+    }
+    if (bc) bc.onmessage = e => { if (e.data && e.data.cmd === 'add') drainPending(); };
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', popupInit);
+    else popupInit();
+
+    window.TrendWindow = {
+      open: coreOpen, onPacket: onPacket, addTag: coreAddTag, removeSlot: removeSlot,
+      setCursor: setCursor, cursor: () => (rulers.length ? rulers[0] : null),
+      addRuler: addRuler, removeRuler: removeRuler, clearRulers: clearRulers, rulers: () => rulers.slice(),
+      valueAt: valueAt, windowStats: windowStats, pan: pan, goLive: goLive, viewEnd: viewEnd, isLive: isLive,
+      isBound: t => Registry.bound(t), isOpen: () => true,
+    };
+    window.openTrend = tag => { coreOpen(); coreAddTag(tag, null); };
+
+  } else if (HAS_DOM) {
+    // --- main DCS app: launcher only, no inline trend ---
+    let popup = null;
+    function openPopup() {
+      if (popup && !popup.closed) { try { popup.focus(); } catch (e) {} return popup; }
+      popup = window.open('trend.html', POPUP_NAME, 'width=1040,height=720');
+      if (!popup) { flashMain('Allow pop-ups to open the trend window'); }
+      return popup;
+    }
+    function launcherAdd(tag) {
+      if (!Registry.bound(tag)) return false;
+      enqueueAdd(tag);
+      openPopup();
+      return true;
+    }
+    function flashMain(msg) {
+      let el = document.getElementById('tw-launch-msg');
+      if (!el) {
+        el = document.createElement('div'); el.id = 'tw-launch-msg';
+        el.style.cssText = 'position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:700;' +
+          'background:#3a2f08;border:1px solid #ffd000;color:#ffd000;font:bold 12px Consolas,monospace;' +
+          'padding:5px 12px;border-radius:4px;';
+        document.body.appendChild(el);
       }
+      el.textContent = msg; el.style.display = 'block';
+      setTimeout(() => { el.style.display = 'none'; }, 3000);
+    }
+
+    // Context menu (right-click an indicator/controller/valve).
+    injectCSS();
+    let menu = null;
+    function closeMenu() { if (menu) menu.style.display = 'none'; }
+    document.addEventListener('click', closeMenu);
+    document.addEventListener('contextmenu', e => { if (!e.target.closest('#tw-menu')) closeMenu(); }, true);
+    function openMenu(ev, tag) {
+      injectCSS();
+      if (!menu) { menu = document.createElement('div'); menu.id = 'tw-menu'; document.body.appendChild(menu); }
+      const bound = Registry.bound(tag);
+      menu.innerHTML = '<div class="hd">' + tag + '</div>' +
+        (bound ? '<div class="it" data-act="trend">Trend &#8599;</div>' : '<div class="it off">Trend — not bound</div>');
+      const it = menu.querySelector('.it[data-act]');
+      if (it) it.onclick = () => { launcherAdd(tag); closeMenu(); };
+      menu.style.display = 'block';
+      menu.style.left = Math.min(ev.pageX, window.innerWidth - 170) + 'px';
+      menu.style.top = Math.min(ev.pageY, window.innerHeight - 90) + 'px';
+    }
+
+    // Preserve native drag from a main-screen indicator onto the popup: the payload cannot cross
+    // windows, so on dragend we test whether the pointer landed inside the popup's screen rect.
+    document.addEventListener('dragend', e => {
+      const tag = window.__ots_drag_tag; window.__ots_drag_tag = null;
+      if (!tag || !popup || popup.closed) return;
+      const sx = e.screenX, sy = e.screenY;
+      try {
+        if (sx >= popup.screenX && sx <= popup.screenX + popup.outerWidth &&
+            sy >= popup.screenY && sy <= popup.screenY + popup.outerHeight) launcherAdd(tag);
+      } catch (err) {}
     });
-  }
-  // Restore after overlays.js has published OV_BINDS.
-  if (HAS_DOM) {
-    if (document.readyState === 'complete') setTimeout(restore, 0);
-    else window.addEventListener('load', () => setTimeout(restore, 0));
+
+    window.TrendWindow = {
+      open: openPopup, addTag: launcherAdd, openMenu: openMenu, onPacket: function () {},
+      isBound: t => Registry.bound(t), isOpen: () => !!(popup && !popup.closed),
+      setCursor: function () {}, removeSlot: function () {},
+    };
+    window.openTrend = tag => launcherAdd(tag);
   }
 
-  const API = {
-    open: open, onPacket: onPacket, addTag: addTag, openMenu: openMenu, removeSlot: removeSlot,
-    setCursor: setCursor, cursor: () => cursorT, valueAt: valueAt,
-    pan: pan, goLive: goLive, viewEnd: viewEnd, isLive: isLive,
-    isBound: t => Registry.bound(t), isOpen: () => !!win && win.style.display === 'block',
-  };
-  if (typeof window !== 'undefined') {
-    window.TrendWindow = API;
-    // Preserved entry point: overlays.js and any legacy caller use window.openTrend(tag).
-    window.openTrend = function (tag) { open(); addTag(tag, null); };
-  }
-  // Headless export so the pure logic is testable without a DOM (see test_trend.js).
+  // Headless export for the test suite (no DOM); exposes the core logic.
   if (typeof module !== 'undefined' && module.exports) {
-    module.exports = Object.assign({}, API, {
-      _internals: { hms, deskClock, stamp, norm, wallAt, noteTime, Registry, commitRange,
-                    UNIT_RANGE, SPANS, SLOTS, PENS, slots,
-                    setSpanValue: v => { span = v; }, getSpan: () => span,
-                    maxPanBack: maxPanBack, setNow: t => { nowSim = t; },
-                    getSelected: () => selected, save: save, saved: saved },
-    });
+    module.exports = {
+      open: coreOpen, onPacket: onPacket, addTag: coreAddTag, removeSlot: removeSlot,
+      setCursor: setCursor, cursor: () => (rulers.length ? rulers[0] : null),
+      addRuler: addRuler, removeRuler: removeRuler, clearRulers: clearRulers, rulers: () => rulers.slice(),
+      valueAt: valueAt, windowStats: windowStats, pan: pan, goLive: goLive, viewEnd: viewEnd, isLive: isLive,
+      isBound: t => Registry.bound(t),
+      _internals: { hms, deskClock, stamp, norm, wallAt, noteTime, Registry, commitRange, windowStats,
+                    UNIT_RANGE, SPANS, SLOTS, PENS, RULER_COLORS, RULERS_MAX, slots,
+                    setSpanValue: v => { span = v; }, getSpan: () => span, maxPanBack: maxPanBack,
+                    setNow: t => { nowSim = t; }, getSelected: () => selected, save: save, saved: saved,
+                    getRulers: () => rulers },
+    };
   }
 })();

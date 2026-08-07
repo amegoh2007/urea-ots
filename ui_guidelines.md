@@ -141,8 +141,17 @@ Left-click any `*IC-3xxxx` indicator opens a faceplate (regex `CTRL_RE = /[A-Z]I
 
 ## 13. Trend Window (`trend.js`)
 
-Persistent 10-pen trend, appended to `<body>` **outside `#stage`** so screen navigation cannot
-hide it. Closes only via the `X` at top-left. One window only.
+10-pen trend hosted in a **separate browser window** (`frontend/trend.html`, loaded via
+`window.open`). The popup runs `trend.js` in POPUP role — full-page UI, its **own** WebSocket to
+`/ws`, its own `/api/hist` backfill — so it lives on a second monitor and is unaffected by anything
+in the main app. The main DCS app runs `trend.js` in LAUNCHER role: right-click → `Trend ↗` (or
+drag, below) opens/focuses the popup and hands the tag across via a `localStorage` queue
+(`ots_trend_pending`) plus a `BroadcastChannel('ots_trend')`. Tag→path resolution in the popup uses
+the `ots_ov_binds` mirror overlays.js writes (the popup never runs overlays.js).
+
+**Cross-window drag:** an HTML5 drag payload cannot cross window boundaries, so on `dragend` the
+launcher tests the pointer's screen coordinates against the popup's screen rect and enqueues the tag
+if it landed there. Right-click `Trend ↗` is the always-available path.
 
 * **Data:** backend historian (`historian.py`) records every numeric and boolean packet leaf
   except the `STREAMS` subtree — 914 paths, ~23.8 MB — from process start. Backfill via
@@ -154,8 +163,9 @@ hide it. Closes only via the `X` at top-left. One window only.
 * **Scaling:** every pen normalises to a shared 0–100 grid using its engineering range
   (`rng:[lo,hi]` on the OV entry → unit-default table → auto-scale). The Y axis relabels to
   the **selected** pen's units; labels outside 0–100 % are suppressed.
-* **Pen table:** `# · colour · TAG · VALUE · @ RULER · UNIT · LOW · HIGH · x`, with a sticky
-  header row. Click a row to select it. Empty rows are drop targets. Booleans render as 0/1
+* **Pen table:** `# · colour · TAG · VALUE · MIN · MAX · AVG · R1..Rn · UNIT · LOW · HIGH · x`,
+  with a sticky header row. Ruler columns appear only for placed rulers. Click a row to select it.
+  Empty rows are drop targets. Booleans render as 0/1
   stepped pens.
 * **Control strip (`#tw-bar`, between plot and pen table):** `◀ ▶` scroll arrows · `LIVE`/`HISTORY`
   state · **CURRENT** plant + desktop clock · **RULER** plant + desktop time with `✕` to clear.
@@ -165,7 +175,15 @@ hide it. Closes only via the `X` at top-left. One window only.
   on its instant instead of drifting forward with each packet. Back stops at program start and at
   the 8 h retention limit; forward resumes live on arrival. The amber `HISTORY` chip returns to
   live when clicked; arrows disable at their limits.
-* **Ruler:** click anywhere on the plot to drop a dashed amber vertical ruler at that instant,
+* **Rulers (up to 5):** click the plot to drop a dashed vertical ruler; each gets a distinct colour
+  (amber, cyan, pink, green, orange) and an `R1`..`R5` label. The pen table grows one colour-matched
+  `R{n}` column per active ruler, showing each pen's held reading at that instant. Ruler chips in the
+  control strip carry plant+desktop time and a ✕; rulers auto-clear when scrolled out of view. A 6th
+  is refused.
+* **MIN / MAX / AVG columns:** always shown, computed over the points currently in the visible
+  window (respecting scroll and span). AVG is the arithmetic mean of visible samples — for a digital
+  pen that reads as its duty fraction.
+* **Ruler (legacy single):** click anywhere on the plot to drop a dashed vertical ruler at that instant,
   labelled with plant and desktop time. The `@ RULER` column then shows what every pen read at
   that moment — last sample at or before the ruler (hold semantics, the only correct reading for
   a stepped digital pen); `--` before a pen has data. Clicking again moves it; the amber `RULER

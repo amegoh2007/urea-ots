@@ -177,10 +177,15 @@ chain alongside `OV_apply`.
 
 ### Layer 3 — trend window (`frontend/trend.js`, markup and CSS in `index.html`)
 
-A single `<div id="trendwin">` appended to `document.body`, **outside `#stage`**. Because the screens
-are sibling divs in one page, persistence across navigation is structural — there is no show/hide
-logic to maintain. `position: fixed`, dragged by its title bar, resizable, `z-index: 400` (current
-maximum in the app is 220 on `#screenmenu`).
+**Amended after review — the trend now lives in a separate browser window.** `trend.html` loads
+`trend.js` in POPUP role: a full-page UI with its own WebSocket to `/ws` and its own `/api/hist`
+backfill, so it can sit on a second monitor. The main app runs `trend.js` in LAUNCHER role and never
+renders a trend inline; right-click `Trend ↗` (or a drag whose `dragend` lands over the popup's
+screen rect) opens/focuses the popup and hands the tag over through a `localStorage` queue plus a
+`BroadcastChannel`. The popup resolves tags via the `ots_ov_binds` mirror overlays.js writes, since
+it never runs overlays.js. The earlier in-page floating `<div id="trendwin">` is gone — native
+drag-drop from a main-screen indicator cannot cross an OS window boundary, so the `dragend`
+screen-rect handoff preserves that gesture and right-click is the always-available path.
 
 **Header**, left to right: `X` close (top-left, per requirement) · `TREND` · live plant clock and
 desktop clock · span segmented control `1m 5m 30m 1h 2h 4h 8h` (default **1h**) · `SAVE`.

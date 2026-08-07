@@ -363,6 +363,102 @@ test('pens read independently at one ruler instant', () => {
   trend.setCursor(null);
 });
 
+// ===== multiple rulers =====
+
+test('up to 5 rulers can be placed, each a distinct instant', () => {
+  reset();
+  trend.clearRulers();
+  for (let i = 0; i < 5; i++) assert.equal(trend.addRuler(100 + i * 10), true);
+  assert.deepEqual(trend.rulers(), [100, 110, 120, 130, 140]);
+});
+
+test('a sixth ruler is refused', () => {
+  reset();
+  trend.clearRulers();
+  for (let i = 0; i < 5; i++) trend.addRuler(i);
+  assert.equal(trend.addRuler(999), false);
+  assert.equal(trend.rulers().length, 5);
+});
+
+test('a duplicate ruler at the same instant is refused', () => {
+  reset();
+  trend.clearRulers();
+  trend.addRuler(50);
+  assert.equal(trend.addRuler(50), false);
+  assert.equal(trend.rulers().length, 1);
+});
+
+test('a ruler can be removed by index and all cleared', () => {
+  reset();
+  trend.clearRulers();
+  [10, 20, 30].forEach(t => trend.addRuler(t));
+  trend.removeRuler(1);
+  assert.deepEqual(trend.rulers(), [10, 30]);
+  trend.clearRulers();
+  assert.deepEqual(trend.rulers(), []);
+});
+
+test('each ruler reads every pen independently at its own instant', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.slots[0].pts = [{ t: 10, v: 100 }, { t: 20, v: 200 }, { t: 30, v: 300 }];
+  trend.clearRulers();
+  trend.addRuler(10); trend.addRuler(25);
+  const rs = trend.rulers();
+  assert.equal(trend.valueAt(I.slots[0], rs[0]), 100);
+  assert.equal(trend.valueAt(I.slots[0], rs[1]), 200);   // held from t=20
+});
+
+test('setCursor stays a single-ruler shim over the multi-ruler store', () => {
+  reset();
+  trend.clearRulers();
+  trend.setCursor(77);
+  assert.deepEqual(trend.rulers(), [77]);
+  assert.equal(trend.cursor(), 77);
+  trend.setCursor(null);
+  assert.deepEqual(trend.rulers(), []);
+});
+
+// ===== MIN / MAX / AVG over the visible window =====
+
+function statPen(points, now, spanS) {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.slots[0].pts = points;
+  I.setNow(now); I.setSpanValue(spanS);
+  return I.slots[0];
+}
+
+test('stats cover min, max and mean of the visible points', () => {
+  const s = statPen([{ t: 96, v: 10 }, { t: 97, v: 30 }, { t: 98, v: 20 }, { t: 99, v: 40 }], 100, 60);
+  const st = trend.windowStats(s);
+  assert.equal(st.min, 10);
+  assert.equal(st.max, 40);
+  assert.equal(st.avg, 25);
+  assert.equal(st.n, 4);
+});
+
+test('stats ignore points outside the scrolled window', () => {
+  const s = statPen([{ t: 10, v: 999 }, { t: 95, v: 20 }, { t: 100, v: 40 }], 100, 30);
+  const st = trend.windowStats(s);   // window is (70, 100]; t=10 excluded
+  assert.equal(st.min, 20);
+  assert.equal(st.max, 40);
+  assert.equal(st.n, 2);
+});
+
+test('stats of an empty or fully-out-of-window pen are null', () => {
+  assert.equal(trend.windowStats(statPen([], 100, 60)), null);
+  assert.equal(trend.windowStats(statPen([{ t: 5, v: 1 }], 100, 60)), null);
+});
+
+test('digital pen average is its duty fraction', () => {
+  const s = statPen([{ t: 96, v: 1 }, { t: 97, v: 1 }, { t: 98, v: 0 }, { t: 99, v: 0 }], 100, 60);
+  const st = trend.windowStats(s);
+  assert.equal(st.min, 0);
+  assert.equal(st.max, 1);
+  assert.equal(st.avg, 0.5);
+});
+
 // ===== scrolling through history =====
 
 test('the view starts live and the back arrow parks it on an instant', () => {

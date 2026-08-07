@@ -557,6 +557,9 @@
     });
     BIND_MAP = m;
     window.OV_BINDS = tm;              // trend.js resolves tag -> packet path through this
+    // Mirror to localStorage so the trend POPUP window (a separate document that never runs
+    // overlays.js) can resolve tags on its own.
+    try { localStorage.setItem('ots_ov_binds', JSON.stringify(tm)); } catch (e) { /* quota */ }
   }
   const eff = o => (o.t === 'ind' && !o.bind && BIND_MAP[o.tag]) ? Object.assign({}, o, BIND_MAP[o.tag]) : o;
   function renderOne(sid, o) {
@@ -668,7 +671,11 @@
         ev.dataTransfer.setData('text/ots-tag', o.tag);
         ev.dataTransfer.setData('text/plain', o.tag);
         ev.dataTransfer.effectAllowed = 'copy';
-        if (window.TrendWindow) window.TrendWindow.open();
+        // Published for trend.js's dragend handoff: the payload cannot cross into the popup
+        // window, so the launcher reads the tag here and tests the drop point against the
+        // popup's screen rect.
+        window.__ots_drag_tag = o.tag;
+        if (window.TrendWindow) window.TrendWindow.open();                  // open/focus the popup so a drop lands somewhere
       });
     }
   }
