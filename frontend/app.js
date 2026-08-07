@@ -7,9 +7,11 @@ let lastState = {};
 
 function connect(){
   ws = new WebSocket(WS_URL);
+  ws.onopen = () => Health.onOpen();
   ws.onmessage = e => {
     const s = JSON.parse(e.data);
     lastState = s;
+    Health.onPacket(s);           // read _health + refresh watchdog BEFORE rendering
     render(s);
     render322(s);
     if(window.refreshF50) window.refreshF50(s);
@@ -18,10 +20,111 @@ function connect(){
     if(window.OV_apply) window.OV_apply(s);
     if(window.TrendWindow) window.TrendWindow.onPacket(s);
   };
-  ws.onclose = () => setTimeout(connect, 1000);
+  ws.onclose = () => { Health.onDisconnect(); setTimeout(connect, 1000); };
   ws.onerror = () => ws.close();
 }
 function send(msg){ if(ws && ws.readyState===1) ws.send(JSON.stringify(msg)); }
+
+// ---------- Backend health / fault surface ----------
+// Three fault classes the operator must be able to tell apart:
+//   CRASH  - server sent a packet whose _health.ok===false (physics step raised).
+//   HANG   - packets still arrive but _health.age_s keeps climbing (step wedged, no throw).
+//   LINK   - no packets at all: WebSocket dropped, server process gone.
+const Health = (function(){
+  let lastPacketWall = Date.now();
+  let linkUp = false;
+  let lastHealth = null;
+  let userDismissed = false;      // reset whenever a NEW/worse fault appears
+  const STALE_MS = 3000;          // no packet for 3 s -> treat link as stale
+
+  const $ = id => document.getElementById(id);
+  function setLED(cls, txt){
+    const led = $('sys-led'); if(!led) return;
+    led.classList.remove('warn','err');
+    if(cls) led.classList.add(cls);
+    $('sys-led-txt').textContent = txt;
+  }
+  function showOverlay(title, cond, h){
+    const ov = $('fault-overlay'); if(!ov) return;
+    $('fault-title').textContent = title;
+    $('fault-cond').textContent  = cond;
+    $('fault-type').textContent  = (h && h.type)  || '—';
+    $('fault-simt').textContent  = (h && h.sim_t!=null) ? Number(h.sim_t).toFixed(1) : '—';
+    $('fault-age').textContent   = (h && h.age_s!=null) ? (Number(h.age_s).toFixed(1)+' s') : '—';
+    $('fault-count').textContent = (h && h.count) ? h.count : '—';
+    $('fault-msg').textContent   = (h && h.error) || cond;
+    const tb = $('fault-tb');
+    if(h && h.traceback){ tb.textContent = h.traceback; }
+    else { tb.textContent=''; tb.classList.remove('show'); $('fault-tb-toggle').textContent='Show traceback'; }
+    if(!userDismissed) ov.classList.add('show');
+  }
+  function hideOverlay(){ const ov=$('fault-overlay'); if(ov) ov.classList.remove('show'); }
+
+  // Signature so we only re-force the overlay open when the fault CHANGES, not every 100ms tick.
+  function sig(kind, h){ return kind+'|'+((h&&h.since)||'')+'|'+((h&&h.type)||''); }
+  let lastSig = null;
+
+  function evaluate(){
+    const stale = (Date.now() - lastPacketWall) > STALE_MS;
+    let kind, h = lastHealth;
+    if(!linkUp || stale){
+      kind = 'LINK';
+    } else if(h && h.ok === false){
+      kind = 'CRASH';
+    } else if(h && h.age_s != null && h.age_s > 5){
+      kind = 'HANG';
+    } else {
+      kind = 'OK';
+    }
+
+    if(kind === 'OK'){
+      setLED('', 'BACKEND OK');
+      hideOverlay(); userDismissed=false; lastSig=null;
+      return;
+    }
+
+    const s = sig(kind, h);
+    if(s !== lastSig){ userDismissed = false; lastSig = s; }  // new/changed fault -> re-alert
+
+    if(kind === 'LINK'){
+      setLED('err', 'NO SIGNAL');
+      showOverlay('BACKEND UNREACHABLE',
+        'No data from the backend. The server process may have crashed or the connection dropped.',
+        h);
+    } else if(kind === 'CRASH'){
+      setLED('err', 'BACKEND ERROR');
+      showOverlay('BACKEND ERROR',
+        'A physics step raised an exception. The simulation is frozen; displayed values are stale.',
+        h);
+    } else if(kind === 'HANG'){
+      setLED('warn', 'BACKEND STALLED');
+      showOverlay('BACKEND STALLED',
+        'The physics step has not completed for several seconds (no exception). The backend is hung.',
+        h);
+    }
+  }
+
+  return {
+    onOpen(){ linkUp = true; lastPacketWall = Date.now(); },
+    onDisconnect(){ linkUp = false; evaluate(); },
+    onPacket(s){ linkUp = true; lastPacketWall = Date.now(); lastHealth = s && s._health || null; evaluate(); },
+    dismiss(){ userDismissed = true; hideOverlay(); },
+    // watchdog: catches the LINK/HANG cases where no packet arrives to drive evaluate()
+    _tick(){ evaluate(); }
+  };
+})();
+setInterval(()=>Health._tick(), 1000);
+document.addEventListener('DOMContentLoaded', ()=>{
+  const on=(id,fn)=>{ const el=document.getElementById(id); if(el) el.addEventListener('click',fn); };
+  on('sys-led', ()=>document.getElementById('fault-overlay').classList.add('show'));
+  on('fault-dismiss', ()=>Health.dismiss());
+  on('fault-reload', ()=>location.reload());
+  on('fault-tb-toggle', ()=>{
+    const tb=document.getElementById('fault-tb'), b=document.getElementById('fault-tb-toggle');
+    const shown=tb.classList.toggle('show');
+    b.textContent = shown ? 'Hide traceback' : 'Show traceback';
+  });
+});
 window.otsSend = send;
 window.openTrend = (tag)=>openTrend(tag);
 

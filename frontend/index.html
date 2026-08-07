@@ -218,6 +218,45 @@
   #mspModal input:disabled,#mspModal input[readonly]{opacity:.5;}
   #msp-on.active{background:#0aa64d;border-color:#22ff22;}
   #msp-off.active{background:#a63a0a;border-color:#ff8a3d;}
+
+  /* ---------- Backend health LED (top-right, always visible) ---------- */
+  #sys-led{position:fixed;top:6px;right:96px;z-index:601;display:flex;align-items:center;
+           gap:6px;background:#0c2b2e;border:1px solid #2f6f75;border-radius:4px;
+           padding:3px 9px;font:bold 11px Arial;color:#cfeff1;cursor:pointer;user-select:none;}
+  #sys-led .dot{width:11px;height:11px;border-radius:50%;background:#22c55e;
+           box-shadow:0 0 6px #22c55e;flex:0 0 auto;}
+  #sys-led.warn .dot{background:#f5c542;box-shadow:0 0 6px #f5c542;animation:sysPulse 1s infinite;}
+  #sys-led.err  .dot{background:#ff3030;box-shadow:0 0 8px #ff3030;animation:sysPulse .7s infinite;}
+  #sys-led.warn{border-color:#f5c542;color:#ffe9a8;}
+  #sys-led.err {border-color:#ff3030;color:#ffd2d2;}
+  @keyframes sysPulse{0%,100%{opacity:1;}50%{opacity:.35;}}
+
+  /* ---------- Full-screen fault overlay ---------- */
+  #fault-overlay{position:fixed;inset:0;z-index:9000;display:none;
+           background:rgba(8,4,4,.86);backdrop-filter:blur(2px);
+           align-items:center;justify-content:center;padding:24px;}
+  #fault-overlay.show{display:flex;}
+  #fault-card{width:min(860px,94vw);max-height:88vh;overflow:auto;background:#1a0e0e;
+           border:2px solid #ff3030;border-radius:8px;box-shadow:0 0 40px rgba(255,48,48,.4);
+           padding:20px 24px;color:#ffe3e3;font-family:Arial,Helvetica,sans-serif;}
+  #fault-card h2{margin:0 0 4px;font-size:20px;color:#ff6b6b;display:flex;align-items:center;gap:10px;}
+  #fault-card h2 .ic{font-size:24px;}
+  #fault-sub{font-size:13px;color:#ffb3b3;margin:0 0 14px;}
+  #fault-meta{display:grid;grid-template-columns:auto 1fr;gap:3px 14px;font-size:12px;
+           color:#ffd2d2;margin-bottom:12px;}
+  #fault-meta b{color:#ff9a9a;font-weight:700;white-space:nowrap;}
+  #fault-msg{background:#000;border:1px solid #7a2020;border-radius:4px;padding:8px 10px;
+           font:12px/1.4 "Cascadia Mono","Consolas",monospace;color:#ff8a8a;margin-bottom:10px;
+           word-break:break-word;}
+  #fault-tb{background:#000;border:1px solid #4a1414;border-radius:4px;padding:8px 10px;
+           font:11px/1.45 "Cascadia Mono","Consolas",monospace;color:#c9b0b0;white-space:pre;
+           overflow:auto;max-height:34vh;display:none;}
+  #fault-tb.show{display:block;}
+  #fault-actions{display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;}
+  #fault-actions button{background:#3a1414;color:#ffd2d2;border:1px solid #ff3030;border-radius:4px;
+           padding:6px 14px;font:bold 12px Arial;cursor:pointer;}
+  #fault-actions button:hover{background:#5a1c1c;}
+  #fault-hint{font-size:11px;color:#c99;margin-top:10px;}
 </style>
 </head>
 <body>
@@ -748,6 +787,34 @@
     <h3 id="stream-title">Stream</h3>
     <table id="stream-table"></table>
     <div class="btns"><button id="s-close">Close</button></div>
+  </div>
+</div>
+
+<!-- Backend health LED: always-visible status pill; click opens the fault overlay -->
+<div id="sys-led" title="Backend status — click for details">
+  <span class="dot"></span><span id="sys-led-txt">BACKEND OK</span>
+</div>
+
+<!-- Full-screen fault overlay: shown when the backend crashes, hangs, or the link drops -->
+<div id="fault-overlay">
+  <div id="fault-card">
+    <h2><span class="ic">&#9888;</span><span id="fault-title">BACKEND ERROR</span></h2>
+    <p id="fault-sub">The simulation backend reported a fault. On-screen values are frozen and no longer live.</p>
+    <div id="fault-meta">
+      <b>Condition</b><span id="fault-cond">&mdash;</span>
+      <b>Exception</b><span id="fault-type">&mdash;</span>
+      <b>Plant time (s)</b><span id="fault-simt">&mdash;</span>
+      <b>Frozen for</b><span id="fault-age">&mdash;</span>
+      <b>Occurrences</b><span id="fault-count">&mdash;</span>
+    </div>
+    <div id="fault-msg">&mdash;</div>
+    <pre id="fault-tb"></pre>
+    <div id="fault-actions">
+      <button id="fault-tb-toggle">Show traceback</button>
+      <button id="fault-reload">Reload page</button>
+      <button id="fault-dismiss">Dismiss</button>
+    </div>
+    <div id="fault-hint">The banner reappears automatically while the fault persists. Restart the backend server to clear a crash.</div>
   </div>
 </div>
 

@@ -31,6 +31,7 @@ if __name__ == "__main__":
 import os
 import time
 import threading
+import traceback
 from collections import deque
 from typing import Optional, Set
 
@@ -8554,6 +8555,30 @@ async def hist_paths():
     return {"paths": hist.paths(), "rings": hist.stats()}
 
 
+@app.get("/api/health")
+async def health_probe():
+    """Backend fault probe. ok=True while the physics loop is stepping cleanly;
+    ok=False with a message+traceback once a step has raised. age_s is seconds
+    since the last successful step -- a rising age_s with ok=True means the step
+    is HANGING (no exception) rather than crashed. Poll this or read the _health
+    block on the /ws packet; both carry the same fault."""
+    now = time.time()
+    age = round(now - health["last_step_wall"], 2)
+    return {
+        "ok": health["ok"],
+        "heartbeat": health["heartbeat"],
+        "age_s": age,
+        "stalled": age > 5.0,          # no successful step for 5 s -> loop wedged/crashed
+        "error": health["error"],
+        "type": health["type"],
+        "traceback": health["traceback"],
+        "sim_t": health["sim_t"],
+        "since": health["since"],
+        "count": health["count"],
+        "server_wall": now,
+    }
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
@@ -8569,6 +8594,59 @@ async def ws_endpoint(ws: WebSocket):
         clients.discard(ws)
 
 
+# -------------------------------------------------------------------------
+#  Backend health / fault surface
+#
+#  Before this block a physics exception inside step_sim() killed the sim_task
+#  coroutine outright: the WebSocket kept re-pushing the LAST good packet, so
+#  the operator saw a plausible-looking screen that was silently frozen -- the
+#  most dangerous failure mode for a training simulator. health now records the
+#  fault, the loop stays alive (so the fault reaches every client and the REST
+#  probe), and a monotonic heartbeat lets the browser detect a *hang* (step_sim
+#  wedged, no exception) as distinct from a clean crash.
+# -------------------------------------------------------------------------
+health = {
+    "ok": True,          # False once step_sim has raised and not yet recovered
+    "heartbeat": 0,      # +1 per successful physics step; frozen value == stalled backend
+    "last_step_wall": time.time(),   # epoch s of last successful step (browser staleness check)
+    "error": None,       # short one-line message (exception type + str)
+    "type": None,        # exception class name
+    "traceback": None,   # full formatted traceback (last frames), for the fault page
+    "sim_t": None,       # plant clock at the moment of failure
+    "since": None,       # epoch s when the fault was first raised
+    "count": 0,          # how many steps have thrown since the backend last ran clean
+}
+
+
+def _flag_health_error(exc: Exception) -> None:
+    tb = traceback.format_exc()
+    health["ok"] = False
+    health["type"] = type(exc).__name__
+    health["error"] = f"{type(exc).__name__}: {exc}"
+    health["traceback"] = tb
+    health["sim_t"] = getattr(state, "sim_t", None)
+    health["count"] = health.get("count", 0) + 1
+    if health.get("since") is None:
+        health["since"] = time.time()
+    # Loud on the server console too -- the operator's screen is not the only place this must show.
+    print("=" * 72)
+    print("BACKEND STEP FAILURE — physics step raised, simulation is frozen:")
+    print(tb)
+    print("=" * 72)
+
+
+def _clear_health_error() -> None:
+    if not health["ok"]:
+        print("Backend recovered: physics step succeeded again after a fault.")
+    health["ok"] = True
+    health["error"] = None
+    health["type"] = None
+    health["traceback"] = None
+    health["sim_t"] = None
+    health["since"] = None
+    health["count"] = 0
+
+
 async def sim_task():
     global last_packet
     last_t = time.time()
@@ -8581,21 +8659,55 @@ async def sim_task():
         #   FAST (xN) -> advance == dt*N, integrated in fixed STEP_CAP sub-steps so each physical
         #   step is bit-identical to SLOW; only the number of steps per real second changes.
         sim_advance = dt * SIM_SPEED.get(state.sim_mode, 1.0)
-        while sim_advance > 1e-9:
-            h = min(STEP_CAP, sim_advance)
-            last_packet = step_sim(h)
-            # Sample inside the sub-step loop, not once per real tick: under FAST one real
-            # tick covers 6 plant-seconds, and sampling outside the loop would alias every
-            # transient down to that resolution.
-            hist.maybe_sample(last_packet, state.sim_t, now)
-            sim_advance -= h
+        try:
+            while sim_advance > 1e-9:
+                h = min(STEP_CAP, sim_advance)
+                last_packet = step_sim(h)
+                # Sample inside the sub-step loop, not once per real tick: under FAST one real
+                # tick covers 6 plant-seconds, and sampling outside the loop would alias every
+                # transient down to that resolution.
+                hist.maybe_sample(last_packet, state.sim_t, now)
+                sim_advance -= h
+                health["heartbeat"] += 1
+                health["last_step_wall"] = time.time()
+            if not health["ok"]:
+                _clear_health_error()
+        except Exception as exc:
+            # A physics step threw (NaN/blow-up/non-convergence). Record it, keep the
+            # coroutine alive so the fault propagates, and back off so we don't spin at
+            # 100% CPU re-raising the same exception thousands of times a second.
+            _flag_health_error(exc)
+            await asyncio.sleep(0.5)
         await asyncio.sleep(DT)
+
+
+def _packet_with_health(packet: dict) -> str:
+    """Serialise the outgoing packet with a fresh _health block stapled on.
+
+    Written every push (not baked into step_sim's return) so that even a STALE
+    last_packet -- which is exactly what you have after a crash -- still carries
+    the live fault flag out to every connected browser."""
+    now = time.time()
+    payload = dict(packet)
+    payload["_health"] = {
+        "ok": health["ok"],
+        "heartbeat": health["heartbeat"],
+        "age_s": round(now - health["last_step_wall"], 2),  # since last good step
+        "error": health["error"],
+        "type": health["type"],
+        "traceback": health["traceback"],
+        "sim_t": health["sim_t"],
+        "since": health["since"],
+        "count": health["count"],
+        "server_wall": now,
+    }
+    return json.dumps(payload)
 
 
 async def push_task():
     while True:
         if clients and last_packet:
-            msg = json.dumps(last_packet)
+            msg = _packet_with_health(last_packet)
             dead = []
             for c in list(clients):
                 try:
