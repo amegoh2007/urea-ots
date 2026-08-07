@@ -419,6 +419,44 @@ test('setCursor stays a single-ruler shim over the multi-ruler store', () => {
   assert.deepEqual(trend.rulers(), []);
 });
 
+// ===== drag to move a ruler =====
+
+test('a ruler can be dragged to a new instant, leaving its neighbours put', () => {
+  reset();
+  I.setNow(1000); I.setSpanValue(3600);            // window [-2600 .. 1000]
+  trend.clearRulers();
+  trend.addRuler(100); trend.addRuler(200); trend.addRuler(300);
+  assert.equal(trend.moveRuler(1, 250), true);
+  assert.deepEqual(trend.rulers(), [100, 250, 300]);
+});
+
+test('a dragged ruler clamps to the right edge of the visible window', () => {
+  reset();
+  I.setNow(1000); I.setSpanValue(3600);            // right edge = viewEnd = 1000
+  trend.clearRulers();
+  trend.addRuler(500);
+  trend.moveRuler(0, 5000);                          // dragged past newest data
+  assert.equal(trend.rulers()[0], 1000);
+});
+
+test('a dragged ruler clamps to the left edge of the visible window', () => {
+  reset();
+  I.setNow(1000); I.setSpanValue(3600);            // left edge = viewEnd - span = -2600
+  trend.clearRulers();
+  trend.addRuler(500);
+  trend.moveRuler(0, -9999);
+  assert.equal(trend.rulers()[0], -2600);
+});
+
+test('moving a non-existent ruler is a no-op', () => {
+  reset();
+  trend.clearRulers();
+  trend.addRuler(100);
+  assert.equal(trend.moveRuler(5, 200), false);
+  assert.equal(trend.moveRuler(-1, 200), false);
+  assert.deepEqual(trend.rulers(), [100]);
+});
+
 // ===== MIN / MAX / AVG over the visible window =====
 
 function statPen(points, now, spanS) {

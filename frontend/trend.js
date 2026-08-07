@@ -97,6 +97,7 @@
   let selected = 0;
   let chart = null, win = null, lastPacket = null;
   let rulers = [];                     // absolute plant seconds; up to RULERS_MAX, coloured by index
+  let dragRuler = -1, dragMoved = false; // index of the ruler being dragged; whether the pointer moved
   let viewEndT = null;                 // right edge (abs plant s); null = live
   const PAN_FRACTION = 0.25;
   let nowSim = 0, nowWall = 0;
@@ -232,6 +233,14 @@
     dirty = true; if (win && chart) redraw();
   }
   function clearRulers() { rulers = []; dirty = true; if (win && chart) redraw(); }
+  // Slide an existing ruler to a new instant, clamped to the visible window. Drives the drag handler.
+  function moveRuler(i, t) {
+    if (i < 0 || i >= rulers.length || t == null) return false;
+    const ve = viewEnd();
+    rulers[i] = clamp(t, ve - span, ve);
+    dirty = true; if (win && chart) redraw();
+    return true;
+  }
   // Backward-compatible single-ruler shims (kept for the earlier API + tests).
   function setCursor(t) { if (t == null) clearRulers(); else { rulers = [t]; dirty = true; if (win && chart) redraw(); } }
 
@@ -260,6 +269,18 @@
       });
     },
   };
+
+  // Pixel<->time helpers + ruler hit-testing, shared by click-to-add and drag-to-move.
+  const RULER_HIT_PX = 6;                              // grab tolerance around a ruler line
+  function pxToTime(px) { return viewEnd() + chart.scales.x.getValueForPixel(px); }
+  function rulerNear(px) {
+    let best = -1, bd = RULER_HIT_PX + 0.5;
+    for (let i = 0; i < rulers.length; i++) {
+      const d = Math.abs(chart.scales.x.getPixelForValue(rulers[i] - viewEnd()) - px);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
 
   function buildChart() {
     const cv = win.querySelector('#tw-canvas');
@@ -340,7 +361,7 @@
 
   function renderRulerChips() {
     const box = win.querySelector('#tw-rulers-list');
-    if (!rulers.length) { box.innerHTML = '<span class="rnone">click plot to add (up to 5)</span>'; return; }
+    if (!rulers.length) { box.innerHTML = '<span class="rnone">click plot to add · drag to move (up to 5)</span>'; return; }
     box.innerHTML = rulers.map((t, i) => {
       const col = RULER_COLORS[i % RULER_COLORS.length];
       const w = wallAt(t);
@@ -688,13 +709,47 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       tb.appendChild(tr);
     }
 
-    win.querySelector('#tw-canvas').addEventListener('click', ev => {
+    // Plot pointer: grab a ruler within RULER_HIT_PX and drag it along the time axis; a plain
+    // click on empty plot still drops a new ruler at that instant.
+    const cv = win.querySelector('#tw-canvas');
+    cv.addEventListener('pointerdown', ev => {
       if (!chart) return;
-      const rect = ev.currentTarget.getBoundingClientRect();
+      const rect = cv.getBoundingClientRect();
       const px = ev.clientX - rect.left, area = chart.chartArea;
       if (px < area.left || px > area.right) return;
-      addRuler(viewEnd() + chart.scales.x.getValueForPixel(px));
+      dragMoved = false;
+      dragRuler = rulerNear(px);
+      if (dragRuler >= 0) {
+        try { cv.setPointerCapture(ev.pointerId); } catch (e) {}
+        cv.style.cursor = 'ew-resize';
+        ev.preventDefault();
+      }
     });
+    cv.addEventListener('pointermove', ev => {
+      if (!chart) return;
+      const rect = cv.getBoundingClientRect();
+      const px = ev.clientX - rect.left, area = chart.chartArea;
+      if (dragRuler >= 0) {
+        moveRuler(dragRuler, pxToTime(clamp(px, area.left, area.right)));
+        dragMoved = true;
+      } else if (px >= area.left && px <= area.right) {
+        cv.style.cursor = rulerNear(px) >= 0 ? 'ew-resize' : 'crosshair';
+      }
+    });
+    function endDrag(ev) {
+      if (dragRuler < 0) return false;
+      try { cv.releasePointerCapture(ev.pointerId); } catch (e) {}
+      dragRuler = -1; cv.style.cursor = 'crosshair';
+      return true;
+    }
+    cv.addEventListener('pointerup', ev => {
+      if (!chart) return;
+      if (endDrag(ev)) return;
+      const rect = cv.getBoundingClientRect();
+      const px = ev.clientX - rect.left, area = chart.chartArea;
+      if (!dragMoved && px >= area.left && px <= area.right) addRuler(pxToTime(px));
+    });
+    cv.addEventListener('pointercancel', endDrag);
     win.querySelector('#tw-rulers-list').addEventListener('click', ev => {
       const b = ev.target.closest('b[data-ri]');
       if (b) removeRuler(Number(b.dataset.ri));
@@ -805,7 +860,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
     window.TrendWindow = {
       open: coreOpen, onPacket: onPacket, addTag: coreAddTag, removeSlot: removeSlot,
       setCursor: setCursor, cursor: () => (rulers.length ? rulers[0] : null),
-      addRuler: addRuler, removeRuler: removeRuler, clearRulers: clearRulers, rulers: () => rulers.slice(),
+      addRuler: addRuler, removeRuler: removeRuler, moveRuler: moveRuler, clearRulers: clearRulers, rulers: () => rulers.slice(),
       valueAt: valueAt, windowStats: windowStats, pan: pan, goLive: goLive, viewEnd: viewEnd, isLive: isLive,
       isBound: t => Registry.bound(t), isOpen: () => true,
     };
@@ -883,7 +938,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
     module.exports = {
       open: coreOpen, onPacket: onPacket, addTag: coreAddTag, removeSlot: removeSlot,
       setCursor: setCursor, cursor: () => (rulers.length ? rulers[0] : null),
-      addRuler: addRuler, removeRuler: removeRuler, clearRulers: clearRulers, rulers: () => rulers.slice(),
+      addRuler: addRuler, removeRuler: removeRuler, moveRuler: moveRuler, clearRulers: clearRulers, rulers: () => rulers.slice(),
       valueAt: valueAt, windowStats: windowStats, pan: pan, goLive: goLive, viewEnd: viewEnd, isLive: isLive,
       isBound: t => Registry.bound(t),
       _internals: { hms, deskClock, stamp, norm, wallAt, noteTime, Registry, commitRange, windowStats,
