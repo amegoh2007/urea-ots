@@ -688,11 +688,18 @@
   let menu = null;
   function closeMenu() { if (menu) menu.style.display = 'none'; }
   if (HAS_DOM) {
+    // Styles up front, not lazily from buildWindow(): the context menu is reachable before the
+    // window has ever been built, and unstyled it renders unpositioned below the fold.
+    injectCSS();
     document.addEventListener('click', closeMenu);
     document.addEventListener('contextmenu', e => { if (!e.target.closest('#tw-menu')) closeMenu(); }, true);
   }
 
   function openMenu(ev, tag) {
+    // The menu can be the very first thing an operator touches, before the window has ever been
+    // built. Without this the styles are absent and it renders unpositioned below the fold, so
+    // right-click looks like it does nothing. injectCSS is idempotent.
+    injectCSS();
     if (!menu) {
       menu = document.createElement('div');
       menu.id = 'tw-menu';
