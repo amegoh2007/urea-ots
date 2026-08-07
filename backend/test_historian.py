@@ -207,13 +207,30 @@ def test_all_nan_bucket_returns_nulls_not_zeros():
 
 # ===== memory ceiling =====
 
-def test_memory_ceiling_matches_the_design_budget():
-    """867 numeric + 46 boolean paths across both rings must stay near 24 MB."""
+def test_memory_is_linear_in_path_count():
+    """The cost invariant, not a fixed total: columnar array('f') is 4 B per path per sample
+    plus 16 B per sample for the two shared timestamp arrays. This holds as the packet grows
+    (the plant model added ~250 paths after the historian shipped, 914 -> ~1167), so the guard
+    tests the per-path law rather than an absolute that packet growth silently breaches."""
     h = Historian()
-    flat = {f"p{i}": float(i) for i in range(913)}
-    h.maybe_sample(flat, 0.0, 1000.0)
+    h.maybe_sample({f"p{i}": float(i) for i in range(1000)}, 0.0, 1000.0)
+    stats = h.stats()
+    for r in h.rings:
+        expected = 4 * r.cap * 1000 + 16 * r.cap
+        assert stats[r.name]["bytes"] == expected, \
+            f"{r.name}: {stats[r.name]['bytes']} B != {expected} B (columnar formula)"
+    total = sum(s["bytes"] for s in stats.values())
+    per_path = total / 1000.0
+    # 4 B/sample * (3600 + 2880) depths = 25 920 B per path, plus timestamp overhead amortised.
+    assert 25000 <= per_path <= 27000, f"{per_path:.0f} B/path — columnar layout drifted"
+
+
+def test_realistic_packet_stays_within_a_sane_bound():
+    """Even well above today's ~1167 paths the archive must stay small (it is RAM, all rings)."""
+    h = Historian()
+    h.maybe_sample({f"p{i}": float(i) for i in range(1500)}, 0.0, 1000.0)
     total = sum(r["bytes"] for r in h.stats().values())
-    assert total < 30e6, f"historian would use {total/1e6:.1f} MB, budget is ~24 MB"
+    assert total < 45e6, f"historian would use {total/1e6:.1f} MB at 1500 paths"
     assert total > 15e6, f"only {total/1e6:.1f} MB allocated — rings look under-sized"
 
 

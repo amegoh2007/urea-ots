@@ -127,7 +127,11 @@ that first appear mid-run are NaN-padded to the current length.
 | fast | 1 s | 3600 | 1m, 5m, 30m, 1h | 913 x 3600 x 4 B = 13.1 MB |
 | slow | 10 s | 2880 | 2h, 4h, 8h | 913 x 2880 x 4 B = 10.5 MB |
 
-Total ≈ 23.6 MB for 867 numeric + 46 boolean paths.
+Total ≈ 23.6 MB for 867 numeric + 46 boolean paths at ship. Memory is ~26 KB per path across
+both rings, so it scales with packet size: after the 2026-08 hydraulics/health additions grew the
+packet to ~1167 paths the archive is ~30 MB. This is by design — the historian records whatever
+the packet carries, so new units are trendable with no tag-list maintenance; the guard test
+asserts the per-path law rather than a fixed total that packet growth would silently breach.
 
 **Sampling.** `PATH_EXCLUDE = ('STREAMS',)`. A flat path list is compiled once and rebuilt only when
 the packet key-set changes. Sampling happens inside the sub-step loop so FAST retains true 1

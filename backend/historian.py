@@ -32,6 +32,11 @@ PATH_EXCLUDE = ("STREAMS",)
 # ring name -> (sample period in PLANT seconds, capacity in samples)
 #   fast: 1 s x 3600 = 1 h   -> serves the 1m / 5m / 30m / 1h spans at full resolution
 #   slow: 10 s x 2880 = 8 h  -> serves the 2h / 4h / 8h spans
+# Memory is 4 B per path per sample (columnar array('f')) plus 16 B/sample for the shared
+# timestamps: ~26 KB per path across both rings. It therefore scales with packet size -- at
+# 914 paths (ship) it was 23.8 MB; the plant model has since grown the packet to ~1167 paths
+# (~30 MB). This is intentional: the historian logs whatever the packet carries so new units
+# become trendable automatically, with no tag list to maintain.
 RINGS = (("fast", 1.0, 3600), ("slow", 10.0, 2880))
 
 
