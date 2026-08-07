@@ -25,6 +25,9 @@ import asyncio
 import json
 import hashlib
 import math
+import sys
+if __name__ == "__main__":
+    sys.modules["main"] = sys.modules["__main__"]
 import os
 import time
 import threading
@@ -4962,6 +4965,87 @@ hist = Historian()
 
 
 # ----- Sim step -----
+# ----- SM Flowsheet Setup -----
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from core.flowsheet import Flowsheet
+from core.stream import Stream
+from core.ejector import Ejector322F001
+from core.stripper import Stripper322E001
+from core.hpcc import Hpcc322E002
+from core.scrubber import Scrubber322E003
+from core.reactor import Reactor322R001
+from core.valve import Valve322604
+from core.vacuum import VacuumTrain324
+
+_sm_flowsheet = Flowsheet("Urea HP Loop")
+_ej_motive = Stream("Ejector_Motive_In")
+_ej_disch = Stream("Ejector_Disch_Out")
+_ej_unit = Ejector322F001("322F001_Ejector", _ej_motive, _ej_disch)
+
+_strip_co2_in = Stream("Stripper_CO2_In")
+_strip_overflow_in = Stream("Stripper_Overflow_In")
+_strip_steam_in = Stream("Stripper_Steam_In")
+_strip_top_gas_out = Stream("Stripper_Top_Gas_Out")
+_strip_bottom_liq_out = Stream("Stripper_Bottom_Liq_Out")
+_strip_unit = Stripper322E001("322E001_Stripper", _strip_co2_in, _strip_overflow_in, _strip_steam_in, _strip_top_gas_out, _strip_bottom_liq_out)
+
+_hpcc_gas_in = Stream("HPCC_Gas_In")
+_hpcc_liq_in = Stream("HPCC_Liq_In")
+_hpcc_gas_out = Stream("HPCC_Gas_Out")
+_hpcc_liq_out = Stream("HPCC_Liq_Out")
+_hpcc_unit = Hpcc322E002("322E002_HPCC", _hpcc_gas_in, _hpcc_liq_in, _hpcc_gas_out, _hpcc_liq_out)
+
+_scrub_offgas_in = Stream("Scrub_Offgas_In")
+_scrub_wash_in = Stream("Scrub_Wash_In")
+_scrub_ccw_in = Stream("Scrub_CCW_In")
+_scrub_vent_out = Stream("Scrub_Vent_Out")
+_scrub_carbamate_out = Stream("Scrub_Carbamate_Out")
+_scrub_ccw_out = Stream("Scrub_CCW_Out")
+_scrub_unit = Scrubber322E003("322E003_Scrubber", _scrub_offgas_in, _scrub_wash_in, _scrub_ccw_in, _scrub_vent_out, _scrub_carbamate_out, _scrub_ccw_out)
+
+_react_feed_in = Stream("React_Feed_In")
+_react_overflow_out = Stream("React_Overflow_Out")
+_react_offgas_out = Stream("React_Offgas_Out")
+_react_unit = Reactor322R001("322R001_Reactor", _react_feed_in, _react_overflow_out, _react_offgas_out)
+
+_valve_og_in = Stream("Valve_Offgas_In")
+_valve_purge_out = Stream("Valve_Purge_Out")
+_valve_unit = Valve322604("HV_322604", _valve_og_in, _valve_purge_out)
+
+_vac_evap_in = Stream("Vac_Evap_In")
+_vac_v1_in = Stream("Vac_V1_In")
+_vac_v2_in = Stream("Vac_V2_In")
+_vac_fa1_in = Stream("Vac_FA1_In")
+_vac_fa2_in = Stream("Vac_FA2_In")
+_vac_mot924_in = Stream("Vac_Mot924_In")
+_vac_mot927_in = Stream("Vac_Mot927_In")
+_vac_mot929_in = Stream("Vac_Mot929_In")
+_vac_cond_out = Stream("Vac_Cond_Out")
+_vac_vent_out = Stream("Vac_Vent_Out")
+
+# Set stream densities and viscosities for pressure drop MESH calculations
+_react_feed_in.density = REACT_OVERFLOW_RHO
+_react_feed_in.viscosity = 0.001
+_strip_overflow_in.density = REACT_OVERFLOW_RHO
+_strip_overflow_in.viscosity = 0.001
+_hpcc_gas_in.density = STRIP_RHO_G_DES
+_hpcc_gas_in.viscosity = 1.5e-5
+_scrub_offgas_in.density = SCRUB_OFFGAS_RHO
+_scrub_offgas_in.viscosity = 1.5e-5
+_vac_unit = VacuumTrain324("324_VacuumTrain", _vac_evap_in, _vac_v1_in, _vac_v2_in, _vac_fa1_in, _vac_fa2_in, _vac_mot924_in, _vac_mot927_in, _vac_mot929_in, _vac_cond_out, _vac_vent_out)
+
+_sm_flowsheet.add_unit(_ej_unit)
+_sm_flowsheet.add_unit(_strip_unit)
+_sm_flowsheet.add_unit(_hpcc_unit)
+_sm_flowsheet.add_unit(_scrub_unit)
+_sm_flowsheet.add_unit(_react_unit)
+_sm_flowsheet.add_unit(_valve_unit)
+_sm_flowsheet.add_unit(_vac_unit)
+# ------------------------------
+
 def step_sim(dt: float) -> dict:
     s = state
     s.sim_t += dt                        # plant clock advances with the physics, not the wall clock
@@ -5648,7 +5732,11 @@ def step_sim(dt: float) -> dict:
                               0.0, SCRUB_HOLDUP_MAX_KG)
     s.scrub_level_pct = clamp(s.scrub_holdup_kg / SCRUB_HOLDUP_NLL_KG * SCRUB_LEVEL_NLL_PCT,
                               0.0, 100.0)
-    hv604 = hv_322604(scrub["offgas_kmolh"], scrub["T_offgas"], s.HIC_322604, scrub["P_offgas"])
+    _valve_og_in.comp = scrub["offgas_kmolh"]
+    _valve_og_in.set_state(T=scrub["T_offgas"], P=scrub["P_offgas"])
+    _valve_unit.hic_pct = s.HIC_322604
+    _valve_unit.solve()
+    hv604 = _valve_unit.diagnostics
     # L3-7 HV-322604 off-gas: external steam-tracing holds the 60 C baseline; flag only when extreme JT
     #   cooling overwhelms the jacket (T_out < 20 C).  Flow NOT restricted (gas line) -> fouling warning.
     s.flags["CARBAMATE_DEPOSITION"] = (hv604["T_out"] < 20.0)
@@ -6835,10 +6923,16 @@ def step_sim(dt: float) -> dict:
     motive_ratio_606 = max(s.HIC_329606 / R324_HIC9606_DES_PCT, 0.0)
     mot927_m = R324_F004_MOTIVE_DES * motive_ratio_606
     mot929_m = R324_F005_MOTIVE_DES * motive_ratio_606
-    vac324 = vacuum_train_324(
-        m_evap, v1_m, v2_m, fa202_m, fa203_m,
-        mot9605_m, mot927_m, mot929_m,
-    )
+    _vac_evap_in.set_state(mass_flow=m_evap)
+    _vac_v1_in.set_state(mass_flow=v1_m)
+    _vac_v2_in.set_state(mass_flow=v2_m)
+    _vac_fa1_in.set_state(mass_flow=fa202_m)
+    _vac_fa2_in.set_state(mass_flow=fa203_m)
+    _vac_mot924_in.set_state(mass_flow=mot9605_m)
+    _vac_mot927_in.set_state(mass_flow=mot927_m)
+    _vac_mot929_in.set_state(mass_flow=mot929_m)
+    _vac_unit.solve()
+    vac324 = _vac_unit.diagnostics
     vac_stream = vac324["streams_kgh"]
     m_324_cond = vac_stream["719"] + vac_stream["720"] + vac_stream["721"] + vac_stream["759"]
     m_324_vent = vac_stream["722"]
@@ -7108,6 +7202,13 @@ def step_sim(dt: float) -> dict:
             "max_relative_residual": _tear_norm,
             "settled": _tear_norm <= _tear_tol,
             "residuals": _tear_resid,
+        },
+        "sm_diagnostics": {
+            "hpcc": locals().get("hpcc", {}),
+            "ej": locals().get("ej", {}),
+            "react": locals().get("react", {}),
+            "hv604": locals().get("hv604", {}),
+            "vac324": locals().get("vac324", {}),
         },
         # G7: every recycle in the flowsheet is explicitly one of two kinds. ALGEBRAIC loops (the 324
         # vacuum P/T tears, no inter-stage holdup within a tick) are iterated to a declared residual by
@@ -8550,23 +8651,12 @@ def _pin_hpcc_ua():
     global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES
     global HPCC_NC_DES_LIVE
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
-    _orig = hpcc_322e002                             # capture the settled HPCC product (HPCC_UA back-calc)
-    _orig_ej = ejector_322f001                       #   and the settled design motive NH3 for the
-    _cap = {}                                        #   EJ_MOTIVE_DES_LIVE -> phi_m bit-exact pin
-    def _cap_hpcc(gas_feed, liq_feed, **kw):
-        r = _orig(gas_feed, liq_feed, **kw)
-        _cap["r"] = r
-        return r
-    def _cap_ej(motive, *a, **kw):
-        rr = _orig_ej(motive, *a, **kw)
-        _cap["ejm"] = motive
-        return rr
-    hpcc_322e002 = _cap_hpcc
-    ejector_322f001 = _cap_ej
-    for _ in range(18000):                           # 30 sim-min @ dt=0.1 s -> settled design steady state
-        step_sim(0.1)
-    hpcc_322e002 = _orig
-    ejector_322f001 = _orig_ej
+    _cap = {}
+    for _ in range(18000):
+        res = step_sim(0.1)
+    _cap["r"] = res["sm_diagnostics"]["hpcc"]
+    _cap["ejm"] = res["sm_diagnostics"]["ej"]["suction_kgh"] / res["sm_diagnostics"]["ej"]["mu"] if res["sm_diagnostics"]["ej"].get("mu", 0) else EJ_MOTIVE_NH3_DES
+
     r = _cap["r"]
     # ISSUE-c reactor mass-conservation refs are NOT pinned here on the CAS warm-up settle (wrong
     # operating point: the off-gas carries the conversion-deficit amplification and the feed differs
@@ -8596,26 +8686,18 @@ def _pin_hpcc_ua():
     #   REACT_OVERFLOW_DES / REACT_OFFGAS_DES exactly); only the feed mass is genuinely upstream-coupled
     #   (ejector phi_m^2 / HPCC), so capture it from the first MAN-seed reactor step.  Then every delta
     #   is identically 0 at the seed -> f_cons == 1.0 bit-exact (restores the design pin).
-    _orig_r2 = react_322r001
     _capf = {}
-    def _cap_react2(*a, **kw):
-        rr = _orig_r2(*a, **kw)
-        _capf["feed"]    = rr["feed_kmolh"]
-        _capf["xi_urea"] = rr["xi_urea"]; _capf["xi_biu"] = rr["xi_biu"]
-        _capf["L"]       = rr["L_feed"];  _capf["W"]      = rr["W_feed"]
-        _capf["X"]       = rr["X_conv"]
-        # design HPCC carbamate-MELT N/C (NH3/CO2) for the bubble_p_322e002 fN anchor.  a[0] is the
-        #   hpcc dict (positional); hpcc_322e002 runs BEFORE react_322r001 this step so its raw combined
-        #   melt feed is populated.  This is the NH3-richer melt N/C (~3.12324), DISTINCT from the
-        #   reactor-feed N/C L (3.07296) captured above.  Guard a zero/absent CO2 (pre-warm pathological).
-        _hf  = a[0].get("feed_kmolh", {}) if a else {}
-        _co2 = _hf.get("CO2", 0.0)
-        if _co2 > 1e-9:
-            _capf["hpcc_L"] = _hf.get("NH3", 0.0) / _co2
-        return rr
-    react_322r001 = _cap_react2
-    step_sim(0.1)                                    # one MAN-seed step (REACT_TEAR_DES still None ->
-    react_322r001 = _orig_r2                          #   tear inactive -> feed_corrected == raw feed)
+    res = step_sim(0.1)
+    rr = res["sm_diagnostics"]["react"]
+    _capf["feed"]    = rr["feed_kmolh"]
+    _capf["xi_urea"] = rr["xi_urea"]; _capf["xi_biu"] = rr["xi_biu"]
+    _capf["L"]       = rr["L_feed"];  _capf["W"]      = rr["W_feed"]
+    _capf["X"]       = rr["X_conv"]
+    _hf = res["sm_diagnostics"]["hpcc"].get("feed_kmolh", {})
+    _co2 = _hf.get("CO2", 0.0)
+    if _co2 > 1e-9:
+        _capf["hpcc_L"] = _hf.get("NH3", 0.0) / _co2
+
     REACT_MASS_DES = (
         sum(_capf["feed"].get(k, 0.0)        * MW_COMP[k] for k in MW_COMP),
         sum(REACT_OVERFLOW_DES.get(k, 0.0)   * MW_COMP[k] for k in MW_COMP),
@@ -8649,16 +8731,10 @@ def _pin_hpcc_ua():
     #     MP:  supply(50% seed) == m_strip  (self-pinned in steam_system via K_902; nothing to size here)
     #     LP:  M_USERS_LP == m_hpcc_des     (4-bar users load-follow HPCC steam-raising -> m_pic == 0)
     import steam_system as _ss
-    _orig2 = hpcc_322e002
     _cap2 = {}
-    def _cap_hpcc2(gas_feed, liq_feed, **kw):
-        rr = _orig2(gas_feed, liq_feed, **kw)
-        _cap2["r"] = rr
-        return rr
-    hpcc_322e002 = _cap_hpcc2
-    for _ in range(3000):                            # 5 sim-min: STOP on the stable MAN design plateau,
-        step_sim(0.1)                                #   BEFORE the NH3-inventory main trip (21_2 latches
-    hpcc_322e002 = _orig2                            #   ~tick 6500 in free-running MAN -> post-trip duty
+    for _ in range(3000):
+        res = step_sim(0.1)
+    _cap2["r"] = res["sm_diagnostics"]["hpcc"]
     _duty_des    = _cap2["r"]["duty_kw"]             #   is garbage). Plateau duty is flat ticks 3000-6000.
     _m_hpcc_des    = _duty_des / HPCC_LATENT_4BAR
     global M_HPCC_DES_LIVE
@@ -8682,15 +8758,10 @@ def _pin_hpcc_ua():
     #   back-solve LAMBDA_ABS so the post-pin live energy balance sums to 0 at design (Tc001 == 43 C,
     #   bit-exact) while activating the live absorber dynamics off-design.
     global A328_GCB_DES, A328_GCB_T, A328_PHI_ABS, A328_VENT_DES, A328_LAMBDA_ABS, hv_322604
-    _orig_hv = hv_322604
-    _caphv   = {}
-    def _cap_hv(offgas, T_in, hic_pct, p_up):
-        rr = _orig_hv(offgas, T_in, hic_pct, p_up)
-        _caphv["m"] = rr["mass_kgh"]; _caphv["T"] = rr["T_out"]
-        return rr
-    hv_322604 = _cap_hv
-    step_sim(0.1)                                    # one MAN-seed step (absorber pre-pin -> holds)
-    hv_322604 = _orig_hv
+    _caphv = {}
+    res = step_sim(0.1)
+    rr = res["sm_diagnostics"]["hv604"]
+    _caphv["m"] = rr["mass_kgh"]; _caphv["T"] = rr["T_out"]
     _gcb_m = _caphv["m"]; _gcb_T = _caphv["T"]
     # SAME stage-7 sensible-heat kernel, evaluated at the pinned design off-gas and Tc001 == A328_C001_T:
     _sens_pin = ((A328_M755_DES*(A328_M755_T - A328_C001_T)
