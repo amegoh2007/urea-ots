@@ -4,21 +4,19 @@
 const WS_URL = `ws://${location.hostname || 'localhost'}:8000/ws`;
 let ws;
 let lastState = {};
-let history = {};
-const HIST_MAX = 3600;
 
 function connect(){
   ws = new WebSocket(WS_URL);
   ws.onmessage = e => {
     const s = JSON.parse(e.data);
     lastState = s;
-    pushHistory(s);
     render(s);
     render322(s);
     if(window.refreshF50) window.refreshF50(s);
     if(window.refreshF51) window.refreshF51(s);
     if(window.refreshMSP) window.refreshMSP(s);
     if(window.OV_apply) window.OV_apply(s);
+    if(window.TrendWindow) window.TrendWindow.onPacket(s);
   };
   ws.onclose = () => setTimeout(connect, 1000);
   ws.onerror = () => ws.close();
@@ -27,30 +25,8 @@ function send(msg){ if(ws && ws.readyState===1) ws.send(JSON.stringify(msg)); }
 window.otsSend = send;
 window.openTrend = (tag)=>openTrend(tag);
 
-function pushHistory(s){
-  const tnow = s.t || (Date.now()/1000);
-  const tags = {
-    FI_321401:s.FI_321401, TI_top1:s.TI_top1, TI_top2:s.TI_top2,
-    PI_top1:s.PI_top1, PI_top2:s.PI_top2, PI_header:s.PI_header, totalizer:s.totalizer,
-    PI_321201:s.PI_321201, PI_321202:s.PI_321202,
-    PY_321201:s.PY_321201, PY_321202:s.PY_321202,
-    PDY_321203:s.PDY_321203, PDY_321204:s.PDY_321204,
-    PA_current:s.pumpA?.current, PA_speed:s.pumpA?.speed,
-    PB_current:s.pumpB?.current, PB_speed:s.pumpB?.speed,
-    PI_disch:s.PI_disch, TI_321020:s.TI_321020
-  };
-  const _ej=s.EJ_322F001;
-  if(_ej){ Object.assign(tags,{
-    EJ_motive:_ej.motive_kgh, EJ_suction:_ej.suction_kgh, EJ_mu:_ej.mu,
-    TT_322012:_ej.TT_322012, EJ_Pdisch:_ej.PI_disch, EJ_total:_ej.total_th,
-    EJ_MW:_ej.MW, HIC_322602:_ej.HIC_322602 }); }
-  for(const k in tags){
-    if(tags[k]===undefined||tags[k]===null) continue;
-    if(!history[k]) history[k]=[];
-    history[k].push({t:tnow,v:Number(tags[k])});
-    if(history[k].length>HIST_MAX) history[k].shift();
-  }
-}
+// (pushHistory removed: the backend historian records all 914 packet paths from process
+//  start, so the 25-tag browser-side ring buffer it maintained is redundant.)
 
 // ---------- Render ----------
 const MODE_LETTER = { MAN:'M', AUTO:'A', CAS:'C' };
@@ -205,33 +181,12 @@ function openCtxMenu(x,y,tag){ ctxTag=tag; ctx.style.display='block'; ctx.style.
 document.addEventListener('click',()=> ctx.style.display='none');
 document.getElementById('ctx-trend').onclick = ()=>{ if(ctxTag) openTrend(ctxTag); };
 
-let trendChart=null, trendSpan=60, trendInterval=null;
-const TREND_SPANS=[10,30,60,120,300,600,1800,3600];
+// Trending now lives in trend.js: a persistent multi-pen window backfilled from the backend
+// historian. The old single-tag #trendModal plotted `history[tag]`, which only ever matched
+// on the legacy .pi screen — every overlay screen passes a P&ID tag ('TT-321001') while this
+// dict is keyed by packet key ('TI_top1'), so those charts always came up empty.
 function openTrend(tag){
-  document.getElementById('trend-title').textContent = `Trend — ${tag}`;
-  document.getElementById('trendModal').classList.add('show');
-  updateTrend(tag);
-  document.getElementById('t-inc').onclick = ()=>{ let i=TREND_SPANS.indexOf(trendSpan); if(i<TREND_SPANS.length-1){trendSpan=TREND_SPANS[i+1]; updateTrend(tag);} };
-  document.getElementById('t-dec').onclick = ()=>{ let i=TREND_SPANS.indexOf(trendSpan); if(i>0){trendSpan=TREND_SPANS[i-1]; updateTrend(tag);} };
-  document.getElementById('t-close').onclick = ()=> { document.getElementById('trendModal').classList.remove('show'); if(trendInterval) clearInterval(trendInterval); };
-  if(trendInterval) clearInterval(trendInterval);
-  trendInterval = setInterval(()=> updateTrend(tag), 500);
-}
-function updateTrend(tag){
-  document.getElementById('t-span').textContent = trendSpan+' s';
-  const arr = history[tag]||[];
-  const t1 = (lastState.t || Date.now()/1000);
-  const pts = arr.filter(p=>p.t>=t1-trendSpan).map(p=>({x:Number((p.t-t1).toFixed(1)),y:p.v}));
-  const ctxc = document.getElementById('trendChart').getContext('2d');
-  if(trendChart) trendChart.destroy();
-  trendChart = new Chart(ctxc,{
-    type:'line',
-    data:{datasets:[{label:tag,data:pts,parsing:false,borderColor:'#22ff22',backgroundColor:'rgba(34,255,34,0.1)',pointRadius:0,tension:0.2}]},
-    options:{ animation:false,responsive:false,
-      scales:{ x:{type:'linear',ticks:{color:'#fff'},grid:{color:'#333'},title:{display:true,text:'t (s)',color:'#fff'}},
-               y:{ticks:{color:'#fff'},grid:{color:'#333'}} },
-      plugins:{legend:{labels:{color:'#fff'}}} }
-  });
+  if(window.TrendWindow){ window.TrendWindow.open(); window.TrendWindow.addTag(tag, null); }
 }
 
 // ---------- Stream popup (generic renderer over packet STREAMS) ----------

@@ -24,7 +24,7 @@ Map native image `(px, py)` to stretched stage: `sx = px * 1366 / imgW`, `sy = p
 * **Dynamic Propagation:** All equations are dynamic. Static constants allowed ONLY for unmodelled upstream units; swap immediately when built.
 
 ## 5. Interactions
-* **Trend:** Right-click bound indicator → Pop-up Chart.js (time vs param).
+* **Trend:** Right-click any bound `ind`/`avalve`/`xv`/`pump` → context menu (`Trend`, `Add to slot`), or drag it onto a slot. Opens the persistent 10-pen window (`trend.js`). See §13.
 * **Faceplates:** Left-click auto-valve indicator → MAN (user %), AUTO (user SP, PID drives), CAS (linked param drives).
 * **Stream Popups:** Left-click stream line → Composition/thermo data.
 * **Tooltips:** Hover asset → tag number.
@@ -135,4 +135,36 @@ Left-click any `*IC-3xxxx` indicator opens a faceplate (regex `CTRL_RE = /[A-Z]I
 * Active mode button: `background:#0aa64d`, border `#22ff22`.
 * Faceplate rows: `<div class="row"><label>…</label><input …></div>`, `step="0.1"`, `min=0 max=100` for %; readonly PV uses `[readonly]` (cyan `#7fd6ff`).
 * Each numeric loop carries a one-line physics note (`font-size:11px`, `#cfeff1`) stating cause→effect (e.g. "↑ PV-322203 opening ⇒ ↓ CO2 feed flow").
-* **Trend:** right-click any bound indicator → `#trendModal` Chart.js (time-span +/- stepper, black canvas). **Stream:** left-click stream line → `#streamModal` composition table.
+* **Trend:** right-click any bound indicator → trend context menu (§13). **Stream:** left-click stream line → `#streamModal` composition table.
+
+---
+
+## 13. Trend Window (`trend.js`)
+
+Persistent 10-pen trend, appended to `<body>` **outside `#stage`** so screen navigation cannot
+hide it. Closes only via the `X` at top-left. One window only.
+
+* **Data:** backend historian (`historian.py`) records every numeric and boolean packet leaf
+  except the `STREAMS` subtree — 914 paths, ~23.8 MB — from process start. Backfill via
+  `GET /api/hist?paths=…&span=…&max=…`; live extension from the WS packet.
+* **Time base:** PLANT clock (`t_sim`), so a 1-hour span is one hour of plant behaviour at
+  either pacing. The X axis carries two tick rows: plant clock, then desktop clock (`t`).
+  Ticks preceding program start render blank, never a clamped placeholder.
+* **Spans:** `1m 5m 30m 1h 2h 4h 8h`, default **1h**.
+* **Scaling:** every pen normalises to a shared 0–100 grid using its engineering range
+  (`rng:[lo,hi]` on the OV entry → unit-default table → auto-scale). The Y axis relabels to
+  the **selected** pen's units; labels outside 0–100 % are suppressed.
+* **Pen table:** `# · colour · TAG · value · unit · range · x`. Click a row to select it.
+  Empty rows are drop targets. Booleans render as 0/1 stepped pens.
+* **Entry:** right-click context menu or HTML5 drag from the overlay. `body.ov-editing`
+  disables `draggable` so the reposition drag keeps working.
+* **Resolution:** `window.OV_BINDS` (built in `buildBindMap`) maps P&ID tag → packet path for
+  `ind`, `avalve`, `xv` and `pump`. This is separate from `BIND_MAP`, which drives `eff()`
+  render inheritance and must stay `ind`-only.
+* **Persistence:** slots, span, selected pen and geometry in `localStorage` (`ots_trend_v1`);
+  restored and re-backfilled on load.
+* **Export:** `SAVE` composes an offscreen canvas (header + chart + pen table) and offers
+  `Trend_Report_YYYY-MM-DD_HH-MM-SS.png` through `showSaveFilePicker`, falling back to an
+  anchor download. No extra libraries.
+* **Colours:** pens `#22ff22 #7fd0d8 #ffd000 #ff9a3c #ff00ff #5fe08f #e06f6f #9bbabb #c78fff #ffffff`;
+  chrome `#13202c` / accent `#4aa587` / text `#cfe`; selected row outlined `#7fd0d8`.

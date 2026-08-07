@@ -38,8 +38,9 @@ from controllers import Controller
 import steam_system
 from steam_system import SteamState, step_steam  # MP/LP steam-header dynamics (quarantined)
 from c003_pressure_coupling import c003_pressure_target_bara
+from historian import Historian  # background trend recorder (plant-time sampled)
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -4265,7 +4266,12 @@ class State:
         self.tank_T_C        = 25.0
         self.tank_P_top_barG = 12.3
         self.F_in_BL_th      = 42.762   # t/h, BL NH3 makeup (seed; set live by LIC-321501 = pump draw)
-        self.totalizer_t     = 177001.09
+        self.totalizer_t     = 0.0       # FQI-321401: NH3 delivered this run; starts at zero every program init
+        # Plant clock (s since program init), advanced by step_sim in lock-step with the
+        # physics. Distinct from wall clock: FAST pacing advances this 60x faster than
+        # real time, and the historian/trends are keyed to it so a "1 hour" trend always
+        # means one hour of PLANT behaviour regardless of sim_mode.
+        self.sim_t           = 0.0
         # block valves (booleans: True = OPEN)
         self.XV_321901 = True
         self.XV_322901 = True
@@ -4950,10 +4956,15 @@ _ctrl_lock = threading.Lock()
 clients: Set[WebSocket] = set()
 last_packet: dict = {}
 
+# Trend historian. Logging starts with the process, not with the first browser, so a pen
+# opened an hour in still backfills the preceding hour.
+hist = Historian()
+
 
 # ----- Sim step -----
 def step_sim(dt: float) -> dict:
     s = state
+    s.sim_t += dt                        # plant clock advances with the physics, not the wall clock
     suct_open  = bool(s.XV_321901) and (s.tank_level_frac > 0.05)
     disch_open = bool(s.XV_322901)
 
@@ -7088,7 +7099,8 @@ def step_sim(dt: float) -> dict:
     _tear_norm = max(_tear_resid.values(), default=0.0)
 
     return {
-        "t":           time.time(),
+        "t":           time.time(),      # desktop clock (epoch s)
+        "t_sim":       s.sim_t,          # plant clock (s since program init); trend X axis
         "RECYCLE_TEAR_RESIDUAL": {
             "method": "observed_dynamic_transport_tears",
             "is_solver_convergence": False,
@@ -8414,6 +8426,30 @@ async def ctrl_get(tag: str):
         return ctrl.to_packet()
 
 
+@app.get("/api/hist")
+async def hist_query(paths: str, span: float = 3600.0,
+                     max_points: int = Query(800, alias="max")):
+    """Backfill trend history.
+
+    ``paths`` is a comma-separated list of packet dot-paths (e.g. ``TI_top1``,
+    ``controllers.SIC_321950.pv``). ``span`` is in PLANT seconds. Values are decimated to
+    at most ``max`` points with a min/max envelope, so spikes survive the reduction.
+
+    REST rather than the WebSocket because backfill is a one-shot bulk pull; live values
+    keep arriving on the packet the client already receives.
+    """
+    wanted = [p for p in (paths or "").split(",") if p]
+    if not wanted:
+        raise HTTPException(status_code=400, detail="paths is required")
+    return hist.query(wanted, max(1.0, float(span)), max(2, int(max_points)))
+
+
+@app.get("/api/hist/paths")
+async def hist_paths():
+    """Every path the historian is recording, plus per-ring occupancy."""
+    return {"paths": hist.paths(), "rings": hist.stats()}
+
+
 @app.websocket("/ws")
 async def ws_endpoint(ws: WebSocket):
     await ws.accept()
@@ -8444,6 +8480,10 @@ async def sim_task():
         while sim_advance > 1e-9:
             h = min(STEP_CAP, sim_advance)
             last_packet = step_sim(h)
+            # Sample inside the sub-step loop, not once per real tick: under FAST one real
+            # tick covers 6 plant-seconds, and sampling outside the loop would alias every
+            # transient down to that resolution.
+            hist.maybe_sample(last_packet, state.sim_t, now)
             sim_advance -= h
         await asyncio.sleep(DT)
 

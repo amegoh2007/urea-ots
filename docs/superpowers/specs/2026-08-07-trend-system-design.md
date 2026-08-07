@@ -148,9 +148,15 @@ array. Span larger than retained history → whatever exists, plus `"truncated":
 
 ### Layer 2 — frontend registry and store (`frontend/trend.js`, new)
 
-`TagRegistry` is built from `BIND_MAP`, which `overlays.js` already computes; it is exposed as
-`window.OV_BINDS`. Resolves `tag -> { path, unit, dec, range, kind }`. This is what repairs defect 1:
-the tag-to-path hop that the current code lacks.
+`TagRegistry` resolves `tag -> { path, unit, dec, range }` through `window.OV_BINDS`, published by
+`overlays.js`. This is what repairs defect 1: the tag-to-path hop that the current code lacks.
+
+**Amended during implementation.** `OV_BINDS` is built alongside `BIND_MAP`, not from it.
+`buildBindMap()` indexes `t === 'ind'` only, so reusing it would have dropped all 47 `avalve`
+entries — every valve opening would have dragged but resolved as NOT BOUND. It also cannot simply
+be widened: `eff()` uses `BIND_MAP` to let an unbound `ind` inherit a bind, and folding valve
+entries in would change which value a shared tag renders. The trend map therefore covers `ind`,
+`avalve`, `xv` and `pump` (223 tags) while `BIND_MAP` stays `ind`-only (173).
 
 **Engineering range** decides whether a 10-pen plot is readable. Resolution order:
 

@@ -536,14 +536,27 @@
     return key in local ? local[key] : (o.def !== false);
   }
 
+  // Element types that can carry a trend pen: analogue value, valve opening, valve/pump state.
+  const TRENDABLE = { ind: 1, avalve: 1, xv: 1, pump: 1 };
   const CTRL_RE = /[A-Z]IC-3\d{2}/i;   // any *IC-3xxxx loop controller (PIC/HIC/LIC/TIC/FIC/SIC) -> faceplate
   let BIND_MAP = {};                   // tag -> {bind,u,dec,face,fp}: first bound occurrence across ALL screens
   function buildBindMap() {            // shared tags read the SAME value on every screen they appear
-    const m = {};
+    const m = {}, tm = {};
     for (const sid in OV) cfg(sid).forEach(o => {
       if (o.t === 'ind' && o.bind && !m[o.tag]) m[o.tag] = { bind: o.bind, u: o.u, dec: o.dec, face: o.face, fp: o.fp, mode: o.mode };
+      // Trend map also carries 'avalve' (modulating valve OPENING %). BIND_MAP itself must
+      // not: eff() uses it to let an unbound 'ind' inherit a bind, and folding valve entries
+      // into that would change which value a shared tag renders.
+      if ((o.t === 'ind' || o.t === 'avalve') && o.bind && !tm[o.tag])
+        tm[o.tag] = { bind: o.bind, u: o.u, dec: o.dec, rng: o.rng };
+      // Block valves and pumps trend as 0/1 digital pens. A pump binds to its object, so
+      // the trendable quantity is the .on flag. Unbound ones (UI-local toggles with no
+      // backend state) are skipped by the o.bind guard — there is nothing to record.
+      if ((o.t === 'xv' || o.t === 'pump') && o.bind && !tm[o.tag])
+        tm[o.tag] = { bind: o.t === 'pump' ? o.bind + '.on' : o.bind, u: '', dec: 0, rng: [0, 1] };
     });
     BIND_MAP = m;
+    window.OV_BINDS = tm;              // trend.js resolves tag -> packet path through this
   }
   const eff = o => (o.t === 'ind' && !o.bind && BIND_MAP[o.tag]) ? Object.assign({}, o, BIND_MAP[o.tag]) : o;
   function renderOne(sid, o) {
@@ -636,12 +649,28 @@
       document.addEventListener('mousemove', mm);
       document.addEventListener('mouseup', mu);
     });
-    el.addEventListener('click', () => { if (!editing) activate(sid, o); });
+    el.addEventListener('click', ev => {
+      if (editing) return;
+      if (el.dataset.dragged === '1') { el.dataset.dragged = ''; return; }  // a drag must not open a faceplate
+      activate(sid, o);
+    });
     el.addEventListener('contextmenu', e => {
       e.preventDefault(); e.stopPropagation();
       if (editing) { openMenu(e, sid, o); return; }                        // edit mode -> Edit/Delete menu
-      if (o.t === 'ind' && o.bind && window.openTrend) window.openTrend(o.tag);
+      // run mode -> trend context menu (Trend / Add to slot), tag resolved via OV_BINDS
+      if (TRENDABLE[o.t] && window.TrendWindow) window.TrendWindow.openMenu(e, o.tag);
     });
+    // drag an indicator, valve opening or valve/pump state straight onto a trend slot
+    if (TRENDABLE[o.t]) {
+      el.addEventListener('dragstart', ev => {
+        if (editing) { ev.preventDefault(); return; }                      // edit mode keeps the reposition drag
+        el.dataset.dragged = '1';
+        ev.dataTransfer.setData('text/ots-tag', o.tag);
+        ev.dataTransfer.setData('text/plain', o.tag);
+        ev.dataTransfer.effectAllowed = 'copy';
+        if (window.TrendWindow) window.TrendWindow.open();
+      });
+    }
   }
 
   function build(sid) {
@@ -669,6 +698,9 @@
       }
       el.dataset.tip = o.tag;
       el.title = o.tag;
+      // Only bound indicators/valve openings are draggable: an unbound white frame has no
+      // packet path, so there is nothing to trend.
+      if (TRENDABLE[o.t] && (eff(o).bind || o.bind)) el.draggable = true;
       if (o.t === 'pump') el.innerHTML = svgPump();
       else if (o.t === 'xv') el.innerHTML = svgXV();
       else if (o.t === 'ovrd') el.innerHTML = '<span class="ovl"></span><b>OVRD</b>';
@@ -891,6 +923,11 @@
     editBtn.onclick = () => {
       editing = !editing;
       document.body.classList.toggle('ov-editing', editing);
+      // Edit mode owns mousedown-drag for repositioning; HTML5 drag would fight it.
+      document.querySelectorAll('.ov.ind, .ov.avalve, .ov.xv, .ov.pump').forEach(el => {
+        if (el.dataset.trendable === '1' || el.draggable) el.dataset.trendable = '1';
+        el.draggable = !editing && el.dataset.trendable === '1';
+      });
       editBtn.textContent = editing ? '✓ Done' : '✎ Edit Layout';
       if (!editing) { closeMenu(); closeModal(); }
     };

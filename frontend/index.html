@@ -192,9 +192,6 @@
   .modal button.primary{background:#0aa64d;}
   .mode-group button{margin-right:4px;width:auto;}
   .mode-group button.active{background:#0aa64d;border-color:#22ff22;}
-  #trendModal .card{min-width:640px;}
-  #trendModal .scaleRow{display:flex;gap:6px;align-items:center;margin:6px 0;}
-  #trendModal canvas{background:#000;}
   #streamModal table{width:100%;border-collapse:collapse;font-family:Consolas,monospace;}
   #streamModal td{border:1px solid #555;padding:3px 6px;}
   /* SIC-321951 faceplate (isolated mode buttons + live mode tag) */
@@ -742,20 +739,8 @@
   </div>
 </div>
 
-<!-- Trend modal -->
-<div class="modal" id="trendModal">
-  <div class="card">
-    <h3 id="trend-title">Trend</h3>
-    <div class="scaleRow">
-      <span>Time span:</span>
-      <button id="t-dec">-</button>
-      <span id="t-span">60 s</span>
-      <button id="t-inc">+</button>
-    </div>
-    <canvas id="trendChart" width="600" height="280"></canvas>
-    <div class="btns"><button id="t-close">Close</button></div>
-  </div>
-</div>
+<!-- Trend: the single-tag #trendModal is superseded by the persistent multi-pen window
+     that trend.js appends to <body> (outside #stage, so screen navigation cannot hide it). -->
 
 <!-- Stream modal -->
 <div class="modal" id="streamModal">
@@ -769,5 +754,6 @@
 <script src="app.js"></script>
 <script src="lv324501_route.js"></script>
 <script src="overlays.js"></script>
+<script src="trend.js"></script>
 </body>
 </html>

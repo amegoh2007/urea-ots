@@ -42,3 +42,28 @@ All gaps have been closed and resolved.
 - **Affected**: Global flowsheet propagation ("Ripple Effect").
 - **Method**: Refactor the codebase to implement `Stream` and `Unit` objects with `is_dirty` flags and event listeners to automatically trigger downstream cascaded solves upon feed perturbations.
 - **Blocking datum**: Agreement on the scope and timeline of the full rewrite, as this fundamentally replaces the current explicit time-domain integration architecture.
+
+## Trend / Historian Gaps (2026-08-07)
+
+Delivered this session: `historian.py` (914 paths, ~23.8 MB, dual-rate rings) + `trend.js`
+(persistent 10-pen window). Design: `docs/superpowers/specs/2026-08-07-trend-system-design.md`.
+Open items only:
+
+- **Gap**: 31 indicator slots remain WHITE FRAME, so they cannot be trended — 24 are Unit-335
+  (melt/prilling: `335D004`, `335P001A/B`, `335P002`, `335P006`, `335R001A/B`, `FFY-335406`,
+  `FIC-335401/335405B/335407`, `FV-335407`, `HIC/HV-335602`, `HV-335609/335610`, `LT-335507`),
+  the rest `322E003`, `322P002`, `323P003A/B`, `328P002/P003/P006/P007`, `329P003`,
+  `IT-329007`, `IT-329008`, `LT-323506`, `MASTER-SP`, `PY-329207B`, `STARTUP SW`.
+  **Method**: bind each tag once its unit is modelled; the historian already records every
+  packet leaf, so no trend-side work is needed. **Blocking datum**: the unit models themselves.
+- **Gap**: 15 pump/XV overlay elements are client-side toggles with no backend state
+  (`329P002A/B`, `329P004A/B`, `329P006A/B`, `329U001-M01/M02`, `XV-322903`, the `EXT-OVR`
+  pushbuttons, `TRIP_35_3`), so they carry no digital pen. **Method**: add backend state and a
+  `bind`. **Blocking datum**: the 329/335 unit models.
+- **Gap**: `Urea OTS — As-Built Mathematical & System Architecture Reference` does not exist in
+  this working tree (only inside the stale `backend/.claude/worktrees/` copy), so the CLAUDE.md
+  auto-update directive could not be honoured for this change. **Method**: restore or recreate
+  the document at repo root. **Blocking datum**: decision on which worktree copy is canonical.
+- **Note (not a gap)**: `STREAMS` is excluded from the historian by design — 2346 of 3213
+  numeric leaves, composition tables read through the stream popup. One-line change to
+  `PATH_EXCLUDE` in `historian.py` if stream trending is ever wanted.
