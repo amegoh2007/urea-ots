@@ -154,8 +154,14 @@ hide it. Closes only via the `X` at top-left. One window only.
 * **Scaling:** every pen normalises to a shared 0–100 grid using its engineering range
   (`rng:[lo,hi]` on the OV entry → unit-default table → auto-scale). The Y axis relabels to
   the **selected** pen's units; labels outside 0–100 % are suppressed.
-* **Pen table:** `# · colour · TAG · value · unit · range · x`. Click a row to select it.
-  Empty rows are drop targets. Booleans render as 0/1 stepped pens.
+* **Pen table:** `# · colour · TAG · value · unit · LOW · HIGH · x`, with a sticky header row.
+  Click a row to select it. Empty rows are drop targets. Booleans render as 0/1 stepped pens.
+* **Editable display range:** LOW and HIGH are number inputs per pen. Editing either sets the
+  pen's display scale and clears its auto-scale flag; ENTER or blur commits (§12). Blanking a
+  field returns the pen to auto-scaling, and auto values render italic/grey to signal they are
+  derived, not set. An inverted or zero-width span is refused with a `BAD RANGE` flash and the
+  previous scale is restored. A focused field is never overwritten by the 4 Hz redraw. Operator
+  ranges persist in `localStorage`; auto pens deliberately store none.
 * **Entry:** right-click context menu or HTML5 drag from the overlay. `body.ov-editing`
   disables `draggable` so the reposition drag keeps working.
 * **Resolution:** `window.OV_BINDS` (built in `buildBindMap`) maps P&ID tag → packet path for

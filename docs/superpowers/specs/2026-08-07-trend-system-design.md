@@ -188,9 +188,20 @@ units, so the selected pen reads directly while the rest stay comparable in shap
 two tick rows: plant clock primary, desktop clock beneath (Chart.js second linear x-axis at
 `position: 'bottom'`, sharing the same data range).
 
-**Pen table**, 10 rows: `# · colour chip · TAG · live value · unit · range · X`. Empty rows read
-`-- drop indicator here --`. Clicking a row selects that pen and the Y axis follows. Fixed 10-colour
-palette chosen for contrast against `#0a1416`, none relying on red/green discrimination alone.
+**Pen table**, 10 rows under a sticky header: `# · colour chip · TAG · live value · unit · LOW ·
+HIGH · X`. Empty rows read `-- drop indicator here --`. Clicking a row selects that pen and the Y
+axis follows. Fixed 10-colour palette chosen for contrast against `#0a1416`, none relying on
+red/green discrimination alone.
+
+**Editable display range (added after review).** LOW and HIGH are per-pen number inputs, so an
+operator can zoom a pen onto the band that matters instead of living with the declared engineering
+range — and can pin a scale on an auto-scaled pen, which otherwise had no route back to a fixed
+one. Editing either bound clears the pen's auto flag; blanking a field restores auto-scaling, with
+derived values rendered italic/grey to distinguish them from set ones. Inverted or zero-width spans
+are refused with a `BAD RANGE` flash because normalisation cannot plot them. A focused input is
+skipped by the 4 Hz redraw, the same guard the faceplates use against telemetry clobbering a
+half-typed entry. Only operator-set ranges persist; auto pens re-derive theirs so a stale range
+cannot freeze onto new data.
 
 **Redraw** by in-place dataset mutation at 4 Hz with `chart.update('none')`, replacing the current
 destroy-and-recreate cycle (defect 3).

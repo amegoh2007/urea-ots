@@ -185,6 +185,95 @@ test('a slot with no declared range is marked for auto-scaling', () => {
   assert.equal(I.slots[0].auto, true);
 });
 
+// ===== editable display range =====
+
+function field(value) { return { value: String(value) }; }
+
+test('an operator LOW overrides the declared range and rescales the pen', () => {
+  reset();
+  trend.addTag('TT-321001', 0);                 // declared 0-250 C
+  I.commitRange(0, 'lo', field(100));
+  assert.equal(I.slots[0].lo, 100);
+  assert.equal(I.slots[0].hi, 250);
+  assert.equal(I.norm(I.slots[0], 175), 50, 'pen must replot against the new range');
+});
+
+test('an operator HIGH overrides the declared range', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.commitRange(0, 'hi', field(50));
+  assert.equal(I.slots[0].hi, 50);
+  assert.equal(I.norm(I.slots[0], 25), 50);
+});
+
+test('setting a bound turns off auto-scaling so data cannot move it back', () => {
+  reset();
+  trend.addTag('N/C Ratio', 0);                 // no declared range -> auto
+  assert.equal(I.slots[0].auto, true);
+  I.commitRange(0, 'hi', field(2));
+  assert.equal(I.slots[0].auto, false);
+  assert.equal(I.slots[0].hi, 2);
+});
+
+test('blanking a bound hands the pen back to auto-scaling', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.commitRange(0, 'lo', field(100));
+  assert.equal(I.slots[0].auto, false);
+  I.commitRange(0, 'lo', field(''));
+  assert.equal(I.slots[0].auto, true);
+});
+
+test('an inverted range is refused, leaving the previous scale intact', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.commitRange(0, 'lo', field(300));           // above the 250 high
+  assert.equal(I.slots[0].lo, 0, 'LOW must not cross HIGH');
+  assert.equal(I.slots[0].hi, 250);
+});
+
+test('a zero-width range is refused', () => {
+  reset();
+  trend.addTag('HV-322602', 0);                 // 0-100 %
+  I.commitRange(0, 'hi', field(0));
+  assert.equal(I.slots[0].hi, 100);
+});
+
+test('a non-numeric entry is refused', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.commitRange(0, 'hi', field('abc'));
+  assert.equal(I.slots[0].hi, 250);
+});
+
+test('a negative LOW is allowed for pens that swing below zero', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.commitRange(0, 'lo', field(-40));
+  assert.equal(I.slots[0].lo, -40);
+  assert.equal(I.slots[0].auto, false);
+});
+
+test('editing an empty slot is a no-op', () => {
+  reset();
+  const inp = field(10);
+  I.commitRange(3, 'lo', inp);
+  assert.equal(I.slots[3], null);
+  assert.equal(inp.value, '', 'the field clears rather than holding a phantom range');
+});
+
+test('operator ranges survive a reload; auto pens re-derive theirs', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('N/C Ratio', 1);
+  I.commitRange(0, 'lo', field(20));
+  I.commitRange(0, 'hi', field(180));
+  I.save();
+  const st = I.saved();
+  assert.deepEqual(st.ranges[0], [20, 180]);
+  assert.equal(st.ranges[1], null, 'auto-scaled pens must not freeze a stale range');
+});
+
 // ===== live feed =====
 
 test('live packets extend a pen on the plant clock', () => {

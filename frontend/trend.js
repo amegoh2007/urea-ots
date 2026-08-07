@@ -95,6 +95,8 @@
     const st = saved();
     st.span = span; st.sel = selected;
     st.tags = slots.map(s => s && s.tag);
+    // Only operator-set ranges are persisted; auto-scaled pens re-derive theirs from data.
+    st.ranges = slots.map(s => (s && !s.auto) ? [s.lo, s.hi] : null);
     if (win) {
       st.open = win.style.display !== 'none';
       st.x = win.style.left; st.y = win.style.top;
@@ -256,17 +258,21 @@
 
   // ================= pen table =================
   function renderRows() {
+    if (!win) return;
     const tb = win.querySelector('#tw-rows');
     for (let i = 0; i < SLOTS; i++) {
       const tr = tb.children[i], slot = slots[i];
       tr.className = (i === selected ? 'sel ' : '') + (slot ? 'full' : 'empty');
       const cells = tr.children;
+      const loI = cells[5].firstChild, hiI = cells[6].firstChild;
       cells[0].textContent = i + 1;
       cells[1].firstChild.style.background = PENS[i];
       if (!slot) {
         cells[2].textContent = '-- drop indicator here --';
-        cells[3].textContent = ''; cells[4].textContent = ''; cells[5].textContent = '';
-        cells[6].textContent = '';
+        cells[3].textContent = ''; cells[4].textContent = '';
+        loI.value = ''; hiI.value = '';
+        loI.disabled = hiI.disabled = true;
+        cells[7].textContent = '';
         continue;
       }
       const last = slot.pts.length ? slot.pts[slot.pts.length - 1] : null;
@@ -274,10 +280,36 @@
       cells[2].textContent = slot.tag;
       cells[3].textContent = last ? last.v.toFixed(slot.entry.dec) : '--';
       cells[4].textContent = stale ? 'STALE' : slot.entry.unit;
-      cells[5].textContent = slot.lo.toFixed(slot.entry.dec) + ' - ' + slot.hi.toFixed(slot.entry.dec) +
-                             (slot.auto ? ' (auto)' : '');
-      cells[6].textContent = 'x';
+      loI.disabled = hiI.disabled = false;
+      // Never overwrite the field the operator is typing into — the 4 Hz redraw would
+      // otherwise wipe a half-entered number, the same failure the faceplates guard against.
+      if (document.activeElement !== loI) loI.value = slot.lo.toFixed(slot.entry.dec);
+      if (document.activeElement !== hiI) hiI.value = slot.hi.toFixed(slot.entry.dec);
+      loI.classList.toggle('auto', slot.auto);
+      hiI.classList.toggle('auto', slot.auto);
+      cells[7].textContent = 'x';
     }
+  }
+
+  // Operator-set display range. Blanking a field hands the pen back to auto-scaling.
+  function commitRange(i, which, inp) {
+    const slot = slots[i];
+    if (!slot) { inp.value = ''; return; }
+    if (inp.value.trim() === '') {
+      slot.auto = true;
+      dirty = true; redraw(); save();
+      return;
+    }
+    const v = Number(inp.value);
+    const lo = which === 'lo' ? v : slot.lo;
+    const hi = which === 'hi' ? v : slot.hi;
+    if (!isFinite(v) || hi - lo <= 0) {     // an inverted or zero span cannot be plotted
+      renderRows();
+      flash(i, 'BAD RANGE');
+      return;
+    }
+    slot.lo = lo; slot.hi = hi; slot.auto = false;
+    dirty = true; redraw(); save();
   }
   function markHist() {
     if (!win) return;
@@ -342,7 +374,7 @@
 
     let y = headH + cv.height + 24;
     c.font = 'bold 11px Consolas, monospace'; c.fillStyle = '#82b3a3';
-    c.fillText('#   TAG                     VALUE      UNIT     RANGE', 12, y);
+    c.fillText('#   TAG                     VALUE      UNIT          LOW         HIGH', 12, y);
     c.font = '11px Consolas, monospace';
     live.forEach((s) => {
       y += rowH;
@@ -353,7 +385,9 @@
       c.fillText(String(i + 1).padEnd(4) + s.tag.padEnd(24) +
                  (last ? last.v.toFixed(s.entry.dec) : '--').padStart(9) + '  ' +
                  s.entry.unit.padEnd(8) +
-                 s.lo.toFixed(s.entry.dec) + ' - ' + s.hi.toFixed(s.entry.dec), 28, y);
+                 s.lo.toFixed(s.entry.dec).padStart(11) + '  ' +
+                 s.hi.toFixed(s.entry.dec).padStart(11) +
+                 (s.auto ? '  (auto)' : ''), 28, y);
     });
 
     const name = 'Trend_Report_' + stamp(d) + '.png';
@@ -402,11 +436,11 @@
 #tw-save{font:bold 11px Arial;background:#1b2a30;color:#7fd0d8;border:1px solid #4aa587;
   padding:3px 9px;cursor:pointer;border-radius:3px;}
 #tw-save:hover{background:#22424a;}
-#tw-plot{position:relative;height:calc(100% - 34px - 200px);min-height:140px;padding:4px 6px 0;}
+#tw-plot{position:relative;height:calc(100% - 34px - 250px);min-height:140px;padding:4px 6px 0;}
 #tw-flash{position:absolute;top:8px;left:50%;transform:translateX(-50%);opacity:0;
   transition:opacity .25s;background:#3a0d0d;border:1px solid #ff3030;color:#ff8a8a;
   font:bold 11px Consolas,monospace;padding:3px 10px;border-radius:3px;pointer-events:none;z-index:2;}
-#tw-table{height:200px;overflow:auto;border-top:1px solid #2a4a44;}
+#tw-table{height:250px;overflow:auto;border-top:1px solid #2a4a44;}
 #tw-table table{width:100%;border-collapse:collapse;font:11px Consolas,monospace;
   font-variant-numeric:tabular-nums;}
 #tw-table td{padding:2px 6px;border-bottom:1px solid #16292c;white-space:nowrap;}
@@ -419,7 +453,18 @@
 #tw-table td.c-k i{display:block;width:11px;height:9px;}
 #tw-table td.c-v{text-align:right;width:88px;color:#fff;font-weight:bold;}
 #tw-table td.c-u{width:64px;color:#82b3a3;}
-#tw-table td.c-r{color:#54706c;}
+#tw-table th{position:sticky;top:0;background:#0f1a24;color:#82b3a3;text-align:left;
+  font:bold 10px "Segoe UI",system-ui;letter-spacing:.5px;padding:3px 6px;
+  border-bottom:1px solid #2a4a44;}
+#tw-table td.c-lo,#tw-table td.c-hi{width:78px;}
+#tw-table td.c-lo input,#tw-table td.c-hi input{width:70px;background:#0b1a16;color:#d6f3e4;
+  border:1px solid #2a4a44;font:11px Consolas,monospace;font-variant-numeric:tabular-nums;
+  padding:1px 3px;text-align:right;}
+#tw-table td.c-lo input:focus,#tw-table td.c-hi input:focus{outline:none;border-color:#7fd0d8;
+  background:#0f2a24;}
+#tw-table td.c-lo input.auto,#tw-table td.c-hi input.auto{color:#54706c;font-style:italic;}
+#tw-table td.c-lo input:disabled,#tw-table td.c-hi input:disabled{background:transparent;
+  border-color:#16292c;}
 #tw-table td.c-x{width:18px;text-align:center;color:#e06f6f;font-weight:bold;}
 #tw-table td.c-x:hover{color:#ff3030;}
 .ov[draggable="true"]{cursor:grab;}
@@ -449,7 +494,10 @@
         '<button id="tw-save" title="Save trend image">SAVE</button>' +
       '</div>' +
       '<div id="tw-plot"><div id="tw-flash"></div><canvas id="tw-canvas"></canvas></div>' +
-      '<div id="tw-table"><table><tbody id="tw-rows"></tbody></table></div>';
+      '<div id="tw-table"><table>' +
+        '<thead><tr><th></th><th></th><th>TAG</th><th>VALUE</th><th>UNIT</th>' +
+        '<th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
+        '<tbody id="tw-rows"></tbody></table></div>';
     document.body.appendChild(win);
 
     const sp = win.querySelector('#tw-spans');
@@ -464,11 +512,28 @@
     for (let i = 0; i < SLOTS; i++) {
       const tr = document.createElement('tr');
       tr.innerHTML = '<td class="c-n"></td><td class="c-k"><i></i></td><td class="c-t"></td>' +
-                     '<td class="c-v"></td><td class="c-u"></td><td class="c-r"></td><td class="c-x"></td>';
+                     '<td class="c-v"></td><td class="c-u"></td>' +
+                     '<td class="c-lo"><input type="number" step="any" disabled ' +
+                       'title="Display LOW for this pen. Blank the field to auto-scale."></td>' +
+                     '<td class="c-hi"><input type="number" step="any" disabled ' +
+                       'title="Display HIGH for this pen. Blank the field to auto-scale."></td>' +
+                     '<td class="c-x"></td>';
       tr.onclick = ev => {
+        if (ev.target.tagName === 'INPUT') { selected = i; dirty = true; redraw(); return; }
         if (ev.target.classList.contains('c-x')) { if (slots[i]) removeSlot(i); return; }
         selected = i; dirty = true; redraw(); save();
       };
+      [['lo', '.c-lo input'], ['hi', '.c-hi input']].forEach(([which, sel]) => {
+        const inp = tr.querySelector(sel);
+        inp.addEventListener('change', () => commitRange(i, which, inp));
+        inp.addEventListener('keydown', ev => {
+          if (ev.key !== 'Enter') return;
+          ev.preventDefault();                       // ENTER commits, per ui_guidelines §12
+          commitRange(i, which, inp);
+          inp.blur();
+        });
+        inp.addEventListener('mousedown', ev => ev.stopPropagation());
+      });
       tr.addEventListener('dragover', ev => { ev.preventDefault(); tr.classList.add('drop'); });
       tr.addEventListener('dragleave', () => tr.classList.remove('drop'));
       tr.addEventListener('drop', ev => {
@@ -608,7 +673,14 @@
     if (typeof st.sel === 'number') selected = clamp(st.sel, 0, SLOTS - 1);
     if (!st.open || !Array.isArray(st.tags)) return;
     open();
-    st.tags.forEach((tag, i) => { if (tag) addTag(tag, i); });
+    st.tags.forEach((tag, i) => {
+      if (!tag) return;
+      addTag(tag, i);
+      const r = st.ranges && st.ranges[i];
+      if (slots[i] && Array.isArray(r) && r.length === 2 && r[1] > r[0]) {
+        slots[i].lo = r[0]; slots[i].hi = r[1]; slots[i].auto = false;
+      }
+    });
   }
   // Restore after overlays.js has published OV_BINDS.
   if (HAS_DOM) {
@@ -628,7 +700,7 @@
   // Headless export so the pure logic is testable without a DOM (see test_trend.js).
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = Object.assign({}, API, {
-      _internals: { hms, deskClock, stamp, norm, wallAt, noteTime, Registry,
+      _internals: { hms, deskClock, stamp, norm, wallAt, noteTime, Registry, commitRange,
                     UNIT_RANGE, SPANS, SLOTS, PENS, slots,
                     setSpanValue: v => { span = v; }, getSpan: () => span,
                     getSelected: () => selected, save: save, saved: saved },
