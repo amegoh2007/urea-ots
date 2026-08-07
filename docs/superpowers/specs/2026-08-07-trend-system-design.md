@@ -188,6 +188,21 @@ units, so the selected pen reads directly while the rest stay comparable in shap
 two tick rows: plant clock primary, desktop clock beneath (Chart.js second linear x-axis at
 `position: 'bottom'`, sharing the same data range).
 
+**Control strip (added after review).** A row between the plot and the pen table carrying `◀ ▶`
+scroll arrows, a `LIVE`/`HISTORY` state chip, the CURRENT plant + desktop clock, and the RULER
+plant + desktop time with a clear button. The two clocks moved here from the header, which was
+carrying eight controls.
+
+Scrolling forced a real change: the view can no longer be pinned to "now". The right edge is held
+as an absolute plant time (`viewEndT`, `null` = live) rather than an offset, so a parked window
+stays on the instant it was parked at instead of drifting forward with every packet. Each arrow
+steps a quarter span and re-backfills, which required a new `end` parameter on `/api/hist` and an
+upper bound in `Ring.window` — without it a scrolled-back query returned everything up to the
+newest sample. Ring selection now weighs span **plus** how far back the window sits, because a
+5-minute span read from 4 hours ago is past the fast ring's retention even though the span alone
+would fit. Back stops at program start and at the 8 h retention limit; forward resumes live on
+arrival.
+
 **Ruler (added after review).** Clicking the plot drops a dashed amber vertical ruler at that
 instant, labelled with plant and desktop time, and the pen table's `@ RULER` column fills with what
 each pen read there. Lookup is the last sample at or before the ruler — hold semantics, matching a

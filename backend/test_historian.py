@@ -139,6 +139,43 @@ def test_query_honours_the_span_window():
     assert min(q["t_sim"]) >= 49.0, f"returned data older than the span: {min(q['t_sim'])}"
 
 
+def test_query_can_end_at_an_older_instant():
+    """A scrolled-back trend asks for a window that closes in the past."""
+    h = build(period=1.0, cap=200)
+    for n in range(100):
+        h.maybe_sample({"x": float(n)}, float(n), 1000.0 + n)
+    q = h.query(["x"], span_s=10.0, max_points=400, end_sim=50.0)
+    assert max(q["t_sim"]) <= 50.0, f"window leaked past its end: {max(q['t_sim'])}"
+    assert min(q["t_sim"]) >= 40.0, f"window reached past its start: {min(q['t_sim'])}"
+    assert max(q["series"]["x"]) <= 50.0
+
+
+def test_scrolled_window_does_not_return_everything_up_to_now():
+    """Without an upper bound the ring would hand back the whole tail."""
+    h = build(period=1.0, cap=200)
+    for n in range(60):
+        h.maybe_sample({"x": float(n)}, float(n), 1000.0 + n)
+    near = h.query(["x"], span_s=5.0, max_points=400, end_sim=20.0)
+    assert len(near["t_sim"]) <= 12, f"got {len(near['t_sim'])} points for a 5 s window"
+
+
+def test_old_window_with_a_short_span_falls_to_the_ring_that_still_holds_it():
+    """A 5-minute span read from 4 hours ago is past the fast ring's retention."""
+    h = Historian()
+    assert h.pick_ring(300).name == "fast"
+    h_now, span, age = 14400.0, 300.0, 14400.0
+    assert h.pick_ring(span + age).name == "slow", "ring choice must account for how far back"
+
+
+def test_default_end_is_still_the_newest_sample():
+    h = build(period=1.0, cap=50)
+    for n in range(30):
+        h.maybe_sample({"x": float(n)}, float(n), 1000.0 + n)
+    a = h.query(["x"], span_s=10.0, max_points=400)
+    b = h.query(["x"], span_s=10.0, max_points=400, end_sim=29.0)
+    assert a["t_sim"] == b["t_sim"], "omitting end must equal ending at the newest sample"
+
+
 def test_query_reports_unknown_paths_instead_of_failing():
     h = build()
     h.maybe_sample({"x": 1.0}, 0.0, 1000.0)

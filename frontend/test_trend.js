@@ -363,6 +363,73 @@ test('pens read independently at one ruler instant', () => {
   trend.setCursor(null);
 });
 
+// ===== scrolling through history =====
+
+test('the view starts live and the back arrow parks it on an instant', () => {
+  reset();
+  I.setNow(10000);
+  I.setSpanValue(3600);
+  trend.goLive();
+  assert.equal(trend.isLive(), true);
+  assert.equal(trend.viewEnd(), 10000);
+  trend.pan(-1);                                  // a quarter of 3600 s
+  assert.equal(trend.isLive(), false);
+  assert.equal(trend.viewEnd(), 10000 - 900);
+});
+
+test('a parked view does not drift forward as the plant runs on', () => {
+  reset();
+  I.setNow(10000); I.setSpanValue(3600);
+  trend.goLive();
+  trend.pan(-1);
+  const parked = trend.viewEnd();
+  I.setNow(10600);                                // 10 more plant-minutes elapse
+  assert.equal(trend.viewEnd(), parked, 'the window must stay on the instant it was parked at');
+});
+
+test('the forward arrow steps back toward now and resumes live on arrival', () => {
+  reset();
+  I.setNow(10000); I.setSpanValue(3600);
+  trend.goLive();
+  trend.pan(-1); trend.pan(-1);
+  assert.equal(trend.viewEnd(), 10000 - 1800);
+  trend.pan(1);
+  assert.equal(trend.isLive(), false);
+  trend.pan(1);
+  assert.equal(trend.isLive(), true, 'catching up to now must resume live');
+  assert.equal(trend.viewEnd(), 10000);
+});
+
+test('scrolling back stops at program start, never before it', () => {
+  reset();
+  I.setNow(5000); I.setSpanValue(3600);
+  trend.goLive();
+  for (let i = 0; i < 20; i++) trend.pan(-1);
+  assert.equal(trend.viewEnd(), 5000 - I.maxPanBack());
+  assert.ok(trend.viewEnd() - 3600 >= -1e-6, 'the window must not open before t=0');
+});
+
+test('scroll range is bounded by retention, not by uptime', () => {
+  reset();
+  I.setNow(200000); I.setSpanValue(3600);         // far beyond the 8 h archive
+  assert.equal(I.maxPanBack(), 28800 - 3600);
+});
+
+test('a short span cannot scroll back at all before enough history exists', () => {
+  reset();
+  I.setNow(120); I.setSpanValue(3600);
+  assert.equal(I.maxPanBack(), 0, 'nothing older than the span exists yet');
+});
+
+test('goLive is a no-op when already live', () => {
+  reset();
+  I.setNow(9000); I.setSpanValue(3600);
+  trend.goLive();
+  trend.goLive();
+  assert.equal(trend.isLive(), true);
+  assert.equal(trend.viewEnd(), 9000);
+});
+
 // ===== desktop-clock mapping =====
 
 test('desktop time is interpolated from the plant/desktop pairs', () => {

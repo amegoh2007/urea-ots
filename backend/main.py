@@ -8428,12 +8428,15 @@ async def ctrl_get(tag: str):
 
 @app.get("/api/hist")
 async def hist_query(paths: str, span: float = 3600.0,
-                     max_points: int = Query(800, alias="max")):
+                     max_points: int = Query(800, alias="max"),
+                     end: Optional[float] = None):
     """Backfill trend history.
 
     ``paths`` is a comma-separated list of packet dot-paths (e.g. ``TI_top1``,
-    ``controllers.SIC_321950.pv``). ``span`` is in PLANT seconds. Values are decimated to
-    at most ``max`` points with a min/max envelope, so spikes survive the reduction.
+    ``controllers.SIC_321950.pv``). ``span`` is in PLANT seconds, and ``end`` is the plant
+    time the window closes at (default: newest sample), so a scrolled-back trend can pull an
+    older window. Values are decimated to at most ``max`` points with a min/max envelope, so
+    spikes survive the reduction.
 
     REST rather than the WebSocket because backfill is a one-shot bulk pull; live values
     keep arriving on the packet the client already receives.
@@ -8441,7 +8444,7 @@ async def hist_query(paths: str, span: float = 3600.0,
     wanted = [p for p in (paths or "").split(",") if p]
     if not wanted:
         raise HTTPException(status_code=400, detail="paths is required")
-    return hist.query(wanted, max(1.0, float(span)), max(2, int(max_points)))
+    return hist.query(wanted, max(1.0, float(span)), max(2, int(max_points)), end_sim=end)
 
 
 @app.get("/api/hist/paths")

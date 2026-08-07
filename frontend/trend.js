@@ -84,6 +84,11 @@
   let selected = 0;
   let chart = null, win = null, lastPacket = null;
   let cursorT = null;                  // ruler position, absolute plant seconds (null = no ruler)
+  // Right edge of the plot, absolute plant seconds. null = live (tracks now). Absolute rather
+  // than an offset from now, so a scrolled-back view stays on the instant it was parked at
+  // instead of drifting forward with every packet.
+  let viewEndT = null;
+  const PAN_FRACTION = 0.25;           // arrows step a quarter window, as DCS trends do
   let nowSim = 0, nowWall = 0;
   let timeMap = [];                    // [t_sim, t_wall] pairs for the desktop tick row
   let dirty = false, redrawTimer = null;
@@ -132,11 +137,18 @@
     return nowWall;
   }
 
+  // Right edge of the visible window in absolute plant seconds.
+  function viewEnd() { return viewEndT == null ? nowSim : viewEndT; }
+  function isLive() { return viewEndT == null; }
+  // How far back history can be scrolled: never before program start, never past retention.
+  function maxPanBack() { return Math.max(0, Math.min(nowSim, 28800) - span); }
+
   function backfill(slot) {
     if (!slot) return Promise.resolve();
     if (typeof fetch !== 'function') return Promise.resolve();   // headless test context
     const url = '/api/hist?paths=' + encodeURIComponent(slot.entry.path) +
-                '&span=' + span + '&max=' + MAX_POINTS;
+                '&span=' + span + '&max=' + MAX_POINTS +
+                (isLive() ? '' : '&end=' + viewEndT.toFixed(3));
     return fetch(url).then(r => {
       if (!r.ok) throw new Error('hist ' + r.status);
       return r.json();
@@ -167,9 +179,9 @@
   function rescale(slot) {              // auto-range pens with no declared engineering range
     if (!slot.auto) return;
     let lo = Infinity, hi = -Infinity;
-    const cut = nowSim - span;
+    const ve = viewEnd(), cut = ve - span;
     for (const p of slot.pts) {
-      if (p.t < cut) continue;
+      if (p.t < cut || p.t > ve) continue;
       if (p.v < lo) lo = p.v;
       if (p.v > hi) hi = p.v;
     }
@@ -198,7 +210,7 @@
     afterDatasetsDraw(ch) {
       if (cursorT == null) return;
       const area = ch.chartArea;
-      const x = ch.scales.x.getPixelForValue(cursorT - nowSim);
+      const x = ch.scales.x.getPixelForValue(cursorT - viewEnd());
       if (!(x >= area.left && x <= area.right)) return;
       const g = ch.ctx;
       g.save();
@@ -241,7 +253,7 @@
             grid: { color: '#1e3a34' },
             ticks: { color: '#8fb3ab', maxTicksLimit: 8, font: { size: 10 },
                      // blank the region that precedes program start rather than stacking 00:00:00
-                     callback: v => (nowSim + v) < 0 ? '' : hms(nowSim + v) },
+                     callback: v => (viewEnd() + v) < 0 ? '' : hms(viewEnd() + v) },
             title: { display: true, text: 'PLANT CLOCK', color: '#5fe08f',
                      font: { size: 10, weight: 'bold' } },
           },
@@ -249,7 +261,7 @@
             type: 'linear', position: 'bottom', min: -span, max: 0, display: true,
             grid: { drawOnChartArea: false, color: '#16292c' },
             ticks: { color: '#7f9ba8', maxTicksLimit: 8, font: { size: 10 },
-                     callback: v => { const w = wallAt(nowSim + v); return w == null ? '' : deskClock(w); } },
+                     callback: v => { const w = wallAt(viewEnd() + v); return w == null ? '' : deskClock(w); } },
             title: { display: true, text: 'DESKTOP CLOCK', color: '#7f9ba8',
                      font: { size: 10 } },
           },
@@ -275,10 +287,10 @@
 
   function redraw() {
     if (!chart || !win || win.style.display === 'none') return;
-    const cut = nowSim - span;
-    // Once the ruler scrolls off the left edge its readings are gone with the data; drop it
-    // rather than leave a column of stale numbers pinned to an invisible line.
-    if (cursorT != null && (cursorT < cut || cursorT > nowSim)) setCursor(null);
+    const ve = viewEnd(), cut = ve - span;
+    // Once the ruler leaves the visible window its readings sit against an invisible line;
+    // drop it rather than leave a column of numbers with nothing to point at.
+    if (cursorT != null && (cursorT < cut || cursorT > ve)) setCursor(null);
     chart.options.scales.x.min = -span;
     chart.options.scales.x2.min = -span;
     for (let i = 0; i < SLOTS; i++) {
@@ -289,19 +301,42 @@
       ds.stepped = bool ? 'before' : false;
       const pts = [];
       for (const p of slot.pts) {
-        if (p.t < cut) continue;
-        pts.push({ x: p.t - nowSim, y: norm(slot, p.v) });
+        if (p.t < cut || p.t > ve) continue;
+        pts.push({ x: p.t - ve, y: norm(slot, p.v) });
       }
       ds.data = pts;
       ds.borderWidth = (i === selected) ? 2.4 : 1.4;
     }
     chart.update('none');
     renderRows();
-    win.querySelector('#tw-plant').textContent = 'PLANT ' + hms(nowSim);
-    win.querySelector('#tw-desk').textContent = 'DESKTOP ' + deskClock(nowWall);
-    const chip = win.querySelector('#tw-ruler');
-    chip.style.display = cursorT == null ? 'none' : 'inline-block';
-    if (cursorT != null) chip.firstChild.textContent = 'RULER ' + hms(cursorT);
+    win.querySelector('#tw-plant').textContent = hms(nowSim);
+    win.querySelector('#tw-desk').textContent = deskClock(nowWall);
+    win.querySelector('#tw-rul-plant').textContent = cursorT == null ? '--:--:--' : hms(cursorT);
+    const rw = cursorT == null ? null : wallAt(cursorT);
+    win.querySelector('#tw-rul-desk').textContent = rw == null ? '--:--:--' : deskClock(rw);
+    win.querySelector('#tw-ruler-box').classList.toggle('set', cursorT != null);
+    win.querySelector('#tw-live').classList.toggle('hist', !isLive());
+    win.querySelector('#tw-live').textContent = isLive() ? 'LIVE' : 'HISTORY';
+    win.querySelector('#tw-fwd').disabled = isLive();
+    win.querySelector('#tw-back').disabled = (nowSim - viewEnd()) >= maxPanBack() - 1e-6;
+  }
+
+  // Scroll the window through history. Steps a quarter span per press and re-backfills, so
+  // scrolling past what the browser has buffered still shows real recorded data.
+  function pan(dir) {
+    const step = span * PAN_FRACTION * dir;
+    let target = viewEnd() + step;
+    const oldest = nowSim - maxPanBack();
+    if (target >= nowSim) viewEndT = null;                 // caught up: resume live
+    else viewEndT = Math.max(target, oldest);
+    Promise.all(slots.filter(Boolean).map(backfill)).then(() => { dirty = true; redraw(); });
+    dirty = true; redraw();
+  }
+  function goLive() {
+    if (isLive()) return;
+    viewEndT = null;
+    Promise.all(slots.filter(Boolean).map(backfill)).then(() => { dirty = true; redraw(); });
+    dirty = true; redraw();
   }
 
   function setCursor(t) {
@@ -489,16 +524,30 @@
   background:#3a0d0d;border:1px solid #ff3030;color:#ff8a8a;font-weight:bold;border-radius:3px;}
 #tw-close:hover{background:#5a1414;}
 #tw-title{font-weight:bold;letter-spacing:1px;}
-#tw-clocks{display:flex;gap:10px;font:11px Consolas,monospace;color:#8fb3ab;
-  font-variant-numeric:tabular-nums;}
-#tw-plant{color:#5fe08f;}
 #tw-hist{display:none;font:10px Consolas,monospace;background:#3a2a08;border:1px solid #b3892f;
   color:#ffd27f;padding:1px 5px;border-radius:3px;}
-#tw-ruler{display:none;font:bold 10px Consolas,monospace;background:#3a2f08;
-  border:1px solid #ffd000;color:#ffd000;padding:1px 6px;border-radius:3px;cursor:pointer;
-  font-variant-numeric:tabular-nums;}
-#tw-ruler:hover{background:#5a4a10;}
 #tw-plot canvas{cursor:crosshair;}
+#tw-bar{display:flex;align-items:center;gap:8px;padding:4px 8px;background:#0f1a24;
+  border-top:1px solid #2a4a44;border-bottom:1px solid #2a4a44;}
+#tw-back,#tw-fwd{font:12px Arial;line-height:1;background:#1b2a30;color:#7fd0d8;
+  border:1px solid #4aa587;padding:3px 10px;cursor:pointer;border-radius:3px;}
+#tw-back:hover:not(:disabled),#tw-fwd:hover:not(:disabled){background:#22424a;}
+#tw-back:disabled,#tw-fwd:disabled{color:#3d5a56;border-color:#22363a;cursor:default;}
+#tw-live{font:bold 10px Consolas,monospace;letter-spacing:.5px;padding:2px 7px;border-radius:3px;
+  background:#0b2b1a;border:1px solid #22ff22;color:#5fe08f;cursor:default;}
+#tw-live.hist{background:#3a2f08;border-color:#ffd000;color:#ffd000;cursor:pointer;}
+#tw-bar .twb{display:flex;align-items:center;gap:6px;padding:2px 8px;border-radius:3px;
+  background:#0b1a16;border:1px solid #22363a;}
+#tw-bar .twb label{font:bold 9px "Segoe UI",system-ui;letter-spacing:.6px;color:#82b3a3;}
+#tw-bar .twb span{font:bold 12px Consolas,monospace;font-variant-numeric:tabular-nums;
+  color:#5fe08f;}
+#tw-bar .twb span+span{color:#7f9ba8;font-weight:normal;}
+#tw-ruler-box span{color:#54706c;}
+#tw-ruler-box.set{border-color:#ffd000;}
+#tw-ruler-box.set span{color:#ffd000;}
+#tw-ruler-box.set span+span{color:#c9a83c;font-weight:normal;}
+#tw-ruler{cursor:pointer;color:#e06f6f !important;font-weight:bold;}
+#tw-ruler:hover{color:#ff3030 !important;}
 #tw-spans{margin-left:auto;display:flex;gap:2px;}
 #tw-spans button{font:bold 11px Arial;background:#1b2a30;color:#9bbabb;border:1px solid #2a4a44;
   padding:3px 7px;cursor:pointer;border-radius:3px;}
@@ -506,11 +555,11 @@
 #tw-save{font:bold 11px Arial;background:#1b2a30;color:#7fd0d8;border:1px solid #4aa587;
   padding:3px 9px;cursor:pointer;border-radius:3px;}
 #tw-save:hover{background:#22424a;}
-#tw-plot{position:relative;height:calc(100% - 34px - 250px);min-height:140px;padding:4px 6px 0;}
+#tw-plot{position:relative;height:calc(100% - 34px - 30px - 250px);min-height:140px;padding:4px 6px 0;}
 #tw-flash{position:absolute;top:8px;left:50%;transform:translateX(-50%);opacity:0;
   transition:opacity .25s;background:#3a0d0d;border:1px solid #ff3030;color:#ff8a8a;
   font:bold 11px Consolas,monospace;padding:3px 10px;border-radius:3px;pointer-events:none;z-index:2;}
-#tw-table{height:250px;overflow:auto;border-top:1px solid #2a4a44;}
+#tw-table{height:250px;overflow:auto;}
 #tw-table table{width:100%;border-collapse:collapse;font:11px Consolas,monospace;
   font-variant-numeric:tabular-nums;}
 #tw-table td{padding:2px 6px;border-bottom:1px solid #16292c;white-space:nowrap;}
@@ -559,14 +608,22 @@
       '<div id="tw-head">' +
         '<div id="tw-close" title="Close trend">X</div>' +
         '<div id="tw-title">TREND</div>' +
-        '<div id="tw-clocks"><span id="tw-plant">PLANT 00:00:00</span>' +
-        '<span id="tw-desk">DESKTOP --:--:--</span></div>' +
-        '<span id="tw-ruler" title="Clear the ruler"><span>RULER</span> &#10005;</span>' +
         '<span id="tw-hist">HISTORY UNAVAILABLE — LIVE ONLY</span>' +
         '<div id="tw-spans"></div>' +
         '<button id="tw-save" title="Save trend image">SAVE</button>' +
       '</div>' +
       '<div id="tw-plot"><div id="tw-flash"></div><canvas id="tw-canvas"></canvas></div>' +
+      // Control strip between plot and pen table: scroll arrows, current time, ruler time.
+      '<div id="tw-bar">' +
+        '<button id="tw-back" title="Scroll back to older records">&#9664;</button>' +
+        '<button id="tw-fwd" title="Scroll forward to newer records">&#9654;</button>' +
+        '<span id="tw-live" title="Return to live">LIVE</span>' +
+        '<div class="twb"><label>CURRENT</label>' +
+          '<span id="tw-plant">00:00:00</span><span id="tw-desk">--:--:--</span></div>' +
+        '<div class="twb" id="tw-ruler-box"><label>RULER</label>' +
+          '<span id="tw-rul-plant">--:--:--</span><span id="tw-rul-desk">--:--:--</span>' +
+          '<span id="tw-ruler" title="Clear the ruler">&#10005;</span></div>' +
+      '</div>' +
       '<div id="tw-table"><table>' +
         '<thead><tr><th></th><th></th><th>TAG</th><th>VALUE</th><th class="h-cur">@ RULER</th>' +
         '<th>UNIT</th><th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
@@ -624,9 +681,12 @@
       const px = ev.clientX - rect.left;
       const area = chart.chartArea;
       if (px < area.left || px > area.right) return;
-      setCursor(nowSim + chart.scales.x.getValueForPixel(px));
+      setCursor(viewEnd() + chart.scales.x.getValueForPixel(px));
     });
     win.querySelector('#tw-ruler').onclick = () => setCursor(null);
+    win.querySelector('#tw-back').onclick = () => pan(-1);
+    win.querySelector('#tw-fwd').onclick = () => pan(+1);
+    win.querySelector('#tw-live').onclick = goLive;
 
     const plot = win.querySelector('#tw-plot');
     plot.addEventListener('dragover', ev => ev.preventDefault());
@@ -782,6 +842,7 @@
   const API = {
     open: open, onPacket: onPacket, addTag: addTag, openMenu: openMenu, removeSlot: removeSlot,
     setCursor: setCursor, cursor: () => cursorT, valueAt: valueAt,
+    pan: pan, goLive: goLive, viewEnd: viewEnd, isLive: isLive,
     isBound: t => Registry.bound(t), isOpen: () => !!win && win.style.display === 'block',
   };
   if (typeof window !== 'undefined') {
@@ -795,6 +856,7 @@
       _internals: { hms, deskClock, stamp, norm, wallAt, noteTime, Registry, commitRange,
                     UNIT_RANGE, SPANS, SLOTS, PENS, slots,
                     setSpanValue: v => { span = v; }, getSpan: () => span,
+                    maxPanBack: maxPanBack, setNow: t => { nowSim = t; },
                     getSelected: () => selected, save: save, saved: saved },
     });
   }

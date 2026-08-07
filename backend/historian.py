@@ -117,10 +117,15 @@ class Ring:
         last = idx[-1] if isinstance(idx, list) else self.count - 1
         return self.t_sim[last] - self.t_sim[first]
 
-    def window(self, span_s, now_sim):
-        """Slot indices within ``span_s`` plant-seconds of ``now_sim``, oldest first."""
-        cutoff = now_sim - span_s
-        return [i for i in self.order() if self.t_sim[i] >= cutoff]
+    def window(self, span_s, end_sim):
+        """Slot indices in ``(end_sim - span_s, end_sim]``, oldest first.
+
+        Bounded at both ends so a scrolled-back trend gets the window it asked for rather
+        than everything up to the newest sample.
+        """
+        cutoff = end_sim - span_s
+        return [i for i in self.order()
+                if self.t_sim[i] >= cutoff and self.t_sim[i] <= end_sim]
 
 
 class Historian:
@@ -153,8 +158,13 @@ class Historian:
                 return ring
         return self.rings[-1]
 
-    def query(self, paths, span_s, max_points=800):
-        """Return ``span_s`` plant-seconds of history for ``paths``.
+    def query(self, paths, span_s, max_points=800, end_sim=None):
+        """Return ``span_s`` plant-seconds of history for ``paths``, ending at ``end_sim``.
+
+        ``end_sim`` defaults to the newest sample. Passing an older instant serves a
+        scrolled-back trend; ring selection then accounts for how far back the window sits,
+        because a 5-minute span read from 4 hours ago needs the slow ring even though the
+        span alone would fit in the fast one.
 
         Decimation keeps a min/max envelope so a spike between two output points still
         appears. Bucket boundaries are shared by every path, which is what lets all
@@ -162,9 +172,11 @@ class Historian:
         the bucket's first and last timestamps, carrying the bucket's two extremes in
         the order they actually occurred.
         """
-        ring = self.pick_ring(span_s)
-        now_sim = self._now_sim(ring)
-        idx = ring.window(span_s, now_sim) if now_sim is not None else []
+        newest = self._newest()
+        end = newest if end_sim is None else float(end_sim)
+        age = 0.0 if newest is None else max(0.0, newest - end)
+        ring = self.pick_ring(span_s + age)
+        idx = ring.window(span_s, end) if newest is not None else []
 
         known = [p for p in paths if p in ring.cols]
         missing = [p for p in paths if p not in ring.cols]
@@ -235,6 +247,11 @@ class Historian:
             return None
         newest = (ring.cursor - 1) % ring.cap
         return ring.t_sim[newest]
+
+    def _newest(self):
+        """Newest plant timestamp across all rings."""
+        stamps = [t for t in (self._now_sim(r) for r in self.rings) if t is not None]
+        return max(stamps) if stamps else None
 
     @staticmethod
     def _buckets(idx, max_points):

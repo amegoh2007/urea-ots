@@ -157,6 +157,14 @@ hide it. Closes only via the `X` at top-left. One window only.
 * **Pen table:** `# · colour · TAG · VALUE · @ RULER · UNIT · LOW · HIGH · x`, with a sticky
   header row. Click a row to select it. Empty rows are drop targets. Booleans render as 0/1
   stepped pens.
+* **Control strip (`#tw-bar`, between plot and pen table):** `◀ ▶` scroll arrows · `LIVE`/`HISTORY`
+  state · **CURRENT** plant + desktop clock · **RULER** plant + desktop time with `✕` to clear.
+* **Scrolling:** the arrows pan a quarter span per press (`PAN_FRACTION`) and re-backfill from the
+  historian via `&end=`, so scrolling reaches recorded data the browser never buffered. The view
+  edge is held as an **absolute plant time** (`viewEndT`, `null` = live), so a parked window stays
+  on its instant instead of drifting forward with each packet. Back stops at program start and at
+  the 8 h retention limit; forward resumes live on arrival. The amber `HISTORY` chip returns to
+  live when clicked; arrows disable at their limits.
 * **Ruler:** click anywhere on the plot to drop a dashed amber vertical ruler at that instant,
   labelled with plant and desktop time. The `@ RULER` column then shows what every pen read at
   that moment — last sample at or before the ruler (hold semantics, the only correct reading for
