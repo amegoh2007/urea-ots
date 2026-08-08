@@ -162,14 +162,19 @@ be widened: `eff()` uses `BIND_MAP` to let an unbound `ind` inherit a bind, and 
 entries in would change which value a shared tag renders. The trend map therefore covers `ind`,
 `avalve`, `xv` and `pump` (223 tags) while `BIND_MAP` stays `ind`-only (173).
 
-**Engineering range** decides whether a 10-pen plot is readable. Resolution order:
+**Engineering range** decides whether a 10-pen plot is readable. **Analog pens auto-scale by
+default** off the samples in view — `[MIN − 5 %, MAX + 5 %]`, re-derived every redraw so the
+bracket expands the moment a value exceeds it and contracts as peaks scroll out. The declared
+range only seeds `lo/hi` before data arrives; resolution order for that seed:
 
 1. explicit `rng: [lo, hi]` on the `OV` entry (added where a datasheet range is known);
 2. unit-default table — `%` 0-100, `C` 0-250, `BAR G` 0-200, `BAR A` 0-200, `T/H` 0-100,
-   `RPM` 0-3000, `A` 0-200, `NM3/H` 0-40000, `KG/H` 0-50000, dimensionless 0-1;
-3. auto-scale from the visible window, with the computed range shown in the pen table.
+   `RPM` 0-3000, `A` 0-200, `NM3/H` 0-40000, `KG/H` 0-50000, dimensionless 0-1.
 
-Boolean pens are fixed 0-1 and rendered stepped.
+The current scale is shown read-only in the pen table's **RANGE** column (`lo – hi`, `A` badge when
+auto). An operator can still pin a fixed scale via LOW/HIGH, which clears the auto flag.
+
+Boolean / digital on-off pens (no unit) are fixed 0-1 and rendered stepped — never auto-scaled.
 
 `TrendStore` per slot: backfill via `/api/hist` on add and on span change, then append live values
 from each WS packet. `app.js` calls `TrendWindow.onPacket(s)` inside the existing `ws.onmessage`
@@ -212,19 +217,23 @@ newest sample. Ring selection now weighs span **plus** how far back the window s
 would fit. Back stops at program start and at the 8 h retention limit; forward resumes live on
 arrival.
 
-**Ruler (added after review).** Clicking the plot drops a dashed amber vertical ruler at that
-instant, labelled with plant and desktop time, and the pen table's `@ RULER` column fills with what
-each pen read there. Lookup is the last sample at or before the ruler — hold semantics, matching a
-DCS cursor and the only correct reading for a stepped digital pen; interpolating would invent a
-half-open valve that never existed. Position is stored as absolute plant time, not a pixel, so it
-stays anchored to the instant as the window scrolls, and auto-clears once it leaves the span rather
-than stranding a column of stale numbers against an invisible line. It is drawn as a Chart.js
-plugin rather than a DOM overlay specifically so the PNG export captures it with no extra code.
+**Rulers (up to 10).** Clicking empty plot drops a dashed vertical ruler at that instant; each gets a
+distinct colour and an `R1`..`R10` label, and the pen table grows one colour-matched `R{n}` column
+showing what each pen read there. **Rulers drag horizontally** — a `pointerdown` within 6 px of a
+line grabs it (cursor → `ew-resize`) and slides it along the time axis, clamped to the visible
+window, with readings updating live; a plain click with no drag still adds one. Lookup is the last
+sample at or before the ruler — hold semantics, matching a DCS cursor and the only correct reading
+for a stepped digital pen; interpolating would invent a half-open valve that never existed. Position
+is stored as absolute plant time, not a pixel, so it stays anchored to the instant as the window
+scrolls, and auto-clears once it leaves the span rather than stranding a column of stale numbers
+against an invisible line. Rulers are drawn as a Chart.js plugin rather than a DOM overlay
+specifically so the PNG export captures them with no extra code. An 11th ruler is refused.
 
-**Pen table**, 10 rows under a sticky header: `# · colour chip · TAG · live value · @ RULER · unit ·
-LOW · HIGH · X`. Empty rows read `-- drop indicator here --`. Clicking a row selects that pen and the Y
-axis follows. Fixed 10-colour palette chosen for contrast against `#0a1416`, none relying on
-red/green discrimination alone.
+**Pen table**, 10 rows under a sticky header: `# · colour chip · TAG · live value · MIN · MAX · AVG ·
+RANGE · R1..Rn · unit · LOW · HIGH · X`. MIN/MAX/AVG cover the visible window; RANGE shows the pen's
+current scale read-only. Empty rows read `-- drop indicator here --`. Clicking a row selects that pen
+and the Y axis follows. Fixed 10-colour palette chosen for contrast against `#0a1416`, none relying
+on red/green discrimination alone.
 
 **Editable display range (added after review).** LOW and HIGH are per-pen number inputs, so an
 operator can zoom a pen onto the band that matters instead of living with the declared engineering

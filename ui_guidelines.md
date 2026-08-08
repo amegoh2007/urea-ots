@@ -160,11 +160,18 @@ if it landed there. Right-click `Trend ↗` is the always-available path.
   either pacing. The X axis carries two tick rows: plant clock, then desktop clock (`t`).
   Ticks preceding program start render blank, never a clamped placeholder.
 * **Spans:** `1m 5m 30m 1h 2h 4h 8h`, default **1h**.
-* **Scaling:** every pen normalises to a shared 0–100 grid using its engineering range
-  (`rng:[lo,hi]` on the OV entry → unit-default table → auto-scale). The Y axis relabels to
-  the **selected** pen's units; labels outside 0–100 % are suppressed.
-* **Pen table:** `# · colour · TAG · VALUE · MIN · MAX · AVG · R1..Rn · UNIT · LOW · HIGH · x`,
-  with a sticky header row. Ruler columns appear only for placed rulers. Click a row to select it.
+* **Scaling:** every pen normalises to a shared 0–100 grid. **Analog pens auto-scale by default:**
+  the display range is set slightly below the MIN and above the MAX of the samples currently in
+  view (5 % pad) and re-derived every redraw, so it expands automatically the instant a value
+  exceeds the current bracket (and contracts as old peaks scroll out). The declared engineering
+  range (`rng:[lo,hi]` on the OV entry → unit-default table) only seeds lo/hi until the first
+  samples arrive. **Digital on/off pens** (no unit) stay pinned to 0–1 so their stepped trace keeps
+  full-scale height. The Y axis relabels to the **selected** pen's units; labels outside 0–100 %
+  are suppressed.
+* **Pen table:** `# · colour · TAG · VALUE · MIN · MAX · AVG · RANGE · R1..Rn · UNIT · LOW · HIGH · x`,
+  with a sticky header row. **RANGE** is a read-only display of the pen's current scale
+  (`lo – hi`, with an `A` badge and grey italic when auto-scaled). Ruler columns appear only for
+  placed rulers. Click a row to select it.
   Empty rows are drop targets. Booleans render as 0/1
   stepped pens.
 * **Control strip (`#tw-bar`, between plot and pen table):** `◀ ▶` scroll arrows · `LIVE`/`HISTORY`
@@ -175,11 +182,13 @@ if it landed there. Right-click `Trend ↗` is the always-available path.
   on its instant instead of drifting forward with each packet. Back stops at program start and at
   the 8 h retention limit; forward resumes live on arrival. The amber `HISTORY` chip returns to
   live when clicked; arrows disable at their limits.
-* **Rulers (up to 5):** click the plot to drop a dashed vertical ruler; each gets a distinct colour
-  (amber, cyan, pink, green, orange) and an `R1`..`R5` label. The pen table grows one colour-matched
-  `R{n}` column per active ruler, showing each pen's held reading at that instant. Ruler chips in the
-  control strip carry plant+desktop time and a ✕; rulers auto-clear when scrolled out of view. A 6th
-  is refused.
+* **Rulers (up to 10):** click the plot to drop a dashed vertical ruler; each gets a distinct colour
+  (amber, cyan, pink, green, orange, violet, red, emerald, white, periwinkle) and an `R1`..`R10`
+  label. **Drag a ruler horizontally** to reposition it (grab within 6 px; the cursor turns to
+  `ew-resize` over a line); it clamps to the visible window and the readings update live. A plain
+  click on empty plot still adds a new ruler. The pen table grows one colour-matched `R{n}` column
+  per active ruler, showing each pen's held reading at that instant. Ruler chips in the control strip
+  carry plant+desktop time and a ✕; rulers auto-clear when scrolled out of view. An 11th is refused.
 * **MIN / MAX / AVG columns:** always shown, computed over the points currently in the visible
   window (respecting scroll and span). AVG is the arithmetic mean of visible samples — for a digital
   pen that reads as its duty fraction.

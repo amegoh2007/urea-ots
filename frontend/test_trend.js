@@ -171,18 +171,48 @@ test('removing a slot frees it for the next drop', () => {
   assert.equal(I.slots[0].tag, 'PT-321201');
 });
 
-test('a slot carries its declared engineering range', () => {
+test('an analog slot seeds its declared range but auto-scales by default', () => {
   reset();
   trend.addTag('HV-322602', 0);
-  assert.equal(I.slots[0].lo, 0);
-  assert.equal(I.slots[0].hi, 100);
-  assert.equal(I.slots[0].auto, false);
+  assert.equal(I.slots[0].lo, 0, 'declared range seeds lo until data arrives');
+  assert.equal(I.slots[0].hi, 100, 'declared range seeds hi until data arrives');
+  assert.equal(I.slots[0].auto, true, 'analog pens auto-scale off the displayed data by default');
 });
 
 test('a slot with no declared range is marked for auto-scaling', () => {
   reset();
   trend.addTag('N/C Ratio', 0);
   assert.equal(I.slots[0].auto, true);
+});
+
+test('a digital on/off pen stays pinned to 0..1, not auto-scaled', () => {
+  reset();
+  trend.addTag('XV-321901', 0);                 // unit '' -> digital
+  assert.equal(I.slots[0].lo, 0);
+  assert.equal(I.slots[0].hi, 1);
+  assert.equal(I.slots[0].auto, false, 'a valve must keep full-scale stepped height');
+});
+
+test('auto-scaling brackets the displayed data slightly below MIN and above MAX', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.slots[0].pts = [{ t: 5, v: 100 }, { t: 6, v: 200 }];
+  I.setNow(6); I.setSpanValue(3600);
+  I.rescale(I.slots[0]);
+  assert.ok(I.slots[0].lo < 100 && I.slots[0].lo > 90, 'lo sits just below MIN');
+  assert.ok(I.slots[0].hi > 200 && I.slots[0].hi < 210, 'hi sits just above MAX');
+});
+
+test('auto range expands when a new value exceeds the current bracket', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.setNow(10); I.setSpanValue(3600);
+  I.slots[0].pts = [{ t: 1, v: 50 }, { t: 2, v: 60 }];
+  I.rescale(I.slots[0]);
+  const hi1 = I.slots[0].hi;
+  I.slots[0].pts.push({ t: 3, v: 500 });          // a spike beyond the old range
+  I.rescale(I.slots[0]);
+  assert.ok(I.slots[0].hi > hi1 && I.slots[0].hi > 500, 'range must grow to hold the new peak');
 });
 
 // ===== editable display range =====
@@ -365,19 +395,25 @@ test('pens read independently at one ruler instant', () => {
 
 // ===== multiple rulers =====
 
-test('up to 5 rulers can be placed, each a distinct instant', () => {
+test('up to 10 rulers can be placed, each a distinct instant', () => {
   reset();
   trend.clearRulers();
-  for (let i = 0; i < 5; i++) assert.equal(trend.addRuler(100 + i * 10), true);
-  assert.deepEqual(trend.rulers(), [100, 110, 120, 130, 140]);
+  for (let i = 0; i < 10; i++) assert.equal(trend.addRuler(100 + i * 10), true);
+  assert.deepEqual(trend.rulers(), [100, 110, 120, 130, 140, 150, 160, 170, 180, 190]);
 });
 
-test('a sixth ruler is refused', () => {
+test('an eleventh ruler is refused', () => {
   reset();
   trend.clearRulers();
-  for (let i = 0; i < 5; i++) trend.addRuler(i);
+  for (let i = 0; i < 10; i++) trend.addRuler(i);
   assert.equal(trend.addRuler(999), false);
-  assert.equal(trend.rulers().length, 5);
+  assert.equal(trend.rulers().length, 10);
+});
+
+test('there is a distinct colour for each of the ten rulers', () => {
+  assert.equal(I.RULER_COLORS.length, 10);
+  assert.equal(new Set(I.RULER_COLORS).size, 10, 'ruler colours must all differ');
+  assert.equal(I.RULERS_MAX, 10);
 });
 
 test('a duplicate ruler at the same instant is refused', () => {

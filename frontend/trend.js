@@ -30,9 +30,11 @@
   const REDRAW_MS = 250;              // 4 Hz; packets arrive at 10 Hz
   const LIVE_MIN_DT = 1.0;            // plant-seconds between live samples (matches fast ring)
   const MAX_POINTS = 800;
-  const RULERS_MAX = 5;
-  // Distinct ruler colours, none shared with a pen colour, none red/green-only to tell apart.
-  const RULER_COLORS = ['#ffd000', '#41e0ff', '#ff5db1', '#7CFC00', '#ff8c1a'];
+  const RULERS_MAX = 10;
+  // Ten distinct ruler colours, well separated on the dark canvas; labels carry R1..R10 so
+  // identity never rests on colour alone.
+  const RULER_COLORS = ['#ffd000', '#41e0ff', '#ff5db1', '#7CFC00', '#ff8c1a',
+                        '#b47cff', '#ff4d4d', '#2ee6a6', '#f0f0f0', '#7aa5ff'];
 
   // Pen palette: ui_guidelines §10 tokens first, then distinct additions.
   const PENS = ['#22ff22', '#7fd0d8', '#ffd000', '#ff9a3c', '#ff00ff',
@@ -186,9 +188,9 @@
       if (p.v < lo) lo = p.v;
       if (p.v > hi) hi = p.v;
     }
-    if (!isFinite(lo) || !isFinite(hi)) { slot.lo = 0; slot.hi = 1; return; }
-    if (hi - lo < 1e-9) { lo -= 0.5; hi += 0.5; }
-    const pad = (hi - lo) * 0.05;
+    if (!isFinite(lo) || !isFinite(hi)) return;      // no visible samples: keep the seeded range
+    if (hi - lo < 1e-9) { lo -= 0.5; hi += 0.5; }    // flat trace: give it a readable band
+    const pad = (hi - lo) * 0.05;                     // slightly below MIN, slightly above MAX
     slot.lo = lo - pad; slot.hi = hi + pad;
   }
 
@@ -222,7 +224,7 @@
   function addRuler(t) {
     if (t == null) return false;
     if (rulers.some(r => Math.abs(r - t) < 1e-6)) return false;    // no duplicate at the same instant
-    if (rulers.length >= RULERS_MAX) { flash(null, 'MAX 5 RULERS'); return false; }
+    if (rulers.length >= RULERS_MAX) { flash(null, 'MAX ' + RULERS_MAX + ' RULERS'); return false; }
     rulers.push(t);
     dirty = true; if (win && chart) redraw();
     return true;
@@ -262,7 +264,7 @@
         g.font = 'bold 10px Consolas, monospace';
         const bw = g.measureText(label).width + 8;
         const bx = clamp(x - bw / 2, area.left, Math.max(area.left, area.right - bw));
-        const by = area.top + i * 15;                   // stack labels so they never overlap
+        const by = Math.min(area.top + i * 15, area.bottom - 13);  // stack labels, clamp inside the plot
         g.fillStyle = col; g.fillRect(bx, by, bw, 13);
         g.fillStyle = '#101010'; g.fillText(label, bx + 4, by + 9.5);
         g.restore();
@@ -361,7 +363,7 @@
 
   function renderRulerChips() {
     const box = win.querySelector('#tw-rulers-list');
-    if (!rulers.length) { box.innerHTML = '<span class="rnone">click plot to add · drag to move (up to 5)</span>'; return; }
+    if (!rulers.length) { box.innerHTML = '<span class="rnone">click plot to add · drag to move (up to ' + RULERS_MAX + ')</span>'; return; }
     box.innerHTML = rulers.map((t, i) => {
       const col = RULER_COLORS[i % RULER_COLORS.length];
       const w = wallAt(t);
@@ -413,7 +415,7 @@
       if (!slot) {
         q('.c-t').textContent = '-- drop indicator here --';
         q('.c-v').textContent = ''; q('.c-min').textContent = ''; q('.c-max').textContent = '';
-        q('.c-avg').textContent = ''; q('.c-u').textContent = '';
+        q('.c-avg').textContent = ''; q('.c-rng').textContent = ''; q('.c-u').textContent = '';
         rc.forEach(c => { c.textContent = ''; c.style.display = 'none'; });
         loI.value = ''; hiI.value = ''; loI.disabled = hiI.disabled = true;
         q('.c-x').textContent = '';
@@ -428,6 +430,10 @@
       q('.c-min').textContent = st ? st.min.toFixed(dec) : '--';
       q('.c-max').textContent = st ? st.max.toFixed(dec) : '--';
       q('.c-avg').textContent = st ? st.avg.toFixed(dec) : '--';
+      const rngCell = q('.c-rng');
+      rngCell.textContent = slot.lo.toFixed(dec) + ' – ' + slot.hi.toFixed(dec) + (slot.auto ? ' A' : '');
+      rngCell.title = slot.auto ? 'Auto-scaled to the displayed data' : 'Operator-set range';
+      rngCell.classList.toggle('auto', slot.auto);
       for (let r = 0; r < RULERS_MAX; r++) {
         const cell = rc[r], on = r < rulers.length;
         cell.style.display = on ? '' : 'none';
@@ -472,7 +478,12 @@
     if (i == null) i = slots.findIndex(s => !s);
     if (i == null || i < 0) { flash(null, 'SLOTS FULL'); return false; }
     const rng = e.range;
-    slots[i] = { tag: tag, entry: e, pts: [], colour: PENS[i], lo: rng ? rng[0] : 0, hi: rng ? rng[1] : 1, auto: !rng };
+    // Analog pens auto-scale off the displayed data by default; digital on/off pens (no unit)
+    // stay pinned to 0..1 so their stepped trace keeps full-scale height. The declared range
+    // just seeds lo/hi until the first samples arrive.
+    const digital = e.unit === '';
+    slots[i] = { tag: tag, entry: e, pts: [], colour: PENS[i],
+                 lo: rng ? rng[0] : 0, hi: rng ? rng[1] : 1, auto: !digital };
     selected = i;
     backfill(slots[i]).then(() => { dirty = true; scheduleRedraw(); });
     dirty = true; scheduleRedraw(); save();
@@ -619,6 +630,8 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
 #tw-table td.c-max{text-align:right;width:70px;color:#ff9a3c;}
 #tw-table td.c-avg{text-align:right;width:70px;color:#cfe;}
 #tw-table th.h-min{color:#7fd0d8;} #tw-table th.h-max{color:#ff9a3c;} #tw-table th.h-avg{color:#cfe;}
+#tw-table td.c-rng{text-align:right;width:120px;color:#d6f3e4;} #tw-table th.h-rng{color:#82b3a3;}
+#tw-table td.c-rng.auto{color:#8fb3ab;font-style:italic;}
 #tw-table td.c-r{text-align:right;width:74px;font-weight:bold;}
 #tw-table td.c-u{width:60px;color:#82b3a3;}
 #tw-table td.c-lo,#tw-table td.c-hi{width:78px;}
@@ -667,6 +680,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       '<div id="tw-table"><table>' +
         '<thead><tr id="tw-head-row"><th></th><th></th><th>TAG</th><th>VALUE</th>' +
         '<th class="h-min">MIN</th><th class="h-max">MAX</th><th class="h-avg">AVG</th>' +
+        '<th class="h-rng">RANGE</th>' +
         rth + '<th>UNIT</th><th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
         '<tbody id="tw-rows"></tbody></table></div>';
     document.body.appendChild(win);
@@ -684,6 +698,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       const tr = document.createElement('tr');
       tr.innerHTML = '<td class="c-n"></td><td class="c-k"><i></i></td><td class="c-t"></td>' +
         '<td class="c-v"></td><td class="c-min"></td><td class="c-max"></td><td class="c-avg"></td>' +
+        '<td class="c-rng"></td>' +
         rtd + '<td class="c-u"></td>' +
         '<td class="c-lo"><input type="number" step="any" disabled title="Display LOW — blank to auto-scale"></td>' +
         '<td class="c-hi"><input type="number" step="any" disabled title="Display HIGH — blank to auto-scale"></td>' +
@@ -941,7 +956,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       addRuler: addRuler, removeRuler: removeRuler, moveRuler: moveRuler, clearRulers: clearRulers, rulers: () => rulers.slice(),
       valueAt: valueAt, windowStats: windowStats, pan: pan, goLive: goLive, viewEnd: viewEnd, isLive: isLive,
       isBound: t => Registry.bound(t),
-      _internals: { hms, deskClock, stamp, norm, wallAt, noteTime, Registry, commitRange, windowStats,
+      _internals: { hms, deskClock, stamp, norm, rescale, wallAt, noteTime, Registry, commitRange, windowStats,
                     UNIT_RANGE, SPANS, SLOTS, PENS, RULER_COLORS, RULERS_MAX, slots,
                     setSpanValue: v => { span = v; }, getSpan: () => span, maxPanBack: maxPanBack,
                     setNow: t => { nowSim = t; }, getSelected: () => selected, save: save, saved: saved,
