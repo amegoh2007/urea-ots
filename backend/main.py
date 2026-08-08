@@ -933,9 +933,10 @@ R323_F010_P_KP      = 0.02        # bar a per (kg/s) net vapour imbalance -> 323
 R323_M324_DES  = R323_M317_DES                                           # tank throughput -> Unit 324
 
 # --- Derived latent / duty terms (force dT/dt = 0 at each design fixed point) ---
-# Stage 1 energy balance: mdot_feed*cp*(Tfeed-135) + Q_E002 - mdot_305*lambda_305 = 0
-R323_LAMBDA_305 = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(R323_FEED_DES_T_C - R323_C003_T_SP_C)
-                   + R323_E002_Q_DES_KW) / (R323_M305_DES/3600.0)          # kJ/kg (~645.6)
+# Stage 1 energy balance: mdot_feed*cp*(T_strip_bot - T_flash_sat) + Q_E002 - mdot_305*lambda_305 = 0
+R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(STRIP_T_BOTTOM_DES_C - STRIP_T_DOWN_DES_C)
+                     + R323_E002_Q_DES_KW)                            # kW available to boil 305
+R323_LAMBDA_305 = R323_Q305_DES_KW / (R323_M305_DES/3600.0)          # kJ/kg (~645.6)
 R323_E002_UA_KW = R323_E002_Q_DES_KW / (tsat_steam(R323_E002_PCHEST_DES) - R323_C003_T_SP_C)  # kW/K
 # Stage 2 adiabatic flash: mdot_314*cp*(135-106) - mdot_701*lambda_701 = 0
 R323_LAMBDA_701 = (R323_M314_DES/3600.0*R323_CP_SOLN*(R323_C003_T_SP_C - R323_F004_T_SP_C)) \
@@ -957,10 +958,10 @@ R323_E010_UA_KW = R323_E010_Q_DES_KW / (tsat_steam(R323_E010_PCHEST_DES) - R323_
 # are each the SAME expression, in the SAME float operation order, as the corresponding runtime
 # `q_avail` term, so at the design seed the ratio q_avail/Q_DES is exactly 1.0 and the duty limit
 # reproduces the design vapour BIT-EXACT (the min() ties on two identical values).
-#   Stage 1  m_feed·cp·(T_feed − 135) + Q_E002  == m_305·λ_305       (== R323_LAMBDA_305 back-solve)
+#   Stage 1  m_feed·cp·(T_strip_bot − T_flash_sat) + Q_E002  == m_305·λ_305   (== R323_LAMBDA_305 back-solve)
 #   Stage 2  m_314·cp·(135 − 106)               == m_701·λ_701       (adiabatic: no Q term)
 #   Stage 3  m_319·cp·(106 − 99) + m_331·cp·(40 − 99) + Q_E010  == m_evap·λ_evap
-R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(R323_FEED_DES_T_C - R323_C003_T_SP_C)
+R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(STRIP_T_BOTTOM_DES_C - STRIP_T_DOWN_DES_C)
                      + R323_E002_Q_DES_KW)                            # kW available to boil 305
 R323_Q701_DES_KW  = (R323_M314_DES/3600.0*R323_CP_SOLN
                      * (R323_C003_T_SP_C - R323_F004_T_SP_C))         # kW released by the 4.1->1.13 letdown
@@ -5805,16 +5806,18 @@ def step_sim(dt: float) -> dict:
     T_bub_c003 = R323_C003_T_SP_C + (tsat_steam(s.r323_c003_P) - _R323_TSAT_C003_DES)
     q305_relax_kw = (s.r323_c003_M * cp_c003 * (T_bub_c003 - s.r323_c003_T)
                      / R323_C003_M_TAU_S)                                         # kW retained to reach bubble point
-    q305_avail_kw = (m_feed_323 / 3600.0 * cp_feed323 * (T_feed_323 - s.r323_c003_T)
-                     + Q_e002_kw)                                                 # kW available as latent
+    T_strip_bot = s.tlag.get("TT_322004", STRIP_T_BOTTOM_DES_C)
+    T_flash_sat = TT_323001
+    q_flash_avail_kw = (m_feed_323 / 3600.0 * cp_feed323 * (T_strip_bot - T_flash_sat))  # kW released by letdown flash
+    q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                           # total available latent kW
     m_305     = min(R323_PHI_V305 * m_feed_323,
                     max(R323_M305_DES * ((q305_avail_kw - q305_relax_kw) / R323_Q305_DES_KW),
                         0.0))                                                     # top vapor -> 323E003 LPCC (305, kg/h)
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
     m_314     = max(R323_M314_DES * (lv501_op / R323_LV501_OP_DES), 0.0)          # bottom drain -> flash (kg/h)
-    P_c003    = (m_feed_323 / 3600.0 * cp_feed323 * (T_feed_323 - s.r323_c003_T)
-                 + Q_e002_kw - m_305 / 3600.0 * R323_LAMBDA_305)                  # net kW on holdup
+    P_c003    = (q305_avail_kw - m_305 / 3600.0 * R323_LAMBDA_305)               # net kW on holdup
+
     M_c003_pre = s.r323_c003_M
     s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp_c003, 1e-6)
     s.r323_c003_M = max(M_c003_pre + (m_feed_323 - m_305 - m_314) / 3600.0 * dt, 1.0)
