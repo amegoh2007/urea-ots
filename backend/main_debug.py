@@ -28,9 +28,6 @@ import math
 import sys
 if __name__ == "__main__":
     sys.modules["main"] = sys.modules["__main__"]
-import sys
-if __name__ == "__main__":
-    sys.modules["main"] = sys.modules["__main__"]
 import os
 import time
 import threading
@@ -619,7 +616,7 @@ STRIP_T_TOP_LOAD_K   = 0.5      # overhead (TT-322013) attenuation of the bottom
                                 #   (dT_bot is a liquid/reboiler effect; the top gas feels it only weakly).
                                 #   The G/L strip-cool endotherm (dT_strip) couples to the OVERHEAD at full
                                 #   weight — the rising vapour is first to carry the CO2-sweep flash latent load.
-STRIP_ETA_KT    = 0.15     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
+STRIP_ETA_KT    = 1.50     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
 STRIP_ETA_KN    = 1.50     # eta_T penalty per unit reactor-feed N/C above design (excess NH3 chokes)
 STRIP_ETA_KW    = 1.50     # eta_T penalty per unit reactor-feed H/C above design (dilution chokes)
 STRIP_ETA_FLOOR = 0.50     # min penalty factor (g_NC, g_HC clamp floor)
@@ -866,7 +863,7 @@ R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
 # LV-322501 (`drain_kgh`) from the remaining live overhead/reboiler load (`m_305`), consumes the
 # beginning-of-substep 323E003/323D001 pressure, and closes exactly at the PFD design point.
 # The retained 90 s lag is a simulator dynamic calibration, not a datasheet-derived gas inventory.
-R323_C003_P_TAU_S = 1.0
+R323_C003_P_TAU_S = 90.0
 
 # --- Stage 2: Flash Tank 323F004 (adiabatic flash 4.1 -> 1.13 bar a, -> 106 C)
 R323_F004_P_BARA    = 1.13                      # bar a, flash pressure
@@ -936,10 +933,9 @@ R323_F010_P_KP      = 0.02        # bar a per (kg/s) net vapour imbalance -> 323
 R323_M324_DES  = R323_M317_DES                                           # tank throughput -> Unit 324
 
 # --- Derived latent / duty terms (force dT/dt = 0 at each design fixed point) ---
-# Stage 1 energy balance: mdot_feed*cp*(T_strip_bot - T_flash_sat) + Q_E002 - mdot_305*lambda_305 = 0
-R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(STRIP_T_BOTTOM_DES_C - STRIP_T_DOWN_DES_C)
-                     + R323_E002_Q_DES_KW)                            # kW available to boil 305
-R323_LAMBDA_305 = R323_Q305_DES_KW / (R323_M305_DES/3600.0)          # kJ/kg (~645.6)
+# Stage 1 energy balance: mdot_feed*cp*(Tfeed-135) + Q_E002 - mdot_305*lambda_305 = 0
+R323_LAMBDA_305 = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(R323_FEED_DES_T_C - R323_C003_T_SP_C)
+                   + R323_E002_Q_DES_KW) / (R323_M305_DES/3600.0)          # kJ/kg (~645.6)
 R323_E002_UA_KW = R323_E002_Q_DES_KW / (tsat_steam(R323_E002_PCHEST_DES) - R323_C003_T_SP_C)  # kW/K
 # Stage 2 adiabatic flash: mdot_314*cp*(135-106) - mdot_701*lambda_701 = 0
 R323_LAMBDA_701 = (R323_M314_DES/3600.0*R323_CP_SOLN*(R323_C003_T_SP_C - R323_F004_T_SP_C)) \
@@ -961,10 +957,10 @@ R323_E010_UA_KW = R323_E010_Q_DES_KW / (tsat_steam(R323_E010_PCHEST_DES) - R323_
 # are each the SAME expression, in the SAME float operation order, as the corresponding runtime
 # `q_avail` term, so at the design seed the ratio q_avail/Q_DES is exactly 1.0 and the duty limit
 # reproduces the design vapour BIT-EXACT (the min() ties on two identical values).
-#   Stage 1  m_feed·cp·(T_strip_bot − T_flash_sat) + Q_E002  == m_305·λ_305   (== R323_LAMBDA_305 back-solve)
+#   Stage 1  m_feed·cp·(T_feed − 135) + Q_E002  == m_305·λ_305       (== R323_LAMBDA_305 back-solve)
 #   Stage 2  m_314·cp·(135 − 106)               == m_701·λ_701       (adiabatic: no Q term)
 #   Stage 3  m_319·cp·(106 − 99) + m_331·cp·(40 − 99) + Q_E010  == m_evap·λ_evap
-R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(STRIP_T_BOTTOM_DES_C - STRIP_T_DOWN_DES_C)
+R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(R323_FEED_DES_T_C - R323_C003_T_SP_C)
                      + R323_E002_Q_DES_KW)                            # kW available to boil 305
 R323_Q701_DES_KW  = (R323_M314_DES/3600.0*R323_CP_SOLN
                      * (R323_C003_T_SP_C - R323_F004_T_SP_C))         # kW released by the 4.1->1.13 letdown
@@ -1360,7 +1356,7 @@ R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
 R3232_TW_SUP_T = 55.0 ; R3232_TW_RET_T = 65.0               # TIC-323013 SP (1102) ; TT-323015 (1103)
 R3232_TV13_DES_PCT = 50.0 ; R3232_TW_TAU_S = 25.0           # TV-323013A design stroke ; supply-T lag (s)
 R3232_E003_T744 = R3232_E003_T - 30.0                       # 44 °C wash to Comp II
-R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.30
+R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.03
 R3232_E003_PV_OP_DES = 25.0                                 # PV-323202 vent stroke
 R3232_D001_M_FULL = 11.10 * 1218.0                          # 13519.8 kg (V·ρ)
 R3232_D001_LVL_SP = 50.0
@@ -1722,6 +1718,7 @@ SOL_NONVOL  = ("Biuret", "HCHO")     # never leave in the vapour at these temper
 def _w_norm(d: dict) -> dict:
     """PFD mass-% row -> mass FRACTIONS summing to exactly 1 (the C6 summation, applied once)."""
     tot = sum(d.get(k, 0.0) for k in SOL_SPECIES)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {k: d.get(k, 0.0) / tot for k in SOL_SPECIES}
 
 
@@ -1740,6 +1737,7 @@ def _reconcile_melt(w_in: dict, m_in: float, m_out: float, w_out_tab: dict) -> d
         out[k] = conserved if k in SOL_NONVOL else min(w_out_tab.get(k, 0.0), conserved)
     out["H2O"] = max(1.0 - sum(out.values()), 0.0)
     tot = sum(out.values())
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {k: out[k] / tot for k in SOL_SPECIES}
 
 
@@ -1834,6 +1832,7 @@ def route_lv324501(m_402g_kgh: float, w_402g: dict, T_402g_C: float,
         m_forward * selector_cp * forward_T + m_recycle * cp_base * recycle_T
     ) / 3600.0
 
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "route": "B" if route_b else "A",
         "selector_stream": "402G" if route_b else "609",
@@ -1956,6 +1955,7 @@ def _sol_stage_anchor(w_in: dict, w_out: dict, m_in: float, m_vap: float, m_liq:
     alpha = {k: ((y[k] / w_out[k]) / aw if (w_out[k] > 1e-12 and k not in SOL_NONVOL) else 0.0)
              for k in SOL_SPECIES}
     alpha["H2O"] = 1.0                               # reference species, by definition
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"xi": xi, "y": y, "alpha": alpha, "resid": resid}
 
 
@@ -1984,7 +1984,9 @@ def sol_vapour_y(w: dict, alpha: dict) -> dict:
     num = {k: alpha[k] * w.get(k, 0.0) for k in SOL_SPECIES}
     tot = sum(num.values())
     if tot <= 1e-15:
-        return {k: (1.0 if k == "H2O" else 0.0) for k in SOL_SPECIES}
+        print(f"m_in={m_in_loop}, m_out={m_out_loop}")
+    return {k: (1.0 if k == "H2O" else 0.0) for k in SOL_SPECIES}
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {k: num[k] / tot for k in SOL_SPECIES}
 
 
@@ -2022,6 +2024,7 @@ def sol_advance(w: dict, M_pre: float, M_new: float, m_in: float, w_in: dict,
     tot = sum(out.values())
     if tot <= 1e-12 or M_new <= 1e-12:
         return dict(w)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {k: out[k] / tot for k in SOL_SPECIES}      # C6: renormalise to Sum w == 1
 
 
@@ -2062,6 +2065,7 @@ def _w_from_molepct(d: dict) -> dict:
     mass %, vapour rows are mole %, and mixing the two silently destroys carbon."""
     m = {k: d.get(k, 0.0) * MW_SOL[k] for k in SOL_SPECIES}
     tot = sum(m.values())
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {k: m[k] / tot for k in SOL_SPECIES}
 
 
@@ -2107,6 +2111,7 @@ def _c001_liq_anchor() -> dict:
     m["CO2"] += A328_ABS_CO2_DES
     m["NH3"] += A328_ABS_NH3_DES
     tot = sum(m.values())
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {k: m[k] / tot for k in SOL_SPECIES}
 
 
@@ -2154,6 +2159,7 @@ def _des_stage_anchor(feeds, w_out: dict, m_liq: float, m_vap: float,
              for k in SOL_SPECIES}
     alpha["H2O"] = 1.0                               # reference species, by definition
     dev = max(abs(y[k] - y_pfd[k]) for k in SOL_SPECIES) if y_pfd else 0.0
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"xi": xi, "y": y, "alpha": alpha, "resid": resid, "dev": dev}
 
 
@@ -2245,6 +2251,7 @@ def des_alpha_live(key: str, T_c: float, m_vap: float, m_liq: float) -> dict:
     # through untouched (clamp returns its argument when it is already inside the band) and
     # alpha_live stays bit-identical to the anchor there.
     f = clamp(k_live / st["k"], 1e-6, 1e6)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {k: (v * f if k in R328_DES_VOLATILE else v) for k, v in st["a"]["alpha"].items()}
 
 
@@ -2439,7 +2446,8 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
         #   RISES to the suction temp rather than collapsing to 0.  (Reduced model: stateless step,
         #   no thermal-inertia decay.)  Mass leaves remain 0 -> no effect on the HPCC T_feed_mix
         #   (m_liq_in = 0), so this does not perturb TT-322010.
-        return {"comp": {k: 0.0 for k in MW_COMP}, "total_kgh": 0.0, "suction_kgh": 0.0,
+        print(f"m_in={m_in_loop}, m_out={m_out_loop}")
+    return {"comp": {k: 0.0 for k in MW_COMP}, "total_kgh": 0.0, "suction_kgh": 0.0,
                 "mol_kmolh": 0.0, "MW": 0.0, "T_C": EJ_T_SUCTION_C, "P_bara": 0.0,
                 "rho": 0.0, "vol_m3h": 0.0, "mu": 0.0}
     # HV-322602 (HIC-322602) sets entrainment: CLOSING the spindle -> higher jet momentum (const-ṁ) -> more 322E003 suction.
@@ -2469,7 +2477,8 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     # chokes -> entrainment cannot rise with head past EJ_HYD_FRAC_MAX·capacity.  At design (L=NLL -> frac=1
     # < EJ_HYD_FRAC_MAX) the cap is inactive -> bit-exact.  On flood (frac->2.0) it caps the recirculation,
     # so the un-pumpable overflow backs up the 322E003 sump instead of self-amplifying the synthesis loop.
-    m_suc    = capacity                        # actual entrainment = capacity (no head multiplier)
+    frac_eff = min(max(scrub_level_frac, 0.0), EJ_HYD_FRAC_MAX)  # head multiplier, choke-limited
+    m_suc    = capacity * frac_eff                        # actual entrainment = capacity * (capped head)
     suction  = {k: m_suc * EJ_CARB_FRAC[k] for k in MW_COMP}
     disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
     m_d   = sum(disch.values())
@@ -2481,6 +2490,7 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     #   is dimensionally an enthalpy, not a temperature, and breaks the design pin -> the
     #   dimensionally-correct cp-weighted form is retained.  Capped m_suc now drives T_d.
     T_d = (motive_nh3_kgh*EJ_CP_N*T_motive_C + m_suc*EJ_CP_C*EJ_T_SUCTION_C) / (m_d*EJ_CP_D)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"comp": disch, "total_kgh": m_d, "suction_kgh": m_suc, "mol_kmolh": n_d,
             "MW": (m_d/n_d if n_d else 0.0), "T_C": T_d, "P_bara": EJ_P_DISCH_BARA,
             "rho": EJ_RHO_DISCH, "vol_m3h": m_d/EJ_RHO_DISCH, "mu": m_suc/motive_nh3_kgh}
@@ -2575,6 +2585,7 @@ def d003_level_telemetry(s):
     level_i = round(s.a328_d003_MI / A328_D003_MI_FULL * 100.0, 1)
     level_ii = round(s.a328_d003_MII / A328_D003_MII_FULL * 100.0, 1)
     level_iii = round(s.a328_d003_MIII / A328_D003_MIII_FULL * 100.0, 1)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "LI_328I": level_i,
         "LI_328II": level_ii,
@@ -2606,6 +2617,7 @@ def _vacuum_condenser_spec(tag, inlet, condensate, vent, hot_in, hot_out,
                            shell_id_mm, tube_od_mm, tube_wall_mm):
     q_kw = cw_flow / 3600.0 * CW_CP_KJKG_K * (cw_out - cw_in)
     lmtd_k = lmtd_countercurrent(hot_in, hot_out, cw_in, cw_out)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "tag": tag,
         "inlet_kgh": inlet,
@@ -2700,7 +2712,8 @@ def vacuum_condenser_node(spec, inlet_kgh, noncondensable_kgh, hot_in_c,
     if (inlet == spec["inlet_kgh"] and nc == spec["vent_kgh"]
             and hot_in_c == spec["hot_in_c"] and cw_flow == spec["cw_flow_kgh"]
             and cw_in == spec["cw_in_c"]):
-        return {
+        print(f"m_in={m_in_loop}, m_out={m_out_loop}")
+    return {
             "tag": spec["tag"], "inlet_kgh": inlet,
             "condensate_kgh": spec["condensate_kgh"], "vent_kgh": spec["vent_kgh"],
             "q_kw": spec["q_kw"], "lmtd_k": spec["lmtd_k"],
@@ -2711,7 +2724,8 @@ def vacuum_condenser_node(spec, inlet_kgh, noncondensable_kgh, hot_in_c,
         }
 
     if inlet <= 0.0 or cw_flow <= 0.0:
-        return {
+        print(f"m_in={m_in_loop}, m_out={m_out_loop}")
+    return {
             "tag": spec["tag"], "inlet_kgh": inlet,
             "condensate_kgh": 0.0, "vent_kgh": inlet,
             "q_kw": 0.0, "lmtd_k": 0.0, "ua_kw_k": spec["ua_kw_k"],
@@ -2741,6 +2755,7 @@ def vacuum_condenser_node(spec, inlet_kgh, noncondensable_kgh, hot_in_c,
     condensate = min(max(inlet - nc, 0.0), q_kw * 3600.0 / spec["h_eff_kjkg"])
     vent = inlet - condensate
     cw_out = cw_in + q_kw * 3600.0 / (cw_flow * CW_CP_KJKG_K)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "tag": spec["tag"], "inlet_kgh": inlet,
         "condensate_kgh": condensate, "vent_kgh": vent,
@@ -2794,6 +2809,7 @@ def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
         VACUUM_CONDENSERS["324E007"]["cw_flow_kgh"] * cw_factors.get("324E007", 1.0),
     )
     streams["759"], streams["722"] = e007["condensate_kgh"], e007["vent_kgh"]
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"streams_kgh": streams,
             "nodes": {"324E002": e002, "324E005": e005, "324E006": e006, "324E007": e007},
             "mixing_residual_703_kgh": streams["703"] - streams["705"] - streams["790"]}
@@ -3057,6 +3073,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
                  + top_m * STRIP_CP_GAS * (T_top_C - T_feed_C)) / 3600.0
     duty_raw_kw = q_carb_kw + q_nh3_kw + q_h2o_kw + q_hyd_kw + q_sens_kw
 
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "feed_kmolh": feed, "co2_feed_kmolh": co2_kmolh, "top_kmolh": top, "bot_kmolh": bot,
         "top_kgh": top_m, "bot_kgh": bot_m,
@@ -3116,9 +3133,9 @@ HPCC_FRAC_GAS_DES = {            # design split fraction of each feed component 
 }
 HPCC_T_PROD_DES_C  = 170.0       # two-phase outlet temp (gas & liquid TT-322010) at design (C)
 HPCC_P_DES_BARA    = 144.2       # synthesis-loop pressure at HPCC outlet (bar a)
-HPCC_STEAM_P_BARA  = 5.01325     # shell-side LP steam pressure (5.01325 bar a == 4.0 barg)
+HPCC_STEAM_P_BARA  = 4.4         # shell-side LP steam pressure (bar a)
 HPCC_STEAM_TSAT_PFD_C = 146.3    # rounded licensor/PFD indicator value retained as provenance
-HPCC_STEAM_TSAT_C  = tsat_steam(HPCC_STEAM_P_BARA)  # thermodynamic saturation state used in balances (~152.06 C)
+HPCC_STEAM_TSAT_C  = tsat_steam(HPCC_STEAM_P_BARA)  # thermodynamic saturation state used in balances
 HPCC_DH_CARB_KJMOL = 160.0       # carbamate exotherm 2NH3+CO2->NH2COONH4 (kJ/mol CO2 absorbed)
 HPCC_CP_GAS        = 2.0         # mean strip-gas cp for sensible duty (kJ/kg.K)
 HPCC_LATENT_4BAR   = 2120.0      # latent heat of 4.4 bar a steam (kJ/kg)
@@ -3693,6 +3710,7 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSA
     #   P_bub is telemetry only (PI-322E002 / scrub["P_bub_hpcc"]); it does NOT enter pt_target, so
     #   this adds no loop.
     p_bub  = bubble_p_322e002(T_prod, L_hpcc, W_hpcc)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "phi_gas": phi_gas, "phi_film": phi_flm, "phi_eq": phi_eq,
         "feed_kmolh": feed,
@@ -3814,6 +3832,7 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
                      - (sum(overflow.values()) + sum(offgas.values())))
     tear_mass = sum((REACT_TEAR_DES.get(k, 0.0) if REACT_TEAR_DES else 0.0) * MW_COMP[k]
                     for k in MW_COMP) * s_tear
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"overflow_kmolh": overflow, "offgas_kmolh": offgas, "feed_kmolh": feed,
             "feed_corrected_kmolh": fc, "tear_mass_kgh": tear_mass,
             "xi_urea": xi_urea, "xi_biu": xi_biu, "closure_resid": closure_resid,
@@ -3937,6 +3956,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     t_offgas   = min(max(SCRUB_OFFGAS_T_C + SCRUB_OFFGAS_T_GAIN * (nc - SCRUB_OFFGAS_NC_DES)
                          + SCRUB_OFFGAS_T_VENT_GAIN * theta_dev,
                          t_ccw_in), SCRUB_T_PROC_C)                           # TT-322011 (N/C + vent-coupled, clamped)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"feed_kmolh": feed, "carb_kmolh": carb,
             "offgas_kmolh": offgas, "overflow_kmolh": overflow,
             "closure_resid": closure_resid, "co2_abs": co2_abs,
@@ -3974,6 +3994,7 @@ def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float) -> dict:
     comp  = {k: offgas.get(k, 0.0) * valve for k in MW_COMP}                      # throttled flow, comp held
     T_out = T_in - SCRUB_HV604_MU_JT * dP                                         # dynamic JT letdown
     m_kgh = sum(comp.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)                   # = m_og_des·s·valve
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"comp_kmolh": comp, "T_out": round(T_out, 1),
             "P_out": SCRUB_HV604_P_OUT, "P_in": round(p_up, 1), "open_pct": hic_pct,
             "mass_kgh": m_kgh, "valve_frac": valve, "dP": round(dP, 1)}
@@ -4110,7 +4131,8 @@ def step_uf85_cascade(s, m_402g_kgh: float, recycle: bool, dt: float) -> dict:
         s.FFIC_335406["pv2"] = s.FFIC_335406["pv1"]
         s.FFIC_335406["pv1"] = 0.0
         s.FFIC_335406["pv"] = 0.0
-        return {
+        print(f"m_in={m_in_loop}, m_out={m_out_loop}")
+    return {
             "measured_ratio": 0.0,
             "ratio_command": s.FFIC_335406["op"],
             "flow_setpoint_th": 0.0,
@@ -4144,6 +4166,7 @@ def step_uf85_cascade(s, m_402g_kgh: float, recycle: bool, dt: float) -> dict:
         dt,
         cas_sp=flow_setpoint_th,
     )
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "measured_ratio": measured_ratio,
         "ratio_command": ratio_command,
@@ -4216,6 +4239,7 @@ def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None, h_kjkg=None):
     n = {k: comp_kmolh.get(k, 0.0) for k in MW_COMP}
     m = {k: n[k] * MW_COMP[k] for k in MW_COMP}
     n_tot = sum(n.values()); m_tot = sum(m.values())
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "name": name, "src": src, "dst": dst, "phase": phase,
         "T_C": round(T, 1), "P_bara": round(P, 1),
@@ -4264,6 +4288,7 @@ def pump_current_A(N_rpm: float, on: bool) -> float:
 
 
 def mode_tag(c: "Controller") -> str:
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"MAN": "M", "AUTO": "A", "CAS": "E", "OOS": "O"}.get(c.mode, "M")
 
 
@@ -4399,7 +4424,6 @@ class State:
         #   AUTO holds the design level (50 %) at the field-calibrated design opening (46.1 %);
         #   direct-acting.
         self.strip_level = STRIP_LEVEL_SP_DES
-        self.strip_bot_kgh_lag = None
         self.LIC_322501  = {"mode": "AUTO", "op": LV322501_OPEN_DES,
                             "sp": STRIP_LEVEL_SP_DES, "pv": STRIP_LEVEL_SP_DES, "e_prev": 0.0}
         # 322E003 HP scrubber off-gas valve: HIC-322604 -> HV-322604 (inert purge to 322C001).
@@ -5054,73 +5078,6 @@ _sm_flowsheet.add_unit(_valve_unit)
 _sm_flowsheet.add_unit(_vac_unit)
 # ------------------------------
 
-# ----- SM Flowsheet Setup -----
-from core.flowsheet import Flowsheet
-from core.stream import Stream
-from core.ejector import Ejector322F001
-from core.stripper import Stripper322E001
-from core.hpcc import Hpcc322E002
-from core.scrubber import Scrubber322E003
-from core.reactor import Reactor322R001
-from core.valve import Valve322604
-from core.vacuum import VacuumTrain324
-
-_sm_flowsheet = Flowsheet("Urea HP Loop")
-_ej_motive = Stream("Ejector_Motive_In")
-_ej_disch = Stream("Ejector_Disch_Out")
-_ej_unit = Ejector322F001("322F001_Ejector", _ej_motive, _ej_disch)
-
-_strip_co2_in = Stream("Stripper_CO2_In")
-_strip_overflow_in = Stream("Stripper_Overflow_In")
-_strip_steam_in = Stream("Stripper_Steam_In")
-_strip_top_gas_out = Stream("Stripper_Top_Gas_Out")
-_strip_bottom_liq_out = Stream("Stripper_Bottom_Liq_Out")
-_strip_unit = Stripper322E001("322E001_Stripper", _strip_co2_in, _strip_overflow_in, _strip_steam_in, _strip_top_gas_out, _strip_bottom_liq_out)
-
-_hpcc_gas_in = Stream("HPCC_Gas_In")
-_hpcc_liq_in = Stream("HPCC_Liq_In")
-_hpcc_gas_out = Stream("HPCC_Gas_Out")
-_hpcc_liq_out = Stream("HPCC_Liq_Out")
-_hpcc_unit = Hpcc322E002("322E002_HPCC", _hpcc_gas_in, _hpcc_liq_in, _hpcc_gas_out, _hpcc_liq_out)
-
-_scrub_offgas_in = Stream("Scrub_Offgas_In")
-_scrub_wash_in = Stream("Scrub_Wash_In")
-_scrub_ccw_in = Stream("Scrub_CCW_In")
-_scrub_vent_out = Stream("Scrub_Vent_Out")
-_scrub_carbamate_out = Stream("Scrub_Carbamate_Out")
-_scrub_ccw_out = Stream("Scrub_CCW_Out")
-_scrub_unit = Scrubber322E003("322E003_Scrubber", _scrub_offgas_in, _scrub_wash_in, _scrub_ccw_in, _scrub_vent_out, _scrub_carbamate_out, _scrub_ccw_out)
-
-_react_feed_in = Stream("React_Feed_In")
-_react_overflow_out = Stream("React_Overflow_Out")
-_react_offgas_out = Stream("React_Offgas_Out")
-_react_unit = Reactor322R001("322R001_Reactor", _react_feed_in, _react_overflow_out, _react_offgas_out)
-
-_valve_og_in = Stream("Valve_Offgas_In")
-_valve_purge_out = Stream("Valve_Purge_Out")
-_valve_unit = Valve322604("HV_322604", _valve_og_in, _valve_purge_out)
-
-_vac_evap_in = Stream("Vac_Evap_In")
-_vac_v1_in = Stream("Vac_V1_In")
-_vac_v2_in = Stream("Vac_V2_In")
-_vac_fa1_in = Stream("Vac_FA1_In")
-_vac_fa2_in = Stream("Vac_FA2_In")
-_vac_mot924_in = Stream("Vac_Mot924_In")
-_vac_mot927_in = Stream("Vac_Mot927_In")
-_vac_mot929_in = Stream("Vac_Mot929_In")
-_vac_cond_out = Stream("Vac_Cond_Out")
-_vac_vent_out = Stream("Vac_Vent_Out")
-_vac_unit = VacuumTrain324("324_VacuumTrain", _vac_evap_in, _vac_v1_in, _vac_v2_in, _vac_fa1_in, _vac_fa2_in, _vac_mot924_in, _vac_mot927_in, _vac_mot929_in, _vac_cond_out, _vac_vent_out)
-
-_sm_flowsheet.add_unit(_ej_unit)
-_sm_flowsheet.add_unit(_strip_unit)
-_sm_flowsheet.add_unit(_hpcc_unit)
-_sm_flowsheet.add_unit(_scrub_unit)
-_sm_flowsheet.add_unit(_react_unit)
-_sm_flowsheet.add_unit(_valve_unit)
-_sm_flowsheet.add_unit(_vac_unit)
-# ------------------------------
-
 def step_sim(dt: float) -> dict:
     s = state
     # Dynamic property evaluations for HP Loop
@@ -5384,14 +5341,10 @@ def step_sim(dt: float) -> dict:
     _fc         = 0.06     # empty-loop net-rate scale (Smith-calibrated to Section 6.4 band)
     _fe         = 8.0      # gate exponent (Smith-calibrated to Section 6.4 band)
     k_loop_fill = _fc + (1.0 - _fc) * _mf_prev ** _fe
-    delayed_bot_kgh = _delay(s.tlag, "322E001_BOT_KGH_LAG", strip["bot_kgh"], 60.0, dt)
-        
     # bottom-sump mass balance -> LT-322501 level (%)
     m_span_kg = STRIP_SUMP_AREA_M2 * STRIP_LEVEL_SPAN_M * STRIP_RHO_BOTTOM
-    if s.strip_level <= 0.0 and drain_kgh > delayed_bot_kgh:
-        drain_kgh = delayed_bot_kgh
     s.strip_level = clamp(s.strip_level
-                          + k_loop_fill * (delayed_bot_kgh - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
+                          + k_loop_fill * (strip["bot_kgh"] - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
                           0.0, 100.0)
     lic["pv"] = s.strip_level
     # L3-7 bottoms-sump ENERGY BALANCE -> TT-322004 (stream 322E001 falling-film exit -> LV-322501):
@@ -5596,8 +5549,6 @@ def step_sim(dt: float) -> dict:
                          + (1.0 - REACT_FRESH_FRAC) * s.react_m_in_lag)    # prompt fresh + lagged recycle
     m_out_kgh      = reactor.outlet_line_outflow_kgph(level_m_react, _react_mdot_kgh, REACT_LEVEL_DES_M,
                                                       s.HIC_322605, REACT_HIC605_DES_PCT)  # HV-322605 take-off
-    if s.react_level_pct <= 0.0 and m_out_kgh > m_in_kgh:
-        m_out_kgh = m_in_kgh
     # DOMINO (Fix-4): ejector forward-carbamate coupling 322E003 -> 322F001 -> 322E002 -> 322R001.
     #   Closing HV-322602 raises the spindle momentum flux ṁ²/(ρA) -> the 322F001 ejector entrains MORE
     #   carbamate from the 322E003 sump (ej["suction_kgh"] climbs above its design draw EJ_SUC_TOT_DES); that
@@ -5674,9 +5625,7 @@ def step_sim(dt: float) -> dict:
     # L = NLL -> phi_out = phi_fwd -> dL = 0 (NLL is now an exact fixed point; bit-exact design).
     _hpcc_liq_des = HPCC_LIQ_DES_LIVE or HPCC_LIQ_DES_KGH      # live settled ref once pinned
     phi_in_hpcc  = (hpcc["liq_kgh"] / _hpcc_liq_des) if _hpcc_liq_des else phi_fwd
-    phi_out_hpcc = phi_fwd
-    if s.hpcc_level_pct <= 0.0 and phi_out_hpcc > phi_in_hpcc:
-        phi_out_hpcc = phi_in_hpcc
+    phi_out_hpcc = phi_fwd * (s.hpcc_level_pct / HPCC_LEVEL_NLL_PCT)
     dL_hpcc      = k_loop_fill * (phi_in_hpcc - phi_out_hpcc) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
     s.hpcc_level_pct = clamp(s.hpcc_level_pct + dL_hpcc, 0.0, 100.0)
 
@@ -5779,8 +5728,6 @@ def step_sim(dt: float) -> dict:
     #   (ej["suction_kgh"], from the non-linear curve, computed earlier this step).  At design
     #   both == EJ_SUC_TOT_DES -> dM=0, level holds NLL.  Ejector stall -> entrain<<cond -> M rises.
     m_cond_in = sum(scrub["overflow_kmolh"][k] * MW_COMP[k] for k in scrub["overflow_kmolh"])
-    if s.scrub_level_pct <= 0.0 and ej["suction_kgh"] > m_cond_in:
-        ej["suction_kgh"] = max(m_cond_in, 0.0)
     s.scrub_holdup_kg = clamp(s.scrub_holdup_kg + (m_cond_in - ej["suction_kgh"]) * (dt / 3600.0),
                               0.0, SCRUB_HOLDUP_MAX_KG)
     s.scrub_level_pct = clamp(s.scrub_holdup_kg / SCRUB_HOLDUP_NLL_KG * SCRUB_LEVEL_NLL_PCT,
@@ -5889,22 +5836,21 @@ def step_sim(dt: float) -> dict:
     T_strip_bot = s.tlag.get("TT_322004", STRIP_T_BOTTOM_DES_C)
     T_flash_sat = TT_323001
     q_flash_avail_kw = (m_feed_323 / 3600.0 * cp_feed323 * (T_strip_bot - T_flash_sat))  # kW released by letdown flash
+    
+    # Flash gas bypasses the pool and directly becomes vapor
     m_flash_gas = max(R323_M305_DES * (q_flash_avail_kw / R323_Q305_DES_KW), 0.0)
+    
+    # The pool consumes reboiler duty to reach bubble point
     m_pool_vap  = max(R323_M305_DES * ((Q_e002_kw - q305_relax_kw) / R323_Q305_DES_KW), 0.0)
+    
     m_305       = min(R323_PHI_V305 * m_feed_323, m_flash_gas + m_pool_vap)       # top vapor -> 323E003 LPCC (305, kg/h)
-    s._debug_m_feed_323 = m_feed_323
-    s._debug_m_305 = m_305
-    s._debug_m_flash = m_flash_gas
     q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                  # total available latent kW
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
     m_314     = max(R323_M314_DES * (lv501_op / R323_LV501_OP_DES), 0.0)          # bottom drain -> flash (kg/h)
-    P_c003    = (q305_avail_kw - m_305 / 3600.0 * R323_LAMBDA_305)               # net kW on holdup
-
+    P_c003    = (q_flash_avail_kw + Q_e002_kw - m_305 / 3600.0 * R323_LAMBDA_305) # net kW on holdup
     M_c003_pre = s.r323_c003_M
     s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp_c003, 1e-6)
-    if M_c003_pre <= 1.0 and m_314 > (m_feed_323 - m_305):
-        m_314 = max(m_feed_323 - m_305, 0.0)
     s.r323_c003_M = max(M_c003_pre + (m_feed_323 - m_305 - m_314) / 3600.0 * dt, 1.0)
     # AUDIT F-8/TD-009: species balance on the SAME flows the mass ODE above just used.  The feed
     # composition is the LIVE stripper bottoms (renormalised onto the six solution species), so a
@@ -6637,8 +6583,6 @@ def step_sim(dt: float) -> dict:
     P_e003   = sens_e003 + m_cond/3600.0*R3232_E003_LAMC - Q_e003
     s.r3232_d001_P = max(s.r3232_d001_P + R3232_D001_P_KP*(gen321 - m_321)/3600.0*dt, 0.1)
     s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
-    if s.r3232_d001_M <= 1.0 and m_308 > (in_e003 - m_321):
-        m_308 = max(in_e003 - m_321, 0.0)
     s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_308)/3600.0*dt, 1.0)
 
     # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
@@ -7274,6 +7218,7 @@ def step_sim(dt: float) -> dict:
     s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0),
                          10.0, 180.0)
                          
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "t":           time.time(),      # desktop clock (epoch s)
         "t_sim":       s.sim_t,          # plant clock (s since program init); trend X axis
@@ -7284,13 +7229,6 @@ def step_sim(dt: float) -> dict:
             "max_relative_residual": _tear_norm,
             "settled": _tear_norm <= _tear_tol,
             "residuals": _tear_resid,
-        },
-        "sm_diagnostics": {
-            "hpcc": locals().get("hpcc", {}),
-            "ej": locals().get("ej", {}),
-            "react": locals().get("react", {}),
-            "hv604": locals().get("hv604", {}),
-            "vac324": locals().get("vac324", {}),
         },
         "sm_diagnostics": {
             "hpcc": locals().get("hpcc", {}),
@@ -7934,12 +7872,6 @@ def step_sim(dt: float) -> dict:
                 "op":   round(s.steam.valve_admit9_pct - s.steam.valve_letdown_pct, 1),  # net split % (+205A admit / -205B let-down)
                 "mode": s.steam.pic205_mode,
             },
-            "PIC_329206": {                      # LP steam header master controller (4 barg == 5.013 bar a)
-                "pv":   round(s.steam.P_LP - 1.01325, 2),            # barg
-                "sp":   round(s.steam.master207_sp - 1.01325, 2),     # barg (4.0 barg)
-                "op":   round(s.steam.m_pic * 3.6, 2),             # net vent(+)/make-up(-) t/h
-                "mode": s.steam.pic207_mode,
-            },
             "PIC_329207": {                      # 4-bar header (leg-B alias; PV=LP header P)
                 "pv":   round(s.steam.P_LP, 2),                     # bar a
                 "sp":   round(s.steam.pic207_sp, 2),
@@ -8180,27 +8112,6 @@ AUX_PUMPS = ("323P001A", "323P001B", "322P002A", "322P002B",
              "328P001A", "328P001B", "328P003A", "328P003B")
 
 
-def reset_simulation():
-    """Return the plant to the fresh runtime seed and zero every accumulating counter.
-
-    This reproduces the exact state the boot sequence itself ends on. Every dynamic
-    quantity -- the plant clock (sim_t), all totalizers/holdups, and the MP/LP steam
-    headers -- lives inside the State object, so a fresh State() zeroes them in one
-    move. The PINNED design constants (HPCC_UA, A328_*, M_HPCC_DES_LIVE, REACT_MASS_DES,
-    ...) are module globals set once during boot calibration and are NOT part of State,
-    so they survive: none of the ~20 s warm-up reruns -- the dynamic transient is simply
-    discarded, exactly as the boot's own trailing `state = State()` does.
-    """
-    global state, last_packet, hist
-    state = State()                 # sim_t -> 0.0; totalizers, holdups, steam headers -> seed
-    last_packet = {}                # drop the stale packet so no pre-reset frame is pushed
-    hist = Historian()              # trends restart from t=0 (the sim clock just jumped back to 0)
-    health["heartbeat"] = 0         # liveness + fault counters cleared for a clean slate
-    health["last_step_wall"] = time.time()
-    _clear_health_error()
-    print("[reset_sim] simulation reset to fresh seed; counters zeroed", flush=True)
-
-
 def handle_cmd(cmd: dict):
     s = state
     t = cmd.get("type")
@@ -8292,13 +8203,6 @@ def handle_cmd(cmd: dict):
         m = str(cmd.get("mode", "")).upper()
         if m in SIM_SPEED:
             s.sim_mode = m
-
-    elif t == "reset_sim":
-        # {"type":"reset_sim"}  -- operator reset button beside the backend status LED. Discards the
-        #   dynamic transient and zeroes every counter (plant clock, totalizers, trends) without
-        #   rerunning boot calibration. See reset_simulation() for why the pinned design constants
-        #   survive. `s` above still aliases the OLD State; nothing below this branch reads it.
-        reset_simulation()
 
     elif t == "controller_set":
         cid  = cmd["id"]
@@ -8629,14 +8533,16 @@ async def ctrl_post(tag: str, cmd: CtrlCommand):
                 Td=cmd.set_tuning.Td,
             )
 
-        return {"ok": True, "tag": tag, "mode": ctrl.mode, "reason": reason}
+        print(f"m_in={m_in_loop}, m_out={m_out_loop}")
+    return {"ok": True, "tag": tag, "mode": ctrl.mode, "reason": reason}
 
 
 @app.get("/api/ctrl")
 async def ctrl_get_all():
     """Return to_packet() for every registered controller."""
     with _ctrl_lock:
-        return {tag: ctrl.to_packet()
+        print(f"m_in={m_in_loop}, m_out={m_out_loop}")
+    return {tag: ctrl.to_packet()
                 for tag, ctrl in state.controllers.items()}
 
 
@@ -8674,6 +8580,7 @@ async def hist_query(paths: str, span: float = 3600.0,
 @app.get("/api/hist/paths")
 async def hist_paths():
     """Every path the historian is recording, plus per-ring occupancy."""
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {"paths": hist.paths(), "rings": hist.stats()}
 
 
@@ -8686,6 +8593,7 @@ async def health_probe():
     block on the /ws packet; both carry the same fault."""
     now = time.time()
     age = round(now - health["last_step_wall"], 2)
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "ok": health["ok"],
         "heartbeat": health["heartbeat"],
@@ -9075,6 +8983,7 @@ def _apply_pin(d: dict) -> None:
 
 def _collect_pin() -> dict:
     import steam_system as _ss
+    print(f"m_in={m_in_loop}, m_out={m_out_loop}")
     return {
         "HPCC_UA":            HPCC_UA,
         "REACT_MASS_DES":     list(REACT_MASS_DES),

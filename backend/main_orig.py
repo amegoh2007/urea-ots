@@ -28,9 +28,6 @@ import math
 import sys
 if __name__ == "__main__":
     sys.modules["main"] = sys.modules["__main__"]
-import sys
-if __name__ == "__main__":
-    sys.modules["main"] = sys.modules["__main__"]
 import os
 import time
 import threading
@@ -41,8 +38,6 @@ from typing import Optional, Set
 import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
 import thermo_extended_uniquac as extended_uniquac
 import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-97)
-from core.thermo import EmpiricalThermo
-thermo = EmpiricalThermo()
 from controllers import Controller
 import steam_system
 from steam_system import SteamState, step_steam  # MP/LP steam-header dynamics (quarantined)
@@ -217,7 +212,7 @@ def cond_infer_328701(nh3_ppm: float, urea_ppm: float, co2_ppm: float) -> float:
     return kappa
 
 
-# ----- Modelling scope boundary (§7.7 P6-B) -----
+# ----- Modelling scope boundary (┬º7.7 P6-B) -----
 # The following 6 P&ID tags are intentionally NOT modelled: they are out-of-envelope
 # auxiliaries with no mass/energy coupling to any modelled unit (no stream on the PFD/HMB
 # crosses the sim boundary through them), so their omission cannot perturb conservation or
@@ -348,12 +343,12 @@ EJ_STALL_EXP   = 2.0             # convexity of the f_stall collapse inside the 
                                  #   f_stall = clamp((phi_m-PHI)/(REC-PHI),0,1)^EXP.  EXP=2 -> sharp
                                  #   quadratic knee: f(0.25)=0.11, f(0.30)=0.44, f(0.35)=1.  NOT a linear
                                  #   phi_m cheat and NOT a curve that only reaches 1 at phi_m=1.
-EJ_HYD_FRAC_MAX = 1.25           # —, HYDRAULIC-CAPACITY (throat-choke) ceiling on the suction-head
+EJ_HYD_FRAC_MAX = 1.25           # ΓÇö, HYDRAULIC-CAPACITY (throat-choke) ceiling on the suction-head
 #   multiplier frac = L_329501/NLL.  A real jet ejector chokes: above a finite suction head the throat
-#   reaches max mass capacity and entrainment STOPS rising with head.  m_suc = capacity·min(frac, this).
+#   reaches max mass capacity and entrainment STOPS rising with head.  m_suc = capacity┬╖min(frac, this).
 #   >1 -> design (frac=1 at NLL) is below the ceiling -> NEVER engages at design -> every pin bit-exact.
 #   25 % head-overcapacity above NLL = typical HP jet-ejector hydraulic margin.  On a 322E003 flood the
-#   raw frac wants 2.0 (L=100%/NLL=50%); the ceiling caps entrainment at 1.25·capacity, so the un-pumpable
+#   raw frac wants 2.0 (L=100%/NLL=50%); the ceiling caps entrainment at 1.25┬╖capacity, so the un-pumpable
 #   overflow excess backs up the sump (already at SCRUB_HOLDUP_MAX clamp) INSTEAD of recirculating the
 #   flood into the discharge -> 322E002 -> reactor loop -> the reactor conversion self-loop re-bounds.
 EJ_SUC_TOT_DES = sum(EJ_SUCTION_KGH.values())                      # kg/h, design suction
@@ -457,7 +452,7 @@ STRIP_P_DES_BARA    = 144.0       # bar a, tube-side (synthesis-loop) pressure
 # --- Design product temperatures (C):
 STRIP_T_TOPGAS_DES_C = 187.0      # TT-322013 top gas -> 322E002
 STRIP_T_BOTTOM_DES_C = 172.0      # TT-322004 bottom solution -> LV-322501 (pre-flash)
-STRIP_T_FLOOD_ANCHOR_C = reactor.T0_DES_C   # 183.0 °C (= REACT_OVERFLOW_T_C, fwd-defined): hot reactor
+STRIP_T_FLOOD_ANCHOR_C = reactor.T0_DES_C   # 183.0 ┬░C (= REACT_OVERFLOW_T_C, fwd-defined): hot reactor
 #   liquor T the bottom asymptotes UP to when the stripper floods (GAP #1 ceiling). reactor.T0_DES_C is
 #   import-time available (REACT_OVERFLOW_T_C is defined after this module's design-point self-call).
 # --- N/C + H/C stripping-efficiency penalty + Arrhenius biuret (live reactor-effluent coupling) ---
@@ -471,13 +466,13 @@ STRIP_W0    = _STRIP_FEED_DES["H2O"] / _STRIP_FEED_DES["CO2"]    # 1.0610  desig
 STRIP_UREA0 = _STRIP_FEED_DES["Urea"]                           # 1302.6  design feed urea (kmol/h)
 # --- Stripper liquid-side energy balance (fixed reboiler duty spread over LIVE feed mass) ---
 #   The 329D005 MP-steam reboiler delivers ~Q_steam,des; the per-unit-mass heating available to
-#   the descending liquid is Q_steam/(ṁ_feed·cp).  A reactor-overflow feed spike at constant steam
-#   duty dilutes that specific heating, so the bottom solution leaves COLDER.  ΔT_steam,des is the
-#   design steam specific heating; the carbamate-decomposition endotherm (∝ feed) cancels its own
+#   the descending liquid is Q_steam/(ß╣ü_feed┬╖cp).  A reactor-overflow feed spike at constant steam
+#   duty dilutes that specific heating, so the bottom solution leaves COLDER.  ╬öT_steam,des is the
+#   design steam specific heating; the carbamate-decomposition endotherm (Γê¥ feed) cancels its own
 #   per-mass term, leaving this steam-dilution swing as the net bottom-temperature response.
-STRIP_CP_BOTTOM      = 2.93     # kJ/kg·K, bottom-solution (urea/carbamate/NH3 melt) mean cp ~175 °C
+STRIP_CP_BOTTOM      = 2.93     # kJ/kg┬╖K, bottom-solution (urea/carbamate/NH3 melt) mean cp ~175 ┬░C
 STRIP_FEED_DES_KGH   = sum(_STRIP_FEED_DES[k] * MW_COMP[k] for k in MW_COMP)   # 280797 kg/h design feed
-STRIP_DT_STEAM_DES_C = STRIP_DUTY_DES_KW * 3600.0 / (STRIP_FEED_DES_KGH * STRIP_CP_BOTTOM)  # ΔT_steam,des ≈172.4 °C
+STRIP_DT_STEAM_DES_C = STRIP_DUTY_DES_KW * 3600.0 / (STRIP_FEED_DES_KGH * STRIP_CP_BOTTOM)  # ╬öT_steam,des Γëê172.4 ┬░C
 
 # ==========================================================================================
 #  TUBE BUNDLE + HYDRODYNAMIC FLOODING LIMIT   (audit TD-006, second half)
@@ -490,7 +485,7 @@ STRIP_DT_STEAM_DES_C = STRIP_DUTY_DES_KW * 3600.0 / (STRIP_FEED_DES_KGH * STRIP_
 #
 #  Geometry: licensor DDS 322E001 (Uhde UD-AU-322-DZ-0003-003 rev 00, page 3).  The DDS is
 #  self-consistent -- its own tabulated surface area confirms the tube count:
-#      N·π·d_o·L = 2600 × π × 0.031 × 6.000 = 1519.27 m²   vs line 25 "1519.00"   (+0.018 %)
+#      N┬╖╧Ç┬╖d_o┬╖L = 2600 ├ù ╧Ç ├ù 0.031 ├ù 6.000 = 1519.27 m┬▓   vs line 25 "1519.00"   (+0.018 %)
 STRIP_N_TUBES        = 2600     # DDS line 34, number of tubes
 STRIP_TUBE_OD_M      = 0.031    # DDS line 36, tube O.D. 31 mm
 STRIP_TUBE_WALL_M    = 0.003    # DDS line 36, wall thickness 3.0 mm
@@ -501,21 +496,21 @@ STRIP_RHO_G_DES      = 10.28    # DDS line 14, tube-side gas density at operatin
 STRIP_RHO_L_IN_DES   = 989.88   # DDS line 13, tube-side liquid density in
 #
 #  The limit itself: Brouwer, "How to Solve Stripper Efficiency Issues", UreaKnowHow 2025,
-#  citing IFS Proceeding 166 -- "at a temperature of the reactor outlet solution of 183 °C and
+#  citing IFS Proceeding 166 -- "at a temperature of the reactor outlet solution of 183 ┬░C and
 #  a pressure of 140 bar, the flooding limit in a 1-inch tube is found to be 145 kg of solution
 #  per hour.  In practice, an upper limit of 70 % of this value is applied."
 #  Three documents agree and nothing has to be fabricated:
 #    * the DDS tube I.D. is 25.0 mm = 0.984 inch, so the 1-inch figure applies WITHOUT scaling;
 #    * the DDS effective tube length is 6.000 m, and the same paper states that 6 m effective
 #      length is what gives a Stamicarbon CO2 stripper its 80 % design stripping efficiency;
-#    * the quoted reference condition (183 °C) is STRIP_FEED207_T_C, this stripper's own feed
+#    * the quoted reference condition (183 ┬░C) is STRIP_FEED207_T_C, this stripper's own feed
 #      temperature, and 140 bar is within 3 % of its 144 bar tube side.
 STRIP_FLOOD_KGH_TUBE = 145.0    # kg/h of solution per tube at the flooding limit
 STRIP_FLOOD_PRACTICE = 0.70     # industry operating cap as a fraction of the limit
 #  DESIGN FLOODING FRACTION -- a COMPUTED result, not a tuned constant:
 #      280797 / 2600 / 145 = 0.7448,  i.e. 108.0 kg/h per tube, 74.5 % of the limit.
 #  Two consequences, both load-bearing:
-#    1. the plant-level limit is 145 × 2600 = 377 000 kg/h, so flooding starts at 134 % of design
+#    1. the plant-level limit is 145 ├ù 2600 = 377 000 kg/h, so flooding starts at 134 % of design
 #       plant load -- the same order as Brouwer's "110 % when new, 120 % at end of life";
 #    2. because 0.7448 < 1.0 the flooding term is IDENTICALLY INACTIVE at the design seed.  It is
 #       a one-sided constraint that does not bind, so it cannot move a single bit of the pinned
@@ -523,15 +518,15 @@ STRIP_FLOOD_PRACTICE = 0.70     # industry operating cap as a fraction of the li
 #       ratio, just a constraint the plant genuinely operates below.
 STRIP_FLOOD_DES_FRAC = STRIP_FEED_DES_KGH / STRIP_N_TUBES / STRIP_FLOOD_KGH_TUBE   # 0.7448
 #  Bottom-temperature signature.  Brouwer: "a sudden temperature increase of the stripper bottom
-#  temperature, let's say 3-4 °C in 15 minutes, is a clear indication for reaching the flooding
+#  temperature, let's say 3-4 ┬░C in 15 minutes, is a clear indication for reaching the flooding
 #  limit".  The rise is capped by the SAME ceiling the existing steam-dilution branch already
-#  uses -- strip_flood_gap = reactor overflow T − bottom T = 183 − 172 = 11 °C -- because both
+#  uses -- strip_flood_gap = reactor overflow T ΓêÆ bottom T = 183 ΓêÆ 172 = 11 ┬░C -- because both
 #  describe the same end state: unstripped reactor liquor falling through the tubes untouched.
 #  K is then FIXED by Brouwer's own number rather than tuned: at 10 % over the limit,
-#      11.0 × (1 − e^(−K·0.10)) = 3.5 °C   ->   K = 3.83.
+#      11.0 ├ù (1 ΓêÆ e^(ΓêÆK┬╖0.10)) = 3.5 ┬░C   ->   K = 3.83.
 STRIP_FLOOD_T_K      = 3.83     # bottom-T rise ramp per unit excess over the flooding limit
 #  Efficiency penalty -- DERIVED, no constant.  The first cut of this block used a fitted
-#  1/(1 + K·x) with K = 1.50 borrowed from STRIP_ETA_KT.  That number is now RETIRED: it was
+#  1/(1 + K┬╖x) with K = 1.50 borrowed from STRIP_ETA_KT.  That number is now RETIRED: it was
 #  never sourced, and it turned out to be roughly an order of magnitude too aggressive (it gave
 #  a 13 % efficiency loss at 10 % over the limit against ~1-3 % from three independent checks).
 #  Worse, it DOUBLE-COUNTED: g_T already collapses eta_T on a feed spike through the thermal
@@ -542,17 +537,17 @@ STRIP_FLOOD_T_K      = 3.83     # bottom-T rise ramp per unit excess over the fl
 #  because the carbamate decomposition endotherm did NOT happen; the heat that should have been
 #  absorbed by dissociation shows up as sensible heat in the liquid instead.  So
 #
-#      Q_deficit = m_feed · cp · dT_flood                      (heat not absorbed)
-#      g_flood   = 1 − Q_deficit / (n_carbamate_CO2 · dH_carb)  (fraction of stripping lost)
+#      Q_deficit = m_feed ┬╖ cp ┬╖ dT_flood                      (heat not absorbed)
+#      g_flood   = 1 ΓêÆ Q_deficit / (n_carbamate_CO2 ┬╖ dH_carb)  (fraction of stripping lost)
 #
-#  Every term on the right is already sourced: dT_flood is fixed by Brouwer's 3-4 °C signature,
+#  Every term on the right is already sourced: dT_flood is fixed by Brouwer's 3-4 ┬░C signature,
 #  cp is STRIP_CP_BOTTOM, and dH_carb is the Frejacques carbamate enthalpy below.  At the design
-#  seed dT_flood is exactly 0.0, so g_flood is exactly 1 − 0.0/Q == 1.0 -- the same structural
+#  seed dT_flood is exactly 0.0, so g_flood is exactly 1 ΓêÆ 0.0/Q == 1.0 -- the same structural
 #  identity as the rest of this block, not a float-ordering trick.
 #
 #  Cross-checks (all three agree the knockdown at 10 % over the limit is a few percent, not 13):
 #    * this energy balance                                        ~2.9 %
-#    * Brouwer's Shangdong Hualu Hengsheng case study, where a 3 °C bottom-temperature change
+#    * Brouwer's Shangdong Hualu Hengsheng case study, where a 3 ┬░C bottom-temperature change
 #      accompanied a 79 % -> 81 % efficiency change                ~2.5 %
 #    * the licensor length correlation quoted in the same paper (6 m eff. -> 80 % efficiency,
 #      8 m eff. -> 82 %) applied to the flooded-length fraction    ~0.8 %
@@ -566,7 +561,7 @@ STRIP_FLOOD_ETA_FLOOR = 0.50    # clamp: the hydraulic term alone can never zero
 # ==========================================================================================
 #  PER-SPECIES ENTHALPY BALANCE   (audit TD-006, second half)
 #
-#  What this replaces.  The stripper's MP-steam draw used to be Q = DUTY_DES · (ṁ_feed/ṁ_feed,des),
+#  What this replaces.  The stripper's MP-steam draw used to be Q = DUTY_DES ┬╖ (ß╣ü_feed/ß╣ü_feed,des),
 #  i.e. duty strictly proportional to feed MASS.  That is wrong in a way that matters: it says a
 #  stripper fed the same tonnage of pure water and of carbamate-rich reactor liquor needs the same
 #  steam.  Composition did not enter at all, so the single largest heat sink in the unit -- the
@@ -574,18 +569,18 @@ STRIP_FLOOD_ETA_FLOOR = 0.50    # clamp: the hydraulic term alone can never zero
 #
 #  Sources.  Frejacques, quoted in Brouwer, "Thermodynamics of the Urea Process", UreaKnowHow
 #  Process Paper June 2009, p.12, which gives BOTH reactions at PROCESS conditions rather than at
-#  the usual 25 °C standard state:
-#      CO2(G) + 2 NH3(G) -> NH2COONH4(L)          dH = -117 kJ/mol at 110 atm and 160 °C
-#      NH2COONH4(L) -> NH2CONH2(L) + H2O(L)       dH = +15.5 kJ/mol at 160-180 °C
-#  Those conditions are close to this stripper's own (144 bar, 172-183 °C), which is why the
+#  the usual 25 ┬░C standard state:
+#      CO2(G) + 2 NH3(G) -> NH2COONH4(L)          dH = -117 kJ/mol at 110 atm and 160 ┬░C
+#      NH2COONH4(L) -> NH2CONH2(L) + H2O(L)       dH = +15.5 kJ/mol at 160-180 ┬░C
+#  Those conditions are close to this stripper's own (144 bar, 172-183 ┬░C), which is why the
 #  process-condition 117 is used here and not the 159-160 kJ/mol figure that is quoted for SOLID
-#  carbamate at 1 atm / 25 °C.  The stripper runs reaction 1 BACKWARDS, so +117 kJ per mol of CO2
+#  carbamate at 1 atm / 25 ┬░C.  The stripper runs reaction 1 BACKWARDS, so +117 kJ per mol of CO2
 #  released from the liquid; urea hydrolysis runs reaction 2 backwards, so -15.5 kJ/mol.
 STRIP_DH_CARB_JMOL = 117_000.0   # J/mol CO2 liberated from carbamate (endothermic here)
 STRIP_DH_HYD_JMOL  = -15_500.0   # J/mol urea hydrolysed -- the LIQUID step (urea + H2O -> carbamate)
 #                                  only; the carbamate it produces is decomposed by the term above,
 #                                  so counting both is a sum, not a double count.
-#  NH3 desorption.  NH3 is SUPERCRITICAL at stripper temperature (Tc = 132.4 °C), so there is no
+#  NH3 desorption.  NH3 is SUPERCRITICAL at stripper temperature (Tc = 132.4 ┬░C), so there is no
 #  latent heat to look up -- what the duty has to pay is the desorption enthalpy out of the melt.
 #  This is NOT a new number: it is the value the loop already uses at the other end of the same
 #  circuit (HPCC_BUB_DHVAP_JMOL, the NH3-dominated vaporisation enthalpy fitted to the synthesis
@@ -594,7 +589,7 @@ STRIP_DH_HYD_JMOL  = -15_500.0   # J/mol urea hydrolysed -- the LIQUID step (ure
 #  test_equation_audit_322e001_enthalpy.py asserts the two stay equal so they cannot drift apart.
 STRIP_DH_NH3_JMOL  = 23_000.0    # J/mol free NH3 desorbed  (== HPCC_BUB_DHVAP_JMOL)
 STRIP_LAM_H2O_JMOL = 36_900.0    # J/mol water vaporised overhead == 2049 kJ/kg (steam tables,
-#                                  ~170 °C); the same value HPCC_FLASH_DH already uses for H2O.
+#                                  ~170 ┬░C); the same value HPCC_FLASH_DH already uses for H2O.
 STRIP_CP_GAS       = 2.0         # kJ/kg.K mean overhead-gas cp  (== HPCC_CP_GAS, same reason)
 #  VALIDATION (scratchpad/probe_td006_enthalpy.py).  Summing these terms over the design streams,
 #  with nothing fitted and no free parameter, gives 37 831 kW against the licensor's design duty
@@ -604,22 +599,22 @@ STRIP_CP_GAS       = 2.0         # kJ/kg.K mean overhead-gas cp  (== HPCC_CP_GAS
 #
 #  HOW IT IS USED -- and why the pin cannot move.  The licensor duty stays the anchor: only the
 #  RATIO of the live balance to the design balance is applied,
-#      Q_strip = STRIP_DUTY_DES_KW · (H_live / H_des) · 3600
+#      Q_strip = STRIP_DUTY_DES_KW ┬╖ (H_live / H_des) ┬╖ 3600
 #  with H_live and H_des produced by the SAME function from the SAME inputs at design, so the
 #  ratio is X/X == 1.0 exactly and Q_strip is bit-identical to the old feed-proportional form
 #  (which was also exactly 1.0 at design).  The absolute 4 % offset therefore never enters the
 #  model -- it cancels in the ratio -- and the design duty remains the PFD value, not a computed one.
 # --- CO2 stripping-gas endotherm (Stamicarbon G/L): the bottom CO2 sweep is held by the compressor while
-#   the reactor liquid feed varies.  When ṁ_feed collapses at constant CO2, the Gas/Liquid ratio spikes,
+#   the reactor liquid feed varies.  When ß╣ü_feed collapses at constant CO2, the Gas/Liquid ratio spikes,
 #   forcing carbamate decomposition + NH3/CO2 evaporation -- a strong ENDOTHERM that OVERPOWERS the steam
 #   heat and pulls the bottom COLDER.  Acts only on EXCESS G/L (feed-lean / CO2-rich); saturates (no pole).
-STRIP_STRIPCOOL_MAX  = 72.0     # °C, max forced-decomposition/evaporation endotherm (G/L -> ∞ asymptote)
-STRIP_STRIPCOOL_KGL  = 1.80     # cooling ramp per unit excess G/L ratio ((G/L)/(G/L)_des − 1)
+STRIP_STRIPCOOL_MAX  = 72.0     # ┬░C, max forced-decomposition/evaporation endotherm (G/L -> Γê₧ asymptote)
+STRIP_STRIPCOOL_KGL  = 1.80     # cooling ramp per unit excess G/L ratio ((G/L)/(G/L)_des ΓêÆ 1)
 STRIP_T_TOP_LOAD_K   = 0.5      # overhead (TT-322013) attenuation of the bottom feed-load thermal swing
                                 #   (dT_bot is a liquid/reboiler effect; the top gas feels it only weakly).
                                 #   The G/L strip-cool endotherm (dT_strip) couples to the OVERHEAD at full
-                                #   weight — the rising vapour is first to carry the CO2-sweep flash latent load.
-STRIP_ETA_KT    = 0.15     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
+                                #   weight ΓÇö the rising vapour is first to carry the CO2-sweep flash latent load.
+STRIP_ETA_KT    = 1.50     # eta_T penalty per unit fractional bottom-T deficit (feed-load cooling chokes strip)
 STRIP_ETA_KN    = 1.50     # eta_T penalty per unit reactor-feed N/C above design (excess NH3 chokes)
 STRIP_ETA_KW    = 1.50     # eta_T penalty per unit reactor-feed H/C above design (dilution chokes)
 STRIP_ETA_FLOOR = 0.50     # min penalty factor (g_NC, g_HC clamp floor)
@@ -656,9 +651,9 @@ LV322501_KVS        = 36.0        # m3/h flow coefficient (full open) [reference
 #   Pin-safe: constant enters only as boot seed (op = OPEN_DES) and ratio normalizer
 #   (op/OPEN_DES), so the design steady state is bit-identical.
 LV322501_OPEN_DES   = 46.1        # %, opening at the design bottom-solution flow (field-calibrated)
-STRIP_SUMP_DT_LOSS_DES_C = 4.0    # C, design-throughput sump heat-loss ΔT (falling-film tube exit -> LV-322501 drain)
+STRIP_SUMP_DT_LOSS_DES_C = 4.0    # C, design-throughput sump heat-loss ╬öT (falling-film tube exit -> LV-322501 drain)
 STRIP_BOT_T_CRYST_C      = 132.7  # C, urea-melt crystallization floor = sump heat-loss sink T (low-throughput asymptote)
-STRIP_SUMP_NTU_DES       = STRIP_SUMP_DT_LOSS_DES_C / (STRIP_T_BOTTOM_DES_C - STRIP_BOT_T_CRYST_C)  # τ_des = UA/(ṁ_des·cp), design sump heat-loss NTU ≈ 0.1018
+STRIP_SUMP_NTU_DES       = STRIP_SUMP_DT_LOSS_DES_C / (STRIP_T_BOTTOM_DES_C - STRIP_BOT_T_CRYST_C)  # ╧ä_des = UA/(ß╣ü_des┬╖cp), design sump heat-loss NTU Γëê 0.1018
 LV322501_DP_DES_BAR = 139.8       # bar, design pressure drop (144.0 - 4.2)
 STRIP_P_DOWN_BARA   = 4.2         # bar a, downstream of LV-322501 (-> 323C003)
 LV322501_P_DOWN_BARA = 4.0        # bar a, L3-1 LP-loop downstream ref for live-P_syn drain head
@@ -689,14 +684,14 @@ R323_CP_SOLN     = 2.5            # kJ/kg.K, lumped urea-solution specific heat
 #      94 % urea, 130 C ->  cp 2.16   constant is 16 % HIGH
 #      98 % urea, 140 C ->  cp 2.08   constant is 20 % HIGH
 #
-#  cp -- BACK-SOLVED, not guessed (CLAUDE.md §1 allows sourced or back-solved).  Take cp_water
+#  cp -- BACK-SOLVED, not guessed (CLAUDE.md ┬º1 allows sourced or back-solved).  Take cp_water
 #  from steam tables, require the mass-weighted mixing rule to reproduce the model's own
 #  R323_CP_SOLN at the design composition, and read off cp_urea:
 #      cp_urea = (2.5 - 0.20 * 4.2183) / 0.80 = 2.0704 kJ/kg.K
 #  The published value for molten urea is ~2.0-2.1 kJ/kg.K, so the number that falls out of the
 #  back-solve matches the literature independently.  That is the corroboration.
 #
-#  rho -- REGRESSED FROM THE PFD, which CLAUDE.md §0 makes the strict source and which tabulates
+#  rho -- REGRESSED FROM THE PFD, which CLAUDE.md ┬º0 makes the strict source and which tabulates
 #  urea %, water %, temperature and effective density for every urea-solution stream in the plant
 #  (12 streams, 34-98 % urea, 40-183 C; probe_c10_rho.py).  Least squares gives
 #      rho = 972.08 + 255.95 * w_urea - 0.4659 * (T - 100)      kg/m3
@@ -765,9 +760,9 @@ def urea_soln_rho(w_urea: float, T_C: float, anchor: float) -> float:
 
 
 # ==============================================================================================
-#  AUDIT C10, aqueous half -- water properties from IAPWS, and why that does not violate §0
+#  AUDIT C10, aqueous half -- water properties from IAPWS, and why that does not violate ┬º0
 #
-#  §0 makes the PFD the strict source, so departing from its tabulated density needs a reason
+#  ┬º0 makes the PFD the strict source, so departing from its tabulated density needs a reason
 #  stronger than "the number looks wrong".  Here is the reason, and it is specific rather than
 #  general: the PFD's density row is RIGHT almost everywhere and wrong for exactly two streams.
 #
@@ -800,13 +795,13 @@ def urea_soln_rho(w_urea: float, T_C: float, anchor: float) -> float:
 #  Crucially, NEITHER impossible value is used as a constant anywhere in this engine (grep: 908.5
 #  matches nothing; 897.7 matches only a kmol/h figure).  The 328 anchors are R328_C002_RHO = 933.0
 #  at 139 C and R328_C004_RHO = 923.28 at 143 C, which sit +0.64 % and -0.02 % from real water.
-#  So the fix never has to anchor on a bad number: §0 is honoured where the PFD is sound, and the
+#  So the fix never has to anchor on a bad number: ┬º0 is honoured where the PFD is sound, and the
 #  DERIVATIVE comes from physics.
 WATER_TC_K   = 647.096      # K, critical temperature of ordinary water (IAPWS)
 WATER_RHOC   = 322.0        # kg/m3, critical density
 #  Wagner & Pruss, J. Phys. Chem. Ref. Data 22 (1993) 783, Eq. 2.6; reproduced as the auxiliary
-#  saturated-liquid equation in IAPWS R7-97 §8.1.  Six PUBLISHED coefficients -- nothing is fitted
-#  here, so §1 is satisfied without any regression at all.  Verified against an independent IF97
+#  saturated-liquid equation in IAPWS R7-97 ┬º8.1.  Six PUBLISHED coefficients -- nothing is fitted
+#  here, so ┬º1 is satisfied without any regression at all.  Verified against an independent IF97
 #  implementation: worst deviation 0.0047 % over 0-220 C, 0.043 % out to 250 C.
 _WP_B = (1.99274064, 1.09965342, -0.510839303, -1.75493479, -45.5170352, -6.74694450e5)
 _WP_E = (1.0 / 3.0, 2.0 / 3.0, 5.0 / 3.0, 16.0 / 3.0, 43.0 / 3.0, 110.0 / 3.0)
@@ -822,7 +817,7 @@ def water_rho_sat(T_C: float) -> float:
 
 def aqueous_rho(anchor: float, T_des_C: float, T_C: float) -> float:
     """Density of an aqueous stream, kg/m3, as a MULTIPLICATIVE departure from its own design
-    anchor: the absolute value stays the PFD's (§0), only the temperature slope comes from IAPWS.
+    anchor: the absolute value stays the PFD's (┬º0), only the temperature slope comes from IAPWS.
 
     Multiplicative rather than additive because these anchors sit 0-1.3 % above pure water and a
     solution's expansivity tracks water's FRACTIONALLY, not absolutely.  Across the full 44->200 C
@@ -838,7 +833,7 @@ def aqueous_rho(anchor: float, T_des_C: float, T_C: float) -> float:
 def aqueous_cp(anchor: float, T_des_C: float, T_C: float) -> float:
     """cp of an aqueous stream, kJ/kg.K, as an additive departure from its own design anchor.
 
-    Note that §0 does not bind here at all: the PFD has NO cp row anywhere (its rows are flows,
+    Note that ┬º0 does not bind here at all: the PFD has NO cp row anywhere (its rows are flows,
     molar weight, density, temperature and pressure), so steam tables are the only admissible
     source rather than merely the better one.  Additive rather than multiplicative because these
     anchors are LUMPED values well below pure water (4.0 and 3.0 against water's 4.18-4.49), so
@@ -866,7 +861,7 @@ R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
 # LV-322501 (`drain_kgh`) from the remaining live overhead/reboiler load (`m_305`), consumes the
 # beginning-of-substep 323E003/323D001 pressure, and closes exactly at the PFD design point.
 # The retained 90 s lag is a simulator dynamic calibration, not a datasheet-derived gas inventory.
-R323_C003_P_TAU_S = 1.0
+R323_C003_P_TAU_S = 90.0
 
 # --- Stage 2: Flash Tank 323F004 (adiabatic flash 4.1 -> 1.13 bar a, -> 106 C)
 R323_F004_P_BARA    = 1.13                      # bar a, flash pressure
@@ -912,7 +907,7 @@ R323_D002_RHO       = 1151.0                    # kg/m3, PFD stream 315/317 effe
 # flashed off, so 2 Urea -> Biuret + NH3 runs in the tank; the licensor sizes Comp I so the ACTIVE
 # residence stays under ~6 min (10 % of 80 m3 = 8 m3 against an 80.6 m3/h feed).  Holding it at a
 # comfortable mid-range level instead would multiply the biuret exposure several-fold, which is the
-# whole reason the vessel is compartmented at all.  Source: References/323D002.md §3.2.
+# whole reason the vessel is compartmented at all.  Source: References/323D002.md ┬º3.2.
 R323_D002_LVL_SP    = 10.0                      # %, LIC-323507 (Compartment I) setpoint
 R323_FV401_OP_DES   = 50.0                      # %, FV-324401 design stroke
 
@@ -927,19 +922,18 @@ R323_M319_DES  = (1.0 - R323_PHI_V701) * R323_M314_DES                    # flas
 #   in  101 570 + 3 270 = 104 840      out  92 820 + 12 020 = 104 840      (PFD 790 tabulates 12 040)
 R323_MEVAP_DES = R323_PHI_VEVAP * R323_M319_DES + R323_M331_DES           # vapour 790 -> vacuum
 R323_M317_DES  = (1.0 - R323_PHI_VEVAP) * R323_M319_DES                   # product -> tank
-# 323F010 vacuum is a LIVE state (PT-323204) driven by two hand valves — HV-323605 (gas outlet 790,
+# 323F010 vacuum is a LIVE state (PT-323204) driven by two hand valves ΓÇö HV-323605 (gas outlet 790,
 # HIC-323605) and HV-329605 (324F002 ejector motive).  Mapping rule: opening either drops the
 # pressure.  No controller on this node, so stability comes from the ejector's suction-pressure
-# capacity roll-off (pull ∝ P/P_des); anchored so m_evap == pull == R323_MEVAP_DES at design.
+# capacity roll-off (pull Γê¥ P/P_des); anchored so m_evap == pull == R323_MEVAP_DES at design.
 R323_HIC605_DES_PCT = 50.0        # % HIC-323605 design opening (HV-323605 gas-outlet hand valve, stream 790)
 R323_F010_P_KP      = 0.02        # bar a per (kg/s) net vapour imbalance -> 323F010 vacuum ODE
 R323_M324_DES  = R323_M317_DES                                           # tank throughput -> Unit 324
 
 # --- Derived latent / duty terms (force dT/dt = 0 at each design fixed point) ---
-# Stage 1 energy balance: mdot_feed*cp*(T_strip_bot - T_flash_sat) + Q_E002 - mdot_305*lambda_305 = 0
-R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(STRIP_T_BOTTOM_DES_C - STRIP_T_DOWN_DES_C)
-                     + R323_E002_Q_DES_KW)                            # kW available to boil 305
-R323_LAMBDA_305 = R323_Q305_DES_KW / (R323_M305_DES/3600.0)          # kJ/kg (~645.6)
+# Stage 1 energy balance: mdot_feed*cp*(Tfeed-135) + Q_E002 - mdot_305*lambda_305 = 0
+R323_LAMBDA_305 = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(R323_FEED_DES_T_C - R323_C003_T_SP_C)
+                   + R323_E002_Q_DES_KW) / (R323_M305_DES/3600.0)          # kJ/kg (~645.6)
 R323_E002_UA_KW = R323_E002_Q_DES_KW / (tsat_steam(R323_E002_PCHEST_DES) - R323_C003_T_SP_C)  # kW/K
 # Stage 2 adiabatic flash: mdot_314*cp*(135-106) - mdot_701*lambda_701 = 0
 R323_LAMBDA_701 = (R323_M314_DES/3600.0*R323_CP_SOLN*(R323_C003_T_SP_C - R323_F004_T_SP_C)) \
@@ -961,10 +955,10 @@ R323_E010_UA_KW = R323_E010_Q_DES_KW / (tsat_steam(R323_E010_PCHEST_DES) - R323_
 # are each the SAME expression, in the SAME float operation order, as the corresponding runtime
 # `q_avail` term, so at the design seed the ratio q_avail/Q_DES is exactly 1.0 and the duty limit
 # reproduces the design vapour BIT-EXACT (the min() ties on two identical values).
-#   Stage 1  m_feed·cp·(T_strip_bot − T_flash_sat) + Q_E002  == m_305·λ_305   (== R323_LAMBDA_305 back-solve)
-#   Stage 2  m_314·cp·(135 − 106)               == m_701·λ_701       (adiabatic: no Q term)
-#   Stage 3  m_319·cp·(106 − 99) + m_331·cp·(40 − 99) + Q_E010  == m_evap·λ_evap
-R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(STRIP_T_BOTTOM_DES_C - STRIP_T_DOWN_DES_C)
+#   Stage 1  m_feed┬╖cp┬╖(T_feed ΓêÆ 135) + Q_E002  == m_305┬╖╬╗_305       (== R323_LAMBDA_305 back-solve)
+#   Stage 2  m_314┬╖cp┬╖(135 ΓêÆ 106)               == m_701┬╖╬╗_701       (adiabatic: no Q term)
+#   Stage 3  m_319┬╖cp┬╖(106 ΓêÆ 99) + m_331┬╖cp┬╖(40 ΓêÆ 99) + Q_E010  == m_evap┬╖╬╗_evap
+R323_Q305_DES_KW  = (R323_FEED_DES_KGH/3600.0*R323_CP_SOLN*(R323_FEED_DES_T_C - R323_C003_T_SP_C)
                      + R323_E002_Q_DES_KW)                            # kW available to boil 305
 R323_Q701_DES_KW  = (R323_M314_DES/3600.0*R323_CP_SOLN
                      * (R323_C003_T_SP_C - R323_F004_T_SP_C))         # kW released by the 4.1->1.13 letdown
@@ -975,14 +969,14 @@ R323_QEVAP_DES_KW = (R323_M319_DES/3600.0*R323_CP_SOLN*(R323_F004_T_SP_C - R323_
 # the liquid sits at its bubble point.  The boiling-point elevation of the urea liquor is held at
 # its design value (same frozen-activity assumption `conc_infer_324` makes), so the live flash
 # temperature rides the water saturation curve offset by the plant's own design anchor:
-#     T_flash = 106 + [ Tsat(P_live) − Tsat(1.13) ]        -> exactly 106.0 at design (offset ≡ 0)
-_R323_TSAT_F004_DES = tsat_steam(R323_F004_P_BARA)                    # °C, design flash-drum Tsat
-# TD-014: 323C003 needs the same anchor.  Its bottoms sit ~9.8 °C BELOW water's saturation
+#     T_flash = 106 + [ Tsat(P_live) ΓêÆ Tsat(1.13) ]        -> exactly 106.0 at design (offset Γëí 0)
+_R323_TSAT_F004_DES = tsat_steam(R323_F004_P_BARA)                    # ┬░C, design flash-drum Tsat
+# TD-014: 323C003 needs the same anchor.  Its bottoms sit ~9.8 ┬░C BELOW water's saturation
 # temperature at 4.1 bar a because the vapour it is in equilibrium with is 33 % NH3 / 50 % CO2, not
 # steam -- so the offset is a depression, not an elevation, and Raoult-on-water cannot produce it.
 # Held at its design value (the same frozen-activity assumption 323F004 already makes) and carried
 # on the live water saturation slope.
-_R323_TSAT_C003_DES = tsat_steam(R323_C003_P_BARA)                    # °C, design column-bottom Tsat
+_R323_TSAT_C003_DES = tsat_steam(R323_C003_P_BARA)                    # ┬░C, design column-bottom Tsat
 
 # --- Design liquid holdups (kg) and level spans from residence times ---
 R323_C003_M_DES  = R323_M314_DES/3600.0 * R323_C003_M_TAU_S               # kg at design
@@ -1000,26 +994,26 @@ R323_D002_M_I_DES   = R323_D002_M_I_FULL  * (R323_D002_LVL_SP/100.0)
 R323_D002_M_TIE_FULL = R323_D002_M_I_FULL + R323_D002_M_II_FULL
 
 # ==========================================================================
-#  UNITS 323-2 / 328-1 / 328-2 — LP RECIRCULATION & DESORPTION
+#  UNITS 323-2 / 328-1 / 328-2 ΓÇö LP RECIRCULATION & DESORPTION
 #  Screens 323-2 (LP carbamate condensation), 328-1 (desorption/hydrolysis
 #  train), 328-2 (LP absorber + carbamate collection). Design anchors:
 #  Combined 1750 MTPD 100%-load PFD-21/22 MB + LPCC/desorber/hydrolyser DS.
 #
 #  Design-fixed-point discipline (identical to Unit 323-1 above):
 #    * every design flow is a Python expression over the existing R323_*
-#      constants, or over anchors defined here IN DEPENDENCY ORDER — never a
-#      re-typed PFD number — so the boot state is bit-exact.  (e.g.
+#      constants, or over anchors defined here IN DEPENDENCY ORDER ΓÇö never a
+#      re-typed PFD number ΓÇö so the boot state is bit-exact.  (e.g.
 #      R323_M305_DES = (24582/130582)*130482 = 24563.4, NOT the raw 24582.)
-#    * every holdup ODE   dM/dt = Σṁ_in − ṁ_vap − ṁ_out          = 0 at design
-#    * every thermal ODE  M·cp·dT/dt = Σṁ_in·cp·(T_in−T) + Q − ṁ_vap·λ = 0 at
-#      design, with the unknown λ (phase change) or UA/Q (exchanger) BACK-
+#    * every holdup ODE   dM/dt = ╬úß╣ü_in ΓêÆ ß╣ü_vap ΓêÆ ß╣ü_out          = 0 at design
+#    * every thermal ODE  M┬╖cp┬╖dT/dt = ╬úß╣ü_in┬╖cp┬╖(T_inΓêÆT) + Q ΓêÆ ß╣ü_vap┬╖╬╗ = 0 at
+#      design, with the unknown ╬╗ (phase change) or UA/Q (exchanger) BACK-
 #      SOLVED here so the RHS is exactly 0 at the design seed.
 #    * every flow = live valve/speed stroke normalised to its design stroke;
-#      every vapour/vent = design split-fraction × live inflow.
-#  These screens only READ Unit-323 outputs (feed-forward) -> the 135/106/99°C
+#      every vapour/vent = design split-fraction ├ù live inflow.
+#  These screens only READ Unit-323 outputs (feed-forward) -> the 135/106/99┬░C
 #  boundaries stay isolated by construction.
 #
-#  Whole-network design closure follows the PFD-20/21/22 stream table (CLAUDE.md §0):
+#  Whole-network design closure follows the PFD-20/21/22 stream table (CLAUDE.md ┬º0):
 #    328D003 Comp I : in 719+720+721+759 = 31479; out 744 = 31478 (1 kg/h table rounding)
 #    Comp II        : in 343 = 34180; out 735+791+734+793 = 34182 (2 kg/h table rounding)
 #    322C001        : in 744+GCB+CPL = vent + 756(33358)
@@ -1032,7 +1026,7 @@ R323_D002_M_TIE_FULL = R323_D002_M_I_FULL + R323_D002_M_II_FULL
 #    328C004        : in 749+931(40557)         = 750(6833)+739(33724)
 #    328D001        : in 737(6665)+718A(3561.5) = 786(276)+775(1675)+776(8275.5)
 # ==========================================================================
-R3232_CP = 3.0     # kJ/kg·K  LP-carbamate / condensate train (323E003, 323E011).
+R3232_CP = 3.0     # kJ/kg┬╖K  LP-carbamate / condensate train (323E003, 323E011).
 # UN-SOURCED on purpose (reconciled 2026-07-24 vs References/Ammonium Carbamate Heat Capacity Data.md):
 # no single valid equation for the reactive aqueous fluid -- the rigorous cp is a full e-NRTL/UNIQUAC
 # electrolyte package (ion cp tabulated only at 298 K), the one closed form (Chauhan cubic) is the pure
@@ -1040,10 +1034,10 @@ R3232_CP = 3.0     # kJ/kg·K  LP-carbamate / condensate train (323E003, 323E011
 # constant can carry.  Reference frozen band for the SOLUTION is 3.2-3.8 (Stamicarbon lean-NH3 ~3.2 low
 # end); 3.0 is above pure-salt ~2.1 and ~6% below that floor -- a defensible lean-liquor value.  aqueous_cp
 # is WRONG here (carbamate ion cp < 0, electrostriction).  LOCKED: back-solved lambdas + C10 test use 3.0.
-R328_CP  = 4.0     # kJ/kg·K  desorber / hydrolyser aqueous train (328C002/003/004)
-A328_CP  = 4.0     # kJ/kg·K  LP absorber 322C001 aqueous liquor
+R328_CP  = 4.0     # kJ/kg┬╖K  desorber / hydrolyser aqueous train (328C002/003/004)
+A328_CP  = 4.0     # kJ/kg┬╖K  LP absorber 322C001 aqueous liquor
 
-# AUDIT C4 / gap G5 — explicit Unit-328 carbamate-desorption enthalpy for the energy-closure ledger.
+# AUDIT C4 / gap G5 ΓÇö explicit Unit-328 carbamate-desorption enthalpy for the energy-closure ledger.
 # The C4 diagnostic residual is the net NH3-CO2 (carbamate) desorption enthalpy the reboiler steam
 # supplies to strip the columns, previously buried in the back-solved boil-up/condensation latents
 # instead of an explicit xi*dH term (see the derivation at the diagnostic itself). Its design
@@ -1057,21 +1051,21 @@ A328_CP  = 4.0     # kJ/kg·K  LP absorber 322C001 aqueous liquor
 # of the aqueous NH3-CO2 speciation network now available off-25 C in props_nh3co2h2o.py (gap G1).
 _A328_Q_REACT_DES_KW = None    # captured on the first (design) tick; see the 328 energy diagnostic
 
-# ---- boundary (fixed) feed streams  (kg/h @ °C) ----
+# ---- boundary (fixed) feed streams  (kg/h @ ┬░C) ----
 R3232_M797_DES = 1758.0 ; R3232_M797_T = 46.0     # inert-laden recycle -> 323E003
 R3232_M702_DES = 440.0  ; R3232_M702_T = 45.0     # flash recycle       -> 323E011
 A328_CPL_DES   = 1750.0 ; A328_CPL_T   = 46.0     # process condensate 954 -> 322C001 (PFD 1750 kg/h @46 C)
 A328_D003_M719 = 26768.0; A328_D003_M719_T = 45.0 # 719 -> 328D003 Comp I
 A328_D003_M720 = 2758.0 ; A328_D003_M720_T = 40.0 # 720 -> 328D003 Comp I
 A328_D003_M721 = 1763.0 ; A328_D003_M721_T = 41.0 # 721 -> 328D003 Comp I
-# AUDIT B10 — 324E007 condensate.  Confirmed from the P&ID ("Condensed gases in bottom of shell side
+# AUDIT B10 ΓÇö 324E007 condensate.  Confirmed from the P&ID ("Condensed gases in bottom of shell side
 # of 324E007 is discharged to 328D003") and by the 324E007 closure 717 (221) = 759 (190) + 722 (31).
 A328_D003_M759 = 190.0  ; A328_D003_M759_T = 55.0 # 759 -> 328D003 Comp I (PFD-21, hottest of the four)
 
 # ==========================================================================
-#  328C002  Desorber-I  (bottoms 139 °C ; top 117 °C ; floats on PIC-328202)
+#  328C002  Desorber-I  (bottoms 139 ┬░C ; top 117 ┬░C ; floats on PIC-328202)
 #  Reboil heat = latent of the two hot recycle OVHDs 748(@188)+750(@140) that
-#  CONDENSE here; the stripped OVHD 737 is generated (latent λ737 back-solved).
+#  CONDENSE here; the stripped OVHD 737 is generated (latent ╬╗737 back-solved).
 # ==========================================================================
 R328_C002_M738_DES = 31114.0                                # 738 liquid feed (=735 via 328E007)
 R328_C002_M748_DES = 812.0                                  # 748 hydrolyser-I OVHD (condenses)
@@ -1082,16 +1076,16 @@ R328_C002_IN_DES   = (R328_C002_M738_DES + R328_C002_M748_DES
 R328_C002_PHI737   = 6665.0 / 40434.0                       # OVHD split -> 328D001 (737)
 R328_C002_M737_DES = R328_C002_PHI737 * R328_C002_IN_DES    # 6665
 R328_C002_M743_DES = R328_C002_IN_DES - R328_C002_M737_DES  # 33769 bottoms -> hydrolyser
-R328_C002_T_BOT_BOT = 139.0 ; R328_C002_T_BOT_TOP = 117.0
-R328_C002_T_BOT738 = 114.0 ; R328_C002_T_BOT748 = 188.0 ; R328_C002_T_BOT750 = 140.0
+R328_C002_T_BOT = 139.0 ; R328_C002_T_TOP = 117.0
+R328_C002_T738 = 114.0 ; R328_C002_T748 = 188.0 ; R328_C002_T750 = 140.0
 R328_D001_T = 61.0                                          # 775 reflux temperature (from 328D001)
 # Holdup: see the F-8 geometry block below -- R328_C002_M_DES is set there from the datasheet.
 R328_C002_LAM748 = 2000.0 ; R328_C002_LAM750 = 2100.0       # kJ/kg condensation of recycle OVHDs
-# sensible net onto the 139°C bottoms (kW), then λ737 closes M·cp·dT/dt = 0:
-R328_C002_SENS = ((R328_C002_M738_DES*(R328_C002_T_BOT738 - R328_C002_T_BOT_BOT)
-                   + R328_C002_M775_DES*(R328_D001_T   - R328_C002_T_BOT_BOT)
-                   + R328_C002_M748_DES*(R328_C002_T_BOT748 - R328_C002_T_BOT_BOT)
-                   + R328_C002_M750_DES*(R328_C002_T_BOT750 - R328_C002_T_BOT_BOT))
+# sensible net onto the 139┬░C bottoms (kW), then ╬╗737 closes M┬╖cp┬╖dT/dt = 0:
+R328_C002_SENS = ((R328_C002_M738_DES*(R328_C002_T738 - R328_C002_T_BOT)
+                   + R328_C002_M775_DES*(R328_D001_T   - R328_C002_T_BOT)
+                   + R328_C002_M748_DES*(R328_C002_T748 - R328_C002_T_BOT)
+                   + R328_C002_M750_DES*(R328_C002_T750 - R328_C002_T_BOT))
                   / 3600.0 * R328_CP)                                     # kW
 R328_C002_LAM737 = ((R328_C002_SENS
                      + R328_C002_M748_DES/3600.0*R328_C002_LAM748
@@ -1099,10 +1093,10 @@ R328_C002_LAM737 = ((R328_C002_SENS
                     / (R328_C002_M737_DES/3600.0))                        # kJ/kg (~1879)
 
 # ==========================================================================
-#  328C003  Hydrolyser  (200 °C, 16.8 bar a, MP-steam 911, 1 h residence)
+#  328C003  Hydrolyser  (200 ┬░C, 16.8 bar a, MP-steam 911, 1 h residence)
 #  Hydrolysis  NH2CONH2 + H2O <=> 2NH3 + CO2  is ENDOTHERMIC; MP steam 911
-#  supplies it.  λ748_gen (OVHD generation latent) lumps the reaction endotherm
-#  and is back-solved so M·cp·dT/dt = 0 at design.
+#  supplies it.  ╬╗748_gen (OVHD generation latent) lumps the reaction endotherm
+#  and is back-solved so M┬╖cp┬╖dT/dt = 0 at design.
 # ==========================================================================
 R328_C003_M746_DES = R328_C002_M743_DES                     # 33769 feed via 328E021 (cold)
 R328_C003_M911_DES = 1105.0                                 # MP-steam strip (FIC-329402)
@@ -1116,13 +1110,13 @@ R328_C003_DT_DES = R328_C003_T - R328_C003_T746            # 10 C differential (
 R328_C003_P_BARA = 16.8 ; R328_C003_P_KP = 0.02
 R328_C003_PV_OP_DES = 50.0                                  # PV-328203 OVHD stroke
 R328_C003_M_DES = R328_C003_M747_DES/3600.0 * 3600.0        # 34062 kg (1 h residence)
-# λ748_gen back-solve: m746·cp·(190−200) + m911·ΔH − m748·λ748 = 0
+# ╬╗748_gen back-solve: m746┬╖cp┬╖(190ΓêÆ200) + m911┬╖╬öH ΓêÆ m748┬╖╬╗748 = 0
 R328_C003_LAM748 = ((R328_C003_M746_DES/3600.0*R328_CP*(R328_C003_T746 - R328_C003_T)
                      + R328_C003_M911_DES/3600.0*R328_C003_M911_DH)
                     / (R328_C003_M748_DES/3600.0))                        # kJ/kg (~1378)
 
 # ==========================================================================
-#  328C004  Desorber-II  (143 °C, LP-steam 931, 900 s residence)
+#  328C004  Desorber-II  (143 ┬░C, LP-steam 931, 900 s residence)
 # ==========================================================================
 R328_C004_M749_DES = R328_C003_M747_DES                     # 34062 feed via 328E021 (hot)
 R328_C004_M931_DES = 6495.0                                 # LP-steam strip (FIC-329401)
@@ -1132,7 +1126,7 @@ R328_C004_PHI750   = 6833.0 / 40557.0                       # OVHD split -> 328C
 R328_C004_M750_DES = R328_C004_PHI750 * R328_C004_IN_DES    # 6833
 R328_C004_M739_DES = R328_C004_IN_DES - R328_C004_M750_DES  # 33724 bottoms -> 328E007 -> boundary
 R328_C004_T = 143.0 ; R328_C004_T749 = 148.0
-R328_C004_DT_DES = R328_C004_T - R328_C002_T_BOT750             # 3 C bottom (143) - top tray (140 = OVHD 750), TT-328004
+R328_C004_DT_DES = R328_C004_T - R328_C002_T750             # 3 C bottom (143) - top tray (140 = OVHD 750), TT-328004
 # Holdup: see the F-8 geometry block below -- R328_C004_M_DES is set there from the datasheet.
 R328_C004_LAM750 = ((R328_C004_M749_DES/3600.0*R328_CP*(R328_C004_T749 - R328_C004_T)
                      + R328_C004_M931_DES/3600.0*R328_C004_M931_DH)
@@ -1179,7 +1173,7 @@ R328_C002_NTRAY  = 15                         # executed trays, 328C002 (DDS lin
 R328_C004_NTRAY  = 22                         # executed trays, 328C004 (DDS line 35)
 R328_C002_H_NLL  = 1.150                      # m,  sump normal liquid level above T.L. (tray arrangement)
 R328_C004_H_NLL  = 0.920                      # m
-# Densities: the PFD rules (CLAUDE.md §0).  Its stream-739 "Density eff." 923.28 kg/m3 @ 143 C and
+# Densities: the PFD rules (CLAUDE.md ┬º0).  Its stream-739 "Density eff." 923.28 kg/m3 @ 143 C and
 # the datasheet's 923.25 @ 143 C agree to 3e-5 relative -- two independent licensor documents on the
 # same number, and both are simply water at 143 C, which is what a <1 ppm purified condensate is.
 # For 328C002 the two differ (PFD 743 = 933.0 @ 139 C, datasheet = 944.0 @ 138 C); the datasheet
@@ -1199,7 +1193,7 @@ R328_C002_M_DES = _r328_holdup(R328_C002_NTRAY, R328_C002_H_NLL, R328_C002_RHO) 
 R328_C004_M_DES = _r328_holdup(R328_C004_NTRAY, R328_C004_H_NLL, R328_C004_RHO)   # ~1436 kg (was 8431)
 
 # ==========================================================================
-#  323E011 + 323D011  (LP carbamate condenser + drum, 45 °C, 1.13 bar a)
+#  323E011 + 323D011  (LP carbamate condenser + drum, 45 ┬░C, 1.13 bar a)
 #  Inlets are PFD-21/22 streams 701+786+321+791.  Outputs are liquid 718 to
 #  323D011 and gas 702 to 323C005.  Stream 734 is a separate 328D003 Comp-II
 #  wash branch into 323D011; it is not an E011 inlet.  The PFD closes E011 at
@@ -1231,8 +1225,8 @@ R3232_E011_MV_DES   = 440.0                                 # PFD stream 702 -> 
 R3232_E011_PHIV     = R3232_E011_MV_DES / R3232_E011_IN_DES
 R3232_E011_MCOND_DES = (R3232_E011_IN_DES - R3232_E011_M402_DES
                         - R3232_E011_MV_DES)                 # gas condensed/absorbed in 323E011
-R3232_M718A_DES = 0.5 * R3232_D011_M718_DES                 # 3561.5 -> 328D001 (PFD 718A 3562 ✓)
-R3232_M718B_DES = 0.5 * R3232_D011_M718_DES                 # 3561.5 -> 323E003 (PFD 718B 3562 ✓)
+R3232_M718A_DES = 0.5 * R3232_D011_M718_DES                 # 3561.5 -> 328D001 (PFD 718A 3562 Γ£ô)
+R3232_M718B_DES = 0.5 * R3232_D011_M718_DES                 # 3561.5 -> 323E003 (PFD 718B 3562 Γ£ô)
 R3232_E011_T = 45.0 ; R3232_E011_T701 = 106.0 ; R3232_E011_T786 = 61.0
 R3232_E011_P_BARA = 1.13 ; R3232_E011_P_KP = 0.05
 R3232_E011_PV_OP_DES = 25.0                                 # PIC-323203 vent stroke
@@ -1241,15 +1235,15 @@ R3232_D011_M_DES   = R3232_D011_M718_DES/3600.0 * R3232_D011_M_TAU_S      # 1187
 R3232_D011_LVL_SP  = 50.0                        # LT-323503 design level (%): OEM "maintains the
 #   flash tank condenser level tank at 50% capacity" (328E021 328E007 328P003 328P006.md:359).
 R3232_LV503_OP_DES  = 50.0                       # LV-323503 stroke, 323P008 common discharge header
-R3232_FIC405_OP_DES = 0.0                        # FV-328405 stroke — the loop is stream 793, a
+R3232_FIC405_OP_DES = 0.0                        # FV-328405 stroke ΓÇö the loop is stream 793, a
 #   normally-closed Comp-I header spare (PFD 0 kg/h), so it sits shut at design.  It is NOT the
 #   718A leg: 718A is the LIC-323503 total draw minus the FIC-323418 718B leg, an unmetered
 #   remainder, and driving it from a second integrator made the D011 level loop ring.
 R3232_FIC418_OP_DES = 50.0                       # FV-323418 stroke, 718B leg -> 323E003
 R3232_M718A_TAU_S   = 45.0                       # 718A leg transport lag (was the FIC-328405 lag)
 R3232_E011_Q_DES_KW = 3440.0                                # datasheet condenser duty
-R3232_E011_UA_KW    = R3232_E011_Q_DES_KW / (R3232_E011_T - 35.0)         # kW/K vs 35°C CW
-# λ_v011 (vapour-generation latent) closes the drum energy balance at 45°C:
+R3232_E011_UA_KW    = R3232_E011_Q_DES_KW / (R3232_E011_T - 35.0)         # kW/K vs 35┬░C CW
+# ╬╗_v011 (vapour-generation latent) closes the drum energy balance at 45┬░C:
 R3232_E011_SENS = (((R3232_E011_M701_DES + R3232_E011_RECON_KGH)*(R3232_E011_T701 - R3232_E011_T)
                     + R3232_E011_M786_DES*(R3232_E011_T786 - R3232_E011_T)
                     + R3232_E011_M321_DES*(74.0          - R3232_E011_T)
@@ -1259,10 +1253,10 @@ R3232_E011_LAMV = ((R3232_E011_Q_DES_KW - R3232_E011_SENS)
                    / (R3232_E011_MCOND_DES/3600.0))                       # kJ/kg condensed gas
 
 # ==========================================================================
-#  328D001  Desorber-I reflux drum (61 °C, 2.6 bar a); 328E004 condenses 737
+#  328D001  Desorber-I reflux drum (61 ┬░C, 2.6 bar a); 328E004 condenses 737
 # ==========================================================================
 R328_D001_M737_DES  = R328_C002_M737_DES                    # 6665 OVHD vapour in
-R328_D001_M718A_DES = R3232_M718A_DES                       # 3561.5 recycle in (PFD 718A 3562 ✓)
+R328_D001_M718A_DES = R3232_M718A_DES                       # 3561.5 recycle in (PFD 718A 3562 Γ£ô)
 R328_D001_IN_DES    = R328_D001_M737_DES + R328_D001_M718A_DES
 R328_D001_M786_DES  = 276.0                                 # vent -> 323E011
 R328_D001_M775_DES  = R328_C002_M775_DES                    # 1675 reflux -> 328C002 (FIC-328404)
@@ -1270,9 +1264,9 @@ R328_D001_M775_DES  = R328_C002_M775_DES                    # 1675 reflux -> 328
 # Read-only UI anchor for FIC-328404: vol = 1.5 * (m_775 / M775_DES), bit-exact 1.5 at design
 # (PFD mass 1675 kg/h / rho 1095 = 1.53 -> tabulated 1.5).  Physics mass balance (m_775) UNTOUCHED.
 S775_VOL_DES = 1.5
-R328_D001_M776_DES  = R328_D001_IN_DES - R328_D001_M786_DES - R328_D001_M775_DES  # 8275.5 -> 323E003 (PFD 776 8275 ✓)
+R328_D001_M776_DES  = R328_D001_IN_DES - R328_D001_M786_DES - R328_D001_M775_DES  # 8275.5 -> 323E003 (PFD 776 8275 Γ£ô)
 R328_D001_M776_RHO  = 1095.0    # kg/m3, stream 776 eff. density @61 C (Combined_1750 tbl, col 776) -> FT-328401 m3/h (8275.5/1095=7.56 -> PFD 7.6)
-R328_D001_M774_DES  = R328_D001_M775_DES + R328_D001_M776_DES             # 9950.5 (PFD 774 9950 ✓)
+R328_D001_M774_DES  = R328_D001_M775_DES + R328_D001_M776_DES             # 9950.5 (PFD 774 9950 Γ£ô)
 R328_D001_T718A = 45.0
 R328_D001_M_FULL = 20900.0
 R328_D001_LVL_SP = 50.5
@@ -1288,19 +1282,19 @@ R328_E004_TV_OP_DES = 50.0                                  # TV-328002 CW strok
 # TIC-328002 controls the opening of TV-328002 (on the CW RETURN line, nozzle N6) = the CW FLOW.
 # TT-329007 reads stream 1029 (the CW return temp): with the process condensation load roughly fixed,
 # the return temp is INVERSE in the CW flow -> opening TV-328002 (more flow) COOLS the return, closing
-# it heats the return:  T_cw_out = T_in + ΔT_des·(op_des/op), = 38 C at the design 50 % opening.
+# it heats the return:  T_cw_out = T_in + ╬öT_des┬╖(op_des/op), = 38 C at the design 50 % opening.
 R328_E004_CW_T_IN_C     = 30.0                              # CW supply (stream 1028) inlet temp, C
 R328_E004_CW_T_OUT_DES_C = 38.0                             # CW return (stream 1029) outlet temp at design, C
 R328_E004_CW_T_MAX_C     = 110.0                            # display clamp: CW flashes near this at the 2.2 bar a return
-# λ737_cond (condensation latent) closes drum energy balance at 61°C:
-R328_D001_SENS = ((R328_D001_M737_DES*(R328_C002_T_BOT_TOP - R328_D001_T)
+# ╬╗737_cond (condensation latent) closes drum energy balance at 61┬░C:
+R328_D001_SENS = ((R328_D001_M737_DES*(R328_C002_T_TOP - R328_D001_T)
                    + R328_D001_M718A_DES*(R328_D001_T718A - R328_D001_T))
                   / 3600.0 * R328_CP)                                     # kW
 R328_D001_LAM737 = ((R328_E004_Q_DES_KW - R328_D001_SENS)
                     / (R328_D001_M737_DES/3600.0))                        # kJ/kg (~2163)
 
 # ==========================================================================
-#  322C001  LP absorber (43 °C, 3.9 bar a); GCB off-gas boot-pinned at runtime
+#  322C001  LP absorber (43 ┬░C, 3.9 bar a); GCB off-gas boot-pinned at runtime
 # ==========================================================================
 A328_M755_DES = 31478.0                                     # Comp-II draw via 322P002
 A328_M755_RHO = 1005.0                                      # kg/m3, stream 755 eff. density @40 C (Combined_1750 tbl, col 755) -> FT-322402 m3/h (31478/1005=31.32 -> PFD 31.3)
@@ -1315,13 +1309,13 @@ A328_C001_M_DES = A328_M756_DES/3600.0 * A328_C001_M_TAU_S  # 5559.7 kg
 A328_QFLOOD_KW  = 500.0                                     # XV-322915 steam-flood latent load
 # GCB boot-pin globals (lazy-pinned in step_sim Stage I; reset in _pin_hpcc_ua):
 A328_GCB_DES    = None   # kg/h off-gas from HV-322604 at the settled design seed
-A328_GCB_T      = None   # °C off-gas temperature
+A328_GCB_T      = None   # ┬░C off-gas temperature
 A328_PHI_ABS    = None   # absorbed fraction 980/GCB_DES (total); species split is a frozen carbamate ratio on top
-A328_VENT_DES   = None   # kg/h vented = GCB_DES − 980
+A328_VENT_DES   = None   # kg/h vented = GCB_DES ΓêÆ 980
 A328_LAMBDA_ABS = None   # kJ/kg absorption enthalpy (back-solved at pin for T=43)
 
 # ==========================================================================
-#  323E003 + 323D001 + 323P001  LPCC (74 °C, tempered-water cooled, 3.2 bar a)
+#  323E003 + 323D001 + 323P001  LPCC (74 ┬░C, tempered-water cooled, 3.2 bar a)
 # ==========================================================================
 R3232_E003_M305_DES  = R323_M305_DES                        # 24563.4 top vapour ex 323C003
 R3232_E003_M718B_DES = R3232_M718B_DES                      # 3560.4
@@ -1355,20 +1349,20 @@ R328_FFIC_RATIO_DES = ((R328_C004_M931_DES / 1000.0)
                        / (R3232_E003_M744_DES / RHO_744_KGM3))           # 0.20685 T/M3
 R3232_E003_M308_DES = R3232_E003_IN_DES - R3232_E003_M321_DES             # condensed-liquid draw
 R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
-# 323E003 tempered-water circuit: PFD stream 1102 supply 55 °C / 1103 return 65 °C.  R3232_TW_T is
+# 323E003 tempered-water circuit: PFD stream 1102 supply 55 ┬░C / 1103 return 65 ┬░C.  R3232_TW_T is
 #   their mean (== 60) and stays the DESIGN datum for the UA back-solve below -- never a live value.
 R3232_TW_SUP_T = 55.0 ; R3232_TW_RET_T = 65.0               # TIC-323013 SP (1102) ; TT-323015 (1103)
 R3232_TV13_DES_PCT = 50.0 ; R3232_TW_TAU_S = 25.0           # TV-323013A design stroke ; supply-T lag (s)
-R3232_E003_T744 = R3232_E003_T - 30.0                       # 44 °C wash to Comp II
-R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.30
+R3232_E003_T744 = R3232_E003_T - 30.0                       # 44 ┬░C wash to Comp II
+R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.03
 R3232_E003_PV_OP_DES = 25.0                                 # PV-323202 vent stroke
-R3232_D001_M_FULL = 11.10 * 1218.0                          # 13519.8 kg (V·ρ)
+R3232_D001_M_FULL = 11.10 * 1218.0                          # 13519.8 kg (V┬╖╧ü)
 R3232_D001_LVL_SP = 50.0
 R3232_D001_M_DES  = R3232_D001_M_FULL * (R3232_D001_LVL_SP/100.0)         # 6759.9 kg
 R3232_E003_Q_DES_KW = 14000.0                               # tempered-water duty (LPCC datasheet)
 R3232_E003_UA_KW    = R3232_E003_Q_DES_KW / (R3232_E003_T - R3232_TW_T)   # 1000 kW/K vs T_tw
 R3232_E003_M_COND_DES = R3232_E003_M305_DES + R3232_E003_M797_DES - R3232_E003_M321_DES  # 24998.4
-# λ_cond back-solve: Σṁ_in·cp·(T_in−74) + ṁ_cond·λ − Q_cw = 0
+# ╬╗_cond back-solve: ╬úß╣ü_in┬╖cp┬╖(T_inΓêÆ74) + ß╣ü_cond┬╖╬╗ ΓêÆ Q_cw = 0
 R3232_E003_SENS = ((R3232_E003_M305_DES *(R3232_E003_T305    - R3232_E003_T)
                     + R3232_E003_M718B_DES*(R3232_E011_T      - R3232_E003_T)
                     + R3232_E003_M776_DES *(R328_D001_T       - R3232_E003_T)
@@ -1417,7 +1411,7 @@ A328_D003_MIII_DES = A328_D003_MIII_FULL * 0.50
 A328_D003_M343_DES = A323_C005_BOT_DES
 A328_D003_COMP_I_ROUNDING_KGH = 1.0
 A328_D003_COMP_II_ROUNDING_KGH = 2.0
-# PFD-22 stream 793 (Amm. Water 56 C, rho 992.4) — a normally-closed SPARE branch off the same
+# PFD-22 stream 793 (Amm. Water 56 C, rho 992.4) ΓÇö a normally-closed SPARE branch off the same
 # 343/733 Comp-II discharge header that feeds 735 / 791 / 734.  PFD design flow is 0 kg/h and
 # 0 m3/h, so FIC-328405 sits at 0 % stroke at design; full stroke is one branch capacity, i.e.
 # the twin of the 791/734 legs (1534 kg/h).
@@ -1440,7 +1434,7 @@ A328_D003_TIII = ((A328_D003_MI_DES * A328_D003_TI
                    + A328_D003_MII_DES * A328_D003_TII)
                   / (A328_D003_MI_DES + A328_D003_MII_DES))
 A328_D003_V001_T = A328_D003_TII
-# Comp I carbamate-formation exotherm 2NH3+CO2<=>NH2COONH4 (λ_I on total inflow):
+# Comp I carbamate-formation exotherm 2NH3+CO2<=>NH2COONH4 (╬╗_I on total inflow):
 A328_D003_LAM_I = -A328_CP * (
       A328_D003_M719*(A328_D003_M719_T - A328_D003_TI)
     + A328_D003_M720*(A328_D003_M720_T - A328_D003_TI)
@@ -1458,7 +1452,7 @@ R328_E021_LOSS = 54.4                                       # kW shell heat loss
 #   190.0021 C, so it cannot carry the design anchor; the design temperatures give the same
 #   effectiveness exactly and reconstruct the datasheet in the process -- Q_cold = 33769/3600*4.0*51
 #   = 1913.58 kW (~ its 1913.6) and the hot/cold closure 1968.03 - 1913.58 = 54.45 kW (~ its 54.4).
-R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT_BOT) / (R328_C003_T - R328_C002_T_BOT_BOT)   # 51/61 = 0.83607
+R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT) / (R328_C003_T - R328_C002_T_BOT)   # 51/61 = 0.83607
 # Hot-side (stream 749) shell loss in flow-temperature units [kg.K/h], back-solved from the plant's
 # own design state -- the hot duty the cold side does NOT receive:
 #   34062*(200-148) - 33769*(190-139) = 1771224 - 1722219 = 49005 kg.K/h = 49005/3600*4.0 = 54.45 kW,
@@ -1466,12 +1460,12 @@ R328_E021_EPS_T = (R328_C003_T746 - R328_C002_T_BOT_BOT) / (R328_C003_T - R328_C
 # R328_E021_EPS_T above).  Used as an ENERGY-BALANCE closure, not as a second effectiveness, so
 # 328E021 can neither create nor destroy energy off-design.
 R328_E021_LOSS_DT = (R328_C004_M749_DES * (R328_C003_T    - R328_C004_T749)
-                     - R328_C003_M746_DES * (R328_C003_T746 - R328_C002_T_BOT_BOT))   # 49005 kg.K/h
+                     - R328_C003_M746_DES * (R328_C003_T746 - R328_C002_T_BOT))   # 49005 kg.K/h
 R328_E007_EPS  = 0.6667                                     # 328E007 feed/effluent interchanger
 R328_E007_LOSS = 18.3                                       # kW shell heat loss
 R328_E007_TC_OUT = 114.0 ; R328_E007_TH_OUT = 89.0         # -> 738 feed / 740 boundary (design anchors)
-# AUDIT C10 — 328E007 was DEAD: the two constants above were defined and never referenced, so the
-# 328C002 feed sat on a frozen R328_C002_T_BOT738 = 114 and TT-328006 on a frozen 89, i.e. a 2005 kW
+# AUDIT C10 ΓÇö 328E007 was DEAD: the two constants above were defined and never referenced, so the
+# 328C002 feed sat on a frozen R328_C002_T738 = 114 and TT-328006 on a frozen 89, i.e. a 2005 kW
 # interchanger duty completely decoupled from its own live hot stream (the 328C004 bottoms).  Wired
 # with the SAME two-part idiom 328E021 already uses: a design-temperature effectiveness for the cold
 # outlet, and an ENERGY-BALANCE closure (not a second effectiveness) for the hot outlet, so 328E007
@@ -1485,10 +1479,10 @@ R328_E007_LOSS_DT = (R328_C004_M739_DES * (R328_C004_T - R328_E007_TH_OUT)
 # 328C002 top-to-bottom design differential: the column top (stream 737 / TT-328008 node, 117 C) sits
 # 22 C below the bottoms state s.a328_c002_T (139 C).  Lets TT-328008 and the TIC-328008 inferential
 # ride the LIVE column instead of a module constant (AUDIT B4 / C31).
-R328_C002_DT_TOP = R328_C002_T_BOT_BOT - R328_C002_T_BOT_TOP        # 22 C
+R328_C002_DT_TOP = R328_C002_T_BOT - R328_C002_T_TOP        # 22 C
 # 328C003 bottoms-to-overhead design differential: stream 748 leaves at 188 C (PFD-22) against the
 # 200 C bulk, so TT-328011 rides the live hydrolyser state at that offset (AUDIT B6).
-R328_C003_DT_748 = R328_C003_T - R328_C002_T_BOT748             # 12 C
+R328_C003_DT_748 = R328_C003_T - R328_C002_T748             # 12 C
 # --- TIC-328008 inferential: H2O mol% in 328C002 offgas (-> 328E004) ---
 # VLE node is the 328C002 OVHD (117 C / 3.5 bar a), NOT the 328D001 drum (2.6 bar a):
 # the drum sits 0.9 bar below the column top across 328E004, so the drum-node Raoult
@@ -1498,7 +1492,7 @@ R328_C003_DT_748 = R328_C003_T - R328_C002_T_BOT748             # 12 C
 # reproduces 46.21 bit-exact while the runtime form (main.py:~3757) stays live on drum P.
 R328_C002_P_TOP  = 3.5                                      # 328C002 OVHD press (bar a) at the VLE node
 # ==========================================================================
-#  AUDIT C1 / C29 — column PRESSURE states for 328C002 and 328C004
+#  AUDIT C1 / C29 ΓÇö column PRESSURE states for 328C002 and 328C004
 # ==========================================================================
 #  The bug the audit measured: a 30 % LP-steam cut to 328C004 moved its temperature by EXACTLY
 #  0.0 K, and cutting the 328C003 overhead relief moved 328C002 by 8e-10 K.  The mechanism was an
@@ -1523,18 +1517,18 @@ R328_C002_P_TOP  = 3.5                                      # 328C002 OVHD press
 #             dissolved NH3/CO2 raising the liquor's vapour pressure above pure water, so the
 #             pure-water bubble point slightly overstates it.  Treated as one lumped offset.
 R328_C002_P_KP   = 0.02                                     # bar per (kg/s) net vapour imbalance
-R328_C002_DP_COL = psat_water_bara(R328_C002_T_BOT_BOT) - R328_C002_P_TOP     # -0.0104 bar
+R328_C002_DP_COL = psat_water_bara(R328_C002_T_BOT) - R328_C002_P_TOP     # -0.0104 bar
 R328_C004_P_BARA = 3.7                                      # bar a, PFD-22 stream 750 / 779 / 780
 R328_C004_P_KP   = 0.02                                     # bar per (kg/s) net vapour imbalance
 R328_C004_DP_COL = psat_water_bara(R328_C004_T) - R328_C004_P_BARA        # +0.2041 bar
 R328_E004_DP     = R328_C002_P_TOP - R328_D001_P_BARA       # 0.9 bar drop 328C002 top -> 328D001 drum over 328E004
 R328_D001_OFFGAS_H2O_PFD = 46.21                            # mol% H2O in offgas, Combined_1750 PFD stream 737 @117 C / 3.5 bar a
-R328_D001_OFFGAS_PHI = (R328_D001_OFFGAS_H2O_PFD/100.0) * R328_C002_P_TOP / psat_water_bara(R328_C002_T_BOT_TOP)   # H2O activity coeff back-solved to PFD 737; psat(117)=1.8004 -> 0.898328
-R328_D001_OFFGAS_H2O_DES = 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_BOT_TOP) / R328_C002_P_TOP   # = 46.21 mol% -> 328E004 (identity anchor; supersedes 62.9 drum-node Raoult)
+R328_D001_OFFGAS_PHI = (R328_D001_OFFGAS_H2O_PFD/100.0) * R328_C002_P_TOP / psat_water_bara(R328_C002_T_TOP)   # H2O activity coeff back-solved to PFD 737; psat(117)=1.8004 -> 0.898328
+R328_D001_OFFGAS_H2O_DES = 100.0 * R328_D001_OFFGAS_PHI * psat_water_bara(R328_C002_T_TOP) / R328_C002_P_TOP   # = 46.21 mol% -> 328E004 (identity anchor; supersedes 62.9 drum-node Raoult)
 
 
 # ==========================================================================
-#  UNIT 324  —  TWO-STAGE VACUUM EVAPORATION  (Screens 324-1 / 324-1B)
+#  UNIT 324  ΓÇö  TWO-STAGE VACUUM EVAPORATION  (Screens 324-1 / 324-1B)
 #  Feed  = 323D002 product delivered by FIC-324401 (m_324, live): 80 % urea,
 #          ~99 C.  Product = 98.6 % urea melt to 335 finishing.
 #    Stage 1  Evaporator I   324E001 (heater) + 324F001 (separator)
@@ -1584,7 +1578,7 @@ R324_P1_DES    = R324_U_DES / R324_W_EV1          # Stage-1 melt @94.31 %
 R324_V1_DES    = R324_FEED_DES - R324_P1_DES      # Stage-1 vapour -> 324E002 condenser
 R324_P2_DES    = R324_U_DES / R324_W_EV2          # Stage-2 melt @97.71 % (final product)
 R324_V2_DES    = R324_P1_DES  - R324_P2_DES       # Stage-2 vapour -> 324E005 condenser
-# AUDIT C2 — total CONDENSABLE load on the vacuum-condenser train (324E002/E005/E006/E007), i.e. the
+# AUDIT C2 ΓÇö total CONDENSABLE load on the vacuum-condenser train (324E002/E005/E006/E007), i.e. the
 # 323F010 flash vapour 790 plus both evaporator-stage vapours 705/709.  Used to make the 328D003
 # Comp-I condensate return (PFD 719+720+721) a LIVE function of what the evaporation section actually
 # boils, instead of the three frozen constants that decoupled the two units entirely.  Anchored, so
@@ -1598,7 +1592,7 @@ R324_COND_DES  = R323_MEVAP_DES + R324_V1_DES + R324_V2_DES    # kg/h (12013.3 +
 # Worse, the PY-324201 / AY-324701 soft sensors (`conc_infer_324`) DID move off design, so the
 # HMI showed a strength the mass balance refused to produce.  The water actually removed is now
 # min(concentration-limited, duty-limited) and the published strength follows the live melt.
-# The design latent loads R324_Q1_DES_KW / R324_Q2_DES_KW are defined with the λ constants below.
+# The design latent loads R324_Q1_DES_KW / R324_Q2_DES_KW are defined with the ╬╗ constants below.
 
 # --- Stage 1 : Evaporator I  324E001 / 324F001  (0.33 bar a, hold 130 C) ------
 R324_F001_P_BARA = 0.33                           # bar a separator vacuum boundary (HARD)
@@ -1644,8 +1638,8 @@ R324_LV9505_SPAN      = R324_E001_COND_DES / (R324_LV9505_OP_DES/100.0)     # kg
 #  ejector pull scales linearly with motive; anchored so at the design stroke the
 #  live pull == R324_F001_EJPULL_DES bit-exact (ratio 1.0) -> vacuum ODE unchanged
 #  at steady state.  Steam-side hand valve -> off the urea/water conservation network.
-# AUDIT C16 — was 650.0, sourced from the ejector datasheet (324-1 ED-2), not the PFD.  CLAUDE.md §2:
-# PFD values strictly override coded constants, and here the PFD is also the stronger evidence — the
+# AUDIT C16 ΓÇö was 650.0, sourced from the ejector datasheet (324-1 ED-2), not the PFD.  CLAUDE.md ┬º2:
+# PFD values strictly override coded constants, and here the PFD is also the stronger evidence ΓÇö the
 # licensor's own closure around 324F002 is exact on it: 706 (72 kg/h, the 324E002 shell vent) + 924
 # (390) = 462 = stream 708 to 323C005.  The pull is anchored as a RATIO (mot9605_m / MOTIVE_DES), so
 # the design fixed point is untouched and only the published motive flow corrects, 650 -> 390 kg/h.
@@ -1680,7 +1674,7 @@ R324_F003_FA_DES  = 21.0                             # kg/h PFD stream 783 false
 R324_PV203_OP_DES = 50.0
 
 # ==============================================================================================
-#  AUDIT F-8 / TD-009 — DOWNSTREAM COMPONENT SPECIES BALANCE (units 323 + 324)
+#  AUDIT F-8 / TD-009 ΓÇö DOWNSTREAM COMPONENT SPECIES BALANCE (units 323 + 324)
 # ==============================================================================================
 # Species tracking used to stop dead at LV-322501: everything downstream was LUMPED MASS moved by
 # design split fractions, so there was no C2 component balance and no C6 summation equation past
@@ -1691,7 +1685,7 @@ R324_PV203_OP_DES = 50.0
 # six-species mass-fraction state; the species are advanced by the SAME flows the mass ODEs already
 # compute, so C1 is untouched by construction and C2/C6 are added on top:
 #
-#     d(M·w_i)/dt = ṁ_in·w_in,i − ṁ_liq·w_i − ṁ_vap·y_i + ν_i·ξ ,     Σ w_i = Σ y_i = 1
+#     d(M┬╖w_i)/dt = ß╣ü_in┬╖w_in,i ΓêÆ ß╣ü_liq┬╖w_i ΓêÆ ß╣ü_vap┬╖y_i + ╬╜_i┬╖╬╛ ,     ╬ú w_i = ╬ú y_i = 1
 #
 # Two pieces of real physics fall out of the design data and had to be modelled explicitly:
 #
@@ -1703,11 +1697,11 @@ R324_PV203_OP_DES = 50.0
 #      Same Arrhenius form and activation energy the stripper already uses (STRIP_BIU_EA).
 #
 #  (2) VAPOUR COMPOSITION BY RELATIVE VOLATILITY.  y_i is not a free vector: it is set by the live
-#      liquid composition through α_i (volatility relative to water), back-solved at the design
+#      liquid composition through ╬▒_i (volatility relative to water), back-solved at the design
 #      point AFTER the reaction extent is removed, so the component balance closes exactly:
-#          y_i = α_i·w_i / Σ_j α_j·w_j        <- this normalisation IS the C6 summation equation
-#      Biuret and HCHO are forced non-volatile (α = 0); the tiny apparent biuret/HCHO vapour in the
-#      back-solve is PFD rounding, not chemistry.  Water is the reference (α = 1) and carries the
+#          y_i = ╬▒_i┬╖w_i / ╬ú_j ╬▒_j┬╖w_j        <- this normalisation IS the C6 summation equation
+#      Biuret and HCHO are forced non-volatile (╬▒ = 0); the tiny apparent biuret/HCHO vapour in the
+#      back-solve is PFD rounding, not chemistry.  Water is the reference (╬▒ = 1) and carries the
 #      closure residual, which is how a balance closer should behave.
 #
 # EVERYTHING IS ANCHORED: at the design seed w == w_des at every stage, so y == y_des, so every
@@ -1861,7 +1855,7 @@ SOL_BIU_ORDER = 2.0                 # 2 Urea -> Biuret + NH3: second order in th
 
 
 #  Full-precision audit hook.  The telemetry payload rounds everything for the HMI, which is right
-#  for the operator and useless for an audit: TD-014 was a 1e-5 °C offset amplified by an open
+#  for the operator and useless for an audit: TD-014 was a 1e-5 ┬░C offset amplified by an open
 #  integrator, and nothing in the rounded payload could have shown it.  Each of the four
 #  bubble-point stages writes its raw branch selectors here every tick.  Written, never read by the
 #  engine -- it cannot influence a single number in the model.
@@ -1876,9 +1870,9 @@ def x_water_mol(w: dict) -> float:
 
 
 def bubble_T_raoult(P_bara: float, w: dict) -> float:
-    """Bubble-point temperature (°C) of a urea liquor whose only volatile is water.
+    """Bubble-point temperature (┬░C) of a urea liquor whose only volatile is water.
 
-    TD-014.  Raoult's law: the partial pressure of water over the solution is x_H2O·Psat(T), and at
+    TD-014.  Raoult's law: the partial pressure of water over the solution is x_H2O┬╖Psat(T), and at
     the bubble point that equals the stage pressure, so
 
         Psat(T_bub) = P / x_H2O      =>      T_bub = Tsat(P / x_H2O)
@@ -1887,17 +1881,17 @@ def bubble_T_raoult(P_bara: float, w: dict) -> float:
     on a MOLE basis, which is why the mass-fraction vector has to be converted first.  Checked
     against the PFD's own (w, P, T) triplets for the three stages this is used on:
 
-        323F010   80.00 % urea, 0.46 bar a   Raoult 100.3 °C   PFD  99 °C   (+1.3)
-        324E001   94.31 % urea, 0.33 bar a   Raoult 123.7 °C   PFD 130 °C   (−6.3)
-        324E003   97.71 % urea, 0.131 bar a  Raoult 132.7 °C   PFD 140 °C   (−7.3)
+        323F010   80.00 % urea, 0.46 bar a   Raoult 100.3 ┬░C   PFD  99 ┬░C   (+1.3)
+        324E001   94.31 % urea, 0.33 bar a   Raoult 123.7 ┬░C   PFD 130 ┬░C   (ΓêÆ6.3)
+        324E003   97.71 % urea, 0.131 bar a  Raoult 132.7 ┬░C   PFD 140 ┬░C   (ΓêÆ7.3)
 
-    i.e. it reproduces 88-99 % of a 20-90 °C elevation with no adjustable parameter; the residual is
-    the non-ideality (γ_H2O < 1 at these concentrations) and is absorbed by the design anchor,
-    because every call site uses the DEPARTURE  T_des + [T_bub(live) − T_bub(design)].  What has to
+    i.e. it reproduces 88-99 % of a 20-90 ┬░C elevation with no adjustable parameter; the residual is
+    the non-ideality (╬│_H2O < 1 at these concentrations) and is absorbed by the design anchor,
+    because every call site uses the DEPARTURE  T_des + [T_bub(live) ΓêÆ T_bub(design)].  What has to
     be right for the model is the SLOPE with composition, and that is what Raoult supplies.
 
     NOT valid for 323C003 / 323F004, whose liquors carry NH3 and CO2: there the volatiles dominate
-    the bubble point and Raoult-on-water overshoots by 33 °C and 16 °C respectively.  Those two
+    the bubble point and Raoult-on-water overshoots by 33 ┬░C and 16 ┬░C respectively.  Those two
     stages keep the frozen-offset form anchored on _R323_TSAT_C003_DES / _R323_TSAT_F004_DES.
     """
     return tsat_steam(P_bara / max(x_water_mol(w), 1e-6))
@@ -1979,7 +1973,7 @@ SOL_STAGES = {
 
 
 def sol_vapour_y(w: dict, alpha: dict) -> dict:
-    """C6 summation equation: y_i = α_i·w_i / Σ α_j·w_j, so Σ y == 1 by construction.
+    """C6 summation equation: y_i = ╬▒_i┬╖w_i / ╬ú ╬▒_j┬╖w_j, so ╬ú y == 1 by construction.
     At the design liquid composition this returns the design vapour composition bit-exact."""
     num = {k: alpha[k] * w.get(k, 0.0) for k in SOL_SPECIES}
     tot = sum(num.values())
@@ -2007,7 +2001,7 @@ def sol_advance(w: dict, M_pre: float, M_new: float, m_in: float, w_in: dict,
                 m_in2: float = 0.0, w_in2: dict = None) -> dict:
     """Integrate one stage's species holdup and renormalise.  C1 is NOT re-derived here -- M_pre and
     M_new come from the existing total-mass ODE, so this layer can never perturb it.  Returns the
-    new mass-fraction vector (Σ w == 1).  m_in2/w_in2 carry a stage's second inlet where it has one
+    new mass-fraction vector (╬ú w == 1).  m_in2/w_in2 carry a stage's second inlet where it has one
     (323F010 takes PFD stream 331 alongside stream 319 -- finding F-11)."""
     out = {}
     for k in SOL_SPECIES:
@@ -2088,11 +2082,11 @@ W_STEAM = _w_norm(dict(H2O=100.0))                                   # 911 MP / 
 # up into the liquor (CO2 + 2 NH3 -> carbamate, tracked as dissolved NH3/CO2); the inerts N2/O2/CH4/H2
 # and the NH3/CO2 SLIP leave in the atmospheric vent.  The total recovered mass keeps the boot-pinned
 # scalar A328_PHI_ABS (so C1/energy/pin are untouched); the species layer splits it at the frozen
-# carbamate ratio and carries a LIVE per-species vent composition — the atmospheric NH3 slip is now a
+# carbamate ratio and carries a LIVE per-species vent composition ΓÇö the atmospheric NH3 slip is now a
 # real number off the balance, where it used to be a composition-blind constant.
 W_S755 = _w_norm(dict(CO2=3.81, H2O=91.13, NH3=4.17, Urea=0.89))     # PFD-20 col 755 Amm.Water in (40 C, MASS %)
 W_CPL  = _w_norm(dict(H2O=100.0))                                    # PFD-20 col 954 process condensate (46 C, 100 % H2O)
-# Design absorbed 130 kg/h (A328_ABS_DES) split at carbamate stoichiometry 2 NH3 : 1 CO2 — the same
+# Design absorbed 130 kg/h (A328_ABS_DES) split at carbamate stoichiometry 2 NH3 : 1 CO2 ΓÇö the same
 # 2:1 the scrubber uses (d_nh3 = 2*d_co2).  Written so the two sum to A328_ABS_DES exactly (float).
 A328_ABS_CO2_DES = A328_ABS_DES * MW_COMP["CO2"] / (MW_COMP["CO2"] + 2.0 * MW_COMP["NH3"])   # 73.286 kg/h
 A328_ABS_NH3_DES = A328_ABS_DES - A328_ABS_CO2_DES                                            # 56.714 kg/h
@@ -2217,7 +2211,7 @@ def _des_kfac(m_liq: float, m_vap: float, r: float) -> float:
 
 
 DES_STAGES = {
-    "C002": {"a": DES_C002, "w": W_S743, "N": R328_NTHEO_C002, "T": R328_C002_T_BOT_BOT,
+    "C002": {"a": DES_C002, "w": W_S743, "N": R328_NTHEO_C002, "T": R328_C002_T_BOT,
              "M": R328_C002_M_DES,
              "V": R328_C002_M748_DES + R328_C002_M750_DES,   # stripping agent: the two hot OVHDs
              "L": R328_C002_M743_DES},
@@ -2288,7 +2282,7 @@ def des_advance(w: dict, M_new: float, feeds, m_vap: float, alpha: dict,
 # kg per kmol of urea hydrolysed:  NH2CONH2 + H2O -> 2 NH3 + CO2
 # CO2 is written as the CLOSER rather than as its own molar mass.  MW_SOL rounds NH3 to 17.0304
 # where the reaction needs 17.0307, so the literal coefficients leave 6e-4 kg/kmol unbalanced --
-# 0.0026 kg/h at the design extent.  Physically nothing; but CLAUDE.md §1 says 100 % conservation of
+# 0.0026 kg/h at the design extent.  Physically nothing; but CLAUDE.md ┬º1 says 100 % conservation of
 # mass, and a stoichiometry vector that does not sum to zero is a mass source no matter how small.
 DES_HYD_NU = {"Urea": -MW_SOL["Urea"], "H2O": -MW_SOL["H2O"], "NH3": 2.0 * MW_SOL["NH3"]}
 DES_HYD_NU["CO2"] = -(DES_HYD_NU["Urea"] + DES_HYD_NU["H2O"] + DES_HYD_NU["NH3"])
@@ -2442,7 +2436,7 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
         return {"comp": {k: 0.0 for k in MW_COMP}, "total_kgh": 0.0, "suction_kgh": 0.0,
                 "mol_kmolh": 0.0, "MW": 0.0, "T_C": EJ_T_SUCTION_C, "P_bara": 0.0,
                 "rho": 0.0, "vol_m3h": 0.0, "mu": 0.0}
-    # HV-322602 (HIC-322602) sets entrainment: CLOSING the spindle -> higher jet momentum (const-ṁ) -> more 322E003 suction.
+    # HV-322602 (HIC-322602) sets entrainment: CLOSING the spindle -> higher jet momentum (const-ß╣ü) -> more 322E003 suction.
     open_eff = clamp(hv_open_pct, 10.0, 100.0)
     # Representative non-linear liquid-liquid jet-ejector entrainment law (322F001, Options 2+3):
     #   The entrainment RATIO mu is ~constant across the healthy band and the suction CAPACITY scales
@@ -2452,7 +2446,7 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     #   capacity AND overflow drop together) yet floods on a real stall (capacity << overflow):
     #       phi_m    = motive / EJ_MOTIVE_DES_LIVE        (live design motive -> phi_m==1 bit-exact)
     #       phi_sp   = EJ_SPINDLE_R^((EJ_OPEN_DES - open_eff)/100)   (NEGATIVE equal-% spindle char, 322F001
-    #                  DDS; phi_sp(74)=R^0=1 bit-exact; CLOSING MORE -> MORE capacity, const-ṁ converging-nozzle momentum)
+    #                  DDS; phi_sp(74)=R^0=1 bit-exact; CLOSING MORE -> MORE capacity, const-ß╣ü converging-nozzle momentum)
     #       f_stall  = clamp((phi_m - PHI)/(REC - PHI), 0, 1) ^ EXP      PHI=0.20, REC=0.35, EXP=2
     #       capacity = EJ_SUC_TOT_DES * phi_m * phi_sp * f_stall
     #       m_suc    = capacity * scrub_level_frac        (frac = L_scrub/NLL, gravity suction head)
@@ -2462,14 +2456,15 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     #     open=EJ_OPEN_DES -> phi_sp=1, L=NLL -> frac=1): m_suc == EJ_SUC_TOT_DES bit-exact.
     _ej_mot_des = EJ_MOTIVE_DES_LIVE if EJ_MOTIVE_DES_LIVE is not None else EJ_MOTIVE_NH3_DES
     phi_m    = motive_nh3_kgh / _ej_mot_des
-    phi_sp   = EJ_SPINDLE_R ** ((EJ_OPEN_DES - open_eff) / 100.0)   # equal-% spindle char (NEGATIVE law: const-ṁ PD-pump momentum)
+    phi_sp   = EJ_SPINDLE_R ** ((EJ_OPEN_DES - open_eff) / 100.0)   # equal-% spindle char (NEGATIVE law: const-ß╣ü PD-pump momentum)
     f_stall  = clamp((phi_m - EJ_STALL_PHI) / (EJ_STALL_REC - EJ_STALL_PHI), 0.0, 1.0) ** EJ_STALL_EXP
     capacity = EJ_SUC_TOT_DES * phi_m * phi_sp * f_stall   # entrainment CAPACITY (kg/h)
     # Phase B: HYDRAULIC-CAPACITY (throat-choke) ceiling on the gravity-head multiplier.  The suction throat
-    # chokes -> entrainment cannot rise with head past EJ_HYD_FRAC_MAX·capacity.  At design (L=NLL -> frac=1
+    # chokes -> entrainment cannot rise with head past EJ_HYD_FRAC_MAX┬╖capacity.  At design (L=NLL -> frac=1
     # < EJ_HYD_FRAC_MAX) the cap is inactive -> bit-exact.  On flood (frac->2.0) it caps the recirculation,
     # so the un-pumpable overflow backs up the 322E003 sump instead of self-amplifying the synthesis loop.
-    m_suc    = capacity                        # actual entrainment = capacity (no head multiplier)
+    frac_eff = min(max(scrub_level_frac, 0.0), EJ_HYD_FRAC_MAX)  # head multiplier, choke-limited
+    m_suc    = capacity * frac_eff                        # actual entrainment = capacity * (capped head)
     suction  = {k: m_suc * EJ_CARB_FRAC[k] for k in MW_COMP}
     disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
     m_d   = sum(disch.values())
@@ -2914,29 +2909,29 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     eta_T_steam = clamp(T_steam_C / STRIP_STEAM_T_DES_C, 0.0, 1.15)      # thermal part (1.0 at design)
     # liquid-side ENERGY BALANCE: fixed steam duty diluted across the LIVE feed mass (kg/h).  More
     # feed (reactor overflow valve opened) at constant duty -> less specific heating -> COLDER bottom.
-    #   raw_load = ΔT_steam,des·(ṁ_feed,des/ṁ_feed − 1)   (=0 at design, <0 on a feed spike)
+    #   raw_load = ╬öT_steam,des┬╖(ß╣ü_feed,des/ß╣ü_feed ΓêÆ 1)   (=0 at design, <0 on a feed spike)
     m_feed_kgh = sum(feed[k] * MW_COMP[k] for k in MW_COMP)             # live stripper feed mass
     raw_load   = STRIP_DT_STEAM_DES_C * (STRIP_FEED_DES_KGH / max(m_feed_kgh, 1e-6) - 1.0)
     # THERMAL CEILING (NTU effectiveness): the bottom liquid can never out-heat the condensing shell
-    # steam, so the raw 1/ṁ_feed pole must NOT diverge as ṁ_feed -> 0; T_bot asymptotes to T_steam.
-    # cap = live head-room below steam sat (T_steam − T_bot,des = gap_des + 0.3·dTs).  The low-feed
-    # (heating) branch saturates as  dT_load = cap·(1 − e^{−raw/cap}) -> cap  (T_bot -> T_steam),
+    # steam, so the raw 1/ß╣ü_feed pole must NOT diverge as ß╣ü_feed -> 0; T_bot asymptotes to T_steam.
+    # cap = live head-room below steam sat (T_steam ΓêÆ T_bot,des = gap_des + 0.3┬╖dTs).  The low-feed
+    # (heating) branch saturates as  dT_load = cap┬╖(1 ΓêÆ e^{ΓêÆraw/cap}) -> cap  (T_bot -> T_steam),
     # staying slope-1 near design.  dT_load remains the EFFICIENCY driver (g_T below): on the high-feed
-    # (flood) branch it stays the RAW negative load so η_T keeps choking and the split keeps closing
+    # (flood) branch it stays the RAW negative load so ╬╖_T keeps choking and the split keeps closing
     # (unstripped volatiles held in the BOTTOMS -- they exit the loop via LV-322501, not overhead).
     cap        = max(STRIP_STEAM_T_DES_C - STRIP_T_BOTTOM_DES_C + 0.3 * dTs, 1e-6)
     dT_load    = cap * (1.0 - math.exp(-raw_load / cap)) if raw_load > 0.0 else raw_load
     g_T        = clamp(1.0 + STRIP_ETA_KT * dT_load / STRIP_T_BOTTOM_DES_C, STRIP_ETA_FLOOR, 1.05)
-    # GAP #1 fix — SEPARATE T_bot driver (dT_bot), decoupled from the g_T driver (dT_load).  The OLD
+    # GAP #1 fix ΓÇö SEPARATE T_bot driver (dT_bot), decoupled from the g_T driver (dT_load).  The OLD
     # code fed the raw linear dT_load straight into T_bot, so a feed spike (raw<0) drove the bottom T
-    # DOWN without bound (ṁ_feed→∞ ⇒ raw→−ΔT_steam,des ⇒ T_bot→−0.4 °C, absurd & wrong sign).
-    # Physics: a flooded stripper is STEAM-LIMITED — carbamate decomposition stalls, its endotherm fades,
-    # and the already-hot reactor liquor (STRIP_T_FLOOD_ANCHOR_C ≈ REACT_OVERFLOW_T_C) falls through the
+    # DOWN without bound (ß╣ü_feedΓåÆΓê₧ ΓçÆ rawΓåÆΓêÆ╬öT_steam,des ΓçÆ T_botΓåÆΓêÆ0.4 ┬░C, absurd & wrong sign).
+    # Physics: a flooded stripper is STEAM-LIMITED ΓÇö carbamate decomposition stalls, its endotherm fades,
+    # and the already-hot reactor liquor (STRIP_T_FLOOD_ANCHOR_C Γëê REACT_OVERFLOW_T_C) falls through the
     # tubes untouched.  So T_bot must RISE and asymptote UP to the reactor overflow T, never crash:
-    #   dT_bot = D·(1 − e^{raw/D}),  D = anchor − T_bot,des ;  raw≤0 ⇒ dT_bot ∈ [0, D)  (→ +D as ṁ→∞)
-    # Low-feed branch keeps dT_bot = dT_load (heat toward steam sat).  g_T (above) is UNTOUCHED — still on
-    # the raw load — so η_T stays choked: a flood gives HOT but UNSTRIPPED bottoms, and the unstripped
-    # volatiles LEAVE WITH THE BOTTOMS (mod × g_T split cut below) — classic NH3 slip to the LP section.
+    #   dT_bot = D┬╖(1 ΓêÆ e^{raw/D}),  D = anchor ΓêÆ T_bot,des ;  rawΓëñ0 ΓçÆ dT_bot Γêê [0, D)  (ΓåÆ +D as ß╣üΓåÆΓê₧)
+    # Low-feed branch keeps dT_bot = dT_load (heat toward steam sat).  g_T (above) is UNTOUCHED ΓÇö still on
+    # the raw load ΓÇö so ╬╖_T stays choked: a flood gives HOT but UNSTRIPPED bottoms, and the unstripped
+    # volatiles LEAVE WITH THE BOTTOMS (mod ├ù g_T split cut below) ΓÇö classic NH3 slip to the LP section.
     strip_flood_gap = max(STRIP_T_FLOOD_ANCHOR_C - STRIP_T_BOTTOM_DES_C, 1e-6)
     dT_bot = dT_load if raw_load > 0.0 else strip_flood_gap * (1.0 - math.exp(raw_load / strip_flood_gap))
     # HYDRODYNAMIC FLOODING (TD-006).  Everything above is a THERMAL response -- it asks whether the
@@ -2944,14 +2939,14 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # tube physically carry the film at all?  Once the rising gas core shears the descending film off
     # the wall the film thickens, liquid is dragged upward, and stripping stops regardless of how much
     # steam is available.  Licensor DDS geometry + the IFS-166 limit (see the constant block):
-    #     flood_frac = ṁ_feed / N_tubes / 145 kg/h      = 0.7448 at design (108.0 of 145 kg/h per tube)
+    #     flood_frac = ß╣ü_feed / N_tubes / 145 kg/h      = 0.7448 at design (108.0 of 145 kg/h per tube)
     # flood_x is the EXCESS over the limit and is EXACTLY 0.0 at design because max() returns the
-    # literal 0.0 for any negative argument -- 0.7448 − 1.0 < 0.  Every term below is therefore an
-    # exact identity at the seed (1 − e^0 = 0.0 ; 1/(1 + K·0.0) = 1.0), so the pin cannot move.
+    # literal 0.0 for any negative argument -- 0.7448 ΓêÆ 1.0 < 0.  Every term below is therefore an
+    # exact identity at the seed (1 ΓêÆ e^0 = 0.0 ; 1/(1 + K┬╖0.0) = 1.0), so the pin cannot move.
     flood_frac = m_feed_kgh / STRIP_N_TUBES / STRIP_FLOOD_KGH_TUBE
     flood_x    = max(flood_frac - 1.0, 0.0)                       # 0.0 at design, exactly
     # Flooded tubes hold un-decomposed carbamate and hot reactor liquor falls through untouched, so the
-    # BOTTOM RUNS HOTTER -- Brouwer's 3-4 °C signature -- capped by the same 183 °C reactor-liquor
+    # BOTTOM RUNS HOTTER -- Brouwer's 3-4 ┬░C signature -- capped by the same 183 ┬░C reactor-liquor
     # ceiling the steam-dilution branch already asymptotes to.
     dT_flood   = strip_flood_gap * (1.0 - math.exp(-STRIP_FLOOD_T_K * flood_x))   # 0.0 at design
     dT_bot     = dT_bot + dT_flood                                # + 0.0 is bit-exact
@@ -2961,9 +2956,9 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # DERIVED from dT_flood by the carbamate energy balance and is computed below, once `avail`
     # is known -- see the STRIP_FLOOD_ETA_FLOOR block for the derivation.
     # CO2 STRIPPING ENDOTHERM (G/L cooling): excess strip gas per liquid forces carbamate decomposition +
-    # NH3/CO2 flash -> endothermic.  r_GL = (G/L)/(G/L)_des − 1 = co2_scale·ṁ_feed,des/ṁ_feed − 1 (=0 at
+    # NH3/CO2 flash -> endothermic.  r_GL = (G/L)/(G/L)_des ΓêÆ 1 = co2_scale┬╖ß╣ü_feed,des/ß╣ü_feed ΓêÆ 1 (=0 at
     # design).  Only feed-lean / CO2-rich (r_GL>0) cools; the feed-spike branch (r_GL<0) is left untouched.
-    # Saturates at STRIP_STRIPCOOL_MAX as G/L -> ∞ (no 1/ṁ_feed pole).  This term OVERPOWERS the dT_load
+    # Saturates at STRIP_STRIPCOOL_MAX as G/L -> Γê₧ (no 1/ß╣ü_feed pole).  This term OVERPOWERS the dT_load
     # steam-heating spike on a low-feed / constant-CO2 excursion -> bottom goes COLDER, not toward steam sat.
     r_GL     = co2_scale * STRIP_FEED_DES_KGH / max(m_feed_kgh, 1e-6) - 1.0
     dT_strip = -STRIP_STRIPCOOL_MAX * (1.0 - math.exp(-STRIP_STRIPCOOL_KGL * max(r_GL, 0.0)))
@@ -2976,7 +2971,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     W_strip = (feed["H2O"] / feed["CO2"]) if feed["CO2"] else STRIP_W0   # stripper-feed H/C (diag)
 
     # 3. reactions: hydrolysis scales with penalized eta_T; biuret = Arrhenius k0 exp(-Ea/RT)*[Urea].
-    T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_bot + dT_strip, T_steam_C) # TT-322004 (steam-heat + G/L strip-cool, ≤ steam sat; dT_bot flood-anchored to reactor T)
+    T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_bot + dT_strip, T_steam_C) # TT-322004 (steam-heat + G/L strip-cool, Γëñ steam sat; dT_bot flood-anchored to reactor T)
     T_bot_K = T_bot_C + 273.15
     # TT-322013 overhead: hoisted out of the return dict because the enthalpy balance below needs it.
     T_top_C = min(STRIP_T_TOPGAS_DES_C + 0.6 * dTs
@@ -3066,7 +3061,7 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
         "bot_MW": (bot_m / bot_n if bot_n else 0.0),
         "top_comp_pct": {k: (top[k] / top_n * 100.0 if top_n else 0.0) for k in MW_COMP},   # mol %
         "bot_mass_pct": {k: (bot_kgh[k] / bot_m * 100.0 if bot_m else 0.0) for k in MW_COMP},# mass %
-        "T_top": T_top_C,   # TT-322013: steam-heat + feed-load (atten.) + G/L strip-cool (full); ≤ steam sat
+        "T_top": T_top_C,   # TT-322013: steam-heat + feed-load (atten.) + G/L strip-cool (full); Γëñ steam sat
         "T_bot": T_bot_C, "T_feed": T_feed_C,
         "xi_hyd": xi_hyd, "xi_biu": xi_biu, "eta_T": eta_T, "T_steam": T_steam_C,
         "eta_T_steam": eta_T_steam, "g_NC": g_NC, "g_HC": g_HC, "g_T": g_T,
@@ -3116,9 +3111,9 @@ HPCC_FRAC_GAS_DES = {            # design split fraction of each feed component 
 }
 HPCC_T_PROD_DES_C  = 170.0       # two-phase outlet temp (gas & liquid TT-322010) at design (C)
 HPCC_P_DES_BARA    = 144.2       # synthesis-loop pressure at HPCC outlet (bar a)
-HPCC_STEAM_P_BARA  = 5.01325     # shell-side LP steam pressure (5.01325 bar a == 4.0 barg)
+HPCC_STEAM_P_BARA  = 4.4         # shell-side LP steam pressure (bar a)
 HPCC_STEAM_TSAT_PFD_C = 146.3    # rounded licensor/PFD indicator value retained as provenance
-HPCC_STEAM_TSAT_C  = tsat_steam(HPCC_STEAM_P_BARA)  # thermodynamic saturation state used in balances (~152.06 C)
+HPCC_STEAM_TSAT_C  = tsat_steam(HPCC_STEAM_P_BARA)  # thermodynamic saturation state used in balances
 HPCC_DH_CARB_KJMOL = 160.0       # carbamate exotherm 2NH3+CO2->NH2COONH4 (kJ/mol CO2 absorbed)
 HPCC_CP_GAS        = 2.0         # mean strip-gas cp for sensible duty (kJ/kg.K)
 HPCC_LATENT_4BAR   = 2120.0      # latent heat of 4.4 bar a steam (kJ/kg)
@@ -3175,14 +3170,14 @@ M_HPCC_DES_LIVE  = None          # design LP steam-raising anchor (kg/s); set at
                                  #   M_USERS_LP + steam_system.M_TURBINE_DES == duty_des/HPCC_LATENT_4BAR (~29.774)
 
 # ----- 322R001 HP Urea Reactor (reduced calibrated split-fraction, pinned to design HMB) -----
-#   Products pinned to shared HMB:  ṅᵒᵛ_i = νᵒᵛ_des,i · s · (φ/φ_des) ;  ṅᵒᵍ_i = νᵒᵍ_des,i · s
-#   s  = CO₂ throughput ratio (= stripper co2_scale);  φ = HV-322605 opening fraction.
+#   Products pinned to shared HMB:  ß╣àß╡Æß╡¢_i = ╬╜ß╡Æß╡¢_des,i ┬╖ s ┬╖ (╧å/╧å_des) ;  ß╣àß╡Æß╡ì_i = ╬╜ß╡Æß╡ì_des,i ┬╖ s
+#   s  = COΓéé throughput ratio (= stripper co2_scale);  ╧å = HV-322605 opening fraction.
 # Overflow design vector IS stream 207 (322R001 overflow = 322E001 feed) -> derive from the
 # single source of truth so the design point is bit-identical and DRY.
 #   Documented literals (kmol/h): Urea 1302.6, Biuret 2.414, NH3 4002.4, CO2 897.7, H2O 2222.0.
-REACT_OVERFLOW_DES = {k: STRIP_FEED207_KMOLH.get(k, 0.0) for k in MW_COMP}   # Σ ≈ 8427.11
+REACT_OVERFLOW_DES = {k: STRIP_FEED207_KMOLH.get(k, 0.0) for k in MW_COMP}   # ╬ú Γëê 8427.11
 REACT_OFFGAS_DES   = {"NH3": 665.73, "CO2": 197.69, "N2": 44.53, "H2O": 42.51,
-                      "O2": 7.42, "CH4": 3.86, "H2": 2.02, "Urea": 0.0, "Biuret": 0.0}  # Σ ≈ 963.76
+                      "O2": 7.42, "CH4": 3.86, "H2": 2.02, "Urea": 0.0, "Biuret": 0.0}  # ╬ú Γëê 963.76
 REACT_XI_UREA_DES  = 1302.27     # urea-formation extent at design (kmol/h)
 REACT_XI_BIU_DES   = 2.414       # biuret-formation extent at design (kmol/h)
 # Calibrated vapour/liquid split fraction theta_i = OGd_i/(OVd_i+OGd_i): partitions reactor product
@@ -3208,19 +3203,19 @@ EJ_MOTIVE_DES_LIVE = None        # settled live design motive NH3 (kg/h), pinned
                                  #   phi_m = motive/EJ_MOTIVE_DES_LIVE == 1.0 bit-exact at design steady
                                  #   state (so the 322E003 sump holdup ODE is a STATIONARY fixed point).
                                  #   None -> fall back to const EJ_MOTIVE_NH3_DES (warm-up/pre-pin calls).
-REACT_HIC605_DES_PCT = 60.0      # φ_des: HV-322605 design opening (Kv_req/Kvs, linear trim)
+REACT_HIC605_DES_PCT = 60.0      # ╧å_des: HV-322605 design opening (Kv_req/Kvs, linear trim)
 REACT_OVERFLOW_T_C = 183.0       # TT-322014 overflow temp -> 322E001
 RATIO_PV_DES       = 2.0231315310702604   # design fresh-feed N/C (live-probed settled ratio.PV)
 REACT_NC_LOOP_GAIN = 0.50        # f_L loop N/C gain: maps the EXOGENOUS fresh-feed N/C deviation
-                                 # (ratio.PV, set by pump speeds — feedback-free) onto the reactor-feed
+                                 # (ratio.PV, set by pump speeds ΓÇö feedback-free) onto the reactor-feed
                                  # N/C that drives Inoue-Kanai f_L.  The pinned recycle otherwise
                                  # suppresses loop NH3-enrichment; this restores it.  ==L0 at design
                                  # (ratio.PV=RATIO_PV_DES -> conv=1) -> bit-exact, AT-322701 invariant.
 REACT_OFFGAS_T_C   = 183.0       # TT-322009 gas-line temp -> 322E003
 REACT_P_BARA       = 144.9       # reactor operating pressure (bar a)
 REACT_OFFGAS_P_BARA = 141.3      # off-gas line pressure -> 322E003 (bar a)
-REACT_OVERFLOW_RHO = 990.0       # urea solution density (kg/m³)
-REACT_OFFGAS_RHO   = 113.30      # off-gas density (kg/m³)
+REACT_OVERFLOW_RHO = 990.0       # urea solution density (kg/m┬│)
+REACT_OFFGAS_RHO   = 113.30      # off-gas density (kg/m┬│)
 # --- TT-322005/6/7/8 axial temperature profile (residence-time model, datasheet N6 A/B/C/D) ---
 # Liquid plug-flow rises from bottom T.L (+0); thermowell elevations (mm) traced from nozzles
 # N6 A/B/C/D on Reactor Datasheet2.  tau(z)=(z/H_L)*tau_tot ; first-order thermal approach to the
@@ -3244,24 +3239,24 @@ def _react_tt_temp(el_mm: float) -> float:
 
 
 REACT_TT_TEMPS_C = {tag: _react_tt_temp(el) for tag, el in REACT_TT_EL_MM.items()}  # 182.9/182.5/180.8/172.6 (static seed)
-REACT_LEVEL_NLL_PCT  = 80.0      # LT-322504 top normal liquid level (% at design φ=φ_des)
+REACT_LEVEL_NLL_PCT  = 80.0      # LT-322504 top normal liquid level (% at design ╧å=╧å_des)
 REACT_V_SPAN_M3      = _react_area_m2 * (REACT_LIQ_H_MM / 1000.0)   # liquid-span volume LT 0->100 %
 
 # --- Fix-1: DYNAMIC 4-node axial thermal profile (replaces the static residence-time probe) ----
 # Lumped node energy balance integrated each tick (see reactor.py module note + step_sim):
-#     dT_n/dt = [ (T_{n-1} - T_n) + g_n·ΔT_col ] / τ_n ,  T_0 = T_feed (HPCC two-phase product).
-#   ΔT_col = REACT_DT_COL_DES · conversion_factor  -> the whole profile FLEXES with per-pass conversion.
-#   g_n    = Damköhler heat-release weights (reactor.node_heat_weights); β = τ_tot/τ_therm makes the
+#     dT_n/dt = [ (T_{n-1} - T_n) + g_n┬╖╬öT_col ] / ╧ä_n ,  T_0 = T_feed (HPCC two-phase product).
+#   ╬öT_col = REACT_DT_COL_DES ┬╖ conversion_factor  -> the whole profile FLEXES with per-pass conversion.
+#   g_n    = Damk├╢hler heat-release weights (reactor.node_heat_weights); ╬▓ = ╧ä_tot/╧ä_therm makes the
 #            steady-state node temps reproduce the as-built static probe bit-exact (HMB-preserving).
-#   τ_n    = Δζ_n·τ_tot  (per-node liquid residence time, min).
-REACT_BETA_DAMK    = REACT_TAU_TOT_MIN / REACT_THERM_TAU_MIN          # ≈ 5.61 (column τ / exotherm τ)
+#   ╧ä_n    = ╬ö╬╢_n┬╖╧ä_tot  (per-node liquid residence time, min).
+REACT_BETA_DAMK    = REACT_TAU_TOT_MIN / REACT_THERM_TAU_MIN          # Γëê 5.61 (column ╧ä / exotherm ╧ä)
 REACT_NODE_TAGS    = ["TT_322008", "TT_322007", "TT_322006", "TT_322005"]  # ASCENDING EL: node1(bot)..node4(top)
 REACT_ZETA_NODES   = [REACT_TT_EL_MM[t] / REACT_LIQ_H_MM for t in REACT_NODE_TAGS]   # dimensionless elevations
-REACT_G_NODES, REACT_G_OV = reactor.node_heat_weights(REACT_ZETA_NODES, REACT_BETA_DAMK)  # Σ + g_ov = 1
+REACT_G_NODES, REACT_G_OV = reactor.node_heat_weights(REACT_ZETA_NODES, REACT_BETA_DAMK)  # ╬ú + g_ov = 1
 _react_zeta_prev   = [0.0] + REACT_ZETA_NODES[:-1]
 REACT_TAU_NODE_MIN = [(z - zp) * REACT_TAU_TOT_MIN for z, zp in zip(REACT_ZETA_NODES, _react_zeta_prev)]  # node residence, min
 REACT_DT_COL_DES   = REACT_OVERFLOW_T_C - HPCC_T_PROD_DES_C           # 13.0 C design column rise (conv=1)
-REACT_OFFGAS_GAMMA = 0.6         # off-gas blend: T_offgas = T_top + γ_o·(T_overflow - T_top)
+REACT_OFFGAS_GAMMA = 0.6         # off-gas blend: T_offgas = T_top + ╬│_o┬╖(T_overflow - T_top)
 REACT_NODE_SS_DES  = reactor.node_profile_ss(HPCC_T_PROD_DES_C, REACT_OVERFLOW_T_C,
                                              REACT_ZETA_NODES, REACT_BETA_DAMK)  # design SS seed [T1..T4]
 # --- Fix-2b: stagnant-flow hydraulic anchoring (Francis weir geometry + conserved holdup mass) -
@@ -3269,8 +3264,8 @@ REACT_NODE_SS_DES  = reactor.node_profile_ss(HPCC_T_PROD_DES_C, REACT_OVERFLOW_T
 # so a closed CO2 XV un-freezes level: it parks at the lip, then thermal contraction drops it below.
 # Every constant is solved against the REAL design overflow + level -> design HMB stays bit-exact:
 #   * crest sits REACT_WEIR_HEAD_DES below the design level (80 % of the 25 m span) -> head_des = 0.05 m
-#   * C_w solved so  rho_bulk·C_w·head_des^1.5 == design overflow  -> d(m_liq)/dt = 0 at design
-#   * holdup seeded rho_bulk·A·level_des  -> level_from_holdup reads exactly 80 % at design T_bulk.
+#   * C_w solved so  rho_bulk┬╖C_w┬╖head_des^1.5 == design overflow  -> d(m_liq)/dt = 0 at design
+#   * holdup seeded rho_bulk┬╖A┬╖level_des  -> level_from_holdup reads exactly 80 % at design T_bulk.
 REACT_LIQ_H_M       = REACT_LIQ_H_MM / 1000.0                      # 25.0 m liquid span (LT 0->100 %)
 REACT_T_BULK_DES    = sum(REACT_NODE_SS_DES) / 4.0                 # design bulk temp = node mean (~179.7 C)
 REACT_RHO_BULK_DES  = reactor.liquid_density(REACT_T_BULK_DES)     # design bulk melt density, kg/m^3
@@ -3284,59 +3279,59 @@ REACT_LEVEL_DES_M   = REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M  # 20.0 m desi
 #   * datasheet p14 "1000 TO OVERFLOW PIPE" -> protection-pipe bottom (= measuring-range TOP tap / URV)
 #     sits 1.0 m above the overflow weir;  p6 "1500" -> measuring SPAN = 1.5 m.
 # So the 0->100 % indication maps a 1.5 m band whose TOP tap (URV, 100 %) is 1.0 m above the overflow line.
-# The liquid HOLDUP + hydraulics stay on the full physical head (react_level_pct, the 25 m column) — ONLY the
+# The liquid HOLDUP + hydraulics stay on the full physical head (react_level_pct, the 25 m column) ΓÇö ONLY the
 # DISPLAYED transmitter reading is re-scoped to this real narrow band, which SATURATES (0 %/100 %) once the
 # surface leaves its range (real instrument behavior).  The reading maps the PHYSICAL head directly through
-# the fixed N7 geometry — LT-322504 tracks the 322R001 mass balance and nothing else (2026-07-03 order: no
+# the fixed N7 geometry ΓÇö LT-322504 tracks the 322R001 mass balance and nothing else (2026-07-03 order: no
 # coupling/pinning to plant load).  At the design head 20.0 m it reads exactly NLL 80 %; see DISPLAY block.
 REACT_LT_SPAN_M       = 1.5      # N7 measuring span, m (datasheet p6 "1500")
 REACT_LT_ABOVE_OVF_M  = 1.0      # URV (100 %) elevation above the overflow line, m (datasheet p14 "1000")
 #   URV = LRV + span = 20.3 m;  overflow line = URV - 1.0 = 19.3 m -> design level sits 0.7 m above the weir.
 #   Span 1.5 m vs the old 25 m full-height map -> ~16.7x more sensitive: HV-322605 head moves now read PROMPT.
-REACT_PHI_FWD_FLOOR = 0.25  # Fix-4: residual letdown floor on φ_fwd in the OUTLET reference (see line ~1619).
+REACT_PHI_FWD_FLOOR = 0.25  # Fix-4: residual letdown floor on ╧å_fwd in the OUTLET reference (see line ~1619).
 #   Bottom take-off drains by loop-pressure/gravity head even when forward circulation stops, so the outlet
-#   reference is m_dot_des·max(φ_fwd, FLOOR), NOT m_dot_des·φ_fwd.  At runtime design φ_fwd≈1.10 ≫ FLOOR so the
-#   max() picks φ_fwd and it cancels m_in's φ_fwd -> bit-exact L_des pin.  On a CO2-cut pump trip φ_fwd->0 but
-#   the FLOOR keeps m_out>0 -> the vessel drains (φ_fwd-coupled m_out would collapse to 0 and freeze — Bug #4).
-#   FLOOR engages only below motive ≈ sqrt(FLOOR)·EJ_MOTIVE_NH3_DES ≈ 20.4 t/h (~half design = trip/deep turndown).
+#   reference is m_dot_des┬╖max(╧å_fwd, FLOOR), NOT m_dot_des┬╖╧å_fwd.  At runtime design ╧å_fwdΓëê1.10 Γë½ FLOOR so the
+#   max() picks ╧å_fwd and it cancels m_in's ╧å_fwd -> bit-exact L_des pin.  On a CO2-cut pump trip ╧å_fwd->0 but
+#   the FLOOR keeps m_out>0 -> the vessel drains (╧å_fwd-coupled m_out would collapse to 0 and freeze ΓÇö Bug #4).
+#   FLOOR engages only below motive Γëê sqrt(FLOOR)┬╖EJ_MOTIVE_NH3_DES Γëê 20.4 t/h (~half design = trip/deep turndown).
 # --- Fix-2: synthesis-pressure forcing from the per-pass conversion deficit -------------------
-REACT_OFFGAS_DEFICIT_GAIN = 1.0  # off-gas NH3/CO2 slip amplifier per unit conversion deficit δ_X
-REACT_PI_KAPPA     = 2.0         # κ: dimensionless pressure forcing Π = κ·δ_X (δ_X = 1 - conversion_factor)
+REACT_OFFGAS_DEFICIT_GAIN = 1.0  # off-gas NH3/CO2 slip amplifier per unit conversion deficit ╬┤_X
+REACT_PI_KAPPA     = 2.0         # ╬║: dimensionless pressure forcing ╬á = ╬║┬╖╬┤_X (╬┤_X = 1 - conversion_factor)
 REACT_NC_OVERFLOW_GAIN = 0.5     # AT-322701 excess-NH3 partition gain: fraction of the design overflow
                                  # NH3 repartitioned overflow<->off-gas per unit feed-N/C deviation
                                  # (L_feed/L0 - 1).  NH3-only shift -> total N & C conserved (CO2 fixed),
                                  # so the reactor->stripper stream N/C (AT-322701) tracks the feed N/C
                                  # instead of staying atom-pinned.  == 0 at design (L_feed=L0 -> bit-exact).
 # --- Fix-3: first-order recycle lag + genuine blended reactor feed ----------------------------
-REACT_TAU_REC_MIN  = 5.0         # τ_rec: HP synthesis-loop recycle inventory lag time constant (min)
-REACT_FRESH_FRAC   = 0.30        # φ_f: fresh make-up fraction of the reactor feed (1-φ_f = lagged recycle)
+REACT_TAU_REC_MIN  = 5.0         # ╧ä_rec: HP synthesis-loop recycle inventory lag time constant (min)
+REACT_FRESH_FRAC   = 0.30        # ╧å_f: fresh make-up fraction of the reactor feed (1-╧å_f = lagged recycle)
 # --- Fix-4: ejector forward-carbamate coupling 322E003 -> 322F001 -> 322E002 -> 322R001 ---------
 REACT_FWD_GAIN     = 1.0         # G_fwd: fraction of the TRANSIENT (washed-out) spindle-attributable draw
                                  # pumped forward through the HPCC into the reactor holdup as extra carbamate
-                                 # make.  Driver = ṁ_suc·(1 − 1/φ_sp(θ)) (≡0 at the design valve θ=74, φ_sp=1);
+                                 # make.  Driver = ß╣ü_suc┬╖(1 ΓêÆ 1/╧å_sp(╬╕)) (Γëí0 at the design valve ╬╕=74, ╧å_sp=1);
                                  # the high-pass of it isolates the valve-move PULSE and dies to 0 at any steady
-                                 # θ -> mass-conservative (no sustained source).  >0 closing, <0 opening.
-REACT_FWD_TAU_MIN  = 8.0         # τ_fwd: washout time constant (min) ≈ 322E003 sump-drain redistribution time;
+                                 # ╬╕ -> mass-conservative (no sustained source).  >0 closing, <0 opening.
+REACT_FWD_TAU_MIN  = 8.0         # ╧ä_fwd: washout time constant (min) Γëê 322E003 sump-drain redistribution time;
                                  # sets how long the LT-322504 forward-carbamate swell persists before relaxing.
-# AT-322701 analyzer: atom-count N/C molar ratio of 322R001 overflow (Σnᵢ·#Nᵢ)/(Σnᵢ·#Cᵢ)
+# AT-322701 analyzer: atom-count N/C molar ratio of 322R001 overflow (╬únß╡ó┬╖#Nß╡ó)/(╬únß╡ó┬╖#Cß╡ó)
 REACT_N_ATOMS = {"NH3": 1, "Urea": 2, "Biuret": 3, "N2": 2}
 REACT_C_ATOMS = {"CO2": 1, "Urea": 1, "Biuret": 2, "CH4": 1}
-# statics (display only): H 25000 mm, ID 2950 mm, 11 sieve trays, volume 191 m³
+# statics (display only): H 25000 mm, ID 2950 mm, 11 sieve trays, volume 191 m┬│
 
 # ----- 322E003 HP Scrubber (reactive falling-film absorber, pinned split-fraction) -----------
 #   Tube side, counter-current: inert-rich reactor off-gas (322R001 -> TT-322009, live
 #   react["offgas_kmolh"]) rises through the tubes; cold weak carbamate wash (323P001 A/B,
 #   design vector) falls as a film.  NH3/CO2/H2O are recovered by instantaneous carbamate
-#   formation 2NH3(aq)+CO2(aq) <=> NH2COONH4(l), dH≈-160 kJ/mol; inerts (N2/O2/CH4/H2) slip to
+#   formation 2NH3(aq)+CO2(aq) <=> NH2COONH4(l), dHΓëê-160 kJ/mol; inerts (N2/O2/CH4/H2) slip to
 #   the off-gas.  BOTH discharges are PINNED to the shared design HMB (proven IDENTICAL by
 #   compare_scrubber.py); closure_resid is a diagnostic only (NOT injected into any stream):
 #     off-gas  322E003 -> TT-322011 -> HV-322604 -> 322C001 LP absorber  (img1, MOL%, 64.78 kmol/h)
 #     overflow 322E003 -> PT-329201/TT-322002/LT-329501 -> 322F001       (= EJ_SUCTION, ejector suction)
-#       off-gasᵢ = νᵒᵍ_des,i · s ;  overflowᵢ = νᵒᵛ_des,i · s ;  s = react co2_scale.
+#       off-gasß╡ó = ╬╜ß╡Æß╡ì_des,i ┬╖ s ;  overflowß╡ó = ╬╜ß╡Æß╡¢_des,i ┬╖ s ;  s = react co2_scale.
 SCRUB_CARB_KGH_DES   = 36915.0   # kg/h design weak-carbamate wash (323P001 A/B -> 322E003)
 SCRUB_CARB_MASSPCT   = {"CO2": 38.49, "H2O": 30.83, "NH3": 30.61, "Urea": 0.07}   # img2 MASS%
 SCRUB_CARB_KMOLH_DES = {k: SCRUB_CARB_MASSPCT.get(k, 0.0) / 100.0 * SCRUB_CARB_KGH_DES / MW_COMP[k]
-                        for k in MW_COMP}                            # Σ ≈ 1618.5 kmol/h
+                        for k in MW_COMP}                            # ╬ú Γëê 1618.5 kmol/h
 SCRUB_CARB_KMOLH_DES_REF = dict(SCRUB_CARB_KMOLH_DES)    # FROZEN design wash (deviation datum; never mutate)
 SCRUB_CARB_ABS_GAIN  = 0.15      # kmol extra CO2 scrubbed per kmol surplus carbamate-wash flow (323P001)
 # -- SUPERSEDED off-gas datasheet (img1 MOL%, 64.78 kmol/h): does NOT route 100% of inerts -> vent and
@@ -3351,15 +3346,15 @@ _SCRUB_OFFGAS_RECON = {"CO2": 62.18213955, "CH4": 3.86000000, "H2": 2.02000000, 
                        "NH3": 94.76367511, "O2": 7.42000000, "H2O": 0.0}
 SCRUB_OFFGAS_KMOLH_DES = {k: _SCRUB_OFFGAS_RECON.get(k, 0.0) for k in MW_COMP}   # span all 9 comps (Urea/Biuret=0)
 # Overflow design vector IS the 322F001 ejector suction (single source of truth -> DRY, bit-identical):
-SCRUB_OVERFLOW_KMOLH_DES = {k: EJ_SUCTION_KGH[k] / MW_COMP[k] for k in MW_COMP}   # Σ ≈ 2519.4 kmol/h
+SCRUB_OVERFLOW_KMOLH_DES = {k: EJ_SUCTION_KGH[k] / MW_COMP[k] for k in MW_COMP}   # ╬ú Γëê 2519.4 kmol/h
 # --- 322E003 sump liquid inventory (Option 3: TRUE dynamic state, not a display lag) ---
-#   dM_scrub/dt = ṁ_cond,in − ṁ_entrain ;  ṁ_cond,in = Σ overflow_kmolh·MWᵢ (carbamate make from
-#   condensation/absorption), ṁ_entrain = ej["suction_kgh"] (actual non-linear-curve entrainment).
-#   At design cond == entrain == EJ_SUC_TOT_DES -> dM=0, level == NLL (bit-exact, indep. of τ).
+#   dM_scrub/dt = ß╣ü_cond,in ΓêÆ ß╣ü_entrain ;  ß╣ü_cond,in = ╬ú overflow_kmolh┬╖MWß╡ó (carbamate make from
+#   condensation/absorption), ß╣ü_entrain = ej["suction_kgh"] (actual non-linear-curve entrainment).
+#   At design cond == entrain == EJ_SUC_TOT_DES -> dM=0, level == NLL (bit-exact, indep. of ╧ä).
 #   If the ejector STALLS (C(phi_m)->0) entrainment collapses while condensation continues -> M rises.
 SCRUB_LEVEL_NLL_PCT  = 50.0      # %, 322E003 sump design normal liquid level
 SCRUB_TAU_HOLDUP_MIN = 4.0       # min, sump residence time at design throughput (sets holdup scale)
-SCRUB_HOLDUP_NLL_KG  = EJ_SUC_TOT_DES * SCRUB_TAU_HOLDUP_MIN / 60.0   # kg liquid at NLL (≈3837 kg)
+SCRUB_HOLDUP_NLL_KG  = EJ_SUC_TOT_DES * SCRUB_TAU_HOLDUP_MIN / 60.0   # kg liquid at NLL (Γëê3837 kg)
 SCRUB_HOLDUP_MAX_KG  = SCRUB_HOLDUP_NLL_KG * 100.0 / SCRUB_LEVEL_NLL_PCT  # kg at 100% (sump full)
 SCRUB_CARB_T_C       = 74.0      # C, weak-carbamate wash inlet (323P001 A/B)
 SCRUB_CARB_P_BARA    = 140.7     # bar a, carbamate feed line
@@ -3368,7 +3363,7 @@ SCRUB_OFFGAS_T_GAIN  = 120.0     # C / (N/C unit), TT-322011 rise w/ excess-NH3 
 SCRUB_OFFGAS_T_VENT_GAIN  = 20.0 # C / (theta/theta_des - 1), TT-322011 rise w/ HV-322604 opening (more uncondensed vent overhead)
 SCRUB_OVERFLOW_T_VENT_GAIN = 12.0 # C / (theta/theta_des - 1), TT-322002 fall w/ HV-322604 opening (vent relief cools bottom overflow)
 SCRUB_OFFGAS_P_BARA  = 140.7     # bar a, off-gas line pressure (synthesis)
-SCRUB_OFFGAS_RHO     = 111.0     # kg/m³, off-gas density (114 C, 140.7 bar a)
+SCRUB_OFFGAS_RHO     = 111.0     # kg/m┬│, off-gas density (114 C, 140.7 bar a)
 SCRUB_OVERFLOW_T_C   = 178.8     # C, TT-322002 overflow temp -> 322F001 (= EJ_T_SUCTION_C)
 SCRUB_OVERFLOW_P_BARA = 140.7    # bar a, PT-329201 overflow-line pressure
 SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exotherm (diagnostic)
@@ -3376,25 +3371,25 @@ SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exot
 SCRUB_HIC604_DES_PCT = 50.0      # %, HIC-322604 design opening (HV-322604, inert purge)
 SCRUB_HV604_P_OUT    = 4.0       # bar a, 322C001 LP-absorber downstream pressure
 SCRUB_HV604_MU_JT    = 0.55      # C/bar, mixture Joule-Thomson coeff (NH3/CO2-rich off-gas)
-SCRUB_HV604_DP_DES   = SCRUB_OFFGAS_P_BARA - SCRUB_HV604_P_OUT   # 136.7 bar, design ΔP across HV-322604 (dP_des)
-SCRUB_HV604_RANGE    = 50.0      # equal-% inherent rangeability R (datasheet char = EQUAL %): K_v(h)=K_vs·R^(h-1)
+SCRUB_HV604_DP_DES   = SCRUB_OFFGAS_P_BARA - SCRUB_HV604_P_OUT   # 136.7 bar, design ╬öP across HV-322604 (dP_des)
+SCRUB_HV604_RANGE    = 50.0      # equal-% inherent rangeability R (datasheet char = EQUAL %): K_v(h)=K_vs┬╖R^(h-1)
 # --- Shell-side CCW (Conditioning Cooling Water) closed loop: 329P006 A/B pump + 329E004 cooler ---
 #   322E003 shell -- TT-329125 -- 329P006 A/B -- FV-329409/FIC-329409 -- TIC-329005 -- shell in;
 #   branch after 329P006: TV-329005 -- 329E002 -- main CCW header (heat rejected via 329E004).
-#   Q_ccw = ṁ_ccw·cp·ΔT removes the condensation/reaction heat; design-pinned, throughput-scaled.
-#   TT-329125 = TIC-329005 + Q_ccw/(ṁ_ccw·cp);  TDY-329125 = TT-329125 − TIC-329005 (cond. quality).
+#   Q_ccw = ß╣ü_ccw┬╖cp┬╖╬öT removes the condensation/reaction heat; design-pinned, throughput-scaled.
+#   TT-329125 = TIC-329005 + Q_ccw/(ß╣ü_ccw┬╖cp);  TDY-329125 = TT-329125 ΓêÆ TIC-329005 (cond. quality).
 SCRUB_CCW_KGH_DES    = 306000.0  # kg/h design CCW circulation (329P006 A/B, 306 t/h)
 SCRUB_CCW_CP         = 4.18      # kJ/kg.K, water
 SCRUB_CCW_T_IN_DES   = 80.0      # C, TIC-329005 supply into shell (design SP)
 SCRUB_CCW_T_OUT_DES  = 95.0      # C, TT-329125 return out of shell (design)
 SCRUB_CCW_P_IN_BARA  = 9.0       # bar a, CCW supply (stream 1111)
 SCRUB_CCW_P_OUT_BARA = 8.0       # bar a, CCW return (stream 1112)
-SCRUB_CCW_RHO_IN     = 971.8     # kg/m³, water @ 80 C
-SCRUB_CCW_RHO_OUT    = 961.9     # kg/m³, water @ 95 C
+SCRUB_CCW_RHO_IN     = 971.8     # kg/m┬│, water @ 80 C
+SCRUB_CCW_RHO_OUT    = 961.9     # kg/m┬│, water @ 95 C
 SCRUB_FV409_DES_PCT  = 60.0      # %, FV-329409 design opening (FIC-329409 -> CCW flow)
 SCRUB_TV005_DES_PCT  = 50.0      # %, TV-329005 design opening (TIC-329005 -> 329E002 branch)
 # F4: CCW loops are now real first-order plant lag + velocity I-PD (no algebraic SP-pin island).
-# §7.6 P5-A provenance: the two TAU_S below are CALIBRATED instrument-response lags fit to CCW step
+# ┬º7.6 P5-A provenance: the two TAU_S below are CALIBRATED instrument-response lags fit to CCW step
 #   data, NOT hydraulically derived -- FIC_329409_TAU_S = FV-329409 actuator stroke + FT filter (fast
 #   circ pump, ~3 s); TIC_329005_TAU_S = tempered-water thermal mass + RTD lag (~25 s). Both are inner
 #   loops subordinate to the feed dead time (FEED_TD_S), so they cannot shift the synthesis-loop FOPTD
@@ -3444,34 +3439,34 @@ SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant
 SYN_P_TAU_FILL_MIN  = 57.8       # min, cold-start (empty-loop) pressurisation tau (06-03 Section 1.2 FOPTD)
 SYN_P_MIN_BARA      = 120.0      # bar a, PT clamp floor
 SYN_P_MAX_BARA      = HPCC_P_DES_BARA  # 144.2 bar a, PT ceiling = feed-supply head (CO2/HPCC/ejector all 144.2); loop cannot exceed feed delivery P
-SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) / 3600.0  # ≈5329 kW
-# 322E003 shell-side effective conductance (ε-NTU). Back-calibrated so the design
+SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) / 3600.0  # Γëê5329 kW
+# 322E003 shell-side effective conductance (╬╡-NTU). Back-calibrated so the design
 # carbamate-condensation duty pins BOTH the design overflow temp and CCW outlet EXACTLY:
-#   UA_eff,des = Q_des/(T_overflow,des − T_ccw,in,des) = 5329/(178.8−80) = 53.94 kW/K
-#   C_ccw,des  = ṁ_ccw,des·cp/3600 = 355.3 kW/K ;  ε_des = UA_eff/C_ccw = 0.1518
-#   UA = −C_ccw·ln(1−ε_des) = 58.5 kW/K  (constant; ε floats with CCW flow off-design)
-_SCRUB_C_CCW_DES_KWK = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP / 3600.0                                  # ≈355.3 kW/K
-_SCRUB_UAEFF_DES_KWK = SCRUB_Q_CCW_DES_KW / (SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES)             # ≈53.94 kW/K
-SCRUB_UA_KWK         = -_SCRUB_C_CCW_DES_KWK * math.log(1.0 - _SCRUB_UAEFF_DES_KWK / _SCRUB_C_CCW_DES_KWK)  # ≈58.5 kW/K
-SCRUB_T_PROC_C       = 185.0     # C, process-gas (carbamate) condensation ceiling — the absolute max T
-#   the shell side can reach.  GAP #2 ε-NTU anchor: as ṁ_ccw -> 0 (FIC-329409 shut) both TT-329125 and
+#   UA_eff,des = Q_des/(T_overflow,des ΓêÆ T_ccw,in,des) = 5329/(178.8ΓêÆ80) = 53.94 kW/K
+#   C_ccw,des  = ß╣ü_ccw,des┬╖cp/3600 = 355.3 kW/K ;  ╬╡_des = UA_eff/C_ccw = 0.1518
+#   UA = ΓêÆC_ccw┬╖ln(1ΓêÆ╬╡_des) = 58.5 kW/K  (constant; ╬╡ floats with CCW flow off-design)
+_SCRUB_C_CCW_DES_KWK = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP / 3600.0                                  # Γëê355.3 kW/K
+_SCRUB_UAEFF_DES_KWK = SCRUB_Q_CCW_DES_KW / (SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES)             # Γëê53.94 kW/K
+SCRUB_UA_KWK         = -_SCRUB_C_CCW_DES_KWK * math.log(1.0 - _SCRUB_UAEFF_DES_KWK / _SCRUB_C_CCW_DES_KWK)  # Γëê58.5 kW/K
+SCRUB_T_PROC_C       = 185.0     # C, process-gas (carbamate) condensation ceiling ΓÇö the absolute max T
+#   the shell side can reach.  GAP #2 ╬╡-NTU anchor: as ß╣ü_ccw -> 0 (FIC-329409 shut) both TT-329125 and
 #   TT-322002 asymptote here instead of +inf.  > SCRUB_OVERFLOW_T_C design 178.8 (synthesis-P headroom).
-SCRUB_COND_CHOKE_MIN = 0.30      # —, residual condensation-duty fraction at a FULLY choked (L-329501=100%)
+SCRUB_COND_CHOKE_MIN = 0.30      # ΓÇö, residual condensation-duty fraction at a FULLY choked (L-329501=100%)
 #   sump.  Phase-B-coupled CHOKE derate: a flooding 322E003 sump (LT-329501 above NLL) progressively floods
 #   the shell-side condensation surface, constricting the carbamate-condensation duty Q_scrubber.  The
-#   condensation-availability factor χ_choke ramps LINEARLY from 1.0 at NLL (50 %) down to this floor at
-#   100 %: χ_choke = 1 − (1−SCRUB_COND_CHOKE_MIN)·max(L−L_NLL,0)/(100−L_NLL).  At/below NLL χ_choke ≡ 1 ->
+#   condensation-availability factor ╧ç_choke ramps LINEARLY from 1.0 at NLL (50 %) down to this floor at
+#   100 %: ╧ç_choke = 1 ΓêÆ (1ΓêÆSCRUB_COND_CHOKE_MIN)┬╖max(LΓêÆL_NLL,0)/(100ΓêÆL_NLL).  At/below NLL ╧ç_choke Γëí 1 ->
 #   q_ccw unchanged -> TDY-329125 + every TT pin stay bit-exact at design.  Above NLL it cuts q_ccw, so the
-#   CCW-rise indicator TDY-329125 FALLS (condensation constricted) — the physically-correct choke signature.
-SCRUB_COND_SPINDLE_GAIN = 0.25   # —, carbamate-condensation duty sensitivity to the 322F001 ejector-spindle
+#   CCW-rise indicator TDY-329125 FALLS (condensation constricted) ΓÇö the physically-correct choke signature.
+SCRUB_COND_SPINDLE_GAIN = 0.25   # ΓÇö, carbamate-condensation duty sensitivity to the 322F001 ejector-spindle
 #   intensity (HV-322602).  The motive jet sets how vigorously the off-gas is drawn through the bottom
 #   condensation zone: CLOSING HV-322602 raises phi_sp>1 (stronger jet, deeper suction) -> more off-gas is
 #   condensed into carbamate per unit time -> Q_scrubber RISES; opening (phi_sp<1) lowers it.  Spindle-duty
-#   factor χ_sp = 1 + SCRUB_COND_SPINDLE_GAIN·(1 − 1/phi_sp), the SAME (1−1/phi_sp) spindle driver as the
-#   322R001 forward-carbamate domino (Rev Δ#11).  At θ_des phi_sp≡1 -> χ_sp≡1 -> q_ccw unscaled -> TT-322002
+#   factor ╧ç_sp = 1 + SCRUB_COND_SPINDLE_GAIN┬╖(1 ΓêÆ 1/phi_sp), the SAME (1ΓêÆ1/phi_sp) spindle driver as the
+#   322R001 forward-carbamate domino (Rev ╬ö#11).  At ╬╕_des phi_spΓëí1 -> ╧ç_spΓëí1 -> q_ccw unscaled -> TT-322002
 #   (178.8) + TDY-329125 (15.0) hold bit-exact; off-design it couples HV-322602 into the FULL 322E003 thermo
 #   (t_overflow_cond -> TT-322002, t_ccw_out/dT_ccw -> TT/TDY-329125).  Two-sided, persistent, phi_sp-keyed
-#   so it is independent of the steady sump level (which sits below NLL at θ_des) — pin holds by construction.
+#   so it is independent of the steady sump level (which sits below NLL at ╬╕_des) ΓÇö pin holds by construction.
 
 
 def bubble_p_322e002(T_c: float, L: float, W: float) -> float:
@@ -3818,7 +3813,7 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
             "feed_corrected_kmolh": fc, "tear_mass_kgh": tear_mass,
             "xi_urea": xi_urea, "xi_biu": xi_biu, "closure_resid": closure_resid,
             "T_overflow": REACT_OVERFLOW_T_C, "T_offgas": REACT_OFFGAS_T_C,
-            "P_bara": round(state.p_syn_bara, 2), "P_offgas": REACT_OFFGAS_P_BARA,
+            "P_bara": REACT_P_BARA, "P_offgas": REACT_OFFGAS_P_BARA,
             "phi": phi, "phi_des": phi_des, "co2_scale": s,
             "X_conv": X_conv, "L_feed": L_feed, "W_feed": W_feed,
             "delta_X": delta_X, "p_nh3_og": p_nh3_og, "p_co2_og": p_co2_og}
@@ -3829,29 +3824,29 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
                   hic604_pct: float = None,
                   liq_carry_kmolh: dict = None, t_carry_c: float = None,
                   choke_level_pct: float = None, spindle_phi: float = 1.0) -> dict:
-    """322E003 HP scrubber — reduced calibrated split-fraction, pinned to the shared design HMB.
+    """322E003 HP scrubber ΓÇö reduced calibrated split-fraction, pinned to the shared design HMB.
     Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
-    wash (323P001 A/B design vector × s).  Both discharges PINNED (proven IDENTICAL):
-        offgasᵢ   = SCRUB_OFFGAS_KMOLH_DES_i   · s   (322E003 -> HV-322604 -> 322C001)
-        overflowᵢ = SCRUB_OVERFLOW_KMOLH_DES_i · s   (322E003 -> 322F001, ejector suction)
+    wash (323P001 A/B design vector ├ù s).  Both discharges PINNED (proven IDENTICAL):
+        offgasß╡ó   = SCRUB_OFFGAS_KMOLH_DES_i   ┬╖ s   (322E003 -> HV-322604 -> 322C001)
+        overflowß╡ó = SCRUB_OVERFLOW_KMOLH_DES_i ┬╖ s   (322E003 -> 322F001, ejector suction)
     closure_resid is a diagnostic only (NOT injected).  Shell-side CCW removes the carbamate
     exotherm.  Boundary-coupled duty: in a closed synthesis loop a rise in reactor-top pressure
     (PT-329201) lifts the uncondensed off-gas vent load into 322E003, so the carbamate-
     condensation exotherm Q_scrubber scales with the synthesis-vent ratio:
-        Q_scrubber = q_ccw = SCRUB_Q_CCW_DES_KW · s · vent_ratio   (vent_ratio = PT-329201/PT_des)
-    With ṁ_ccw constant the sensible-heat balance then lifts TT-329125 proportionally:
-        TT-329125 = t_ccw_in + Q_scrubber/(ṁ_ccw·cp).  vent_ratio defaults to 1.0 (design-exact)."""
+        Q_scrubber = q_ccw = SCRUB_Q_CCW_DES_KW ┬╖ s ┬╖ vent_ratio   (vent_ratio = PT-329201/PT_des)
+    With ß╣ü_ccw constant the sensible-heat balance then lifts TT-329125 proportionally:
+        TT-329125 = t_ccw_in + Q_scrubber/(ß╣ü_ccw┬╖cp).  vent_ratio defaults to 1.0 (design-exact)."""
     s = co2_scale
     carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}      # 323P001 A/B wash
     feed     = {k: offgas_feed.get(k, 0.0) + carb[k] for k in MW_COMP}         # combined tube feed
     offgas   = {k: SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}    # pinned -> img1
     overflow = {k: SCRUB_OVERFLOW_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}  # pinned -> EJ suction
     # --- 323P001 weak-carbamate recycle wash: LIVE deviation injection (design bit-exact) ----------
-    # Surplus wash above/below the design rate (carb_dev = carb − carb_des·s) is a real liquid-phase
+    # Surplus wash above/below the design rate (carb_dev = carb ΓêÆ carb_des┬╖s) is a real liquid-phase
     # absorbent perturbation: (1) its mass leaves with the bottom overflow (-> 322F001 ejector suction),
     # and (2) the surplus absorbent scrubs extra CO2 (+ paired NH3 at the 2:1 carbamate stoichiometry)
     # out of the off-gas into that overflow.  Both terms are DEVIATIONS from the design wash, so at
-    # carb == carb_des·s every term is identically 0 -> pinned off-gas/overflow HMB + TT pins hold exact.
+    # carb == carb_des┬╖s every term is identically 0 -> pinned off-gas/overflow HMB + TT pins hold exact.
     carb_dev     = {k: carb[k] - SCRUB_CARB_KMOLH_DES_REF.get(k, 0.0) * s for k in MW_COMP}
     carb_dev_tot = sum(carb_dev.values())
     for k in MW_COMP:
@@ -3878,44 +3873,44 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     closure_resid = sum(feed.values()) - sum(offgas.values()) - sum(overflow.values())
     co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)          # kmol/h gas->carbamate (now wash-live)
     q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0                # full exotherm (diag)
-    q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s × synthesis-vent load PT-329201)
+    q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s ├ù synthesis-vent load PT-329201)
     # --- HV-322602 ejector-spindle CONDENSATION-INTENSITY coupling (TT-322002 / TDY-329125 / 322E003 thermo) ---
     # The 322F001 motive jet sets how vigorously the off-gas is drawn through the bottom condensation zone.
     # CLOSING HV-322602 raises phi_sp>1 (stronger jet, deeper suction) -> more off-gas condensed into carbamate
-    # per unit time -> Q_scrubber RISES; opening (phi_sp<1) lowers it.  Same (1−1/phi_sp) spindle driver as the
-    # 322R001 forward-carbamate domino.  At θ_des phi_sp≡1 -> chi_sp≡1 -> q_ccw unscaled -> TT-322002 (178.8)
-    # + TDY-329125 (15.0) bit-exact; phi_sp-keyed so it is independent of the steady sump level (below NLL @θ_des).
+    # per unit time -> Q_scrubber RISES; opening (phi_sp<1) lowers it.  Same (1ΓêÆ1/phi_sp) spindle driver as the
+    # 322R001 forward-carbamate domino.  At ╬╕_des phi_spΓëí1 -> chi_spΓëí1 -> q_ccw unscaled -> TT-322002 (178.8)
+    # + TDY-329125 (15.0) bit-exact; phi_sp-keyed so it is independent of the steady sump level (below NLL @╬╕_des).
     chi_sp    = 1.0 + SCRUB_COND_SPINDLE_GAIN * (1.0 - 1.0 / max(spindle_phi, 1e-6))
     q_ccw_kw *= max(chi_sp, SCRUB_COND_CHOKE_MIN)
     # --- Phase-B-coupled CONDENSATION CHOKE derate (TDY-329125 / TT-322002 response to sump flood) -----
     # A flooding sump (LT-329501 above NLL, prior-step tear) floods the shell-side condensation surface,
-    # so the carbamate-condensation duty Q_scrubber is constricted by χ_choke ∈ [SCRUB_COND_CHOKE_MIN, 1]:
-    #   χ_choke = 1 − (1−SCRUB_COND_CHOKE_MIN)·max(L_329501 − L_NLL, 0)/(100 − L_NLL)   (L_NLL = NLL %)
-    # At/below NLL χ_choke ≡ 1 -> q_ccw unchanged -> design bit-exact (TDY-329125 holds 15.0).  Above NLL
-    # q_ccw is cut, so TDY-329125 = χ_choke·q_ccw/UA_eff·ε FALLS — condensation constricted by the choke.
+    # so the carbamate-condensation duty Q_scrubber is constricted by ╧ç_choke Γêê [SCRUB_COND_CHOKE_MIN, 1]:
+    #   ╧ç_choke = 1 ΓêÆ (1ΓêÆSCRUB_COND_CHOKE_MIN)┬╖max(L_329501 ΓêÆ L_NLL, 0)/(100 ΓêÆ L_NLL)   (L_NLL = NLL %)
+    # At/below NLL ╧ç_choke Γëí 1 -> q_ccw unchanged -> design bit-exact (TDY-329125 holds 15.0).  Above NLL
+    # q_ccw is cut, so TDY-329125 = ╧ç_choke┬╖q_ccw/UA_eff┬╖╬╡ FALLS ΓÇö condensation constricted by the choke.
     if choke_level_pct is not None:
         chi_choke = 1.0 - (1.0 - SCRUB_COND_CHOKE_MIN) * max(choke_level_pct - SCRUB_LEVEL_NLL_PCT, 0.0) \
                           / max(100.0 - SCRUB_LEVEL_NLL_PCT, 1e-6)
         q_ccw_kw *= clamp(chi_choke, SCRUB_COND_CHOKE_MIN, 1.0)
-    # GAP #2 — ε-NTU condenser bridge bounds BOTH the CCW outlet and the process overflow against the
-    # condensation ceiling T_proc, killing the ṁ_ccw -> 0 (FIC-329409 shut) divide-by-zero pole.  Old
-    # code blew up two ways: the raw sensible rise q_ccw/(ṁ_ccw·cp) AND q_ccw/UA_eff both -> ~1e9 C.
-    #   C_ccw = max(ṁ_ccw·cp/3600, 1e-6) ; ε = 1−exp(−UA/C_ccw) ; UA_eff = max(ε·C_ccw, 1e-6)
+    # GAP #2 ΓÇö ╬╡-NTU condenser bridge bounds BOTH the CCW outlet and the process overflow against the
+    # condensation ceiling T_proc, killing the ß╣ü_ccw -> 0 (FIC-329409 shut) divide-by-zero pole.  Old
+    # code blew up two ways: the raw sensible rise q_ccw/(ß╣ü_ccw┬╖cp) AND q_ccw/UA_eff both -> ~1e9 C.
+    #   C_ccw = max(ß╣ü_ccw┬╖cp/3600, 1e-6) ; ╬╡ = 1ΓêÆexp(ΓêÆUA/C_ccw) ; UA_eff = max(╬╡┬╖C_ccw, 1e-6)
     #   T_overflow = min(t_ccw_in + q_ccw/UA_eff, T_proc)        (design 80 + 5329/53.94 = 178.8, pinned)
-    #   T_ccw_out  = t_ccw_in + (T_overflow − t_ccw_in)·ε        (CCW rides the SAME ε toward the LIVE
-    #     condensing temp T_overflow, itself ≤ T_proc).  Because 98.8·UA_eff,des ≡ q_ccw,des, design
-    #     ε·98.8 = q_ccw/C_ccw = 15.0 -> TT-329125 = 95.0 EXACT (holds the line-557 pin); ṁ_ccw -> 0 ->
-    #     ε -> 1 -> T_overflow, T_ccw_out -> T_proc (185) instead of +inf.  Anchoring T_ccw_out's
-    #     gradient to T_overflow (not raw T_proc) is what preserves the 95.0 pin — raw T_proc drifts 95.9.
+    #   T_ccw_out  = t_ccw_in + (T_overflow ΓêÆ t_ccw_in)┬╖╬╡        (CCW rides the SAME ╬╡ toward the LIVE
+    #     condensing temp T_overflow, itself Γëñ T_proc).  Because 98.8┬╖UA_eff,des Γëí q_ccw,des, design
+    #     ╬╡┬╖98.8 = q_ccw/C_ccw = 15.0 -> TT-329125 = 95.0 EXACT (holds the line-557 pin); ß╣ü_ccw -> 0 ->
+    #     ╬╡ -> 1 -> T_overflow, T_ccw_out -> T_proc (185) instead of +inf.  Anchoring T_ccw_out's
+    #     gradient to T_overflow (not raw T_proc) is what preserves the 95.0 pin ΓÇö raw T_proc drifts 95.9.
     C_ccw_kwk  = max(m_ccw_kgh * SCRUB_CCW_CP / 3600.0, 1e-6)                  # floored heat-capacity rate
     eps_ht     = 1.0 - math.exp(-SCRUB_UA_KWK / C_ccw_kwk)                     # single-stream effectiveness
     ua_eff_kwk = max(eps_ht * C_ccw_kwk, 1e-6)
-    # HV-322604 vent-opening deviation theta_dev = θ/θ_des − 1 ∈ [−1,+1] over 0..100 %; ≡ 0 at θ_des (50 %).
-    # Two-sided LIVE coupling, zero at design -> off-gas/overflow HMB + every TT pin stay bit-exact at θ_des.
+    # HV-322604 vent-opening deviation theta_dev = ╬╕/╬╕_des ΓêÆ 1 Γêê [ΓêÆ1,+1] over 0..100 %; Γëí 0 at ╬╕_des (50 %).
+    # Two-sided LIVE coupling, zero at design -> off-gas/overflow HMB + every TT pin stay bit-exact at ╬╕_des.
     theta_dev  = (hic604_pct if hic604_pct is not None else SCRUB_HIC604_DES_PCT) / SCRUB_HIC604_DES_PCT - 1.0
     t_overflow_cond = min(t_ccw_in + q_ccw_kw / ua_eff_kwk, SCRUB_T_PROC_C)   # condensation-driven overflow T
     t_ccw_out  = t_ccw_in + (t_overflow_cond - t_ccw_in) * eps_ht            # TT-329125 (CCW pin anchored to cond. T)
-    # TT-322002: condensation T minus the vent-opening deviation — opening HV-322604 relieves the scrubber and
+    # TT-322002: condensation T minus the vent-opening deviation ΓÇö opening HV-322604 relieves the scrubber and
     # cools the bottom carbamate overflow; closing pressurises and heats it (toward the T_proc ceiling).
     t_overflow = min(max(t_overflow_cond - SCRUB_OVERFLOW_T_VENT_GAIN * theta_dev, t_ccw_in),
                      SCRUB_T_PROC_C)                                          # TT-322002 (vent-coupled, clamped)
@@ -3928,7 +3923,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
             w_carry    = carry_mass_kgh / m_ov_tot
             t_overflow = min(t_overflow + w_carry * (t_carry_c - t_overflow), SCRUB_T_PROC_C)
     dT_ccw     = t_ccw_out - t_ccw_in                                         # TDY-329125 (cond. quality)
-    # TT-322011 off-gas vent-top temp — LIVE off the excess-NH3 loop slip (AT-322701).  At higher feed N/C
+    # TT-322011 off-gas vent-top temp ΓÇö LIVE off the excess-NH3 loop slip (AT-322701).  At higher feed N/C
     # the synthesis loop runs CO2-limited: excess NH3 cannot form carbamate, slips unabsorbed through the
     # scrubber, and its higher vapour load lifts the uncondensed vent-top temp.  Driver = (AT-322701 - N/C_des):
     # at design L_feed=L0 -> nh3_shift=0 -> AT-322701 = N/C_des -> deviation 0 -> 114.0 EXACT (bit-pin).
@@ -3943,7 +3938,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
             "q_carb_kw": q_carb_kw, "q_ccw_kw": q_ccw_kw,
             "t_ccw_in": t_ccw_in, "t_ccw_out": t_ccw_out, "dT_ccw": dT_ccw,
             "m_ccw_kgh": m_ccw_kgh, "co2_scale": s, "vent_ratio": vent_ratio,
-            "eps_ht": eps_ht, "ua_eff_kwk": ua_eff_kwk,                        # ε-NTU bridge diag
+            "eps_ht": eps_ht, "ua_eff_kwk": ua_eff_kwk,                        # ╬╡-NTU bridge diag
             "T_offgas": t_offgas, "P_offgas": SCRUB_OFFGAS_P_BARA,
             "T_overflow": t_overflow, "P_overflow": SCRUB_OVERFLOW_P_BARA}
 
@@ -3951,36 +3946,36 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
 def _eq_pct(theta_pct: float, theta_des_pct: float, R: float = SCRUB_HV604_RANGE) -> float:
     """Equal-percentage valve characteristic factor, normalised to the design opening.
 
-    IEC 60534 inherent equal-percentage trim  K_v(h) = K_vs · R^(h-1)  (h = fractional travel,
+    IEC 60534 inherent equal-percentage trim  K_v(h) = K_vs ┬╖ R^(h-1)  (h = fractional travel,
     R = rangeability).  Normalised to the design travel h_des the K_vs cancels:
-        φ_ep(θ) = K_v(θ)/K_v(θ_des) = R^(h - h_des) = R^((θ - θ_des)/100)
-    so φ_ep(θ_des) = R^0 = 1 exactly (design bit-exact) and each +1 % travel multiplies the
-    installed K_v by R^0.01 (≈ +8 %/1 % at R=50) — the steep top-of-travel gain that distinguishes
+        ╧å_ep(╬╕) = K_v(╬╕)/K_v(╬╕_des) = R^(h - h_des) = R^((╬╕ - ╬╕_des)/100)
+    so ╧å_ep(╬╕_des) = R^0 = 1 exactly (design bit-exact) and each +1 % travel multiplies the
+    installed K_v by R^0.01 (Γëê +8 %/1 % at R=50) ΓÇö the steep top-of-travel gain that distinguishes
     an equal-% trim from a linear one near the seat-limited / choked operating band."""
     return R ** ((max(theta_pct, 0.0) - theta_des_pct) / 100.0)
 
 
 def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float) -> dict:
-    """HV-322604 HP-scrubber off-gas valve — dynamic isenthalpic letdown 322E003 -> 322C001.
+    """HV-322604 HP-scrubber off-gas valve ΓÇö dynamic isenthalpic letdown 322E003 -> 322C001.
     Inert purge to the LP absorber.  Flow follows the valve hydraulic characteristic, driven by
-    the live controller opening θ (HIC-322604) and √ΔP across the seat.  Datasheet trim is
-    EQUAL PERCENTAGE (DN-24, Kvs 2.1, carbamate gas), so the opening term is R^((θ−θ_des)/100):
-        m_og = m_og_des·s · R^((θ−θ_des)/100) · √(max(P_up−P_down,0)/ΔP_des)   (θ_des = 50%, R = 50)
-    The incoming `offgas` vector is already the design purge × s, so the valve factor scales it
-    1:1 (composition held; θ=θ_des & P_up=design -> factor=1 -> bit-exact design HMB).  Dynamic
-    Joule-Thomson cooling on the ACTUAL pressure drop:  T_out = T_in − μ_JT·ΔP."""
+    the live controller opening ╬╕ (HIC-322604) and ΓêÜ╬öP across the seat.  Datasheet trim is
+    EQUAL PERCENTAGE (DN-24, Kvs 2.1, carbamate gas), so the opening term is R^((╬╕ΓêÆ╬╕_des)/100):
+        m_og = m_og_des┬╖s ┬╖ R^((╬╕ΓêÆ╬╕_des)/100) ┬╖ ΓêÜ(max(P_upΓêÆP_down,0)/╬öP_des)   (╬╕_des = 50%, R = 50)
+    The incoming `offgas` vector is already the design purge ├ù s, so the valve factor scales it
+    1:1 (composition held; ╬╕=╬╕_des & P_up=design -> factor=1 -> bit-exact design HMB).  Dynamic
+    Joule-Thomson cooling on the ACTUAL pressure drop:  T_out = T_in ΓêÆ ╬╝_JT┬╖╬öP."""
     dP    = max(p_up - SCRUB_HV604_P_OUT, 0.0)
-    valve = _eq_pct(hic_pct, SCRUB_HIC604_DES_PCT) * math.sqrt(dP / SCRUB_HV604_DP_DES)   # equal-% trim × √ΔP-ratio
+    valve = _eq_pct(hic_pct, SCRUB_HIC604_DES_PCT) * math.sqrt(dP / SCRUB_HV604_DP_DES)   # equal-% trim ├ù ΓêÜ╬öP-ratio
     comp  = {k: offgas.get(k, 0.0) * valve for k in MW_COMP}                      # throttled flow, comp held
     T_out = T_in - SCRUB_HV604_MU_JT * dP                                         # dynamic JT letdown
-    m_kgh = sum(comp.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)                   # = m_og_des·s·valve
+    m_kgh = sum(comp.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)                   # = m_og_des┬╖s┬╖valve
     return {"comp_kmolh": comp, "T_out": round(T_out, 1),
             "P_out": SCRUB_HV604_P_OUT, "P_in": round(p_up, 1), "open_pct": hic_pct,
             "mass_kgh": m_kgh, "valve_frac": valve, "dP": round(dP, 1)}
 
 
 def react_nc_ratio(comp_kmolh: dict) -> float:
-    """AT-322701: molar N/C ratio (Σ nᵢ·#Nᵢ)/(Σ nᵢ·#Cᵢ) of a stream on an atom basis."""
+    """AT-322701: molar N/C ratio (╬ú nß╡ó┬╖#Nß╡ó)/(╬ú nß╡ó┬╖#Cß╡ó) of a stream on an atom basis."""
     n = sum(comp_kmolh.get(k, 0.0) * a for k, a in REACT_N_ATOMS.items())
     c = sum(comp_kmolh.get(k, 0.0) * a for k, a in REACT_C_ATOMS.items())
     return (n / c) if c else 0.0
@@ -3988,7 +3983,7 @@ def react_nc_ratio(comp_kmolh: dict) -> float:
 
 # Design AT-322701 (overflow N/C) reference for TT-322011 off-gas-temp slip model.  At design L_feed=L0 ->
 # nh3_shift=0 -> overflow == pinned design HMB, so this is the exact bit-pin anchor (nc_act-nc_des = 0).
-SCRUB_OFFGAS_NC_DES = react_nc_ratio(REACT_OVERFLOW_DES)   # ≈ 3.000, computed once at import
+SCRUB_OFFGAS_NC_DES = react_nc_ratio(REACT_OVERFLOW_DES)   # Γëê 3.000, computed once at import
 
 
 # ----------------------------------------------------------------------------------------------------
@@ -4155,8 +4150,8 @@ def step_uf85_cascade(s, m_402g_kgh: float, recycle: bool, dt: float) -> dict:
 
 # --- Empirical transport dead time (DCS 03-06-2025 anchor analysis) -------------------
 #  Feed-introduction propagation: dead time bracketed to <=572 s, best estimate 345 s
-#  (PT-329201 FOPTD fit, R2=0.9888; see reports/dcs_anchor_dynamics_2025-06-03.md §1.2).
-#  Applied ONLY to the feed tear streams (NH3 motive, CO2 feed) — the loop's 3470 s
+#  (PT-329201 FOPTD fit, R2=0.9888; see reports/dcs_anchor_dynamics_2025-06-03.md ┬º1.2).
+#  Applied ONLY to the feed tear streams (NH3 motive, CO2 feed) ΓÇö the loop's 3470 s
 #  pressurization time constant is an EMERGENT property of the inventory ODEs and is a
 #  validation target, NOT a hard-coded lag (hard-coding it would double-count dynamics).
 FEED_TD_S = 345.0          # s, NH3/CO2 feed -> synthesis-loop response dead time
@@ -4166,7 +4161,7 @@ def _delay(store: dict, key: str, target: float, td_s: float, dt: float) -> floa
     """Pure transport delay y(t) = u(t - td), robust to a VARIABLE sub-step dt.
 
     sim_task advances each real tick in STEP_CAP-bounded sub-steps whose size is not
-    fixed — the remainder sub-step is often a tiny numerical crumb (~1e-8 s).  So the
+    fixed ΓÇö the remainder sub-step is often a tiny numerical crumb (~1e-8 s).  So the
     buffer length must NOT be derived from dt (n = td/dt would explode to ~1e10 on a
     crumb -> MemoryError).  Instead this is a timestamp-tagged FIFO of past inputs,
     zero-order-held against a per-sub-step sim clock.
@@ -4270,7 +4265,6 @@ def mode_tag(c: "Controller") -> str:
 # ----- Plant state -----
 class State:
     def __init__(self):
-        self.r322_r001_P = 144.9  # HP loop pressure anchor (bar a)
         # tank
         self.tank_level_frac = 0.65
         self.tank_T_C        = 25.0
@@ -4288,7 +4282,7 @@ class State:
         # 322F001 ejector spindle opening (HIC-322602 -> HV-322602), % open
         self.HIC_322602 = 74.0
         # 322R001 HP urea reactor: HIC-322605 -> HV-322605 overflow valve opening (%)
-        self.HIC_322605 = REACT_HIC605_DES_PCT          # φ_des = 60 %
+        self.HIC_322605 = REACT_HIC605_DES_PCT          # ╧å_des = 60 %
         # reactor-overflow tear stream (synthesis recycle): the stripper feed consumes the
         # previous step's value (initialised to the design vector -> design = bit-identical).
         self.react_overflow_kmolh = dict(REACT_OVERFLOW_DES)
@@ -4299,7 +4293,7 @@ class State:
         self.react_T_node     = list(REACT_NODE_SS_DES)
         self.react_T_overflow = REACT_OVERFLOW_T_C   # TT-322014 overflow lip temp (dynamic anchor)
         self.react_T_offgas   = REACT_OFFGAS_T_C     # TT-322009 off-gas line temp (dynamic)
-        # Fix-3: lagged recycle states (τ_rec) blended with the fresh feed to drive Inoue-Kanai f_L/f_W.
+        # Fix-3: lagged recycle states (╧ä_rec) blended with the fresh feed to drive Inoue-Kanai f_L/f_W.
         #   Seeded at design (L0/W0) -> blend == design feed -> conversion bit-exact on init.
         self.react_L_rec = reactor.L0_DES    # lagged recycle N/C (NH3/CO2) contribution
         self.react_W_rec = reactor.W0_DES    # lagged recycle H/C (H2O/CO2) contribution
@@ -4307,28 +4301,28 @@ class State:
         #   conversion self-loop (gain ~0.16) flexes with its OWN exotherm but does NOT ride the HPCC
         #   T_prod cold-cliff (which closed an unstable G~-15 thermal recycle). =1.0 -> design bit-exact.
         self.react_conv_fac = 1.0
-        # PHYSICAL liquid-head fraction (% of the 25 m column) — DYNAMIC inventory state (mass balance,
-        # open-loop: HV-322605 is hand/auto and does NOT control level). dV/dt = Q_in - Q_out(φ).  Drives
+        # PHYSICAL liquid-head fraction (% of the 25 m column) ΓÇö DYNAMIC inventory state (mass balance,
+        # open-loop: HV-322605 is hand/auto and does NOT control level). dV/dt = Q_in - Q_out(╧å).  Drives
         # the bottom-take-off hydraulics, the flood/carryover guard and the loop-mass P_min (full-column).
         self.react_level_pct = REACT_LEVEL_NLL_PCT      # init at design NLL = 80 % (derived from react_m_liq)
-        # LT-322504 transmitter reading (%) — the DISPLAYED narrow-band indication (N7, 1.5 m span, top tap
+        # LT-322504 transmitter reading (%) ΓÇö the DISPLAYED narrow-band indication (N7, 1.5 m span, top tap
         #   1 m above overflow): a re-scope of react_level_pct, NOT a separate inventory.  Init 80 % (design).
         self.react_lt322504_pct = REACT_LEVEL_NLL_PCT
-        # Fix-2b: CONSERVED liquid holdup mass (kg) — the true level state.  level = m_liq/(rho(T)·A),
+        # Fix-2b: CONSERVED liquid holdup mass (kg) ΓÇö the true level state.  level = m_liq/(rho(T)┬╖A),
         #   so cooling (rho up) drops the level below the weir lip even with the holdup frozen.
-        self.react_m_liq     = REACT_M_LIQ_DES          # seeded rho_bulk·A·level_des -> reads 80 % at design
-        # Recycle-mass transport lag (τ_rec): the (1-φ_f) recycle leg of the production-mass surge buffers
+        self.react_m_liq     = REACT_M_LIQ_DES          # seeded rho_bulk┬╖A┬╖level_des -> reads 80 % at design
+        # Recycle-mass transport lag (╧ä_rec): the (1-╧å_f) recycle leg of the production-mass surge buffers
         #   through the loop inventory before reaching the holdup In term, so HV-322605 keeps PROMPT drain
-        #   authority over LT-322504.  Seeded 0 (no surge at design) -> m_in==ṁ_des on init (bit-exact).
+        #   authority over LT-322504.  Seeded 0 (no surge at design) -> m_in==ß╣ü_des on init (bit-exact).
         self.react_m_in_lag  = 0.0
         # Fix-4 ejector forward-carbamate washout: low-pass of the spindle-attributable draw
-        #   ṁ_suc·(1−1/φ_sp(θ)).  The high-pass (driver − this state) is the TRANSIENT forward-carbamate
-        #   pulse on an HV-322602 move, decaying to 0 at any steady θ (so no sustained fictitious source).
-        #   Seeded 0; driver ≡ 0 at the design valve θ=74 -> state stays 0 -> LT-322504 pin bit-exact.
+        #   ß╣ü_suc┬╖(1ΓêÆ1/╧å_sp(╬╕)).  The high-pass (driver ΓêÆ this state) is the TRANSIENT forward-carbamate
+        #   pulse on an HV-322602 move, decaying to 0 at any steady ╬╕ (so no sustained fictitious source).
+        #   Seeded 0; driver Γëí 0 at the design valve ╬╕=74 -> state stays 0 -> LT-322504 pin bit-exact.
         self.react_fwd_wash  = 0.0
         self.hpcc_level_pct  = HPCC_LEVEL_NLL_PCT       # 322E002 liquid inventory, init design NLL
-        # 322E003 scrubber sump — TRUE dynamic liquid inventory (Option 3). holdup kg integrated
-        #   each tick from (condensation make − actual ejector entrainment); level = holdup/NLL_KG·NLL%.
+        # 322E003 scrubber sump ΓÇö TRUE dynamic liquid inventory (Option 3). holdup kg integrated
+        #   each tick from (condensation make ΓêÆ actual ejector entrainment); level = holdup/NLL_KG┬╖NLL%.
         self.scrub_holdup_kg = SCRUB_HOLDUP_NLL_KG      # init at design NLL holdup -> 50 % (bit-exact)
         self.scrub_level_pct = SCRUB_LEVEL_NLL_PCT      # 322E003 sump level (LT-329501), design NLL
         # pumps: open_act = torque-converter valve opening %
@@ -4399,7 +4393,6 @@ class State:
         #   AUTO holds the design level (50 %) at the field-calibrated design opening (46.1 %);
         #   direct-acting.
         self.strip_level = STRIP_LEVEL_SP_DES
-        self.strip_bot_kgh_lag = None
         self.LIC_322501  = {"mode": "AUTO", "op": LV322501_OPEN_DES,
                             "sp": STRIP_LEVEL_SP_DES, "pv": STRIP_LEVEL_SP_DES, "e_prev": 0.0}
         # 322E003 HP scrubber off-gas valve: HIC-322604 -> HV-322604 (inert purge to 322C001).
@@ -4456,7 +4449,7 @@ class State:
         self.r323_f010_P = R323_F010_P_BARA        # bar a 323F010 vacuum (PT-323204, live off HV-323605/HV-329605)
         self.r323_d002_M_I  = R323_D002_M_I_DES    # 323D002 Compartment I (active, 80 m3)
         # Comp II is DRY in normal operation -- it is an emergency buffer that only fills when Comp I
-        # spills over the internal baffle (References/323D002.md §3.3).  It used to seed at 50 %,
+        # spills over the internal baffle (References/323D002.md ┬º3.3).  It used to seed at 50 %,
         # which quietly declared a 173 t inventory that the plant would treat as a high-level alarm.
         self.r323_d002_M_II = 0.0                  # Compartment II (passive buffer, 300 m3)
         self.r323_d002_T    = R323_F010_T_SP_C     # TI-323008 Comp-I bulk temperature (99 C)
@@ -4513,7 +4506,7 @@ class State:
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 150.0}
 
         # ==================================================================
-        #  UNIT 324 — TWO-STAGE EVAPORATION controllers + lumped state.
+        #  UNIT 324 ΓÇö TWO-STAGE EVAPORATION controllers + lumped state.
         #  Every controller seeded pv==sp==pv1==pv2 -> du==0 (bit-exact boot);
         #  every holdup/temp/pressure seeded at its design fixed point so
         #  dM/dt = dT/dt = dP/dt = 0 at t=0.  Steam is a TIC->PIC cascade
@@ -4624,7 +4617,7 @@ class State:
         self.r324_f003_P = R324_F003_P_BARA          # bar a 324F003 vacuum
 
         # ==================================================================
-        #  UNITS 323-2 / 328-1 / 328-2 — LP RECIRCULATION & DESORPTION state
+        #  UNITS 323-2 / 328-1 / 328-2 ΓÇö LP RECIRCULATION & DESORPTION state
         #  Lumped liquid holdups (kg), bulk temps (C), section pressures (bar a)
         #  seeded at the design fixed point so dM/dt = dT/dt = dP/dt = 0 at boot.
         #  Controllers are inline velocity-I-PD dicts (EU) stepped by _ctrl_ipd,
@@ -4641,7 +4634,7 @@ class State:
         self.r3232_d001_P = R3232_D001_P_BARA
         # ---- 328C002 Desorber-I (bottoms 139 C) / 328D001 reflux drum (61 C, 2.6)
         self.a328_c002_M = R328_C002_M_DES
-        self.a328_c002_T = R328_C002_T_BOT_BOT
+        self.a328_c002_T = R328_C002_T_BOT
         self.a328_c002_P = R328_C002_P_TOP        # AUDIT C1: column OVHD pressure state (3.5 bar a)
         self.a328_d001_M = R328_D001_M_DES
         self.a328_d001_T = R328_D001_T
@@ -4734,10 +4727,10 @@ class State:
                            "pv1": R3232_D011_LVL_SP, "pv2": R3232_D011_LVL_SP,
                            "Kc": 1.8, "Ti": 120.0, "Td": 0.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 100.0}
-        # TIC-323013 323E003 tempered-water SUPPLY temp (stream 1102, 55 °C) -> split-range TV-323013A/B.
+        # TIC-323013 323E003 tempered-water SUPPLY temp (stream 1102, 55 ┬░C) -> split-range TV-323013A/B.
         #   DIRECT: PV above SP -> op rises -> TV-A opens (cold make-up in) and TV-B closes (hot bypass
-        #   out); the two strokes are exact opposites.  sp span = the achievable supply band: 45 °C at
-        #   TV-A wide open, 65 °C (= return temp) at TV-A shut / full bypass.
+        #   out); the two strokes are exact opposites.  sp span = the achievable supply band: 45 ┬░C at
+        #   TV-A wide open, 65 ┬░C (= return temp) at TV-A shut / full bypass.
         self.TIC_323013 = {"mode": "CAS", "op": R3232_TV13_DES_PCT,
                            "sp": R3232_TW_SUP_T, "pv": R3232_TW_SUP_T,
                            "pv1": R3232_TW_SUP_T, "pv2": R3232_TW_SUP_T,
@@ -5054,81 +5047,8 @@ _sm_flowsheet.add_unit(_valve_unit)
 _sm_flowsheet.add_unit(_vac_unit)
 # ------------------------------
 
-# ----- SM Flowsheet Setup -----
-from core.flowsheet import Flowsheet
-from core.stream import Stream
-from core.ejector import Ejector322F001
-from core.stripper import Stripper322E001
-from core.hpcc import Hpcc322E002
-from core.scrubber import Scrubber322E003
-from core.reactor import Reactor322R001
-from core.valve import Valve322604
-from core.vacuum import VacuumTrain324
-
-_sm_flowsheet = Flowsheet("Urea HP Loop")
-_ej_motive = Stream("Ejector_Motive_In")
-_ej_disch = Stream("Ejector_Disch_Out")
-_ej_unit = Ejector322F001("322F001_Ejector", _ej_motive, _ej_disch)
-
-_strip_co2_in = Stream("Stripper_CO2_In")
-_strip_overflow_in = Stream("Stripper_Overflow_In")
-_strip_steam_in = Stream("Stripper_Steam_In")
-_strip_top_gas_out = Stream("Stripper_Top_Gas_Out")
-_strip_bottom_liq_out = Stream("Stripper_Bottom_Liq_Out")
-_strip_unit = Stripper322E001("322E001_Stripper", _strip_co2_in, _strip_overflow_in, _strip_steam_in, _strip_top_gas_out, _strip_bottom_liq_out)
-
-_hpcc_gas_in = Stream("HPCC_Gas_In")
-_hpcc_liq_in = Stream("HPCC_Liq_In")
-_hpcc_gas_out = Stream("HPCC_Gas_Out")
-_hpcc_liq_out = Stream("HPCC_Liq_Out")
-_hpcc_unit = Hpcc322E002("322E002_HPCC", _hpcc_gas_in, _hpcc_liq_in, _hpcc_gas_out, _hpcc_liq_out)
-
-_scrub_offgas_in = Stream("Scrub_Offgas_In")
-_scrub_wash_in = Stream("Scrub_Wash_In")
-_scrub_ccw_in = Stream("Scrub_CCW_In")
-_scrub_vent_out = Stream("Scrub_Vent_Out")
-_scrub_carbamate_out = Stream("Scrub_Carbamate_Out")
-_scrub_ccw_out = Stream("Scrub_CCW_Out")
-_scrub_unit = Scrubber322E003("322E003_Scrubber", _scrub_offgas_in, _scrub_wash_in, _scrub_ccw_in, _scrub_vent_out, _scrub_carbamate_out, _scrub_ccw_out)
-
-_react_feed_in = Stream("React_Feed_In")
-_react_overflow_out = Stream("React_Overflow_Out")
-_react_offgas_out = Stream("React_Offgas_Out")
-_react_unit = Reactor322R001("322R001_Reactor", _react_feed_in, _react_overflow_out, _react_offgas_out)
-
-_valve_og_in = Stream("Valve_Offgas_In")
-_valve_purge_out = Stream("Valve_Purge_Out")
-_valve_unit = Valve322604("HV_322604", _valve_og_in, _valve_purge_out)
-
-_vac_evap_in = Stream("Vac_Evap_In")
-_vac_v1_in = Stream("Vac_V1_In")
-_vac_v2_in = Stream("Vac_V2_In")
-_vac_fa1_in = Stream("Vac_FA1_In")
-_vac_fa2_in = Stream("Vac_FA2_In")
-_vac_mot924_in = Stream("Vac_Mot924_In")
-_vac_mot927_in = Stream("Vac_Mot927_In")
-_vac_mot929_in = Stream("Vac_Mot929_In")
-_vac_cond_out = Stream("Vac_Cond_Out")
-_vac_vent_out = Stream("Vac_Vent_Out")
-_vac_unit = VacuumTrain324("324_VacuumTrain", _vac_evap_in, _vac_v1_in, _vac_v2_in, _vac_fa1_in, _vac_fa2_in, _vac_mot924_in, _vac_mot927_in, _vac_mot929_in, _vac_cond_out, _vac_vent_out)
-
-_sm_flowsheet.add_unit(_ej_unit)
-_sm_flowsheet.add_unit(_strip_unit)
-_sm_flowsheet.add_unit(_hpcc_unit)
-_sm_flowsheet.add_unit(_scrub_unit)
-_sm_flowsheet.add_unit(_react_unit)
-_sm_flowsheet.add_unit(_valve_unit)
-_sm_flowsheet.add_unit(_vac_unit)
-# ------------------------------
-
 def step_sim(dt: float) -> dict:
     s = state
-    # Dynamic property evaluations for HP Loop
-    _react_feed_in.viscosity = thermo.viscosity_liq_pas(s.react_T_overflow)
-    _strip_overflow_in.viscosity = thermo.viscosity_liq_pas(s.react_T_overflow)
-    _hpcc_gas_in.viscosity = thermo.viscosity_gas_pas(s.react_T_overflow)
-    _scrub_offgas_in.viscosity = thermo.viscosity_gas_pas(s.a328_c001_T)
-
     s.sim_t += dt                        # plant clock advances with the physics, not the wall clock
     suct_open  = bool(s.XV_321901) and (s.tank_level_frac > 0.05)
     disch_open = bool(s.XV_322901)
@@ -5142,7 +5062,7 @@ def step_sim(dt: float) -> dict:
     if pic["mode"] == "AUTO" and not pic["pv_bad"]:
         # F2: velocity I-PD, DIRECT-acting (sigma=-1): rising line-P -> open vent.  P acts on PV
         # (no SP derivative kick), I acts on error.  Kc/Ti = 0.5 reproduces the old integral-only
-        # gain; the added Kc·ΔPV proportional term damps the static-gain vent loop.  PV==SP & steady
+        # gain; the added Kc┬╖╬öPV proportional term damps the static-gain vent loop.  PV==SP & steady
         # -> du=0 (bumpless, design-preserving).
         du = PIC_322203_KC * ((pic["pv"] - pic["pv_prev"])
                               + (dt / PIC_322203_TI) * (pic["pv"] - pic["sp"]))
@@ -5268,7 +5188,7 @@ def step_sim(dt: float) -> dict:
     motive_nh3_kgh = (F_pump_total_th * 1000.0) if disch_open else 0.0
     # Empirical BL->loop transport dead time (FEED_TD_S): NH3 leaving the pump discharge
     # header transits the BL->ejector line before the loop sees it.  Pure re-timing (ring
-    # buffer) — the tank/pump balance above debits the LIVE flow; the difference is line
+    # buffer) ΓÇö the tank/pump balance above debits the LIVE flow; the difference is line
     # pack in transit.  FY-321401 / ratio-PV read the live pump-discharge transmitters.
     motive_nh3_kgh = _delay(s.tlag, "FEED_NH3", motive_nh3_kgh, FEED_TD_S, dt)
     # Option 3 coupling: ACTUAL entrainment = ejector capacity * gravity suction head (scrub level).
@@ -5354,7 +5274,7 @@ def step_sim(dt: float) -> dict:
     lic["e_prev"] = e_lvl                       # track for bumpless MAN->AUTO
     lv_open = clamp(lic["op"], 0.0, 100.0)
     # L3-1 LV-322501 letdown driven by the LIVE synthesis pressure (PT-329201 = s.p_syn_bara), not a
-    #   frozen design ΔP.  As the loop depressurizes (black-start / blowdown) the drain head collapses
+    #   frozen design ╬öP.  As the loop depressurizes (black-start / blowdown) the drain head collapses
     #   -> drain -> 0, no spurious letdown from an empty vessel.  Uses prior-step p_syn (same loop-break
     #   convention as nu / dP_vent).  P_down = 4.0 bar a (LP loop downstream of LV-322501).
     #       m_drain = m_drain_des * (Op_LV/Op_LV_des) * sqrt(max(P_syn - P_down,0)/(P_syn_des - P_down))
@@ -5384,29 +5304,25 @@ def step_sim(dt: float) -> dict:
     _fc         = 0.06     # empty-loop net-rate scale (Smith-calibrated to Section 6.4 band)
     _fe         = 8.0      # gate exponent (Smith-calibrated to Section 6.4 band)
     k_loop_fill = _fc + (1.0 - _fc) * _mf_prev ** _fe
-    delayed_bot_kgh = _delay(s.tlag, "322E001_BOT_KGH_LAG", strip["bot_kgh"], 60.0, dt)
-        
     # bottom-sump mass balance -> LT-322501 level (%)
     m_span_kg = STRIP_SUMP_AREA_M2 * STRIP_LEVEL_SPAN_M * STRIP_RHO_BOTTOM
-    if s.strip_level <= 0.0 and drain_kgh > delayed_bot_kgh:
-        drain_kgh = delayed_bot_kgh
     s.strip_level = clamp(s.strip_level
-                          + k_loop_fill * (delayed_bot_kgh - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
+                          + k_loop_fill * (strip["bot_kgh"] - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
                           0.0, 100.0)
     lic["pv"] = s.strip_level
     # L3-7 bottoms-sump ENERGY BALANCE -> TT-322004 (stream 322E001 falling-film exit -> LV-322501):
     #   The bottom sump is a stirred buffer below the steam-heated falling-film tubes.  Steady-state sump
     #   energy balance (film enthalpy in = drain enthalpy out + heat loss to surroundings):
-    #       ṁ·cp·T_film = ṁ·cp·T_out + UA·(T_out − T_amb)
+    #       ß╣ü┬╖cp┬╖T_film = ß╣ü┬╖cp┬╖T_out + UA┬╖(T_out ΓêÆ T_amb)
     #   The rigorous stripper model's strip["T_bot"] already equals the DESIGN-drain sump outlet (design HMB
-    #   anchor), so the film feeding the sump is  T_film = T_bot·(1+τ) − τ·T_amb  with the design sump-loss
-    #   NTU  τ = UA/(ṁ_des·cp) = STRIP_SUMP_NTU_DES.  Eliminating T_film and writing r = ṁ_drain/ṁ_des
+    #   anchor), so the film feeding the sump is  T_film = T_bot┬╖(1+╧ä) ΓêÆ ╧ä┬╖T_amb  with the design sump-loss
+    #   NTU  ╧ä = UA/(ß╣ü_des┬╖cp) = STRIP_SUMP_NTU_DES.  Eliminating T_film and writing r = ß╣ü_drain/ß╣ü_des
     #   (live drain / design drain) gives the closed-form sump outlet temperature:
-    #       T_out = [ r·(1+τ)·T_bot + τ·(1−r)·T_amb ] / (r + τ)
-    #   r=1 -> T_out = T_bot  (bit-exact design HMB);  r↑ (LV-322501 opened -> more bottoms flow, less sump
-    #   residence) -> T_out -> (1+τ)·T_bot = T_film  (hotter, ≤ steam sat);  r↓ (throttled, long residence)
-    #   -> T_out -> T_amb  (crystallization-pinned floor).  dT_out/dr = τ(1+τ)(T_bot−T_amb)/(r+τ)² > 0 since
-    #   T_bot > T_amb, so opening LV-322501 raises the bottoms flow which raises TT-322004 (item 3) — now
+    #       T_out = [ r┬╖(1+╧ä)┬╖T_bot + ╧ä┬╖(1ΓêÆr)┬╖T_amb ] / (r + ╧ä)
+    #   r=1 -> T_out = T_bot  (bit-exact design HMB);  rΓåæ (LV-322501 opened -> more bottoms flow, less sump
+    #   residence) -> T_out -> (1+╧ä)┬╖T_bot = T_film  (hotter, Γëñ steam sat);  rΓåô (throttled, long residence)
+    #   -> T_out -> T_amb  (crystallization-pinned floor).  dT_out/dr = ╧ä(1+╧ä)(T_botΓêÆT_amb)/(r+╧ä)┬▓ > 0 since
+    #   T_bot > T_amb, so opening LV-322501 raises the bottoms flow which raises TT-322004 (item 3) ΓÇö now
     #   driven by the ACTUAL drain mass flow through the sump heat balance, not an empirical opening curve.
     #   drain_kgh keys off strip["T_bot"] (f_drain) only, never T_out -> no algebraic loop.
     T_amb_sump = STRIP_BOT_T_CRYST_C
@@ -5440,20 +5356,20 @@ def step_sim(dt: float) -> dict:
     s.tlag["HPCC_TPROD"] = hpcc["T_prod"]        # tear for next tick's phase split
     s.hpcc_phi           = hpcc["phi_film"]      # interfacial-composition state (relaxed, pre-gate)
 
-    # 322R001 HP urea reactor: pinned products from hpcc feed, throughput s, valve φ.
+    # 322R001 HP urea reactor: pinned products from hpcc feed, throughput s, valve ╧å.
     # f_L loop coupling: the reduced model pins the recycle overflow, so the endogenous feed N/C
     # (hpcc L_hpcc) is dominated by the atom-conserving ripple (conv^ -> NH3 -2d -> feed N/C v):
     # a strong NEGATIVE loop that cannot be amplified.  Drive f_L instead off the EXOGENOUS
-    # fresh-feed N/C (s.ratio_PV, set by pump speeds — feedback-free): L_drive maps its deviation
+    # fresh-feed N/C (s.ratio_PV, set by pump speeds ΓÇö feedback-free): L_drive maps its deviation
     # onto the reactor-feed N/C, == L0 at design (ratio.PV=RATIO_PV_DES -> conv=1, bit-exact).
     # Drives Inoue-Kanai f_L only; overflow ripple keeps AT-322701 atom-invariant; PT-329201
     # (L_hpcc bubble-point) untouched.
     # Fix-3: genuine blended reactor feed with a first-order recycle lag (replaces the L_override
     # band-aid).  The EXOGENOUS fresh-feed N/C (pump speeds, feedback-free) is the disturbance target
-    # L_fresh; the recycle leg L_rec chases it through a τ_rec first-order Euler lag, and the reactor
-    # sees the φ_f-weighted blend.  W (reactor-feed H/C) blends the same way off the LIVE HPCC feed.
+    # L_fresh; the recycle leg L_rec chases it through a ╧ä_rec first-order Euler lag, and the reactor
+    # sees the ╧å_f-weighted blend.  W (reactor-feed H/C) blends the same way off the LIVE HPCC feed.
     # At design L_fresh==L0, W_inst==W0, L_rec/W_rec seeded at design -> blend == design (bit-exact);
-    # at settled steady state (t >> τ_rec) the lag fully relaxes (L_rec->L_fresh, W_rec->W_inst) so
+    # at settled steady state (t >> ╧ä_rec) the lag fully relaxes (L_rec->L_fresh, W_rec->W_inst) so
     # the blend -> the instantaneous feed and the prior settled conversion is recovered exactly.
     a_rec   = dt / (REACT_TAU_REC_MIN * 60.0)                 # per-tick first-order lag coefficient
     L_fresh = reactor.L0_DES * (1.0 + REACT_NC_LOOP_GAIN * (s.ratio_PV / RATIO_PV_DES - 1.0))
@@ -5472,7 +5388,7 @@ def step_sim(dt: float) -> dict:
                             T_overflow_c=T_conv_c)
     
     # Dynamic Darcy-Weisbach pressure drop for Reactor
-    dP_des_react = state.p_syn_bara - HPCC_P_DES_BARA
+    dP_des_react = REACT_P_BARA - HPCC_P_DES_BARA
     m_react_live = max(sum(react["feed_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
     m_react_des  = HPCC_LIQ_DES_LIVE if HPCC_LIQ_DES_LIVE else HPCC_LIQ_DES_KGH
     w_urea_react = (react["feed_kmolh"].get("Urea", 0.0) * MW_COMP["Urea"]) / m_react_live
@@ -5501,21 +5417,21 @@ def step_sim(dt: float) -> dict:
     
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
-    # NB: s.react_overflow_kmolh (the stripper-feed tear) is set BELOW in the reactor-inventory block —
-    #     it is the HYDRAULIC bottom take-off m_out (HV-322605 × column head), NOT the raw split production.
+    # NB: s.react_overflow_kmolh (the stripper-feed tear) is set BELOW in the reactor-inventory block ΓÇö
+    #     it is the HYDRAULIC bottom take-off m_out (HV-322605 ├ù column head), NOT the raw split production.
 
-    # Fix-1: integrate the distributed 4-node axial thermal profile (Damköhler-shaped exotherm).
-    #   dT_n/dt = [ (T_{n-1} - T_n) + g_n·ΔT_col ] / τ_n ,  T_0 = T_feed (HPCC two-phase product),
-    #   ΔT_col = ΔT_col,des · conversion_factor  (the profile FLEXES with the live per-pass conversion).
+    # Fix-1: integrate the distributed 4-node axial thermal profile (Damk├╢hler-shaped exotherm).
+    #   dT_n/dt = [ (T_{n-1} - T_n) + g_n┬╖╬öT_col ] / ╧ä_n ,  T_0 = T_feed (HPCC two-phase product),
+    #   ╬öT_col = ╬öT_col,des ┬╖ conversion_factor  (the profile FLEXES with the live per-pass conversion).
     # Explicit Euler; the upstream term uses the PREVIOUS-step node temps (T_old) so the cascade is
     # decoupled within a tick (steady state is identical: T_old[n-1]==T_new[n-1] -> telescopes to
-    # T_n = T_feed + ΔT_col·G_raw(ζ_n), the as-built residence-time probe profile when conv_fac->1).
+    # T_n = T_feed + ╬öT_col┬╖G_raw(╬╢_n), the as-built residence-time probe profile when conv_fac->1).
     conv_fac = react["X_conv"] / reactor.X_DES_RAW
     s.react_conv_fac = conv_fac                              # tear -> next step's design-anchored f_T base
     dT_col   = REACT_DT_COL_DES * conv_fac
     T_old     = list(s.react_T_node)
     T_up      = hpcc["T_prod"]                               # node-0 upstream = LIVE HPCC two-phase feed T (cascade)
-    flow_frac = max(clamp(react["co2_scale"], 0.0, 1.0), 1.0e-3)  # m_dot/m_dot_des proxy (§7.6 P5-B: floor 1e-3>0 so tau_n=tau_des/flow_frac stays finite as load->0; bit-exact at design, co2_scale>>1e-3); tau-scale + loss gate
+    flow_frac = max(clamp(react["co2_scale"], 0.0, 1.0), 1.0e-3)  # m_dot/m_dot_des proxy (┬º7.6 P5-B: floor 1e-3>0 so tau_n=tau_des/flow_frac stays finite as load->0; bit-exact at design, co2_scale>>1e-3); tau-scale + loss gate
     new_T     = []
     for n in range(4):
         # Fix-1/2: flow-scaled residence  tau_n = tau_des/flow_frac  (-> +inf as flow collapses, zero-flow
@@ -5527,7 +5443,7 @@ def step_sim(dt: float) -> dict:
         new_T.append(Tn)
         T_up = T_old[n]                                       # next node's upstream = this node (prev step)
     s.react_T_node     = new_T
-    s.react_T_overflow = new_T[3] + REACT_G_OV * dT_col       # overflow lip off INERTIAL node-3 (Σ g_n + g_ov = 1 anchor)
+    s.react_T_overflow = new_T[3] + REACT_G_OV * dT_col       # overflow lip off INERTIAL node-3 (╬ú g_n + g_ov = 1 anchor)
     s.react_T_offgas   = new_T[3] + REACT_OFFGAS_GAMMA * (s.react_T_overflow - new_T[3])
     react["T_overflow"] = s.react_T_overflow                 # publish live profile to telemetry + scrubber
     react["T_offgas"]   = s.react_T_offgas
@@ -5566,53 +5482,51 @@ def step_sim(dt: float) -> dict:
     if _STEAM_READY:                        # OFF during both boot-pin settles (headers frozen at design)
         step_steam(s.steam, dt, m_strip, m_hpcc, s.steam.m_users9)
 
-    # LT-322504 dynamic level — DOMINO inventory (Option 2, Lead-Ops mandate): the reactor 322R001 is a
+    # LT-322504 dynamic level ΓÇö DOMINO inventory (Option 2, Lead-Ops mandate): the reactor 322R001 is a
     #   true liquid HOLDUP and HV/HIC-322605 has STRICT HYDRAULIC authority over the BOTTOM take-off to the
-    #   stripper (NOT over the molar off-gas split — vaporization happens DOWNSTREAM in the 322E001 tubes):
-    #       m_in  = ṁ_ov,split                              (live urea-solution PRODUCTION; φ-independent)
-    #       m_out = ṁ_des·(θ/θ_des)·(max(L,0)/L_des)        (HV-322605 gate × column head; capacity = ṁ_des)
-    #       d(m_liq)/dt = m_in − m_out ;  L = m_liq/(rho(T_bulk)·A).
-    #   m_out IS the liquid fed to the stripper (conservation through the holdup) — see f_strip below.  At
-    #   design θ==θ_des, L==L_des and ṁ_ov,split==ṁ_des -> m_out==m_in==ṁ_des -> dm/dt=0, f_strip=1.0
-    #   (bit-exact pin).  OPEN HV-322605: m_out>m_in -> reactor DRAINS (L↓) AND surges the stripper feed
-    #   (transient); level re-settles at L_eq=L_des·(θ_des/θ) while steady feed returns to production.
-    #   THROTTLE: m_out<m_in -> reactor FLOODS (L↑, see carryover below) and starves the stripper.  The
-    #   take-off capacity is ṁ_des (production-independent), so a CO2-cut feed trip (m_in -> 0) drains the
-    #   vessel CONTINUOUSLY toward empty — no φ_fwd FLOOR hack needed (Bug #4 safe by construction).
+    #   stripper (NOT over the molar off-gas split ΓÇö vaporization happens DOWNSTREAM in the 322E001 tubes):
+    #       m_in  = ß╣ü_ov,split                              (live urea-solution PRODUCTION; ╧å-independent)
+    #       m_out = ß╣ü_des┬╖(╬╕/╬╕_des)┬╖(max(L,0)/L_des)        (HV-322605 gate ├ù column head; capacity = ß╣ü_des)
+    #       d(m_liq)/dt = m_in ΓêÆ m_out ;  L = m_liq/(rho(T_bulk)┬╖A).
+    #   m_out IS the liquid fed to the stripper (conservation through the holdup) ΓÇö see f_strip below.  At
+    #   design ╬╕==╬╕_des, L==L_des and ß╣ü_ov,split==ß╣ü_des -> m_out==m_in==ß╣ü_des -> dm/dt=0, f_strip=1.0
+    #   (bit-exact pin).  OPEN HV-322605: m_out>m_in -> reactor DRAINS (LΓåô) AND surges the stripper feed
+    #   (transient); level re-settles at L_eq=L_des┬╖(╬╕_des/╬╕) while steady feed returns to production.
+    #   THROTTLE: m_out<m_in -> reactor FLOODS (LΓåæ, see carryover below) and starves the stripper.  The
+    #   take-off capacity is ß╣ü_des (production-independent), so a CO2-cut feed trip (m_in -> 0) drains the
+    #   vessel CONTINUOUSLY toward empty ΓÇö no ╧å_fwd FLOOR hack needed (Bug #4 safe by construction).
     T_bulk_react   = sum(new_T) / 4.0                          # live bulk temp (= node mean; design 179.7 C)
     level_m_react  = REACT_LIQ_H_M * s.react_level_pct / 100.0  # prev-step head feeding the discharge (explicit)
     m_ov_split_kgh = sum(react["overflow_kmolh"][k] * MW_COMP[k] for k in react["overflow_kmolh"])  # instantaneous production
-    # HV-322605 ⟶ mass-balance timing fix.  The production surge above design (m_ov_split − ṁ_des) is the
+    # HV-322605 Γƒ╢ mass-balance timing fix.  The production surge above design (m_ov_split ΓêÆ ß╣ü_des) is the
     #   synthesis-loop recycle returning as urea solution; the reduced model returns it with ZERO transport
     #   delay (1-step tears), so production refilled the holdup as fast as HV-322605 drained it and LT-322504
-    #   barely moved.  Split the surge exactly like the L/W composition lag above: the fresh fraction φ_f
-    #   arrives PROMPT, the (1−φ_f) recycle leg buffers through the loop inventory τ_rec (same a_rec, φ_f).
-    #   Result: m_out responds to HV-322605 at once while m_in refills over τ_rec -> HV-322605 has prompt,
-    #   visible hydraulic authority over the level, re-settling at L_eq=L_des·(θ_des/θ).  At design the surge
-    #   is 0 -> lag stays 0 -> m_in==ṁ_des==m_out -> dm/dt=0 (bit-exact pin preserved).
+    #   barely moved.  Split the surge exactly like the L/W composition lag above: the fresh fraction ╧å_f
+    #   arrives PROMPT, the (1ΓêÆ╧å_f) recycle leg buffers through the loop inventory ╧ä_rec (same a_rec, ╧å_f).
+    #   Result: m_out responds to HV-322605 at once while m_in refills over ╧ä_rec -> HV-322605 has prompt,
+    #   visible hydraulic authority over the level, re-settling at L_eq=L_des┬╖(╬╕_des/╬╕).  At design the surge
+    #   is 0 -> lag stays 0 -> m_in==ß╣ü_des==m_out -> dm/dt=0 (bit-exact pin preserved).
     m_surge_kgh       = m_ov_split_kgh - _react_mdot_kgh                    # production above design (0 at design)
-    s.react_m_in_lag += a_rec * (m_surge_kgh - s.react_m_in_lag)           # recycle leg lags through τ_rec
+    s.react_m_in_lag += a_rec * (m_surge_kgh - s.react_m_in_lag)           # recycle leg lags through ╧ä_rec
     m_in_kgh          = (_react_mdot_kgh + REACT_FRESH_FRAC * m_surge_kgh
                          + (1.0 - REACT_FRESH_FRAC) * s.react_m_in_lag)    # prompt fresh + lagged recycle
     m_out_kgh      = reactor.outlet_line_outflow_kgph(level_m_react, _react_mdot_kgh, REACT_LEVEL_DES_M,
                                                       s.HIC_322605, REACT_HIC605_DES_PCT)  # HV-322605 take-off
-    if s.react_level_pct <= 0.0 and m_out_kgh > m_in_kgh:
-        m_out_kgh = m_in_kgh
     # DOMINO (Fix-4): ejector forward-carbamate coupling 322E003 -> 322F001 -> 322E002 -> 322R001.
-    #   Closing HV-322602 raises the spindle momentum flux ṁ²/(ρA) -> the 322F001 ejector entrains MORE
+    #   Closing HV-322602 raises the spindle momentum flux ß╣ü┬▓/(╧üA) -> the 322F001 ejector entrains MORE
     #   carbamate from the 322E003 sump (ej["suction_kgh"] climbs above its design draw EJ_SUC_TOT_DES); that
     #   surge is pumped forward through the HPCC (322E002) into the reactor as extra liquid make.  The reduced
-    #   loop previously dead-ended this wave at the HPCC — reactor m_in carried no forward-flow term — so
+    #   loop previously dead-ended this wave at the HPCC ΓÇö reactor m_in carried no forward-flow term ΓÇö so
     #   LT-322504 was stone-dead to HV-322602.  Inject the surge (kg/h above design) directly into the holdup
-    #   (bypassing m_in_kgh's recycle-lag split — it is a prompt forward-pumped wave, not production).  The
+    #   (bypassing m_in_kgh's recycle-lag split ΓÇö it is a prompt forward-pumped wave, not production).  The
     #   head then climbs above design -> LT-322504 RISES on closing / FALLS on opening.
-    #   Driver = the SPINDLE-attributable part of the draw, ṁ_suc·(1 − 1/φ_sp(θ)) -> identically 0 at the design
-    #   valve θ=74 (φ_sp=1) at ANY sump state, so the LT-322504 startup/relaxation NLL pin stays bit-exact (it is
+    #   Driver = the SPINDLE-attributable part of the draw, ß╣ü_suc┬╖(1 ΓêÆ 1/╧å_sp(╬╕)) -> identically 0 at the design
+    #   valve ╬╕=74 (╧å_sp=1) at ANY sump state, so the LT-322504 startup/relaxation NLL pin stays bit-exact (it is
     #   NOT keyed on raw suction, which is nonzero off-NLL during the sump fill).  The driver's SUSTAINED part is
     #   a counterfactual (at steady state the sump can only supply its inflow -> a constant forward term would
-    #   INVENT mass), so wash it out: low-pass the driver (react_fwd_wash, τ_fwd ≈ sump-drain time) and inject
-    #   only the HIGH-PASS residue (driver − wash) — the TRANSIENT pulse on an HV-322602 move that decays to 0
-    #   at any steady θ.  Mass-conservative inventory REDISTRIBUTION sump->reactor->stripper; the higher
+    #   INVENT mass), so wash it out: low-pass the driver (react_fwd_wash, ╧ä_fwd Γëê sump-drain time) and inject
+    #   only the HIGH-PASS residue (driver ΓêÆ wash) ΓÇö the TRANSIENT pulse on an HV-322602 move that decays to 0
+    #   at any steady ╬╕.  Mass-conservative inventory REDISTRIBUTION sump->reactor->stripper; the higher
     #   head raises the level-servoed take-off m_out and the swell relaxes back.
     _phi_sp_theta    = EJ_SPINDLE_R ** ((EJ_OPEN_DES - s.HIC_322602) / 100.0)   # >1 closing, =1 @74, <1 opening
     _fwd_drive_kgh   = ej["suction_kgh"] * (1.0 - 1.0 / _phi_sp_theta)          # spindle-attributable draw (0 @74)
@@ -5621,19 +5535,19 @@ def step_sim(dt: float) -> dict:
     m_fwd_carb_kgh   = REACT_FWD_GAIN * (_fwd_drive_kgh - s.react_fwd_wash)     # high-pass: transient pulse, ->0 steady
     s.react_m_liq += k_loop_fill * (m_in_kgh - m_out_kgh + m_fwd_carb_kgh) * (dt / 3600.0)
     s.react_m_liq  = max(s.react_m_liq, reactor.M_HOLDUP_MIN)  # holdup floor -> guards level_from_holdup
-    # DOMINO: the hydraulic take-off m_out IS this step's stripper liquid feed — scale the split-fraction
+    # DOMINO: the hydraulic take-off m_out IS this step's stripper liquid feed ΓÇö scale the split-fraction
     #   overflow composition to the live outlet mass (f_strip=1 at design -> bit-exact).  The 322E001 native
     #   heat/CO2-strip equations then drive this liquid surge into the overhead gas at its own equilibrium.
     f_strip = (m_out_kgh / m_ov_split_kgh) if m_ov_split_kgh > 1.0e-9 else 1.0
     s.react_overflow_kmolh = {k: react["overflow_kmolh"][k] * f_strip for k in react["overflow_kmolh"]}
     # ISSUE (Phase A): OFF-GAS-LINE LIQUID CARRYOVER on flood.  Throttling the bottom take-off (HV-322605)
-    #   cannot pass m_in, so holdup rises to the vessel-full mass M_full = rho(T_bulk)·A·H_liq (PHYSICAL
+    #   cannot pass m_in, so holdup rises to the vessel-full mass M_full = rho(T_bulk)┬╖A┬╖H_liq (PHYSICAL
     #   vessel-full lip; the LT-322504 narrow band saturates 100% earlier, at overflow+1 m).  Liquid above
-    #   M_full CANNOT accumulate in the reactor — it physically spills
+    #   M_full CANNOT accumulate in the reactor ΓÇö it physically spills
     #   over the off-gas line (TT-322009) into the HP scrubber (322E003) as ENTRAINED MELT.  Capping m_liq
     #   at M_full simultaneously (a) closes a latent conservation leak (m_liq integrated unbounded above
     #   full while only the level DISPLAY was clamped, so m_out saturated < m_in forever) and (b) yields
-    #   the carryover rate = the un-passable excess (m_in − m_out)|_full.  Carryover carries reactor-
+    #   the carryover rate = the un-passable excess (m_in ΓêÆ m_out)|_full.  Carryover carries reactor-
     #   OVERFLOW composition + enthalpy (react_T_overflow).  Identically ZERO below the flood lip
     #   (m_liq < M_full at design 80% NLL) -> react_carry_kmolh is None -> scrubber HMB/TT pins bit-exact.
     M_full_react      = reactor.liquid_density(T_bulk_react) * _react_area_m2 * REACT_LIQ_H_M
@@ -5643,12 +5557,12 @@ def step_sim(dt: float) -> dict:
                                                         area_m2=_react_area_m2) / REACT_LIQ_H_M * 100.0,
                               0.0, 100.0)
     # LT-322504 DISPLAY: direct N7 narrow band (datasheet 1.5 m span; top tap 1 m above overflow).  The
-    #   transmitter reads the PHYSICAL liquid head through the fixed instrument geometry — LT-322504 tracks
+    #   transmitter reads the PHYSICAL liquid head through the fixed instrument geometry ΓÇö LT-322504 tracks
     #   the 322R001 mass balance and NOTHING else (2026-07-03 order: no coupling/pinning to plant load; the
     #   former design-valve SHADOW reference + _load_gate machinery is DELETED).  At the design head
     #   L = REACT_LEVEL_DES_M = 20.0 m it reads exactly NLL 80 %, so the design boot and short holds stay
     #   bit-exact.  KNOWN CONSEQUENCE (was the shadow's raison d'etre): the static design seed is not the
-    #   coupled-loop fixed point — over ~5 h the loop relaxes (reactor head −0.49 m / −1.9 %) and the 1.5 m
+    #   coupled-loop fixed point ΓÇö over ~5 h the loop relaxes (reactor head ΓêÆ0.49 m / ΓêÆ1.9 %) and the 1.5 m
     #   band amplifies that sag 16.7x (80 % -> ~48 %); that drift is now the INTENDED mass-balance reading.
     #   Saturates 0/100 % off the 1.5 m band like the real transmitter.  HOLDUP, discharge hydraulics, flood
     #   guard and loop P_min all stay on the PHYSICAL head s.react_level_pct.
@@ -5657,7 +5571,7 @@ def step_sim(dt: float) -> dict:
                                   + (_H_liq_react - REACT_LEVEL_DES_M) / REACT_LT_SPAN_M * 100.0,
                                   0.0, 100.0)
     # carryover molar vector = reactor-overflow composition scaled by (entrained mass / overflow mass):
-    #   ν_carry,k = ṁ_carry · ν_ov,k / Σ_j ν_ov,j·MW_j  -> preserves overflow mole fractions exactly.
+    #   ╬╜_carry,k = ß╣ü_carry ┬╖ ╬╜_ov,k / ╬ú_j ╬╜_ov,j┬╖MW_j  -> preserves overflow mole fractions exactly.
     _ov_mass_kgh      = sum(react["overflow_kmolh"][k] * MW_COMP[k] for k in react["overflow_kmolh"])
     react_carry_kmolh = ({k: react["overflow_kmolh"][k] * (react_carry_kgh / _ov_mass_kgh)
                           for k in react["overflow_kmolh"]}
@@ -5669,14 +5583,12 @@ def step_sim(dt: float) -> dict:
     # ISSUE-c/e: the old outflow term was phi_fwd ALONE (level-independent) -> a pure integrator: any
     # in!=out mismatch wound the level to a rail (floods to 100 % at 70 % load, drifts even at design).
     # A condenser sump drains by gravity head, so make the outflow rise with level: phi_out =
-    # phi_fwd·(L/NLL).  This closes the loop -> a stable first-order lag that SETTLES at the bounded
-    # equilibrium L_eq = NLL·(phi_in/phi_fwd) instead of railing.  At design phi_in = phi_fwd = 1 and
+    # phi_fwd┬╖(L/NLL).  This closes the loop -> a stable first-order lag that SETTLES at the bounded
+    # equilibrium L_eq = NLL┬╖(phi_in/phi_fwd) instead of railing.  At design phi_in = phi_fwd = 1 and
     # L = NLL -> phi_out = phi_fwd -> dL = 0 (NLL is now an exact fixed point; bit-exact design).
     _hpcc_liq_des = HPCC_LIQ_DES_LIVE or HPCC_LIQ_DES_KGH      # live settled ref once pinned
     phi_in_hpcc  = (hpcc["liq_kgh"] / _hpcc_liq_des) if _hpcc_liq_des else phi_fwd
-    phi_out_hpcc = phi_fwd
-    if s.hpcc_level_pct <= 0.0 and phi_out_hpcc > phi_in_hpcc:
-        phi_out_hpcc = phi_in_hpcc
+    phi_out_hpcc = phi_fwd * (s.hpcc_level_pct / HPCC_LEVEL_NLL_PCT)
     dL_hpcc      = k_loop_fill * (phi_in_hpcc - phi_out_hpcc) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
     s.hpcc_level_pct = clamp(s.hpcc_level_pct + dL_hpcc, 0.0, 100.0)
 
@@ -5702,7 +5614,7 @@ def step_sim(dt: float) -> dict:
         if not math.isfinite(tic["op"]):  tic["op"] = SCRUB_TV005_DES_PCT
         tic["pv"] = SCRUB_CCW_T_IN_DES            # coerce finite so no NaN propagates downstream
     else:                                         # F4: first-order supply-T plant lag + AUTO velocity I-PD
-        #   T_ss = cooler valve char + exotherm load.  Load = gain·((s-1)+δ_X) -> 0 at design (bit-exact);
+        #   T_ss = cooler valve char + exotherm load.  Load = gain┬╖((s-1)+╬┤_X) -> 0 at design (bit-exact);
         #   a throughput/conversion-deficit rise warms the returning tempered water, which the loop rejects.
         t_load  = TIC_329005_LOAD_GAIN * ((react["co2_scale"] - 1.0) + react["delta_X"])
         T_ss    = clamp(SCRUB_CCW_T_OUT_DES
@@ -5717,11 +5629,11 @@ def step_sim(dt: float) -> dict:
     m_ccw_kgh  = max(fic["pv"], 1e-6) * 1000.0    # CCW circulation (t/h -> kg/h)
     top_ratio  = (strip["top_mol"] / STRIP_TOP_MOL_DES) if STRIP_TOP_MOL_DES else 1.0  # stripper overhead push
     nu = s.p_syn_bara / SYN_P_DES_BARA            # vent ratio = PT-329201/PT_des (prior-step state; breaks the algebraic loop)
-    # HV-322604 back-pressure penalty — valve vent capacity vs the scrubber's required inert purge:
-    #   vent_frac = m_og/(m_og_des·s) = R^((θ−θ_des)/100)·√(ΔP/ΔP_des);  θ_des = design opening (50%,
+    # HV-322604 back-pressure penalty ΓÇö valve vent capacity vs the scrubber's required inert purge:
+    #   vent_frac = m_og/(m_og_des┬╖s) = R^((╬╕ΓêÆ╬╕_des)/100)┬╖ΓêÜ(╬öP/╬öP_des);  ╬╕_des = design opening (50%,
     #   demand-met), equal-% trim per datasheet (must match hv_322604 so the diagnostic vent flow and
     #   the back-pressure penalty use one characteristic).  Pinch below design (vent_frac<1) starves the
-    #   inert vent -> uncondensed inerts accumulate and integrate PT-329201 up.  Prior-step p_syn for ΔP.
+    #   inert vent -> uncondensed inerts accumulate and integrate PT-329201 up.  Prior-step p_syn for ╬öP.
     dP_vent   = max(s.p_syn_bara - SCRUB_HV604_P_OUT, 0.0)
     vent_frac = _eq_pct(s.HIC_322604, SCRUB_HIC604_DES_PCT) * math.sqrt(dP_vent / SCRUB_HV604_DP_DES)
     scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
@@ -5733,9 +5645,9 @@ def step_sim(dt: float) -> dict:
     #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
     #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation
     #   over tau (min -> s).  Design: m_ccw=des, s=1, nu=1, top_ratio=1 -> rho=1 -> PT holds 140.7.
-    #   Thermal factor f_th = (T_cond − T_ccw_in)/(T_cond − T_ccw_in,des): a WARMER CCW supply
+    #   Thermal factor f_th = (T_cond ΓêÆ T_ccw_in)/(T_cond ΓêÆ T_ccw_in,des): a WARMER CCW supply
     #   shrinks the condensation driving force -> capacity falls -> rho_cond drops -> PT-329201 rises.
-    #   f_th ≡ 1 at design T_ccw_in=80 C, so a pure CCW-flow move reduces to the prior calibration.
+    #   f_th Γëí 1 at design T_ccw_in=80 C, so a pure CCW-flow move reduces to the prior calibration.
     f_th      = (SCRUB_OVERFLOW_T_C - tic["pv"]) / max(SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES, 1e-6)
     rho_cond  = (m_ccw_kgh / SCRUB_CCW_KGH_DES) * max(f_th, 0.0) / max(react["co2_scale"] * nu, 1e-6)
     # PT-329201 vapour differentiation: NH3 + H2O overhead are CONDENSABLE solvents (absorbed into
@@ -5752,13 +5664,51 @@ def step_sim(dt: float) -> dict:
     #   NLL) hoisted above pt_fwd so the BASE stripper forward-push deviation is ALSO inventory-gated.  An
     #   empty loop has no circulation to develop stripper overhead, so it must not push the PT target above
     #   design -- previously pt_fwd overshot to ~162 barg at cold start (pb_push ungated), which made the
-    #   model-free pressurisation tau read short (§6.4).  == 1.0 at design (levels at NLL) AND pb_push == 0
+    #   model-free pressurisation tau read short (┬º6.4).  == 1.0 at design (levels at NLL) AND pb_push == 0
     #   -> pt_fwd == SYN_P_DES_BARA exactly (design SS bit-exact); -> pure SYN_P_TAU_FILL_MIN lag toward
-    #   design as the loop empties (§6.1 emergent tau, never a hard lag on the pressure state).
+    #   design as the loop empties (┬º6.1 emergent tau, never a hard lag on the pressure state).
     m_loop_frac = clamp((s.react_level_pct + s.hpcc_level_pct + s.strip_level)
                         / (REACT_LEVEL_NLL_PCT + HPCC_LEVEL_NLL_PCT + STRIP_LEVEL_SP_DES), 0.0, 1.0)
     live_syn_p_anchor = hpcc["P_bub"] - (HPCC_P_DES_BARA - SYN_P_DES_BARA)
-    pass  # old pt_fwd block removed
+    pt_fwd    = live_syn_p_anchor * (1.0 + m_loop_frac * SYN_P_COUPLING * pb_push)
+    # L3-2b inventory gate on the PT forcing offsets.  m_loop_frac (the same loop-mass fraction used
+    #   for the PT floor below) multiplies EVERY additive forcing term so an empty / part-filled loop
+    #   cannot saturate p_target: the deficit / vent / conversion push can only develop as the HP
+    #   liquid inventories physically accumulate.  == 1.0 at design (levels at NLL) -> forcing
+    #   unchanged -> design steady state stays bit-exact; -> 0 as the loop empties -> cold-start
+    #   pressurisation tracks inventory fill (emergent tau), never a hard lag on the pressure state
+    #   (report ┬º6.1 / ┬º6.4 remediation option 2).  m_loop_frac computed above (hoisted for pt_fwd gate).
+    # Fix-2: dimensionless conversion-deficit forcing ╬á = ╬║┬╖╬┤_X injected ADDITIVELY into the PT
+    # target.  When the reactor under-converts (low N/C / high H/C), the unconverted NH3 + CO2 flash
+    # to the synthesis loop and aggressively pressurise it: ╬á┬╖P_des bar of extra forcing.  ╬┤_X is
+    # clamped >= 0 (Fix-2), so at/above design ╬á = 0 -> no spurious depressurisation at high N/C.
+    Pi_conv   = REACT_PI_KAPPA * react["delta_X"]
+    pt_target = pt_fwd + m_loop_frac * (
+                         SYN_P_DEFICIT_GAIN * max(1.0 - rho_cond, 0.0) * live_syn_p_anchor
+                       + SYN_P_VENT_GAIN * max(1.0 - vent_frac, 0.0) * live_syn_p_anchor
+                       + Pi_conv * live_syn_p_anchor)  # HV-322604 vent: ONE-SIDED inert-purge deficit only
+                                                    #   (close<des -> inerts accumulate -> PT up; open>=des
+                                                    #   -> purge is supply-limited, no extra venting -> PT
+                                                    #   unchanged).  Tiny purge valve cannot crash HP P.
+    # L3-2 inventory-aware PT floor: a totally empty loop must be able to bottom out at atmospheric,
+    #   not a hard 120 bar.  Loop-mass fraction = mean of the three HP liquid inventories vs their design
+    #   NLL (LT-322504 80%, LT-322E002 50%, LT-322501 50%); == 1.0 at design -> P_min == 120 bar (the
+    #   static SYN_P_MIN_BARA preserved exactly), -> 1.0 atm as the loop empties.
+    #       P_min = 1.0 + 119.0 * clamp(M_loop / M_loop_des, 0, 1)
+    #   (m_loop_frac computed above, at the forcing gate.)
+    p_syn_min   = 1.0 + 119.0 * m_loop_frac
+    # Inventory-emergent pressurisation tau: an EMPTY loop (m_loop_frac -> 0) has little condensable/
+    #   vapour inventory to build head, so PT climbs on the sourced cold-start constant SYN_P_TAU_FILL_MIN
+    #   (57.8 min, 06-03 Section 1.2 field FOPTD); as the three HP liquid inventories fill toward NLL the
+    #   constant relaxes linearly to the warm op-pt SYN_P_TAU_MIN (4 min).  tau EMERGES from inventory fill
+    #   -- NOT a hard lag on the pressure state (report Section 6.1: never a fudge lag; tune physical
+    #   inventory).  At design m_loop_frac == 1 -> tau_eff == SYN_P_TAU_MIN and (pt_target - p_syn) == 0,
+    #   so the steady-state hold is bit-exact regardless of tau_eff.
+    _tre = 4.0   # relax-schedule shape (Smith-calibrated to Section 6.4 band); holds tau_eff at
+                 #   SYN_P_TAU_FILL_MIN until m_loop_frac -> 1, then collapses to warm SYN_P_TAU_MIN
+    tau_eff_min = SYN_P_TAU_FILL_MIN + m_loop_frac ** _tre * (SYN_P_TAU_MIN - SYN_P_TAU_FILL_MIN)
+    s.p_syn_bara = clamp(s.p_syn_bara + (dt / (tau_eff_min * 60.0)) * (pt_target - s.p_syn_bara),
+                         p_syn_min, SYN_P_MAX_BARA)
     scrub["P_overflow"] = s.p_syn_bara            # PT-329201 dynamic synthesis pressure (bar a)
     scrub["P_offgas"]   = s.p_syn_bara            # off-gas line rides the live synthesis P (HV-322604 P_up)
     scrub["vent_frac"]  = vent_frac               # HV-322604 vent capacity / required purge (<1 -> PT rises)
@@ -5774,13 +5724,11 @@ def step_sim(dt: float) -> dict:
     scrub["overflow_kmolh"] = {k: v * f_ovf for k, v in scrub["overflow_kmolh"].items()}
     s.flags["SCRUBBER_SOLIDIFICATION"] = (f_ovf < 1.0)
     # --- Option 3: 322E003 sump inventory ODE (Euler) ---------------------------------------------
-    #   dM/dt = ṁ_cond,in − ṁ_entrain.  ṁ_cond,in = the condensation/absorption make this tick
-    #   (post-mushy-zone overflow mass); ṁ_entrain = what the ejector actually pulled this tick
+    #   dM/dt = ß╣ü_cond,in ΓêÆ ß╣ü_entrain.  ß╣ü_cond,in = the condensation/absorption make this tick
+    #   (post-mushy-zone overflow mass); ß╣ü_entrain = what the ejector actually pulled this tick
     #   (ej["suction_kgh"], from the non-linear curve, computed earlier this step).  At design
     #   both == EJ_SUC_TOT_DES -> dM=0, level holds NLL.  Ejector stall -> entrain<<cond -> M rises.
     m_cond_in = sum(scrub["overflow_kmolh"][k] * MW_COMP[k] for k in scrub["overflow_kmolh"])
-    if s.scrub_level_pct <= 0.0 and ej["suction_kgh"] > m_cond_in:
-        ej["suction_kgh"] = max(m_cond_in, 0.0)
     s.scrub_holdup_kg = clamp(s.scrub_holdup_kg + (m_cond_in - ej["suction_kgh"]) * (dt / 3600.0),
                               0.0, SCRUB_HOLDUP_MAX_KG)
     s.scrub_level_pct = clamp(s.scrub_holdup_kg / SCRUB_HOLDUP_NLL_KG * SCRUB_LEVEL_NLL_PCT,
@@ -5793,7 +5741,7 @@ def step_sim(dt: float) -> dict:
     # L3-7 HV-322604 off-gas: external steam-tracing holds the 60 C baseline; flag only when extreme JT
     #   cooling overwhelms the jacket (T_out < 20 C).  Flow NOT restricted (gas line) -> fouling warning.
     s.flags["CARBAMATE_DEPOSITION"] = (hv604["T_out"] < 20.0)
-    TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 − TIC-329005 (condensation quality)
+    TDY_329125 = scrub["t_ccw_out"] - tic["pv"]   # TT-329125 ΓêÆ TIC-329005 (condensation quality)
     q_e004_kw  = scrub["q_ccw_kw"]                # 329E004 tempered-water-cooler duty (loop closure)
 
     # ----- Section-322 tear display lags (compute ONCE per tick -> shared by both telemetry views) -----
@@ -5833,7 +5781,7 @@ def step_sim(dt: float) -> dict:
     # ==================================================================================
     m_feed_323 = max(drain_kgh, 0.0)                       # live 322E001 bottoms -> 323C003 (kg/h)
     T_feed_323 = TT_323001                                 # C, post-LV-322501 flash (un-lagged)
-    # AUDIT C10 — cp is a PROPERTY, not a constant.  One lumped 2.5 kJ/kg.K used to cover the 44 %
+    # AUDIT C10 ΓÇö cp is a PROPERTY, not a constant.  One lumped 2.5 kJ/kg.K used to cover the 44 %
     # granulation return at 40 C, the 55.9 % stripper bottoms at 119 C and the 80 % product at 99 C.
     # Each stream now carries its own, as a departure from that lumped anchor so every back-solved
     # lambda and UA above stays exactly valid (see the R323_CP_*_DES block).  The feed composition is
@@ -5852,59 +5800,58 @@ def step_sim(dt: float) -> dict:
     pic02_pv  = clamp(s.PIC_329202["op"] / 100.0 * s.steam.P_LP, 0.0, s.steam.P_LP)  # live LP-header chest P
     pic02_op  = _ctrl_ipd(s.PIC_329202, pic02_pv, dt, cas_sp=tic07_op)            # steam valve stroke (%)
     p_chest_e002 = steam_chest_pressure(pic02_op, s.steam.P_LP)
-    # AUDIT F-10 — a CONDENSING-STEAM chest can only ADD heat.  Un-floored, shutting PV-329202
-    # clamps p_chest to 0.02 bar a (tsat ~17.5 C) and UA·(tsat − T) becomes a large NEGATIVE duty,
+    # AUDIT F-10 ΓÇö a CONDENSING-STEAM chest can only ADD heat.  Un-floored, shutting PV-329202
+    # clamps p_chest to 0.02 bar a (tsat ~17.5 C) and UA┬╖(tsat ΓêÆ T) becomes a large NEGATIVE duty,
     # i.e. the heater turns into a refrigerator and drags the column to ~14 C.  Physically the
     # chest simply stops condensing and Q -> 0.  At design Q is strongly positive -> max() is the
     # identity -> bit-exact.  Same floor applied to 323E010, 324E001, 324E003.
     Q_e002_kw = max(R323_E002_UA_KW * (tsat_steam(p_chest_e002) - s.r323_c003_T), 0.0)  # heater duty (kW)
-    # AUDIT F-2 — boil-up is ENERGY-LIMITED, not a frozen split fraction.  q_avail is the latent
+    # AUDIT F-2 ΓÇö boil-up is ENERGY-LIMITED, not a frozen split fraction.  q_avail is the latent
     # duty actually left after the feed has been brought to the column temperature; the overhead
     # cannot exceed what that duty can vaporise.  min() with the composition split keeps the
     # design point bit-exact (both branches evaluate to R323_M305_DES) and makes the correct
     # failure mode appear: PV-329202 shut -> Q_e002 -> 0 -> boil-up collapses instead of the
     # temperature ODE absorbing an impossible latent load.
-    # AUDIT TD-014 — the boil-up above used to consume the WHOLE available duty, and R323_LAMBDA_305
-    # is back-solved as Q305_DES/(M305_DES/3600), so m_305·λ/3600 cancelled q_avail term for term and
+    # AUDIT TD-014 ΓÇö the boil-up above used to consume the WHOLE available duty, and R323_LAMBDA_305
+    # is back-solved as Q305_DES/(M305_DES/3600), so m_305┬╖╬╗/3600 cancelled q_avail term for term and
     # the column-temperature ODE below evaluated to IDENTICALLY ZERO on this branch.  TIC-323007 was
     # then integrating against a plant of zero gain: whatever it did to the reboiler was exactly
-    # undone by the boil-up it produced, T never moved off 135.00001 °C, and its velocity-form
-    # integral walked the steam valve down forever at a rate set by Kc·dt/Ti — i.e. a LINEAR,
-    # NEVER-ARRESTING, TICK-INVARIANT ramp.  That ramp is the whole of TD-014: measured −0.0041 pp/h
-    # of urea here, −0.0044 at 323F004, −0.0067 at 323F010, with the stripper bottoms feeding it
+    # undone by the boil-up it produced, T never moved off 135.00001 ┬░C, and its velocity-form
+    # integral walked the steam valve down forever at a rate set by Kc┬╖dt/Ti ΓÇö i.e. a LINEAR,
+    # NEVER-ARRESTING, TICK-INVARIANT ramp.  That ramp is the whole of TD-014: measured ΓêÆ0.0041 pp/h
+    # of urea here, ΓêÆ0.0044 at 323F004, ΓêÆ0.0067 at 323F010, with the stripper bottoms feeding it
     # bit-flat for 6 h.  It was one-sided because the split branch caps the other direction.
     #
     # The closure is the one 323F004 already uses and the one the physics demands: the liquid sits at
     # its BUBBLE POINT, so the duty that is not spent boiling walks the holdup toward it over the
-    # stage's own residence time.  Substituting into the ODE gives exactly dT/dt = (T_bub − T)/τ, so
+    # stage's own residence time.  Substituting into the ODE gives exactly dT/dt = (T_bub ΓêÆ T)/╧ä, so
     # energy is still conserved and the temperature is a real state with a real driver.  323C003's
     # bubble point rides the live column pressure (PT-323201), which is itself driven by the live
-    # top-vapour rate — so TIC-323007 now has a genuine, correctly-signed plant: more duty -> more
+    # top-vapour rate ΓÇö so TIC-323007 now has a genuine, correctly-signed plant: more duty -> more
     # 305 -> higher P -> higher T_sat -> higher T.
     # Design: P == 4.1 -> the tsat bracket is a literal 0.0 -> T_bub == 135.0 == T -> q_relax == 0.0
-    # -> q_avail − 0.0 == q_avail bit-identically -> m_305 == R323_M305_DES exactly (the min() ties).
+    # -> q_avail ΓêÆ 0.0 == q_avail bit-identically -> m_305 == R323_M305_DES exactly (the min() ties).
     T_bub_c003 = R323_C003_T_SP_C + (tsat_steam(s.r323_c003_P) - _R323_TSAT_C003_DES)
     q305_relax_kw = (s.r323_c003_M * cp_c003 * (T_bub_c003 - s.r323_c003_T)
                      / R323_C003_M_TAU_S)                                         # kW retained to reach bubble point
     T_strip_bot = s.tlag.get("TT_322004", STRIP_T_BOTTOM_DES_C)
     T_flash_sat = TT_323001
     q_flash_avail_kw = (m_feed_323 / 3600.0 * cp_feed323 * (T_strip_bot - T_flash_sat))  # kW released by letdown flash
+    
+    # Flash gas bypasses the pool and directly becomes vapor
     m_flash_gas = max(R323_M305_DES * (q_flash_avail_kw / R323_Q305_DES_KW), 0.0)
+    
+    # The pool consumes reboiler duty to reach bubble point
     m_pool_vap  = max(R323_M305_DES * ((Q_e002_kw - q305_relax_kw) / R323_Q305_DES_KW), 0.0)
+    
     m_305       = min(R323_PHI_V305 * m_feed_323, m_flash_gas + m_pool_vap)       # top vapor -> 323E003 LPCC (305, kg/h)
-    s._debug_m_feed_323 = m_feed_323
-    s._debug_m_305 = m_305
-    s._debug_m_flash = m_flash_gas
     q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                  # total available latent kW
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
     m_314     = max(R323_M314_DES * (lv501_op / R323_LV501_OP_DES), 0.0)          # bottom drain -> flash (kg/h)
-    P_c003    = (q305_avail_kw - m_305 / 3600.0 * R323_LAMBDA_305)               # net kW on holdup
-
+    P_c003    = (q_flash_avail_kw + Q_e002_kw - m_305 / 3600.0 * R323_LAMBDA_305) # net kW on holdup
     M_c003_pre = s.r323_c003_M
     s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp_c003, 1e-6)
-    if M_c003_pre <= 1.0 and m_314 > (m_feed_323 - m_305):
-        m_314 = max(m_feed_323 - m_305, 0.0)
     s.r323_c003_M = max(M_c003_pre + (m_feed_323 - m_305 - m_314) / 3600.0 * dt, 1.0)
     # AUDIT F-8/TD-009: species balance on the SAME flows the mass ODE above just used.  The feed
     # composition is the LIVE stripper bottoms (renormalised onto the six solution species), so a
@@ -5927,14 +5874,14 @@ def step_sim(dt: float) -> dict:
     )
 
     # ---- Stage 2: Flash Tank 323F004  (adiabatic letdown 4.1 -> 1.13 bar, hold 106 C) --------
-    # AUDIT F-1 — TRUE isenthalpic flash (was a frozen split fraction of m_314, so a ±30 °C swing
+    # AUDIT F-1 ΓÇö TRUE isenthalpic flash (was a frozen split fraction of m_314, so a ┬▒30 ┬░C swing
     # in the Stage-1 outlet produced identical vapour).  Two coupled statements:
     #   (a) saturation constraint  T_flash = Tsat(P_drum) anchored at the design bubble point;
-    #   (b) enthalpy balance       m_701·λ_701 = m_314·cp·(T_in − T_flash) − M·cp·(T_sat − T)/τ
+    #   (b) enthalpy balance       m_701┬╖╬╗_701 = m_314┬╖cp┬╖(T_in ΓêÆ T_flash) ΓêÆ M┬╖cp┬╖(T_sat ΓêÆ T)/╧ä
     #       i.e. the sensible surplus of the letdown flashes off, less whatever is needed to walk
     #       the drum to its bubble point over its own liquid residence time.  Substituting (b) into
-    #       the energy ODE below yields exactly dT/dt = (T_sat − T)/τ, so energy stays conserved.
-    # Design: P == 1.13 -> T_sat == 106.0 -> relax term ≡ 0 and q701_avail_kw == R323_Q701_DES_KW
+    #       the energy ODE below yields exactly dT/dt = (T_sat ΓêÆ T)/╧ä, so energy stays conserved.
+    # Design: P == 1.13 -> T_sat == 106.0 -> relax term Γëí 0 and q701_avail_kw == R323_Q701_DES_KW
     # bit-identically (same operand order) -> m_701 == R323_M701_DES exactly.
     T_sat_f004 = R323_F004_T_SP_C + (tsat_steam(s.r323_f004_P) - _R323_TSAT_F004_DES)
     q701_relax_kw = (s.r323_f004_M * cp_f004 * (T_sat_f004 - s.r323_f004_T)
@@ -5965,7 +5912,7 @@ def step_sim(dt: float) -> dict:
     #  AUDIT F-11: stream 331 (urea-recovery return from the granulation scrubber) joins stream 319
     #  ahead of 323E010.  It is a battery-limit inflow -- the granulation scrubber is outside the
     #  simulated boundary -- so it is a constant here, exactly like the 323C005 demin make-up
-    #  (ui_guidelines.md §4).  It is COLD (40 C) and 55 % water, so it both loads the heater and
+    #  (ui_guidelines.md ┬º4).  It is COLD (40 C) and 55 % water, so it both loads the heater and
     #  feeds the vacuum vapour; without it the stage could not reach the PFD's 80 % product.
     m_331     = R323_M331_DES                                                     # kg/h, PFD stream 331
     tic12_op  = _ctrl_ipd(s.TIC_323012, s.r323_f010_T, dt)                        # steam-P demand (bar a)
@@ -5973,14 +5920,14 @@ def step_sim(dt: float) -> dict:
     pic08_op  = _ctrl_ipd(s.PIC_329208, pic08_pv, dt, cas_sp=tic12_op)            # steam valve stroke (%)
     p_chest_e010 = steam_chest_pressure(pic08_op, s.steam.P_LP)
     Q_e010_kw = max(R323_E010_UA_KW * (tsat_steam(p_chest_e010) - s.r323_f010_T), 0.0)  # heater duty (kW, F-10 floored)
-    # AUDIT F-3 — same energy limit as Stage 1: the pre-evaporator cannot evaporate more water
+    # AUDIT F-3 ΓÇö same energy limit as Stage 1: the pre-evaporator cannot evaporate more water
     # than its live LP-steam duty (plus the feed's sensible surplus) can supply.
     qevap_avail_kw = (m_319 / 3600.0 * cp_f004 * (s.r323_f004_T - s.r323_f010_T)
                       + m_331 / 3600.0 * cp_331 * (R323_M331_T_C - s.r323_f010_T)
                       + Q_e010_kw)                                                # kW available as latent
     # Flow cap in anchored-ratio form: at design the numerator and denominator are bit-identical, so
     # the ratio is exactly 1.0 and the cap reproduces R323_MEVAP_DES exactly (the min() then ties).
-    # AUDIT TD-014 — same degeneracy as Stage 1, same closure, but the lever is different.  323F010
+    # AUDIT TD-014 ΓÇö same degeneracy as Stage 1, same closure, but the lever is different.  323F010
     # runs against a FIXED 0.46 bar a vacuum boundary, so its bubble point cannot move with pressure;
     # what moves it is CONCENTRATION.  That is the correct physics for a vacuum evaporator and it is
     # what TIC-323012 actually controls on the plant: more steam -> more water off -> higher urea
@@ -6002,9 +5949,9 @@ def step_sim(dt: float) -> dict:
     M_f010_pre = s.r323_f010_M
     s.r323_f010_T = s.r323_f010_T + P_f010 * dt / max(M_f010_pre * cp_f010, 1e-6)
     s.r323_f010_M = max(M_f010_pre + (m_319 + m_331 - m_evap - m_317) / 3600.0 * dt, 1.0)
-    # Mapping — live 323F010 vacuum (PT-323204).  The evolved vapour m_evap is pulled out through
+    # Mapping ΓÇö live 323F010 vacuum (PT-323204).  The evolved vapour m_evap is pulled out through
     # HV-323605 (gas outlet, HIC-323605) and evacuated by the 324F002 ejector on HV-329605; opening
-    # either raises the pull and drops the pressure.  pull ∝ P/P_des is the ejector suction-pressure
+    # either raises the pull and drops the pressure.  pull Γê¥ P/P_des is the ejector suction-pressure
     # capacity roll-off, which makes it a stable first-order node with no controller.  Anchored: at
     # design HIC-323605 == HIC-329605 == 50 %, P == P_des and m_evap == R323_MEVAP_DES, so
     # pull == R323_MEVAP_DES and dP/dt is a literal 0.0.  (The bubble point above stays on the DESIGN
@@ -6020,7 +5967,7 @@ def step_sim(dt: float) -> dict:
                              m_evap, y_evap, m_317, xi_f010, dt, m_in2=m_331, w_in2=W_S331)
 
     # ---- Stage 4: Urea Solution Tank 323D002  (atmospheric, two compartments) -----------------
-    #  TOPOLOGY (References/323D002.md §3, confirmed by operations 2026-07-23):
+    #  TOPOLOGY (References/323D002.md ┬º3, confirmed by operations 2026-07-23):
     #    Comp I  --  80 m3, ACTIVE.  Every feed and discharge nozzle lands here: in = m_317 from the
     #                323F010 separator, out = m_324 drawn by 323P003A/B via LIC-323507 -> FIC-324401
     #                -> FV-324401.  LIC-323507 is its level, TI-323008 its bulk temperature.
@@ -6043,10 +5990,10 @@ def step_sim(dt: float) -> dict:
     d002_recyc_w = s.tlag.get("R324_recyc_comp", s.w_e003)
     M_I_pre    = s.r323_d002_M_I
     M_II_pre   = s.r323_d002_M_II
-    # AUDIT C10 — a level gauge measures VOLUME, and volume is mass over a density that moves.  The
+    # AUDIT C10 ΓÇö a level gauge measures VOLUME, and volume is mass over a density that moves.  The
     # spans below were mass spans built on a frozen 1300 kg/m3, so a tank of thinner (hotter, weaker)
     # liquor read low on LIC-323507 by exactly the density error while the operator saw the same
-    # inventory.  ρ is now live on composition and temperature, anchored on the PFD's own 1151 for
+    # inventory.  ╧ü is now live on composition and temperature, anchored on the PFD's own 1151 for
     # streams 315/317 so the design level is bit-exact.  The volumes (80 / 300 m3) are steel and do
     # not move; only what a kilogram occupies does.
     rho_d002   = urea_soln_rho(s.w_d002.get("Urea", R324_W_IN), s.r323_d002_T, R323_D002_RHO)
@@ -6086,7 +6033,7 @@ def step_sim(dt: float) -> dict:
     s.r323_d002_M_I  = max(M_I_new, 1.0)
     s.r323_d002_M_II = max(M_II_new, 0.0)
     # TI-323008 -- Comp-I bulk temperature, now a real state instead of an echo of the upstream
-    # separator.  One inlet, one outlet, no duty and no reaction:  M·cp·dT/dt = m_317·cp_in·(T_in − T).
+    # separator.  One inlet, one outlet, no duty and no reaction:  M┬╖cp┬╖dT/dt = m_317┬╖cp_in┬╖(T_in ΓêÆ T).
     # The alarm this instrument carries is a LOW-temperature alarm, because a cooling tank walks the
     # 80 % liquor toward its crystallisation boundary and blocks the 323P003 suction -- so the tank
     # needs its own thermal inertia to show that at all.  At design T_in == T == 99 C, so the bracket
@@ -6172,11 +6119,11 @@ def step_sim(dt: float) -> dict:
         s.w_d002 = w_I_new
 
     # ======================================================================
-    #  UNITS 323-2 / 328-1 / 328-2  — LP RECIRCULATION & DESORPTION
+    #  UNITS 323-2 / 328-1 / 328-2  ΓÇö LP RECIRCULATION & DESORPTION
     #  Feed-forward 9-stage state-space model (dependency order).  Every
-    #  holdup ODE  dM/dt = Σṁ_in − ṁ_vap − ṁ_out = 0 and every thermal ODE
-    #  M·cp·dT/dt = Σṁ_in·cp·(T_in−T) + Q − ṁ_vap·λ = 0 at the design seed
-    #  (λ / UA back-solved in the constants block above).  Seven recycle
+    #  holdup ODE  dM/dt = ╬úß╣ü_in ΓêÆ ß╣ü_vap ΓêÆ ß╣ü_out = 0 and every thermal ODE
+    #  M┬╖cp┬╖dT/dt = ╬úß╣ü_in┬╖cp┬╖(T_inΓêÆT) + Q ΓêÆ ß╣ü_vap┬╖╬╗ = 0 at the design seed
+    #  (╬╗ / UA back-solved in the constants block above).  Seven recycle
     #  tears are read one-tick-delayed via s.tlag.get(key, design) and
     #  rewritten at the end -> stable, bit-exact at design.  Live upstream
     #  feeds: m_305 (323C003 top vapour), m_701 (323F004 flash vapour),
@@ -6189,7 +6136,7 @@ def step_sim(dt: float) -> dict:
     # aqueous_cp() anchored on ITS OWN design temperature, so every value equals the frozen constant
     # bit-exactly at the design seed (every back-solved lambda/UA and the boot-pinned
     # A328_LAMBDA_ABS are therefore untouched) and tracks IAPWS off design.
-    cp_328c002 = aqueous_cp(R328_CP, R328_C002_T_BOT_BOT, s.a328_c002_T)
+    cp_328c002 = aqueous_cp(R328_CP, R328_C002_T_BOT, s.a328_c002_T)
     cp_328c003 = aqueous_cp(R328_CP, R328_C003_T,     s.a328_c003_T)
     cp_328c004 = aqueous_cp(R328_CP, R328_C004_T,     s.a328_c004_T)
     cp_328d001 = aqueous_cp(R328_CP, R328_D001_T,     s.a328_d001_T)
@@ -6300,7 +6247,7 @@ def step_sim(dt: float) -> dict:
     T_740    = min(max(T740_raw, min(s.a328_d003_TII, s.a328_c004_T)),
                    max(s.a328_d003_TII, s.a328_c004_T))
 
-    # ----- Stage 3 : 328C002  Desorber-I (bottoms 139°C, floats PIC-328202)
+    # ----- Stage 3 : 328C002  Desorber-I (bottoms 139┬░C, floats PIC-328202)
     Tc002    = s.a328_c002_T
     m_738    = m_735
     in_c002  = m_738 + m748_prev + m750_prev + m775_prev
@@ -6309,8 +6256,8 @@ def step_sim(dt: float) -> dict:
     m_743    = R328_C002_M743_DES * (lic503_op / 50.0)                    # bottoms -> hydrolyser
     sens_c002= ((m_738*(T_738 - Tc002)                                    # AUDIT C10: live 328E007 outlet
                  + m775_prev*(R328_D001_T   - Tc002)
-                 + m748_prev*(R328_C002_T_BOT748 - Tc002)
-                 + m750_prev*(R328_C002_T_BOT750 - Tc002))/3600.0*cp_328c002)
+                 + m748_prev*(R328_C002_T748 - Tc002)
+                 + m750_prev*(R328_C002_T750 - Tc002))/3600.0*cp_328c002)
     # AUDIT F-8: the overhead is ENERGY-limited, not a frozen fraction of the inflow.  What leaves
     # overhead is what the two condensing hot recycle vapours (748 @188, 750 @140) plus the sensible
     # net can actually boil, capped by the throughput ratio.  Anchored-ratio form: both caps evaluate
@@ -6318,7 +6265,7 @@ def step_sim(dt: float) -> dict:
     # exact expression -- and therefore the exact bits -- it had under the frozen split.
     q_c002   = (sens_c002 + m748_prev/3600.0*R328_C002_LAM748
                 + m750_prev/3600.0*R328_C002_LAM750)
-    # AUDIT C1 — GENERATION is what the net duty can boil (the old "energy cap", unchanged in form so
+    # AUDIT C1 ΓÇö GENERATION is what the net duty can boil (the old "energy cap", unchanged in form so
     # the seed ties exactly); FLOW OUT is what the overhead line to 328D001 passes at the live column
     # pressure across 328E004.  They are now two different quantities, which is precisely what the
     # old code collapsed: it set m_737 := generation, and with LAM737 back-solved as
@@ -6326,11 +6273,8 @@ def step_sim(dt: float) -> dict:
     # and the temperature is the bubble point at the bottom node.
     gen737   = max(R328_C002_M737_DES * (q_c002 / R328_C002_Q_DES), 0.0)  # boil-up (kg/h)
     # Dynamic pressure drop coupling: flow driven by column-to-drum dP
-    _p001_lag = _lag1(s.tlag, 'P_D001_lag', s.a328_d001_P, 2.0, dt)
-    _p002_lag_737 = _lag1(s.tlag, 'P_C002_lag_737', s.a328_c002_P, 2.0, dt)
-    dP_737   = max(_p002_lag_737 - _p001_lag, 0.001)
     dP_737   = max(s.a328_c002_P - s.a328_d001_P, 0.001)
-    m_737    = R328_C002_M737_DES * math.sqrt(dP_737 / R328_E004_DP)
+    m_737    = R328_C002_M737_DES * math.sqrt(dP_737 / R328_E004_DP)      # OVHD line -> 328E004/328D001
     M_c002_pre = s.a328_c002_M
     s.a328_c002_P = max(s.a328_c002_P + R328_C002_P_KP*(gen737 - m_737)/3600.0*dt, 0.1)
     s.a328_c002_T = tsat_steam(s.a328_c002_P + R328_C002_DP_COL)          # bubble point at the bottom
@@ -6343,7 +6287,7 @@ def step_sim(dt: float) -> dict:
                                       (s.y_328_748, m748_prev), (s.y_328_750, m750_prev)],
                                      m_737, a_c002, m_743, 0.0, dt)
 
-    # ----- Stage 4 : 328C003  Hydrolyser (200°C, MP-steam 911) -----------
+    # ----- Stage 4 : 328C003  Hydrolyser (200┬░C, MP-steam 911) -----------
     Tc003    = s.a328_c003_T
     m_746    = m_743                                                     # via 328E021
     # 328E021 cold outlet (stream 746, TT-328009): C002 bottoms 139 heated by C003 bottoms 200.
@@ -6354,7 +6298,7 @@ def step_sim(dt: float) -> dict:
     in_c003  = m_746 + m_911
     pic203b_op = _ctrl_ipd(s.PIC_328203, s.a328_c003_P, dt)
     m_748    = R328_C003_M748_DES * (pic203b_op / R328_C003_PV_OP_DES)    # OVHD relief -> 328C002
-    # AUDIT F-7/TD-008 — the overhead generation is now the REACTION plus the strip, not a frozen
+    # AUDIT F-7/TD-008 ΓÇö the overhead generation is now the REACTION plus the strip, not a frozen
     # split fraction of the inflow.  gas_hyd is what urea hydrolysis actually makes; gas_str is what
     # the MP steam carries over and scales with the live 911 flow.  Both == design at the seed, so
     # gen748 == R328_C003_M748_DES bit-exact and the pressure ODE below stays stationary.
@@ -6394,7 +6338,7 @@ def step_sim(dt: float) -> dict:
                                      m_748, DES_C003["alpha"], m_747, xi_hyd_328, dt)
     s.y_328_748 = y_748
 
-    # ----- Stage 5 : 328C004  Desorber-II (143°C, LP-steam 931, FFIC) -----
+    # ----- Stage 5 : 328C004  Desorber-II (143┬░C, LP-steam 931, FFIC) -----
     Tc004    = s.a328_c004_T
     m_749    = m_747                                                     # via 328E021 (hot side)
     # 328E021 hot outlet (stream 749): C003 bottoms 200 giving up heat to the C002-bottoms cold side.
@@ -6425,19 +6369,12 @@ def step_sim(dt: float) -> dict:
     # AUDIT F-8: energy-limited overhead, same anchored-ratio form as 328C002 -- what the LP strip
     # steam plus the sensible net can boil, capped by throughput.  Replaces R328_C004_PHI750.
     q_c004   = sens_c004 + m_931/3600.0*R328_C004_M931_DH
-    # AUDIT C1 — same split as 328C002: boil-up from the net duty, outflow from the live column
+    # AUDIT C1 ΓÇö same split as 328C002: boil-up from the net duty, outflow from the live column
     # pressure through the overhead line into the 328C002 bottom, temperature = bubble point.  This
     # is the column where it matters most for training: losing the LP strip steam must drop the
     # bottoms temperature and collapse the NH3 stripping, and under the old form it did neither.
     gen750   = max(R328_C004_M750_DES * (q_c004 / R328_C004_Q_DES), 0.0)  # boil-up (kg/h)
-    # Dynamic pressure drop coupling: flow driven by 328C004 to 328C002 dP
-    dP_750_des = R328_C004_P_BARA - R328_C002_P_TOP
-    _p004_lag = _lag1(s.tlag, 'P_C004_lag', s.a328_c004_P, 2.0, dt)
-    _p002_lag = _lag1(s.tlag, 'P_C002_lag', s.a328_c002_P, 2.0, dt)
-    dP_750_live = max(_p004_lag - _p002_lag, 0.001)
-    
-    dP_750_live = max(s.a328_c004_P - s.a328_c002_P, 0.001)
-    m_750    = R328_C004_M750_DES * math.sqrt(dP_750_live / dP_750_des)
+    m_750    = R328_C004_M750_DES * (s.a328_c004_P / R328_C004_P_BARA)    # OVHD line -> 328C002 bottom
     M_c004_pre = s.a328_c004_M
     s.a328_c004_P = max(s.a328_c004_P + R328_C004_P_KP*(gen750 - m_750)/3600.0*dt, 0.1)
     s.a328_c004_T = tsat_steam(s.a328_c004_P + R328_C004_DP_COL)          # bubble point at the bottom
@@ -6448,15 +6385,15 @@ def step_sim(dt: float) -> dict:
                                      m_750, a_c004, m_739, 0.0, dt)
     s.y_328_750 = y_750
 
-    # ----- Stage 6 : 328D001  Desorber-I reflux drum (61°C, 328E004) -----
+    # ----- Stage 6 : 328D001  Desorber-I reflux drum (61┬░C, 328E004) -----
     Td001    = s.a328_d001_T
-    # AUDIT B2 — stream 793 used to be drawn out of 328D003 Comp-II (Stage 2) and delivered
+    # AUDIT B2 ΓÇö stream 793 used to be drawn out of 328D003 Comp-II (Stage 2) and delivered
     # NOWHERE: up to S793_CAP_KGH = 1534 kg/h of mass was destroyed at full FV-328405 stroke, and the
     # leak was invisible at design only because the design stroke is 0 %.  Mapping of Desorber
     # Hydrolyzer unit.md:34-36 puts it in the 737 header ahead of 328E004, i.e. into this drum.
     # m_793 is settled in Stage 2, so this is a same-tick term, not a tear.  At design m_793 == 0.
     in_d001  = m_737 + m718A_prev + m_793
-    # AUDIT B5 — the mapping doc (line 5) puts PIC-328202 on 328C002, not on the drum: the valve
+    # AUDIT B5 ΓÇö the mapping doc (line 5) puts PIC-328202 on 328C002, not on the drum: the valve
     # PV-328202 does sit on the 786 vent off 328D001 (line 41, which the code already had right), but
     # the transmitter reads the column.  The PV was bound to s.a328_d001_P, i.e. wrong by exactly one
     # exchanger pressure drop (PFD-22: 737/738 = 3.5 bar a, 774/775/786 = 2.6), and the model's own
@@ -6474,14 +6411,14 @@ def step_sim(dt: float) -> dict:
     # Stepped HERE, immediately before its slave, so the cascade is same-tick like every other
     # master in this engine; its PV depends only on constants and s.a328_d001_P, both already
     # settled at this point.  On CAS, FV-328404 strokes to hold TIC-328008.
-    # AUDIT C31 — the doc specifies TWO inputs (TT-328008 and PIC-328202); the temperature leg was the
-    # module constant R328_C002_T_BOT_TOP, so the PV was live on drum pressure and blind to the column.
+    # AUDIT C31 ΓÇö the doc specifies TWO inputs (TT-328008 and PIC-328202); the temperature leg was the
+    # module constant R328_C002_T_TOP, so the PV was live on drum pressure and blind to the column.
     # psat(117)=1.8004 vs psat(120)=1.9854, i.e. 3 C swings the PV by 4.75 mol% -- twice the loop's
     # whole SP band.  Now rides the live 328C002 bottoms at the design top/bottom offset; at the seed
     # s.a328_c002_T - R328_C002_DT_TOP == 139 - 22 == 117.0 exactly, so the pin cannot move.
     dt_top_dynamic = 10.0 + (R328_C002_DT_TOP - 10.0) * (m775_prev / R328_D001_M775_DES)
     T_737      = s.a328_c002_T - dt_top_dynamic                             # TT-328008, column top (C)
-    # AUDIT C1 — the VLE node pressure is now the LIVE 328C002 state, not the drum plus a frozen
+    # AUDIT C1 ΓÇö the VLE node pressure is now the LIVE 328C002 state, not the drum plus a frozen
     # R328_E004_DP.  At the seed s.a328_c002_P == R328_C002_P_TOP == 3.5, the same value the old
     # s.a328_d001_P + R328_E004_DP reconstructed, so the inferential is bit-exact at design.
     tic8008_op = _ctrl_ipd(s.TIC_328008,
@@ -6539,7 +6476,7 @@ def step_sim(dt: float) -> dict:
                  + m_786_d001 * s.a328_d001_T
                  + m_776 * s.a328_d001_T) / 3600.0 * R328_CP
                 + Q_e004 + R328_E021_LOSS + R328_E007_LOSS)
-    # AUDIT C4 / gap G5 — CLOSE the envelope by making the hidden carbamate-desorption enthalpy an
+    # AUDIT C4 / gap G5 ΓÇö CLOSE the envelope by making the hidden carbamate-desorption enthalpy an
     # EXPLICIT term instead of leaving it buried in back-solved latents.  q328_react is the reaction
     # heat the MP+LP reboiler steam supplies to strip NH3/CO2 out of solution; its design magnitude is
     # captured once from the design seed (first tick from a fresh design State), so the residual is
@@ -6556,7 +6493,7 @@ def step_sim(dt: float) -> dict:
     q328_react = _A328_Q_REACT_DES_KW * steam_ratio_328
     q328_resid = q328_raw + q328_react         # kW; ~0 at design, bounded off-design departure
 
-    # ----- Stage 7 : 322C001  LP absorber (43°C, live GCB off-gas) --------
+    # ----- Stage 7 : 322C001  LP absorber (43┬░C, live GCB off-gas) --------
     Tc001    = s.a328_c001_T
     gcb_m    = hv604["mass_kgh"]
     gcb_T    = hv604["T_out"]
@@ -6571,12 +6508,12 @@ def step_sim(dt: float) -> dict:
         abs_c001  = A328_ABS_DES
         vent_c001 = max(gcb_m - abs_c001, 0.0)
     else:                                                                # post-pin: live off-gas
-        # TD-009 remainder — reactive absorption CO2 + 2 NH3 -> carbamate.  The scalar recovered mass
+        # TD-009 remainder ΓÇö reactive absorption CO2 + 2 NH3 -> carbamate.  The scalar recovered mass
         # abs_c001 is the SAME boot-pinned split as before (A328_PHI_ABS*gcb_m, so C1 and the energy
         # balance are byte-identical and the 15-key pin is untouched); the species layer splits it at
         # the frozen carbamate ratio 2 NH3 : 1 CO2, and the inerts N2/O2/CH4/H2 pass 100 % to the vent.
-        # The vent then carries a LIVE per-species composition (gcb_i − absorbed_i), replacing the
-        # composition-blind scalar — the atmospheric NH3 slip is now a real number, not a boot constant.
+        # The vent then carries a LIVE per-species composition (gcb_i ΓêÆ absorbed_i), replacing the
+        # composition-blind scalar ΓÇö the atmospheric NH3 slip is now a real number, not a boot constant.
         abs_c001  = A328_PHI_ABS * gcb_m
         abs_co2   = abs_c001 * A328_ABS_CO2_DES / A328_ABS_DES            # frozen carbamate split
         abs_nh3   = abs_c001 * A328_ABS_NH3_DES / A328_ABS_DES
@@ -6604,7 +6541,7 @@ def step_sim(dt: float) -> dict:
                                    [(W_S755, m_755), (W_CPL, s.cpl_flow_kgh), (w_abs, abs_c001)],
                                    0.0, A328_C001_ALPHA, m_756, 0.0, dt)
 
-    # ----- Stage 8 : 323E003 + 323D001  LPCC (74°C, tempered water) -------
+    # ----- Stage 8 : 323E003 + 323D001  LPCC (74┬░C, tempered water) -------
     Te003    = s.r3232_e003_T
     in_e003  = m_305 + m718B_prev + m_776 + R3232_M797_DES
     pic202_op= _ctrl_ipd(s.PIC_323202, s.r3232_d001_P, dt)
@@ -6623,11 +6560,11 @@ def step_sim(dt: float) -> dict:
     tva_op   = s.TIC_323013["op"]                              # prior-step TV-323013A stroke
     T_tw_ss  = clamp(R3232_TW_RET_T - (R3232_TW_RET_T - R3232_TW_SUP_T)
                      * (tva_op / max(R3232_TV13_DES_PCT, 1e-6)), 20.0, R3232_TW_RET_T)
-    T_tw_sup = _lag1(s.tlag, "R3232_TW_SUP", T_tw_ss, R3232_TW_TAU_S, dt)   # stream 1102 (55 °C)
+    T_tw_sup = _lag1(s.tlag, "R3232_TW_SUP", T_tw_ss, R3232_TW_TAU_S, dt)   # stream 1102 (55 ┬░C)
     T_tw_ret = s.tlag.get("R3232_TW_RET", R3232_TW_RET_T)      # prior-step state; breaks the algebraic loop
     tic13_op = _ctrl_ipd(s.TIC_323013, T_tw_sup, dt)           # PV = TW supply, NOT the shell temp
     Q_e003   = R3232_E003_UA_KW * (Te003 - 0.5*(T_tw_sup + T_tw_ret))
-    T_tw_ret = T_tw_sup + (R3232_TW_RET_T - R3232_TW_SUP_T) * (Q_e003 / R3232_E003_Q_DES_KW)  # 1103 (65 °C)
+    T_tw_ret = T_tw_sup + (R3232_TW_RET_T - R3232_TW_SUP_T) * (Q_e003 / R3232_E003_Q_DES_KW)  # 1103 (65 ┬░C)
     s.tlag["R3232_TW_RET"] = T_tw_ret                          # TT-323015
     m_cond   = m_305 + R3232_M797_DES - m_321
     sens_e003= ((m_305*(R3232_E003_T305 - Te003)
@@ -6637,19 +6574,16 @@ def step_sim(dt: float) -> dict:
     P_e003   = sens_e003 + m_cond/3600.0*R3232_E003_LAMC - Q_e003
     s.r3232_d001_P = max(s.r3232_d001_P + R3232_D001_P_KP*(gen321 - m_321)/3600.0*dt, 0.1)
     s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
-    if s.r3232_d001_M <= 1.0 and m_308 > (in_e003 - m_321):
-        m_308 = max(in_e003 - m_321, 0.0)
     s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_308)/3600.0*dt, 1.0)
 
-    # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
+    # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45┬░C) -----
     Te011    = s.r3232_e011_T
     in_e011  = (R3232_E011_IN_DES + (m_701 - R3232_E011_M701_DES)
                 + (m_786_d001 - R3232_E011_M786_DES)
                 + (m_321 - R3232_E011_M321_DES)
                 + (m_402 - R3232_E011_M402_DES))
     pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
-    dP_v011  = max(s.r3232_e011_P - 1.0, 0.001)   # C005 is approx 1.0 bar (atmospheric vent node)
-    m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES) * math.sqrt(dP_v011 / (R3232_E011_P_BARA - 1.0))
+    m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
     gen_v011 = R3232_E011_PHIV * in_e011
     # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 (PFD stream
     # 734) fall in; the 323P008 lean-carbamate pumps draw out through LV-323503 on the common
@@ -6714,13 +6648,13 @@ def step_sim(dt: float) -> dict:
     s.tlag["R328_739"]   = m_739       # 328C004 bottoms this tick -> caps next tick's 741 recycle
 
     # ======================================================================
-    #  UNIT 324 — TWO-STAGE VACUUM EVAPORATION  (rigorous, conservative)
+    #  UNIT 324 ΓÇö TWO-STAGE VACUUM EVAPORATION  (rigorous, conservative)
     #  Feed = m_324 (kg/h, 80% urea, ~99 C) delivered by FIC-324401. LV-B
     #  recycle returns to 323D002 Compartment I on a one-tick tear; it is not
     #  an undocumented direct Stage-1 feed. Each stage runs a TIC->PIC steam cascade that sets the
     #  chest pressure -> Q = UA*(tsat(p_chest) - T); urea is conserved so the
     #  water evaporated is fixed exactly by the concentration anchor, and the
-    #  energy/mass/pressure ODEs integrate the live sub-step dt.  UA/λ were
+    #  energy/mass/pressure ODEs integrate the live sub-step dt.  UA/╬╗ were
     #  back-solved at the seed so dM/dt = dT/dt = dP/dt = 0 at design.  Vacuum
     #  is held by a false-air PIC balanced against a fixed ejector pull.
     #      HARD anchors: Stage 1 0.33 bar a / 130 C / 80->95 % ;
@@ -6740,7 +6674,7 @@ def step_sim(dt: float) -> dict:
     w_tank     = s.w_d002.get("Urea", R324_W_IN)
     urea1_in   = w_tank * feed1_m                                             # urea into Stage 1 (kg/h)
     w_feed1    = w_tank
-    # AUDIT C18 — the Stage-1 feed enthalpy term used the FROZEN R324_FEED_T_C = 99 C while the
+    # AUDIT C18 ΓÇö the Stage-1 feed enthalpy term used the FROZEN R324_FEED_T_C = 99 C while the
     # 323D002 tank temperature is a live ODE state carrying (by the code's own note at the tank) a
     # LOW-temperature alarm.  A 10 K tank cooldown withholds 644 kW = 6.1 % of R324_E001_Q_DES_KW,
     # i.e. ~1067 kg/h less water evaporated -- and the model moved none of it.
@@ -6752,15 +6686,15 @@ def step_sim(dt: float) -> dict:
     pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
     p_chest_e001 = steam_chest_pressure(pic203_op, s.steam.P_LP)
     Q_e001_kw  = max(R324_E001_UA_KW*(tsat_steam(p_chest_e001) - s.r324_e001_T), 0.0)
-    # AUDIT F-4 — evaporation is DUTY-LIMITED, and the melt strength FOLLOWS it (was pinned at
+    # AUDIT F-4 ΓÇö evaporation is DUTY-LIMITED, and the melt strength FOLLOWS it (was pinned at
     # R324_W_EV1 by construction, so no operator action could dilute the product).  q1_avail is
     # the latent duty left after the feed has been carried to the stage temperature; the water
-    # removed is whichever is smaller — the concentration target or what that duty can boil.
-    # AUDIT TD-016 — the evaporator melt strength IS the smooth VLE equilibrium at the controlled
+    # removed is whichever is smaller ΓÇö the concentration target or what that duty can boil.
+    # AUDIT TD-016 ΓÇö the evaporator melt strength IS the smooth VLE equilibrium at the controlled
     # vacuum, and the water removed follows it continuously.  This closes the residual limit cycle
     # and replaces the whole TD-014/TD-015 min(concentration-cap, duty) two-branch closure.
     #
-    # The old concentration cap was a FIXED 94.31 % ceiling — `urea_in / R324_W_EV1` — whose
+    # The old concentration cap was a FIXED 94.31 % ceiling ΓÇö `urea_in / R324_W_EV1` ΓÇö whose
     # d(conc)/dT is identically zero.  Once the melt hit it, more steam only raised T with no
     # concentration payoff, so TIC-324001 saw zero process gain, disengaged, let the melt drift and
     # then over-corrected: the relay chatter the Urea-Water VLE research (sec 2) blames for these
@@ -6773,7 +6707,7 @@ def step_sim(dt: float) -> dict:
     # Evaluated at the CONTROLLED design vacuum (0.33 bar a), not the live separator pressure, so the
     # melt target is a pure smooth function of temperature.  Anchored (w_eq(130,0.33) == R324_W_EV1)
     # so v == R324_V1_DES and P_e001 == 0 bit-exact at the design seed; TIC-324001 stays what TD-015
-    # made it — a melt-strength controller acting through temperature — now without the relay.
+    # made it ΓÇö a melt-strength controller acting through temperature ΓÇö now without the relay.
     # Close the pressure/VLE algebraic tear inside the stage.  Pressure sets equilibrium vapour
     # generation; vapour load and ejector pull set pressure.  A bounded fixed-point solve prevents
     # the returned pressure and composition from belonging to different integration instants.
@@ -6836,7 +6770,7 @@ def step_sim(dt: float) -> dict:
     }
     p1_m       = max(feed1_m - v1_m, 0.0)                                     # Stage-1 melt (kg/h)
     w1_live    = clamp(urea1_in / max(p1_m, 1e-6), 0.0, 1.0)                  # LIVE Stage-1 urea mass frac
-    # AUDIT C3 — this was `m_p1 = p1_m`, i.e. outlet := inlet - vapour, which makes the holdup ODE
+    # AUDIT C3 ΓÇö this was `m_p1 = p1_m`, i.e. outlet := inlet - vapour, which makes the holdup ODE
     # below (feed1_m - v1_m - m_p1) identically ZERO for every operating point: 324F001 was a
     # zero-capacity node whose level indicator could not move and whose mass was nevertheless the
     # denominator of the Stage-1 temperature ODE.  The drain is a barometric leg into the 324F003
@@ -6858,7 +6792,7 @@ def step_sim(dt: float) -> dict:
         sol_advance(s.w_e001, M_f001_pre, s.r324_f001_M, feed1_m, feed1_w,
                     v1_m, y_v1, m_p1, xi_e001, dt), w1_live)
     # Vacuum pressure and VLE were solved together above.
-    # AUDIT C5 — the pull had NO suction-pressure term, so the vacuum ODE below was a pure open
+    # AUDIT C5 ΓÇö the pull had NO suction-pressure term, so the vacuum ODE below was a pure open
     # integrator: nothing on its right-hand side depended on s.r324_f001_P.  Shutting HIC-329605 gave
     # dP/dt = 0.02*(14073+250)/3600 = 0.0796 bar/s and the state ramped to the 1.0 bar clamp in 8.4 s
     # and stayed pinned; with PIC-324202 in MAN any imbalance ran to a rail.  A steam-jet ejector's
@@ -6886,7 +6820,7 @@ def step_sim(dt: float) -> dict:
     pic212_op  = _ctrl_ipd(s.PIC_329212, pic212_pv, dt, cas_sp=tic2_op)       # steam valve stroke (%)
     p_chest_e003 = steam_chest_pressure(pic212_op, s.steam.P_9)
     Q_e003_kw  = max(R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T), 0.0)  # Evap-II duty (kW, F-10 floored)
-    # AUDIT TD-016 — Evaporator II, same smooth-equilibrium closure as Evaporator I: the melt
+    # AUDIT TD-016 ΓÇö Evaporator II, same smooth-equilibrium closure as Evaporator I: the melt
     # strength follows the continuous Extended-UNIQUAC departure at 0.131 bar a, so the
     # water removed follows temperature smoothly with no min()/duty relay.  Anchored bit-exact
     # (w_eq(140,0.131) == R324_W_EV2), T-driven at the PIC-324203-controlled vacuum.
@@ -6976,12 +6910,12 @@ def step_sim(dt: float) -> dict:
     s.w_e003   = sol_pin_strength(
         sol_advance(s.w_e003, M_f003_pre, s.r324_f003_M, feed2_m, s.w_e001,
                     v2_m, y_v2, m_f003_out, xi_e003, dt), w2_live)
-    # vacuum: PIC-324203 deep-vacuum false-air bleed vs the 324F004/F005 ejector pull.  Mapping — the
+    # vacuum: PIC-324203 deep-vacuum false-air bleed vs the 324F004/F005 ejector pull.  Mapping ΓÇö the
     # pull is set by HV-329606 motive steam (HIC-329606): opening it harder drops 324F003 and the
     # 324E005 shell pressure.  Anchored: at design HIC-329606 == 50 % -> the pull == EJPULL_DES, so
     # the ODE is bit-identical at the seed.  (PIC-324203 trims 324F003 to SP in AUTO; the sign shows
     # directly with the loop in MAN.)
-    # AUDIT C5 — same open-integrator defect and same anchored roll-off as the Stage-1 pull above.
+    # AUDIT C5 ΓÇö same open-integrator defect and same anchored roll-off as the Stage-1 pull above.
 
     # ---- UF85 ratio injection (FFIC-335406 ratio station -> FIC-335405 flow) ------
     #  Physical mixing is already closed in route501 above. Datasheet-3 section 5.2 requires
@@ -7022,7 +6956,7 @@ def step_sim(dt: float) -> dict:
     #   FIC-328405 / LIC-323503 dropped from here: both now step on the live 718A/718B/323D011 network.
     # (TIC-328008 is stepped earlier, immediately before its FIC-328404 slave -- see TD-004.
     #  Stepping it a second time here would advance the controller twice per tick.)
-    # AUDIT C32 — the differential PV subtracted the module constant R328_C003_T746, so only the
+    # AUDIT C32 ΓÇö the differential PV subtracted the module constant R328_C003_T746, so only the
     # TT-328013 leg was live: a 328E021 fouling change or a 328C002 bottoms excursion moved the true
     # dT and left the PV flat, i.e. TIC-328012 could not see the upset it exists to detect.  T_746 is
     # the live 328E021 cold outlet already published as TT-328009; at design it is 190.0 exactly.
@@ -7098,7 +7032,7 @@ def step_sim(dt: float) -> dict:
 
     # Discharge header
     # Discharge header: affinity-law developed head droops with motive (pump-speed) fraction.
-    #   P = P_idle + (P_design - P_idle)·phi_m^2 ;  == 164.0 at design (phi_m=1), 7.5 idle (phi_m=0).
+    #   P = P_idle + (P_design - P_idle)┬╖phi_m^2 ;  == 164.0 at design (phi_m=1), 7.5 idle (phi_m=0).
     P_disch_header_barG = (7.5 + ((P_SYN_DOWN_BAR - 1.0) - 7.5) * phi_fwd) \
         if (s.pumpA["on"] or s.pumpB["on"]) else 7.5
 
@@ -7265,15 +7199,6 @@ def step_sim(dt: float) -> dict:
     _tear_tol = 1.0e-6
     _tear_norm = max(_tear_resid.values(), default=0.0)
 
-    # Dynamic Pressure Anchor (Mass Balance ODE)
-    # Loop mass capacity ~ 1500 kg/bar. 
-    C_loop = 1500.0  
-    m_in_loop = (F_pump_total_th * 1000.0) + F_CO2_feed_kgh + m_308
-    m_out_loop = drain_kgh + hv604["mass_kgh"]
-    
-    s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0),
-                         10.0, 180.0)
-                         
     return {
         "t":           time.time(),      # desktop clock (epoch s)
         "t_sim":       s.sim_t,          # plant clock (s since program init); trend X axis
@@ -7284,13 +7209,6 @@ def step_sim(dt: float) -> dict:
             "max_relative_residual": _tear_norm,
             "settled": _tear_norm <= _tear_tol,
             "residuals": _tear_resid,
-        },
-        "sm_diagnostics": {
-            "hpcc": locals().get("hpcc", {}),
-            "ej": locals().get("ej", {}),
-            "react": locals().get("react", {}),
-            "hv604": locals().get("hv604", {}),
-            "vac324": locals().get("vac324", {}),
         },
         "sm_diagnostics": {
             "hpcc": locals().get("hpcc", {}),
@@ -7334,14 +7252,14 @@ def step_sim(dt: float) -> dict:
         },
         "FI_321401":   round(F_pump_total_th, 2),   # FT-321401 live discharge flow
         "TI_top1":     round(s.tank_T_C, 1),         # TT-321001 tank temp (left)
-        # F6: TT-321002 de-aliased — top-right thermowell reads a level-dependent stratification
+        # F6: TT-321002 de-aliased ΓÇö top-right thermowell reads a level-dependent stratification
         #     offset below TT-321001 (empties -> larger vapour-space gradient); tracks both live
         #     tank_T_C and tank_level_frac so boundary disturbances still ripple through.
         "TI_top2":     round(s.tank_T_C - 0.8 * (1.0 - s.tank_level_frac), 1),  # TT-321002 (right)
         "LSL_321501":  (s.tank_level_frac < 0.15),   # low-level switch (active=LO)
         "PI_top1":     round(s.tank_P_top_barG, 1),
         "PI_top2":     round(s.tank_P_top_barG, 1),
-        "PI_header":   round(7.3 * phi_fwd, 1),      # F6: PI-321003 feed-header P de-pinned — affinity-law w/ pump motive (phi_fwd^=1 at design -> 7.3)
+        "PI_header":   round(7.3 * phi_fwd, 1),      # F6: PI-321003 feed-header P de-pinned ΓÇö affinity-law w/ pump motive (phi_fwd^=1 at design -> 7.3)
         "LI_321501":   round(s.tank_level_frac * 100.0, 1),
         "totalizer":   round(s.totalizer_t, 2),
         "XV_321901":   bool(s.XV_321901),
@@ -7467,7 +7385,7 @@ def step_sim(dt: float) -> dict:
             "F010": {                            # Pre-evaporator 323F010 + Heater 323E010 (vacuum 0.46 bar)
                 "TT_323010":  round(s.r323_f010_T, 1),                       # pre-evap temp (C, hold 99)
                 "P_bara":     round(s.r323_f010_P, 3),                       # PT-323204 (bar a, live off HV-323605/329605)
-                "HV_323605":  round(s.HIC_323605, 1),                        # gas-outlet hand valve (%) — opening drops P
+                "HV_323605":  round(s.HIC_323605, 1),                        # gas-outlet hand valve (%) ΓÇö opening drops P
                 "LI_323F010": round(s.r323_f010_M / R323_F010_M_FULL * 100.0, 1),
                 "feed331_th": round(m_331 / 1000.0, 2),                      # urea-recovery return (t/h)
                 "evap_th":    round(m_evap / 1000.0, 2),                     # vapour 790 -> vac (t/h)
@@ -7497,7 +7415,7 @@ def step_sim(dt: float) -> dict:
             },
         },
         "LPCC_3232": {                           # Screen 323-2 : LP Carbamate Condenser train
-            "E003": {                            # 323E003 LPCC + 323D001 carbamate separator (74°C)
+            "E003": {                            # 323E003 LPCC + 323D001 carbamate separator (74┬░C)
                 "TT_323003":  round(s.r3232_e003_T, 1),                    # shell liquid temp (C, hold 74)
                 "P_bara":     round(s.r3232_d001_P, 2),                    # 323D001 pressure (bar a)
                 "LI_323502":  round(s.r3232_d001_M / R3232_D001_M_FULL * 100.0, 1),
@@ -7518,14 +7436,14 @@ def step_sim(dt: float) -> dict:
                                "op": round(s.TIC_323013["op"], 2), "mode": s.TIC_323013["mode"]},
                 "TV_323013A": round(tic13_op, 1),              # cold make-up : opens as PV rises above SP
                 "TV_323013B": round(100.0 - tic13_op, 1),      # hot bypass : exact opposite of TV-323013A
-                "TT_323015":  round(T_tw_ret, 1),              # TW return 323E003 -> 323P003 (1103, 65 °C)
+                "TT_323015":  round(T_tw_ret, 1),              # TW return 323E003 -> 323P003 (1103, 65 ┬░C)
                 # FIC-328402 is a VOLUMETRIC loop: pv/sp are m3/h (the operator enters SP in m3/h).
                 "FIC_328402": {"pv": round(s.FIC_328402["pv"], 2), "sp": round(s.FIC_328402["sp"], 2),
                                "op": round(s.FIC_328402["op"], 1), "mode": s.FIC_328402["mode"],
                                "vol_m3h": round(m_744 / RHO_744_KGM3, 2),   # PFD stream 744 (raw, unlagged)
                                "kgh": round(m_744, 1)},
             },
-            "E011": {                            # 323E011 LP carbamate condenser + 323D011 (45°C)
+            "E011": {                            # 323E011 LP carbamate condenser + 323D011 (45┬░C)
                 "TT_323011":  round(s.r3232_e011_T, 1),                    # shell liquid temp (C, hold 45)
                 "P_bara":     round(s.r3232_e011_P, 2),                    # 323D011 pressure (bar a)
                 "LI_323D011": round(s.r3232_e011_M / R3232_D011_M_DES * R3232_D011_LVL_SP, 1),
@@ -7569,8 +7487,8 @@ def step_sim(dt: float) -> dict:
             },
         },
         "DESORB_328": {                          # Screen 328-1 : Desorption / Hydrolysis train
-            "C002": {                            # 328C002 Desorber-I (bottoms 139°C)
-                "R328_C002_T_BOT_BOT": round(s.a328_c002_T, 1),                     # bottom temp (C, hold 139)
+            "C002": {                            # 328C002 Desorber-I (bottoms 139┬░C)
+                "TT_328C002": round(s.a328_c002_T, 1),                     # bottom temp (C, hold 139)
                 "TT_328007":  round(s.a328_c002_T, 1),                     # bottoms draw -> 328P006 (stream 743, 139C)
                 # AUDIT B4: TT-328008 belongs on the 328C002 OVERHEAD (stream 737, 117 C -> 328E004),
                 # per Mapping of Desorber Hydrolyzer unit.md:46.  It used to be published in the D001
@@ -7585,7 +7503,7 @@ def step_sim(dt: float) -> dict:
                 "LIC_328503": {"pv": round(s.LIC_328503["pv"], 1), "sp": round(s.LIC_328503["sp"], 1),
                                "op": round(s.LIC_328503["op"], 1), "mode": s.LIC_328503["mode"]},
             },
-            "C003": {                            # 328C003 Hydrolyser (200°C, MP steam)
+            "C003": {                            # 328C003 Hydrolyser (200┬░C, MP steam)
                 "TT_328C003": round(s.a328_c003_T, 1),                     # temp (C, hold 200)
                 "TT_328012":  round(T_746, 1),                             # 3rd tray / 746 (C, 190) - AUDIT C32: live 328E021 cold outlet
                 # AUDIT B6: TT-328011 is on the 328C003 OVERHEAD line (stream 748, 188 C) per
@@ -7614,8 +7532,8 @@ def step_sim(dt: float) -> dict:
                 "TIC_328012": {"pv": round(s.TIC_328012["pv"], 1), "sp": round(s.TIC_328012["sp"], 1),
                                "op": round(s.TIC_328012["op"], 2), "mode": s.TIC_328012["mode"]},
             },
-            "C004": {                            # 328C004 Desorber-II (143°C, LP steam, FFIC ratio)
-                "R328_C004_T": round(s.a328_c004_T, 1),                     # temp (C, hold 143)
+            "C004": {                            # 328C004 Desorber-II (143┬░C, LP steam, FFIC ratio)
+                "TT_328C004": round(s.a328_c004_T, 1),                     # temp (C, hold 143)
                 "TT_328005":  round(s.a328_c004_T, 1),                     # bottoms draw -> 328E007 (stream 739, 143C)
                 "TT_328004":  round(s.a328_c004_T - R328_C004_DT_DES, 1),  # top tray = OVHD 750 (140C), tracks live bottoms
                 "P_bara":     round(s.a328_c004_P, 2),                     # AUDIT C1: live column pressure (3.7 bar a)
@@ -7636,7 +7554,7 @@ def step_sim(dt: float) -> dict:
                 "LIC_328505": {"pv": round(s.LIC_328505["pv"], 1), "sp": round(s.LIC_328505["sp"], 1),
                                "op": round(s.LIC_328505["op"], 1), "mode": s.LIC_328505["mode"]},
             },
-            "D001": {                            # 328D001 Desorber-I reflux drum (61°C, 328E004)
+            "D001": {                            # 328D001 Desorber-I reflux drum (61┬░C, 328E004)
                 "TT_328D001": round(s.a328_d001_T, 1),                     # temp (C, hold 61)
                 "P_bara":     round(s.a328_d001_P, 2),
                 "LI_328501":  round(s.a328_d001_M / R328_D001_M_DES * R328_D001_LVL_SP, 1),
@@ -7667,7 +7585,7 @@ def step_sim(dt: float) -> dict:
             },
         },
         "ABSORB_328": {                          # Screen 328-2 : LP Absorber + recirc collector
-            "C001": {                            # 322C001 LP off-gas absorber (43°C, live GCB)
+            "C001": {                            # 322C001 LP off-gas absorber (43┬░C, live GCB)
                 "TT_322015":  round(s.a328_c001_T, 1),                     # liquid temp (C, hold 43; trip>57)
                 "P_bara":     round(s.a328_c001_P, 2),
                 "LI_322502":  round(s.a328_c001_M / A328_C001_M_DES * 50.0, 1),
@@ -7675,7 +7593,7 @@ def step_sim(dt: float) -> dict:
                 "gcb_T":      round(gcb_T, 1),                             # off-gas temp (C)
                 "abs_th":     round(abs_c001 / 1000.0, 2),                 # NH3/CO2 absorbed (t/h)
                 "vent_th":    round(vent_c001 / 1000.0, 2),               # inert + slip vent -> 328V001 (t/h)
-                # TD-009 remainder — live vent NH3 slip (was a boot-pinned split; now off the species balance)
+                # TD-009 remainder ΓÇö live vent NH3 slip (was a boot-pinned split; now off the species balance)
                 "vent_nh3_kgh": round(vent_c001 * (y_vent["NH3"] if y_vent else 0.0), 1),  # NH3 -> 328V001/atm (kg/h)
                 "vent_nh3_pct": round((y_vent["NH3"] if y_vent else 0.0) * 100.0, 2),  # NH3 mass% in the atm vent
                 "vent_co2_pct": round((y_vent["CO2"] if y_vent else 0.0) * 100.0, 2),  # CO2 mass% in the atm vent
@@ -7728,7 +7646,7 @@ def step_sim(dt: float) -> dict:
         "EVAP_324": {                            # Screens 324-1 / 324-1B : two-stage vacuum evaporation
             "E001": {                            # Screen 324-1 : Evaporator I 324E001 / 324F001 (130 C, 0.33 bar a)
                 "TT_324001":   round(s.r324_e001_T, 1),                       # melt temp (C, hold 130)
-                # AUDIT B8 — PT-324201 is the 324F001 SEPARATOR transmitter (mapping doc line 11) and
+                # AUDIT B8 ΓÇö PT-324201 is the 324F001 SEPARATOR transmitter (mapping doc line 11) and
                 # is the pressure input to the PY-324201 concentration inferential; PIC-324202 is the
                 # 324E002 SHELL controller (line 14).  The separator vacuum used to be published only
                 # under the shell controller's tag, so PT-324201 was invisible on the HMI.  The shell
@@ -7763,7 +7681,7 @@ def step_sim(dt: float) -> dict:
             },
             "E003": {                            # Screen 324-1B : Evaporator II 324E003 / 324F003 (140 C, 0.131 bar a)
                 "TT_324002":   round(s.r324_e003_T, 1),                       # melt temp (C, hold 140)
-                # AUDIT B8 — PT-324204 is the 324F003 separator transmitter (mapping doc line 20) and
+                # AUDIT B8 ΓÇö PT-324204 is the 324F003 separator transmitter (mapping doc line 20) and
                 # feeds the AY-324701 inferential; PIC-324203 is the 324E005 shell controller (line 24).
                 "PT_324204":   round(s.r324_f003_P, 3),                       # 324F003 separator vacuum (bar a, hold 0.131)
                 "PT_324203":   round(s.r324_f003_P, 3),                       # 324E005 shell pressure (shared rounded PFD manifold)
@@ -7800,7 +7718,7 @@ def step_sim(dt: float) -> dict:
                 "p_chest_bara":round(p_chest_e003, 2),                        # steam chest press. (bar a)
                 "Q_kW":        round(Q_e003_kw, 0),                           # Evap-II duty (kW)
                 "HIC_329606":  round(s.HIC_329606, 1),                        # 324F004/F005 motive-steam hand valve (%)
-                "HV_329606":   round(s.HIC_329606, 1),                        # HV-329606 opening (tracks HIC 1:1) — opening drops 324F003/E005 P
+                "HV_329606":   round(s.HIC_329606, 1),                        # HV-329606 opening (tracks HIC 1:1) ΓÇö opening drops 324F003/E005 P
                 "P_324E005_sh":round(s.r324_f003_P, 3),                       # 324E005 shell = 324F003 manifold (bar a)
                 "TIC_324002":  {"pv": round(s.TIC_324002["pv"], 1), "sp": round(s.TIC_324002["sp"], 1),
                                 "op": round(s.TIC_324002["op"], 2), "mode": s.TIC_324002["mode"]},
@@ -7851,8 +7769,8 @@ def step_sim(dt: float) -> dict:
             "liq_th":      round(hpcc["liq_th"], 2),     # liquid product (t/h)
             "liq_MW":      round(hpcc["liq_MW"], 2),
             "liq_mass_pct":{k: round(hpcc["liq_mass_pct"][k], 3) for k in MW_COMP},  # mass %
-            "phi_gas":     {k: hpcc["phi_gas"][k] for k in MW_COMP},   # AUDIT F-6: live (T,P) flash split (unrounded — diag/gate)
-            "LT_322E002":  round(s.hpcc_level_pct, 1),   # liquid level (%) — DYNAMIC inventory (swells on stall)
+            "phi_gas":     {k: hpcc["phi_gas"][k] for k in MW_COMP},   # AUDIT F-6: live (T,P) flash split (unrounded ΓÇö diag/gate)
+            "LT_322E002":  round(s.hpcc_level_pct, 1),   # liquid level (%) ΓÇö DYNAMIC inventory (swells on stall)
             "P_bara":      round(d_HPCC_P, 1),
             "steam": {                            # shell side: LP steam (live LP header, heat recovery)
                 "TI_shell": round(T_shell_lp, 1),            # live LP-header sat condensing temp (C)
@@ -7934,12 +7852,6 @@ def step_sim(dt: float) -> dict:
                 "op":   round(s.steam.valve_admit9_pct - s.steam.valve_letdown_pct, 1),  # net split % (+205A admit / -205B let-down)
                 "mode": s.steam.pic205_mode,
             },
-            "PIC_329206": {                      # LP steam header master controller (4 barg == 5.013 bar a)
-                "pv":   round(s.steam.P_LP - 1.01325, 2),            # barg
-                "sp":   round(s.steam.master207_sp - 1.01325, 2),     # barg (4.0 barg)
-                "op":   round(s.steam.m_pic * 3.6, 2),             # net vent(+)/make-up(-) t/h
-                "mode": s.steam.pic207_mode,
-            },
             "PIC_329207": {                      # 4-bar header (leg-B alias; PV=LP header P)
                 "pv":   round(s.steam.P_LP, 2),                     # bar a
                 "sp":   round(s.steam.pic207_sp, 2),
@@ -7990,21 +7902,21 @@ def step_sim(dt: float) -> dict:
             },
         },
         "REACT_322R001": {                       # HP Urea Reactor 322R001 -> 322E001 / 322E003
-            "TT_322005":   round(s.react_T_node[3], 1),  # N6 A top (EL +21700) — node-4 DYNAMIC profile
-            "TT_322006":   round(s.react_T_node[2], 1),  # N6 B     (EL +14800) — node-3 DYNAMIC profile
-            "TT_322007":   round(s.react_T_node[1], 1),  # N6 C     (EL  +7900) — node-2 DYNAMIC profile
-            "TT_322008":   round(s.react_T_node[0], 1),  # N6 D bot (EL  +1000) — node-1 DYNAMIC profile
+            "TT_322005":   round(s.react_T_node[3], 1),  # N6 A top (EL +21700) ΓÇö node-4 DYNAMIC profile
+            "TT_322006":   round(s.react_T_node[2], 1),  # N6 B     (EL +14800) ΓÇö node-3 DYNAMIC profile
+            "TT_322007":   round(s.react_T_node[1], 1),  # N6 C     (EL  +7900) ΓÇö node-2 DYNAMIC profile
+            "TT_322008":   round(s.react_T_node[0], 1),  # N6 D bot (EL  +1000) ΓÇö node-1 DYNAMIC profile
             "TT_322009":   round(react["T_offgas"], 1),      # off-gas line -> 322E003 (C, live profile)
-            "LT_322504":   round(s.react_lt322504_pct, 1),   # N7 narrow-band reading (1.5 m span, top tap 1 m above overflow) — DYNAMIC
+            "LT_322504":   round(s.react_lt322504_pct, 1),   # N7 narrow-band reading (1.5 m span, top tap 1 m above overflow) ΓÇö DYNAMIC
             "AT_322701":   round(d_AT322701, 3),  # N/C molar ratio ->322E001 (lagged analyzer)
             "HIC_322605":  round(s.HIC_322605, 1),           # overflow valve controller (%)
             "HV_322605":   round(s.HIC_322605, 1),           # HV-322605 opening (tracks HIC 1:1)
             "P_bara":      round(react["P_bara"], 1),        # reactor pressure (bar a)
             "P_offgas":    round(react["P_offgas"], 1),      # off-gas line pressure (bar a)
             "closure_resid": round(react["closure_resid"], 2),  # mass-closure diag (kmol/h, not injected)
-            "X_conv":      round(react["X_conv"] * 100.0, 2),    # per-pass CO2->urea conversion (%) — Inoue-Kanai
+            "X_conv":      round(react["X_conv"] * 100.0, 2),    # per-pass CO2->urea conversion (%) ΓÇö Inoue-Kanai
             "L_feed":      round(react["L_feed"], 3),            # reactor-feed N/C molar (NH3/CO2)
-            "W_feed":      round(react["W_feed"], 4),            # reactor-feed H/C molar (H2O/CO2) — water-penalty driver
+            "W_feed":      round(react["W_feed"], 4),            # reactor-feed H/C molar (H2O/CO2) ΓÇö water-penalty driver
             "xi_urea":     round(react["xi_urea"], 2),           # urea-formation extent (kmol/h, conversion-coupled)
         },
         "SCRUB_322E003": {                       # HP Scrubber 322E003 -> 322C001 (off-gas) / 322F001 (overflow)
@@ -8033,7 +7945,7 @@ def step_sim(dt: float) -> dict:
             "LT_329501":   round(s.scrub_level_pct, 1),  # 322E003 sump level (%, true dynamic inventory)
             "ccw": {                              # shell-side CCW loop (329P006 A/B pump + 329E004 cooler)
                 "TT_329125":  round(d_TT329125, 2),     # CCW return temp out of shell (C, lagged)
-                "TDY_329125": round(TDY_329125, 2),             # TT-329125 − TIC-329005 (cond. quality, C) — live PT-329201 cascade
+                "TDY_329125": round(TDY_329125, 2),             # TT-329125 ΓêÆ TIC-329005 (cond. quality, C) ΓÇö live PT-329201 cascade
                 "vent_ratio": round(scrub["vent_ratio"], 4),    # synthesis-vent load PT-329201/PT_des (= nu, prior-step state)
                 "rho_cond":   round(scrub["rho_cond"], 4),      # condensation capacity/demand (CCW flow / vent load); <1 -> PT-329201 rises
                 "co2_free":   round(scrub["co2_free"], 1),      # free acid CO2 overhead (pressure-building, kmol/h)
@@ -8066,7 +7978,7 @@ def step_sim(dt: float) -> dict:
             "xi_biuret_kmolh": {"C003": round(xi_c003, 5), "F004": round(xi_f004, 5),
                                 "F010": round(xi_f010, 5), "E001": round(xi_e001, 5),
                                 "E003": round(xi_e003, 5)},
-            # AUDIT C7 — _sol_stage_anchor's clip residual was computed and RETURNED but never read
+            # AUDIT C7 ΓÇö _sol_stage_anchor's clip residual was computed and RETURNED but never read
             # by any caller, contradicting its own docstring ("The clip residual is reported, never
             # hidden").  It is the negative vapour flow the anchor had to clamp to zero and back-charge
             # to water, i.e. mass the PFD's own rounded stream table cannot produce.  E001 carries
@@ -8180,27 +8092,6 @@ AUX_PUMPS = ("323P001A", "323P001B", "322P002A", "322P002B",
              "328P001A", "328P001B", "328P003A", "328P003B")
 
 
-def reset_simulation():
-    """Return the plant to the fresh runtime seed and zero every accumulating counter.
-
-    This reproduces the exact state the boot sequence itself ends on. Every dynamic
-    quantity -- the plant clock (sim_t), all totalizers/holdups, and the MP/LP steam
-    headers -- lives inside the State object, so a fresh State() zeroes them in one
-    move. The PINNED design constants (HPCC_UA, A328_*, M_HPCC_DES_LIVE, REACT_MASS_DES,
-    ...) are module globals set once during boot calibration and are NOT part of State,
-    so they survive: none of the ~20 s warm-up reruns -- the dynamic transient is simply
-    discarded, exactly as the boot's own trailing `state = State()` does.
-    """
-    global state, last_packet, hist
-    state = State()                 # sim_t -> 0.0; totalizers, holdups, steam headers -> seed
-    last_packet = {}                # drop the stale packet so no pre-reset frame is pushed
-    hist = Historian()              # trends restart from t=0 (the sim clock just jumped back to 0)
-    health["heartbeat"] = 0         # liveness + fault counters cleared for a clean slate
-    health["last_step_wall"] = time.time()
-    _clear_health_error()
-    print("[reset_sim] simulation reset to fresh seed; counters zeroed", flush=True)
-
-
 def handle_cmd(cmd: dict):
     s = state
     t = cmd.get("type")
@@ -8292,13 +8183,6 @@ def handle_cmd(cmd: dict):
         m = str(cmd.get("mode", "")).upper()
         if m in SIM_SPEED:
             s.sim_mode = m
-
-    elif t == "reset_sim":
-        # {"type":"reset_sim"}  -- operator reset button beside the backend status LED. Discards the
-        #   dynamic transient and zeroes every counter (plant clock, totalizers, trends) without
-        #   rerunning boot calibration. See reset_simulation() for why the pinned design constants
-        #   survive. `s` above still aliases the OLD State; nothing below this branch reads it.
-        reset_simulation()
 
     elif t == "controller_set":
         cid  = cmd["id"]
@@ -8752,7 +8636,7 @@ def _flag_health_error(exc: Exception) -> None:
         health["since"] = time.time()
     # Loud on the server console too -- the operator's screen is not the only place this must show.
     print("=" * 72)
-    print("BACKEND STEP FAILURE — physics step raised, simulation is frozen:")
+    print("BACKEND STEP FAILURE ΓÇö physics step raised, simulation is frozen:")
     print(tb)
     print("=" * 72)
 
@@ -8887,7 +8771,6 @@ def _pin_hpcc_ua():
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
     _cap = {}
     for _ in range(18000):
-        
         res = step_sim(0.1)
     _cap["r"] = res["sm_diagnostics"]["hpcc"]
     _cap["ejm"] = res["sm_diagnostics"]["ej"]["suction_kgh"] / res["sm_diagnostics"]["ej"]["mu"] if res["sm_diagnostics"]["ej"].get("mu", 0) else EJ_MOTIVE_NH3_DES
@@ -9005,7 +8888,7 @@ def _pin_hpcc_ua():
     A328_GCB_DES    = _gcb_m
     A328_GCB_T      = _gcb_T
     A328_PHI_ABS    = A328_ABS_DES / _gcb_m          # absorbed fraction (PHI_ABS*GCB_DES == A328_ABS_DES)
-    A328_VENT_DES   = _gcb_m - A328_ABS_DES          # design vent = off-gas − absorbed
+    A328_VENT_DES   = _gcb_m - A328_ABS_DES          # design vent = off-gas ΓêÆ absorbed
     A328_LAMBDA_ABS = -_sens_pin*3600.0/A328_ABS_DES # back-solved -> P_c001 == 0 at design (bit-exact)
 
     state = State()                                  # discard the capture step (fresh design seed)
