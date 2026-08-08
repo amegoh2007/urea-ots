@@ -96,7 +96,7 @@
   const slots = [];                    // {tag, entry, pts:[{t,v}], colour, lo, hi, auto}
   for (let i = 0; i < SLOTS; i++) slots.push(null);
   let span = DEFAULT_SPAN;
-  let selected = 0;
+  let selected = -1;                 // -1 = no pen highlighted (all traces at full strength)
   let chart = null, win = null, lastPacket = null;
   let rulers = [];                     // absolute plant seconds; up to RULERS_MAX, coloured by index
   let dragRuler = -1, dragMoved = false; // index of the ruler being dragged; whether the pointer moved
@@ -348,7 +348,13 @@
         pts.push({ x: p.t - ve, y: norm(slot, p.v) });
       }
       ds.data = pts;
-      ds.borderWidth = (i === selected) ? 2.4 : 1.4;
+      // Highlight the chosen pen: thicken it, keep it at full colour, and draw it last (on top);
+      // fade every other pen so the selected trend clearly stands out. selected < 0 = none chosen,
+      // so all pens keep full strength.
+      const isSel = (i === selected), fade = (selected >= 0 && !isSel);
+      ds.borderWidth = isSel ? 3.2 : 1.4;
+      ds.borderColor = fade ? (PENS[i] + '40') : PENS[i];   // +40 = 25% alpha (8-digit hex)
+      ds.order = isSel ? 1 : 0;                              // Chart.js draws higher order last -> selected on top
     }
     chart.update('none');
     renderRows();
@@ -489,7 +495,14 @@
     dirty = true; scheduleRedraw(); save();
     return true;
   }
-  function removeSlot(i) { slots[i] = null; dirty = true; scheduleRedraw(); save(); }
+  function removeSlot(i) { slots[i] = null; if (selected === i) selected = -1; dirty = true; scheduleRedraw(); save(); }
+  // Choose a pen from the table -> highlight its trend above (thicken it, fade the rest, and drive the
+  // Y axis from its range). Reclicking the active pen, or picking an empty row, clears the highlight.
+  function selectPen(i) {
+    selected = (i != null && i >= 0 && slots[i] && selected !== i) ? i : -1;
+    dirty = true; redraw(); save();
+    return selected;
+  }
   function flash(index, msg) {
     if (!win) return;
     const el = win.querySelector('#tw-flash');
@@ -704,9 +717,9 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
         '<td class="c-hi"><input type="number" step="any" disabled title="Display HIGH — blank to auto-scale"></td>' +
         '<td class="c-x"></td>';
       tr.onclick = ev => {
-        if (ev.target.tagName === 'INPUT') { selected = i; dirty = true; redraw(); return; }
+        if (ev.target.tagName === 'INPUT') { if (slots[i]) selected = i; dirty = true; redraw(); return; }
         if (ev.target.classList.contains('c-x')) { if (slots[i]) removeSlot(i); return; }
-        selected = i; dirty = true; redraw(); save();
+        selectPen(i);   // highlight this pen's trend above; reclick (or an empty row) clears it
       };
       [['lo', '.c-lo input'], ['hi', '.c-hi input']].forEach(([which, sel]) => {
         const inp = tr.querySelector(sel);
@@ -854,7 +867,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       buildWindow(); buildChart();
       const st = saved();
       if (typeof st.span === 'number' && SPANS.some(x => x.s === st.span)) span = st.span;
-      if (typeof st.sel === 'number') selected = clamp(st.sel, 0, SLOTS - 1);
+      if (typeof st.sel === 'number') selected = st.sel < 0 ? -1 : clamp(st.sel, 0, SLOTS - 1);
       if (Array.isArray(st.tags)) st.tags.forEach((tag, i) => {
         if (!tag) return;
         coreAddTag(tag, i);
@@ -959,7 +972,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       _internals: { hms, deskClock, stamp, norm, rescale, wallAt, noteTime, Registry, commitRange, windowStats,
                     UNIT_RANGE, SPANS, SLOTS, PENS, RULER_COLORS, RULERS_MAX, slots,
                     setSpanValue: v => { span = v; }, getSpan: () => span, maxPanBack: maxPanBack,
-                    setNow: t => { nowSim = t; }, getSelected: () => selected, save: save, saved: saved,
+                    setNow: t => { nowSim = t; }, getSelected: () => selected, selectPen: selectPen, save: save, saved: saved,
                     getRulers: () => rulers },
     };
   }

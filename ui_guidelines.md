@@ -171,9 +171,13 @@ if it landed there. Right-click `Trend ↗` is the always-available path.
 * **Pen table:** `# · colour · TAG · VALUE · MIN · MAX · AVG · RANGE · R1..Rn · UNIT · LOW · HIGH · x`,
   with a sticky header row. **RANGE** is a read-only display of the pen's current scale
   (`lo – hi`, with an `A` badge and grey italic when auto-scaled). Ruler columns appear only for
-  placed rulers. Click a row to select it.
-  Empty rows are drop targets. Booleans render as 0/1
-  stepped pens.
+  placed rulers. Empty rows are drop targets. Booleans render as 0/1 stepped pens.
+* **Pen highlight (choose a row → emphasise its trend):** clicking a filled row highlights that pen —
+  its line above thickens (3.2 px vs 1.4), keeps full colour, and is drawn on top, while every other
+  pen fades to 25 % alpha; the row is outlined and the Y axis relabels to that pen's range. Clicking
+  the active row again (or clicking an empty row) clears the highlight and returns all pens to full
+  strength. Adding a pen makes it the active/highlighted pen. State is `selected` (`-1` = none),
+  persisted as `sel` in `ots_trend_v1`.
 * **Control strip (`#tw-bar`, between plot and pen table):** `◀ ▶` scroll arrows · `LIVE`/`HISTORY`
   state · **CURRENT** plant + desktop clock · **RULER** plant + desktop time with `✕` to clear.
 * **Scrolling:** the arrows pan a quarter span per press (`PAN_FRACTION`) and re-backfill from the

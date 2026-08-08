@@ -215,6 +215,48 @@ test('auto range expands when a new value exceeds the current bracket', () => {
   assert.ok(I.slots[0].hi > hi1 && I.slots[0].hi > 500, 'range must grow to hold the new peak');
 });
 
+// ===== pen highlight (choose a row -> emphasise its trend above) =====
+
+test('choosing a filled row highlights that pen', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);
+  assert.equal(I.selectPen(0), 0, 'clicking row 0 highlights pen 0');
+  assert.equal(I.getSelected(), 0);
+});
+
+test('reclicking the highlighted pen clears the highlight', () => {
+  reset();
+  trend.addTag('TT-321001', 0);                 // adding a pen makes it the active one
+  assert.equal(I.getSelected(), 0);
+  assert.equal(I.selectPen(0), -1, 'clicking the active pen again clears it');
+  assert.equal(I.getSelected(), -1);
+});
+
+test('choosing an empty row clears the highlight (nothing to emphasise)', () => {
+  reset();
+  trend.addTag('TT-321001', 0);                 // add -> pen 0 becomes active
+  assert.equal(I.selectPen(5), -1, 'an empty row cannot be highlighted');
+  assert.equal(I.getSelected(), -1);
+});
+
+test('removing the highlighted pen clears the highlight', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  assert.equal(I.getSelected(), 0);
+  trend.removeSlot(0);
+  assert.equal(I.getSelected(), -1, 'the highlight must not point at an emptied slot');
+});
+
+test('removing a different pen leaves the highlight intact', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);                 // the newest add is the active pen
+  assert.equal(I.getSelected(), 1);
+  trend.removeSlot(0);
+  assert.equal(I.getSelected(), 1, 'removing another pen must not disturb the active one');
+});
+
 // ===== editable display range =====
 
 function field(value) { return { value: String(value) }; }

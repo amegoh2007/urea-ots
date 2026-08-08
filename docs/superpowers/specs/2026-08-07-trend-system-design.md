@@ -202,6 +202,13 @@ units, so the selected pen reads directly while the rest stay comparable in shap
 two tick rows: plant clock primary, desktop clock beneath (Chart.js second linear x-axis at
 `position: 'bottom'`, sharing the same data range).
 
+**Pen highlight.** Choosing a pen from the table emphasises its trend on the plot: `selectPen(i)`
+sets `selected` (`-1` = none), and `redraw` then thickens that dataset (`borderWidth 3.2` vs `1.4`),
+keeps it at full colour, and draws it last (`order -1`) so it sits on top, while every other pen is
+faded to 25 % alpha (`PENS[i] + '40'`). The Y axis already follows `selected`, so the highlighted pen
+also reads directly. Clicking a filled row toggles it (reclick clears back to all-full-strength);
+clicking an empty row, or removing the highlighted pen, clears the highlight. Adding a pen selects it.
+
 **Control strip (added after review).** A row between the plot and the pen table carrying `◀ ▶`
 scroll arrows, a `LIVE`/`HISTORY` state chip, the CURRENT plant + desktop clock, and the RULER
 plant + desktop time with a clear button. The two clocks moved here from the header, which was
