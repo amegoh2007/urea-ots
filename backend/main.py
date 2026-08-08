@@ -3114,9 +3114,9 @@ HPCC_FRAC_GAS_DES = {            # design split fraction of each feed component 
 }
 HPCC_T_PROD_DES_C  = 170.0       # two-phase outlet temp (gas & liquid TT-322010) at design (C)
 HPCC_P_DES_BARA    = 144.2       # synthesis-loop pressure at HPCC outlet (bar a)
-HPCC_STEAM_P_BARA  = 4.4         # shell-side LP steam pressure (bar a)
+HPCC_STEAM_P_BARA  = 5.01325     # shell-side LP steam pressure (5.01325 bar a == 4.0 barg)
 HPCC_STEAM_TSAT_PFD_C = 146.3    # rounded licensor/PFD indicator value retained as provenance
-HPCC_STEAM_TSAT_C  = tsat_steam(HPCC_STEAM_P_BARA)  # thermodynamic saturation state used in balances
+HPCC_STEAM_TSAT_C  = tsat_steam(HPCC_STEAM_P_BARA)  # thermodynamic saturation state used in balances (~152.06 C)
 HPCC_DH_CARB_KJMOL = 160.0       # carbamate exotherm 2NH3+CO2->NH2COONH4 (kJ/mol CO2 absorbed)
 HPCC_CP_GAS        = 2.0         # mean strip-gas cp for sensible duty (kJ/kg.K)
 HPCC_LATENT_4BAR   = 2120.0      # latent heat of 4.4 bar a steam (kJ/kg)
@@ -7840,6 +7840,12 @@ def step_sim(dt: float) -> dict:
                 "op":   round(s.steam.valve_admit9_pct - s.steam.valve_letdown_pct, 1),  # net split % (+205A admit / -205B let-down)
                 "mode": s.steam.pic205_mode,
             },
+            "PIC_329206": {                      # LP steam header master controller (4 barg == 5.013 bar a)
+                "pv":   round(s.steam.P_LP - 1.01325, 2),            # barg
+                "sp":   round(s.steam.master207_sp - 1.01325, 2),     # barg (4.0 barg)
+                "op":   round(s.steam.m_pic * 3.6, 2),             # net vent(+)/make-up(-) t/h
+                "mode": s.steam.pic207_mode,
+            },
             "PIC_329207": {                      # 4-bar header (leg-B alias; PV=LP header P)
                 "pv":   round(s.steam.P_LP, 2),                     # bar a
                 "sp":   round(s.steam.pic207_sp, 2),
@@ -8080,6 +8086,27 @@ AUX_PUMPS = ("323P001A", "323P001B", "322P002A", "322P002B",
              "328P001A", "328P001B", "328P003A", "328P003B")
 
 
+def reset_simulation():
+    """Return the plant to the fresh runtime seed and zero every accumulating counter.
+
+    This reproduces the exact state the boot sequence itself ends on. Every dynamic
+    quantity -- the plant clock (sim_t), all totalizers/holdups, and the MP/LP steam
+    headers -- lives inside the State object, so a fresh State() zeroes them in one
+    move. The PINNED design constants (HPCC_UA, A328_*, M_HPCC_DES_LIVE, REACT_MASS_DES,
+    ...) are module globals set once during boot calibration and are NOT part of State,
+    so they survive: none of the ~20 s warm-up reruns -- the dynamic transient is simply
+    discarded, exactly as the boot's own trailing `state = State()` does.
+    """
+    global state, last_packet, hist
+    state = State()                 # sim_t -> 0.0; totalizers, holdups, steam headers -> seed
+    last_packet = {}                # drop the stale packet so no pre-reset frame is pushed
+    hist = Historian()              # trends restart from t=0 (the sim clock just jumped back to 0)
+    health["heartbeat"] = 0         # liveness + fault counters cleared for a clean slate
+    health["last_step_wall"] = time.time()
+    _clear_health_error()
+    print("[reset_sim] simulation reset to fresh seed; counters zeroed", flush=True)
+
+
 def handle_cmd(cmd: dict):
     s = state
     t = cmd.get("type")
@@ -8171,6 +8198,13 @@ def handle_cmd(cmd: dict):
         m = str(cmd.get("mode", "")).upper()
         if m in SIM_SPEED:
             s.sim_mode = m
+
+    elif t == "reset_sim":
+        # {"type":"reset_sim"}  -- operator reset button beside the backend status LED. Discards the
+        #   dynamic transient and zeroes every counter (plant clock, totalizers, trends) without
+        #   rerunning boot calibration. See reset_simulation() for why the pinned design constants
+        #   survive. `s` above still aliases the OLD State; nothing below this branch reads it.
+        reset_simulation()
 
     elif t == "controller_set":
         cid  = cmd["id"]
