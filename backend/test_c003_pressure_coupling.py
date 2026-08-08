@@ -136,3 +136,32 @@ def test_opening_response_is_consistent_across_supported_steps():
     fine = _advance_opening(0.1)
     coarse = _advance_opening(main.STEP_CAP)
     assert coarse == pytest.approx(fine, abs=2.0e-4)
+
+
+def test_opening_lv322501_increases_top_vapor_and_opens_pv323202():
+    main.state = main.State()
+    state = main.state
+    state.LIC_322501["mode"] = "MAN"
+    state.LIC_322501["op"] = 55.0  # open from 46.1% design
+
+    for _ in range(60):
+        packet = main.step_sim(1.0)
+
+    assert packet["RECIRC_323"]["C003"]["v305_th"] > 24.58
+    assert state.r3232_d001_P >= 3.20
+    assert state.PIC_323202["op"] > 25.0
+
+
+def test_increasing_323e002_steam_increases_c003_pressure_and_pv323202():
+    main.state = main.State()
+    state = main.state
+    state.TIC_323007["mode"] = "MAN"
+    state.TIC_323007["op"] = 3.5  # higher steam chest demand
+
+    for _ in range(30):
+        packet = main.step_sim(1.0)
+
+    assert packet["RECIRC_323"]["C003"]["v305_th"] > 24.58
+    assert state.r323_c003_P > 4.10
+    assert state.PIC_323202["op"] > 25.0
+
