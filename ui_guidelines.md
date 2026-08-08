@@ -149,6 +149,10 @@ drag, below) opens/focuses the popup and hands the tag across via a `localStorag
 (`ots_trend_pending`) plus a `BroadcastChannel('ots_trend')`. Tag→path resolution in the popup uses
 the `ots_ov_binds` mirror overlays.js writes (the popup never runs overlays.js).
 
+The **`TRENDS`** button in `#sys-tools` (fixed top-right, beside `RESET`, so it shows on every
+screen) opens/focuses the popup with no tag attached (`TrendWindow.open()`) — the screen-independent
+way in when you have no indicator to right-click or drag.
+
 **Cross-window drag:** an HTML5 drag payload cannot cross window boundaries, so on `dragend` the
 launcher tests the pointer's screen coordinates against the popup's screen rect and enqueues the tag
 if it landed there. Right-click `Trend ↗` is the always-available path.

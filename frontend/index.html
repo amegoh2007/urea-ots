@@ -220,7 +220,7 @@
   #msp-off.active{background:#a63a0a;border-color:#ff8a3d;}
 
   /* ---------- Backend health LED + reset (top-right, always visible) ---------- */
-  #sys-tools{position:fixed;top:6px;right:96px;z-index:601;display:flex;align-items:center;gap:6px;}
+  #sys-tools{position:fixed;top:6px;right:116px;z-index:601;display:flex;align-items:center;gap:6px;}
   #sys-reset{display:flex;align-items:center;gap:5px;background:#3a1e0c;border:1px solid #c9772f;
            border-radius:4px;padding:3px 9px;font:bold 11px Arial;color:#ffd8ad;cursor:pointer;
            user-select:none;}
@@ -228,6 +228,12 @@
   #sys-reset:active{background:#7a3f18;}
   #sys-reset .ric{font-size:13px;line-height:1;}
   #sys-reset.flash{background:#0aa64d;border-color:#22ff22;color:#fff;}
+  #sys-trend{display:flex;align-items:center;gap:5px;background:#0c2b2e;border:1px solid #2f6f75;
+           border-radius:4px;padding:3px 9px;font:bold 11px Arial;color:#bfeef0;cursor:pointer;
+           user-select:none;}
+  #sys-trend:hover{background:#124045;border-color:#4aa587;color:#fff;}
+  #sys-trend:active{background:#0a3a3f;}
+  #sys-trend .tic{display:block;flex:0 0 auto;}
   #sys-led{display:flex;align-items:center;
            gap:6px;background:#0c2b2e;border:1px solid #2f6f75;border-radius:4px;
            padding:3px 9px;font:bold 11px Arial;color:#cfeff1;cursor:pointer;user-select:none;}
@@ -800,6 +806,12 @@
 
 <!-- Backend simulation status LED + reset button (always visible, top-right) -->
 <div id="sys-tools">
+  <button id="sys-trend" title="Open the trend window — multi-pen trends">
+    <svg class="tic" viewBox="0 0 16 12" width="15" height="11" aria-hidden="true">
+      <polyline points="1,10 5,6 8,8 15,1" fill="none" stroke="currentColor"
+                stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg><span>TRENDS</span>
+  </button>
   <button id="sys-reset" title="Reset simulation — restart from the fresh seed and zero all counters">
     <span class="ric">&#8635;</span><span id="sys-reset-txt">RESET</span>
   </button>

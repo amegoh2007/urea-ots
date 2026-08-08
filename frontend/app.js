@@ -117,6 +117,7 @@ setInterval(()=>Health._tick(), 1000);
 document.addEventListener('DOMContentLoaded', ()=>{
   const on=(id,fn)=>{ const el=document.getElementById(id); if(el) el.addEventListener('click',fn); };
   on('sys-led', ()=>document.getElementById('fault-overlay').classList.add('show'));
+  on('sys-trend', ()=>{ if(window.TrendWindow) window.TrendWindow.open(); });
   // Reset simulation: confirm (guards accidental clicks), fire the backend reset command,
   // and flash the button green as local acknowledgement (the fresh packet follows within a tick).
   on('sys-reset', ()=>{
