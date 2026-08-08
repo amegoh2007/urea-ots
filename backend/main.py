@@ -28,6 +28,9 @@ import math
 import sys
 if __name__ == "__main__":
     sys.modules["main"] = sys.modules["__main__"]
+import sys
+if __name__ == "__main__":
+    sys.modules["main"] = sys.modules["__main__"]
 import os
 import time
 import threading
@@ -4397,6 +4400,7 @@ class State:
         #   AUTO holds the design level (50 %) at the field-calibrated design opening (46.1 %);
         #   direct-acting.
         self.strip_level = STRIP_LEVEL_SP_DES
+        self.strip_bot_kgh_lag = None
         self.LIC_322501  = {"mode": "AUTO", "op": LV322501_OPEN_DES,
                             "sp": STRIP_LEVEL_SP_DES, "pv": STRIP_LEVEL_SP_DES, "e_prev": 0.0}
         # 322E003 HP scrubber off-gas valve: HIC-322604 -> HV-322604 (inert purge to 322C001).
@@ -5051,6 +5055,73 @@ _sm_flowsheet.add_unit(_valve_unit)
 _sm_flowsheet.add_unit(_vac_unit)
 # ------------------------------
 
+# ----- SM Flowsheet Setup -----
+from core.flowsheet import Flowsheet
+from core.stream import Stream
+from core.ejector import Ejector322F001
+from core.stripper import Stripper322E001
+from core.hpcc import Hpcc322E002
+from core.scrubber import Scrubber322E003
+from core.reactor import Reactor322R001
+from core.valve import Valve322604
+from core.vacuum import VacuumTrain324
+
+_sm_flowsheet = Flowsheet("Urea HP Loop")
+_ej_motive = Stream("Ejector_Motive_In")
+_ej_disch = Stream("Ejector_Disch_Out")
+_ej_unit = Ejector322F001("322F001_Ejector", _ej_motive, _ej_disch)
+
+_strip_co2_in = Stream("Stripper_CO2_In")
+_strip_overflow_in = Stream("Stripper_Overflow_In")
+_strip_steam_in = Stream("Stripper_Steam_In")
+_strip_top_gas_out = Stream("Stripper_Top_Gas_Out")
+_strip_bottom_liq_out = Stream("Stripper_Bottom_Liq_Out")
+_strip_unit = Stripper322E001("322E001_Stripper", _strip_co2_in, _strip_overflow_in, _strip_steam_in, _strip_top_gas_out, _strip_bottom_liq_out)
+
+_hpcc_gas_in = Stream("HPCC_Gas_In")
+_hpcc_liq_in = Stream("HPCC_Liq_In")
+_hpcc_gas_out = Stream("HPCC_Gas_Out")
+_hpcc_liq_out = Stream("HPCC_Liq_Out")
+_hpcc_unit = Hpcc322E002("322E002_HPCC", _hpcc_gas_in, _hpcc_liq_in, _hpcc_gas_out, _hpcc_liq_out)
+
+_scrub_offgas_in = Stream("Scrub_Offgas_In")
+_scrub_wash_in = Stream("Scrub_Wash_In")
+_scrub_ccw_in = Stream("Scrub_CCW_In")
+_scrub_vent_out = Stream("Scrub_Vent_Out")
+_scrub_carbamate_out = Stream("Scrub_Carbamate_Out")
+_scrub_ccw_out = Stream("Scrub_CCW_Out")
+_scrub_unit = Scrubber322E003("322E003_Scrubber", _scrub_offgas_in, _scrub_wash_in, _scrub_ccw_in, _scrub_vent_out, _scrub_carbamate_out, _scrub_ccw_out)
+
+_react_feed_in = Stream("React_Feed_In")
+_react_overflow_out = Stream("React_Overflow_Out")
+_react_offgas_out = Stream("React_Offgas_Out")
+_react_unit = Reactor322R001("322R001_Reactor", _react_feed_in, _react_overflow_out, _react_offgas_out)
+
+_valve_og_in = Stream("Valve_Offgas_In")
+_valve_purge_out = Stream("Valve_Purge_Out")
+_valve_unit = Valve322604("HV_322604", _valve_og_in, _valve_purge_out)
+
+_vac_evap_in = Stream("Vac_Evap_In")
+_vac_v1_in = Stream("Vac_V1_In")
+_vac_v2_in = Stream("Vac_V2_In")
+_vac_fa1_in = Stream("Vac_FA1_In")
+_vac_fa2_in = Stream("Vac_FA2_In")
+_vac_mot924_in = Stream("Vac_Mot924_In")
+_vac_mot927_in = Stream("Vac_Mot927_In")
+_vac_mot929_in = Stream("Vac_Mot929_In")
+_vac_cond_out = Stream("Vac_Cond_Out")
+_vac_vent_out = Stream("Vac_Vent_Out")
+_vac_unit = VacuumTrain324("324_VacuumTrain", _vac_evap_in, _vac_v1_in, _vac_v2_in, _vac_fa1_in, _vac_fa2_in, _vac_mot924_in, _vac_mot927_in, _vac_mot929_in, _vac_cond_out, _vac_vent_out)
+
+_sm_flowsheet.add_unit(_ej_unit)
+_sm_flowsheet.add_unit(_strip_unit)
+_sm_flowsheet.add_unit(_hpcc_unit)
+_sm_flowsheet.add_unit(_scrub_unit)
+_sm_flowsheet.add_unit(_react_unit)
+_sm_flowsheet.add_unit(_valve_unit)
+_sm_flowsheet.add_unit(_vac_unit)
+# ------------------------------
+
 def step_sim(dt: float) -> dict:
     s = state
     # Dynamic property evaluations for HP Loop
@@ -5314,10 +5385,17 @@ def step_sim(dt: float) -> dict:
     _fc         = 0.06     # empty-loop net-rate scale (Smith-calibrated to Section 6.4 band)
     _fe         = 8.0      # gate exponent (Smith-calibrated to Section 6.4 band)
     k_loop_fill = _fc + (1.0 - _fc) * _mf_prev ** _fe
+    
+    if s.strip_bot_kgh_lag is None:
+        s.strip_bot_kgh_lag = strip["bot_kgh"]
+    else:
+        tau_fall = 30.0  # seconds of transit delay
+        s.strip_bot_kgh_lag += (strip["bot_kgh"] - s.strip_bot_kgh_lag) * (dt / tau_fall)
+        
     # bottom-sump mass balance -> LT-322501 level (%)
     m_span_kg = STRIP_SUMP_AREA_M2 * STRIP_LEVEL_SPAN_M * STRIP_RHO_BOTTOM
     s.strip_level = clamp(s.strip_level
-                          + k_loop_fill * (strip["bot_kgh"] - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
+                          + k_loop_fill * (s.strip_bot_kgh_lag - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
                           0.0, 100.0)
     lic["pv"] = s.strip_level
     # L3-7 bottoms-sump ENERGY BALANCE -> TT-322004 (stream 322E001 falling-film exit -> LV-322501):
@@ -5809,10 +5887,13 @@ def step_sim(dt: float) -> dict:
     T_strip_bot = s.tlag.get("TT_322004", STRIP_T_BOTTOM_DES_C)
     T_flash_sat = TT_323001
     q_flash_avail_kw = (m_feed_323 / 3600.0 * cp_feed323 * (T_strip_bot - T_flash_sat))  # kW released by letdown flash
-    q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                           # total available latent kW
-    m_305     = min(R323_PHI_V305 * m_feed_323,
-                    max(R323_M305_DES * ((q305_avail_kw - q305_relax_kw) / R323_Q305_DES_KW),
-                        0.0))                                                     # top vapor -> 323E003 LPCC (305, kg/h)
+    m_flash_gas = max(R323_M305_DES * (q_flash_avail_kw / R323_Q305_DES_KW), 0.0)
+    m_pool_vap  = max(R323_M305_DES * ((Q_e002_kw - q305_relax_kw) / R323_Q305_DES_KW), 0.0)
+    m_305       = min(R323_PHI_V305 * m_feed_323, m_flash_gas + m_pool_vap)       # top vapor -> 323E003 LPCC (305, kg/h)
+    s._debug_m_feed_323 = m_feed_323
+    s._debug_m_305 = m_305
+    s._debug_m_flash = m_flash_gas
+    q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                  # total available latent kW
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
     m_314     = max(R323_M314_DES * (lv501_op / R323_LV501_OP_DES), 0.0)          # bottom drain -> flash (kg/h)
@@ -7197,6 +7278,13 @@ def step_sim(dt: float) -> dict:
             "max_relative_residual": _tear_norm,
             "settled": _tear_norm <= _tear_tol,
             "residuals": _tear_resid,
+        },
+        "sm_diagnostics": {
+            "hpcc": locals().get("hpcc", {}),
+            "ej": locals().get("ej", {}),
+            "react": locals().get("react", {}),
+            "hv604": locals().get("hv604", {}),
+            "vac324": locals().get("vac324", {}),
         },
         "sm_diagnostics": {
             "hpcc": locals().get("hpcc", {}),

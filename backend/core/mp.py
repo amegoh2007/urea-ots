@@ -73,14 +73,18 @@ class MPSection323(UnitOperation):
         T_strip_bot = s.tlag.get("TT_322004", STRIP_T_BOTTOM_DES_C)
         T_flash_sat = TT_323001
         q_flash_avail_kw = (m_feed_323 / 3600.0 * cp_feed323 * (T_strip_bot - T_flash_sat))  # kW released by letdown flash
-        q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                           # total available latent kW
-        m_305     = min(R323_PHI_V305 * m_feed_323,
-                        max(R323_M305_DES * ((q305_avail_kw - q305_relax_kw) / R323_Q305_DES_KW),
-                            0.0))                                                     # top vapor -> 323E003 LPCC (305, kg/h)
+        
+        # Flash gas bypasses the pool and directly becomes vapor
+        m_flash_gas = max(R323_M305_DES * (q_flash_avail_kw / R323_Q305_DES_KW), 0.0)
+        
+        # The pool consumes reboiler duty to reach bubble point
+        m_pool_vap  = max(R323_M305_DES * ((Q_e002_kw - q305_relax_kw) / R323_Q305_DES_KW), 0.0)
+        
+        m_305     = min(R323_PHI_V305 * m_feed_323, m_flash_gas + m_pool_vap)                 # top vapor -> 323E003 LPCC (305, kg/h)
         lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
         lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
         m_314     = max(R323_M314_DES * (lv501_op / R323_LV501_OP_DES), 0.0)          # bottom drain -> flash (kg/h)
-        P_c003    = (q305_avail_kw - m_305 / 3600.0 * R323_LAMBDA_305)               # net kW on holdup
+        P_c003    = (q_flash_avail_kw + Q_e002_kw - m_305 / 3600.0 * R323_LAMBDA_305) # net kW on holdup
 
         M_c003_pre = s.r323_c003_M
         s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp_c003, 1e-6)

@@ -34,10 +34,7 @@ def c003_pressure_target_bara(
     if downstream_pressure_bara <= 0.0:
         raise ValueError("downstream absolute pressure must be positive")
 
-    equivalent_gas_load_m3h = (
-        C003_Q301_DES_M3H * lv_flow_ratio
-        + C003_QOTHER_DES_M3H * overhead_flow_ratio
-    )
+    equivalent_gas_load_m3h = C003_Q305_DES_M3H * overhead_flow_ratio
     return math.sqrt(
         downstream_pressure_bara ** 2
         + (equivalent_gas_load_m3h / C003_GAS_LOAD_COEFF_M3H_PER_BAR) ** 2
