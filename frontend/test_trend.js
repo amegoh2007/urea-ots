@@ -703,3 +703,46 @@ test('there are ten distinct pen colours for ten slots', () => {
   assert.equal(I.PENS.length, 10);
   assert.equal(new Set(I.PENS).size, 10);
 });
+
+// ===== custom span parser =====
+
+test('parseSpan converts s/m/h suffixes to seconds', () => {
+  assert.equal(I.parseSpan('30s'), 30);
+  assert.equal(I.parseSpan('10m'), 600);
+  assert.equal(I.parseSpan('3h'), 10800);
+  assert.equal(I.parseSpan('1h'), 3600);
+  assert.equal(I.parseSpan('90s'), 90);
+});
+
+test('parseSpan defaults to seconds when no unit is given', () => {
+  assert.equal(I.parseSpan('300'), 300);
+});
+
+test('parseSpan accepts fractional values', () => {
+  assert.equal(I.parseSpan('1.5h'), 5400);
+  assert.equal(I.parseSpan('0.5m'), 30);
+});
+
+test('parseSpan is case-insensitive for the unit', () => {
+  assert.equal(I.parseSpan('2H'), 7200);
+  assert.equal(I.parseSpan('5M'), 300);
+  assert.equal(I.parseSpan('60S'), 60);
+});
+
+test('parseSpan rejects values below 5 seconds', () => {
+  assert.equal(I.parseSpan('4'), null);
+  assert.equal(I.parseSpan('4s'), null);
+  assert.equal(I.parseSpan('0m'), null);
+});
+
+test('parseSpan rejects values above 24 hours', () => {
+  assert.equal(I.parseSpan('25h'), null);
+  assert.equal(I.parseSpan('86401s'), null);
+});
+
+test('parseSpan rejects malformed strings', () => {
+  assert.equal(I.parseSpan(''), null);
+  assert.equal(I.parseSpan('abc'), null);
+  assert.equal(I.parseSpan('10x'), null);
+  assert.equal(I.parseSpan('1h30m'), null);
+});

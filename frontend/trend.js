@@ -522,9 +522,26 @@
     el.textContent = msg; el.style.opacity = '1';
     setTimeout(() => { el.style.opacity = '0'; }, 1400);
   }
+  // Parse a user-typed span string: "30s" → 30, "10m" → 600, "3h" → 10800.
+  // Returns null if unparseable or out of the 5 s – 24 h range.
+  function parseSpan(str) {
+    const m = (str || '').trim().match(/^(\d+(?:\.\d+)?)\s*([smh]?)$/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    const unit = (m[2] || 's').toLowerCase();
+    const s = unit === 'h' ? n * 3600 : unit === 'm' ? n * 60 : n;
+    return (isFinite(s) && s >= 5 && s <= 86400) ? Math.round(s) : null;
+  }
+  function applyCustomSpan(inp) {
+    const s = parseSpan(inp.value);
+    if (s == null) { flash(null, 'BAD SPAN (e.g. 30s 10m 3h)'); inp.classList.remove('on'); return; }
+    setSpan(s);
+  }
   function setSpan(s) {
     span = s;
     win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === s));
+    const ci = win.querySelector('#tw-spans .cust-inp');
+    if (ci) ci.classList.toggle('on', !SPANS.some(x => x.s === s) && parseSpan(ci.value) === s);
     Promise.all(slots.filter(Boolean).map(backfill)).then(() => { dirty = true; redraw(); });
     save();
   }
@@ -628,10 +645,15 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
   border-radius:3px;padding:1px 5px;}
 .rchip b{cursor:pointer;margin-left:3px;opacity:.8;}
 .rchip b:hover{opacity:1;}
-#tw-spans{margin-left:auto;display:flex;gap:2px;}
+#tw-spans{margin-left:auto;display:flex;gap:2px;align-items:center;}
 #tw-spans button{font:bold 11px Arial;background:#1b2a30;color:#9bbabb;border:1px solid #2a4a44;
   padding:3px 7px;cursor:pointer;border-radius:3px;}
 #tw-spans button.on{background:#0aa64d;border-color:#22ff22;color:#fff;}
+#tw-spans .cust-inp{width:56px;font:bold 11px Arial;background:#1b2a30;color:#9bbabb;
+  border:1px solid #2a4a44;padding:3px 5px;border-radius:3px;text-align:center;}
+#tw-spans .cust-inp:focus{outline:none;border-color:#7fd0d8;color:#d6f3e4;}
+#tw-spans .cust-inp.on{background:#0aa64d;border-color:#22ff22;color:#fff;}
+#tw-spans .cust-inp::placeholder{color:#3d5a56;font-weight:normal;font-style:italic;}
 #tw-save{font:bold 11px Arial;background:#1b2a30;color:#7fd0d8;border:1px solid #4aa587;
   padding:3px 9px;cursor:pointer;border-radius:3px;}
 #tw-save:hover{background:#22424a;}
@@ -721,6 +743,16 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       b.onclick = () => setSpan(x.s);
       sp.appendChild(b);
     });
+    const custInp = document.createElement('input');
+    custInp.type = 'text';
+    custInp.className = 'cust-inp';
+    custInp.placeholder = 'e.g. 30s';
+    custInp.title = 'Custom span — type a value like 30s, 10m, 3h, then press Enter';
+    custInp.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); applyCustomSpan(custInp); custInp.blur(); }
+    });
+    custInp.addEventListener('mousedown', ev => ev.stopPropagation());
+    sp.appendChild(custInp);
 
     const tb = win.querySelector('#tw-rows');
     for (let i = 0; i < SLOTS; i++) {
@@ -822,6 +854,8 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
     win.style.display = 'block';
     if (!chart) buildChart();
     win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === span));
+    const _ci = win.querySelector('#tw-spans .cust-inp');
+    if (_ci) _ci.classList.toggle('on', !SPANS.some(x => x.s === span) && parseSpan(_ci.value) === span);
     markHist();
     dirty = true; redraw();
   }
@@ -884,7 +918,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       document.body.classList.add('tw-popup');
       buildWindow(); buildChart();
       const st = saved();
-      if (typeof st.span === 'number' && SPANS.some(x => x.s === st.span)) span = st.span;
+      if (typeof st.span === 'number' && st.span > 0) span = st.span;
       if (Array.isArray(st.hl)) highlights = new Set(st.hl.filter(n => Number.isInteger(n) && n >= 0 && n < SLOTS));
       else if (typeof st.sel === 'number' && st.sel >= 0) highlights.add(clamp(st.sel, 0, SLOTS - 1)); // migrate old single-select
       if (typeof st.axis === 'number') axisPen = st.axis < 0 ? -1 : clamp(st.axis, 0, SLOTS - 1);
@@ -898,6 +932,13 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       if (axisPen >= 0 && !slots[axisPen]) axisPen = highlights.size ? [...highlights][highlights.size - 1] : -1;
       win.style.display = 'block';
       win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === span));
+      if (!SPANS.some(x => x.s === span)) {
+        const ci2 = win.querySelector('#tw-spans .cust-inp');
+        if (ci2) {
+          ci2.value = span % 3600 === 0 ? (span / 3600) + 'h' : span % 60 === 0 ? (span / 60) + 'm' : span + 's';
+          ci2.classList.add('on');
+        }
+      }
       drainPending();
       connectWS();
       markHist(); redraw();
@@ -996,7 +1037,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
                     setSpanValue: v => { span = v; }, getSpan: () => span, maxPanBack: maxPanBack,
                     setNow: t => { nowSim = t; }, getHighlights: () => [...highlights], getAxisPen: () => axisPen,
                     setHighlight: setHighlight, toggleHighlight: toggleHighlight, save: save, saved: saved,
-                    getRulers: () => rulers },
+                    getRulers: () => rulers, parseSpan: parseSpan },
     };
   }
 })();
