@@ -30,6 +30,7 @@ const I = trend._internals;
 
 function reset() {
   for (let i = 0; i < I.SLOTS; i++) I.slots[i] = null;
+  I.getHighlights().forEach(i => I.setHighlight(i, false));   // clear marks + axis between tests
 }
 
 // ===== clocks =====
@@ -215,46 +216,67 @@ test('auto range expands when a new value exceeds the current bracket', () => {
   assert.ok(I.slots[0].hi > hi1 && I.slots[0].hi > 500, 'range must grow to hold the new peak');
 });
 
-// ===== pen highlight (choose a row -> emphasise its trend above) =====
+// ===== pen highlight (tickbox column -> emphasise trends above, multi-select) =====
 
-test('choosing a filled row highlights that pen', () => {
+test('adding a pen does not auto-highlight it', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  assert.deepEqual(I.getHighlights(), [], 'a fresh pen starts unmarked; the operator ticks it');
+});
+
+test('ticking a row highlights that pen', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  assert.equal(I.toggleHighlight(0), true, 'ticking marks the pen');
+  assert.deepEqual(I.getHighlights(), [0]);
+});
+
+test('multiple pens can be highlighted at once', () => {
   reset();
   trend.addTag('TT-321001', 0);
   trend.addTag('PT-321201', 1);
-  assert.equal(I.selectPen(0), 0, 'clicking row 0 highlights pen 0');
-  assert.equal(I.getSelected(), 0);
+  trend.addTag('N/C Ratio', 2);
+  I.setHighlight(0, true);
+  I.setHighlight(2, true);
+  assert.deepEqual(I.getHighlights().sort((a, b) => a - b), [0, 2], 'both marks coexist; pen 1 stays unmarked');
 });
 
-test('reclicking the highlighted pen clears the highlight', () => {
-  reset();
-  trend.addTag('TT-321001', 0);                 // adding a pen makes it the active one
-  assert.equal(I.getSelected(), 0);
-  assert.equal(I.selectPen(0), -1, 'clicking the active pen again clears it');
-  assert.equal(I.getSelected(), -1);
-});
-
-test('choosing an empty row clears the highlight (nothing to emphasise)', () => {
-  reset();
-  trend.addTag('TT-321001', 0);                 // add -> pen 0 becomes active
-  assert.equal(I.selectPen(5), -1, 'an empty row cannot be highlighted');
-  assert.equal(I.getSelected(), -1);
-});
-
-test('removing the highlighted pen clears the highlight', () => {
+test('unticking removes just that pen from the highlight set', () => {
   reset();
   trend.addTag('TT-321001', 0);
-  assert.equal(I.getSelected(), 0);
-  trend.removeSlot(0);
-  assert.equal(I.getSelected(), -1, 'the highlight must not point at an emptied slot');
+  trend.addTag('PT-321201', 1);
+  I.setHighlight(0, true); I.setHighlight(1, true);
+  I.setHighlight(0, false);
+  assert.deepEqual(I.getHighlights(), [1]);
 });
 
-test('removing a different pen leaves the highlight intact', () => {
+test('ticking an empty row does nothing', () => {
   reset();
   trend.addTag('TT-321001', 0);
-  trend.addTag('PT-321201', 1);                 // the newest add is the active pen
-  assert.equal(I.getSelected(), 1);
-  trend.removeSlot(0);
-  assert.equal(I.getSelected(), 1, 'removing another pen must not disturb the active one');
+  I.toggleHighlight(5);                          // slot 5 is empty
+  assert.deepEqual(I.getHighlights(), []);
+});
+
+test('the most recently ticked pen drives the Y axis', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);
+  I.setHighlight(0, true);
+  assert.equal(I.getAxisPen(), 0);
+  I.setHighlight(1, true);
+  assert.equal(I.getAxisPen(), 1, 'the newest mark takes the axis');
+  I.setHighlight(1, false);
+  assert.equal(I.getAxisPen(), 0, 'axis falls back to the remaining marked pen');
+});
+
+test('removing a highlighted pen unmarks it and frees the axis', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);
+  I.setHighlight(0, true); I.setHighlight(1, true);
+  trend.removeSlot(1);
+  assert.deepEqual(I.getHighlights(), [0], 'removed pen drops out of the highlight set');
+  assert.equal(I.getAxisPen(), 0, 'axis moves to the surviving marked pen');
 });
 
 // ===== editable display range =====

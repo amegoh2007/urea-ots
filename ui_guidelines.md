@@ -170,18 +170,19 @@ if it landed there. Right-click `Trend ↗` is the always-available path.
   exceeds the current bracket (and contracts as old peaks scroll out). The declared engineering
   range (`rng:[lo,hi]` on the OV entry → unit-default table) only seeds lo/hi until the first
   samples arrive. **Digital on/off pens** (no unit) stay pinned to 0–1 so their stepped trace keeps
-  full-scale height. The Y axis relabels to the **selected** pen's units; labels outside 0–100 %
-  are suppressed.
-* **Pen table:** `# · colour · TAG · VALUE · MIN · MAX · AVG · RANGE · R1..Rn · UNIT · LOW · HIGH · x`,
-  with a sticky header row. **RANGE** is a read-only display of the pen's current scale
-  (`lo – hi`, with an `A` badge and grey italic when auto-scaled). Ruler columns appear only for
-  placed rulers. Empty rows are drop targets. Booleans render as 0/1 stepped pens.
-* **Pen highlight (choose a row → emphasise its trend):** clicking a filled row highlights that pen —
-  its line above thickens (3.2 px vs 1.4), keeps full colour, and is drawn on top, while every other
-  pen fades to 25 % alpha; the row is outlined and the Y axis relabels to that pen's range. Clicking
-  the active row again (or clicking an empty row) clears the highlight and returns all pens to full
-  strength. Adding a pen makes it the active/highlighted pen. State is `selected` (`-1` = none),
-  persisted as `sel` in `ots_trend_v1`.
+  full-scale height. The Y axis relabels to the **most recently highlighted** pen's units (`axisPen`);
+  labels outside 0–100 % are suppressed.
+* **Pen table:** `# · ✓ · colour · TAG · VALUE · MIN · MAX · AVG · RANGE · R1..Rn · UNIT · LOW · HIGH · x`,
+  with a sticky header row. **✓** is a highlight tickbox (see below). **RANGE** is a read-only display
+  of the pen's current scale (`lo – hi`, with an `A` badge and grey italic when auto-scaled). Ruler
+  columns appear only for placed rulers. Empty rows are drop targets. Booleans render as 0/1 stepped pens.
+* **Pen highlight (tickbox column → emphasise trends):** the **✓** column after `#` marks a pen for
+  highlight. **Multiple pens can be marked at once**: every marked line thickens (3.2 px vs 1.4), keeps
+  full colour, and is drawn on top, while the unmarked pens fade to 25 % alpha; marked rows are outlined.
+  Clicking anywhere on a filled row toggles its mark too (same as the tickbox). No marks = all pens at
+  full strength. The most recently marked pen drives the Y-axis engineering scale (`axisPen`). State is
+  `highlights` (a Set) + `axisPen`, persisted as `hl`/`axis` in `ots_trend_v1` (old single-pen `sel`
+  migrates in).
 * **Control strip (`#tw-bar`, between plot and pen table):** `◀ ▶` scroll arrows · `LIVE`/`HISTORY`
   state · **CURRENT** plant + desktop clock · **RULER** plant + desktop time with `✕` to clear.
 * **Scrolling:** the arrows pan a quarter span per press (`PAN_FRACTION`) and re-backfill from the
