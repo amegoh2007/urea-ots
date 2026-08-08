@@ -247,7 +247,7 @@ class SteamState:
     P_SUP: float = P_SUP_BARA       # BL 25-bar supply header (held boundary)
     P_MP:  float = P_HP_BARA        # 329D005 HP saturator 19.7 (name kept for main.py compat)
     P_9:   float = P_MP_BARA        # 329D009 MP drum 9.0
-    P_LP:  float = P_LP_BARA        # 322D001A/B LP drums 4.4
+    P_LP:  float = P_LP_BARA        # 322D001A/B LP drums, 4 barg / 5.01325 bara
     # --- valve openings (%) ---
     valve_supply_pct:  float = field(default_factory=_seed_supply_pct)   # PV-329204
     valve_admit9_pct:  float = PV205A_BIAS_PCT  # PV-329205A; 1,754 kg/h design make-up
@@ -277,7 +277,7 @@ class SteamState:
     pic207_sp:   float = P_LP_SP_BARA   # 4-bar header master SP (bar a) == leg-B SP
     # --- MASTER-SP trio (leg B reuses pic207_sp / pic207_mode / i_pic / valve pv207b_pct; leg C reuses valve_963_pct) ---
     master207_on: bool  = True                  # ON=one SP fans out A=+DB/B/C=-DB & locks; OFF=3 independent loops
-    master207_sp: float = P_LP_SP_BARA          # master SP (bar a); 4.4 -> B=4.4 / A=4.5 / C=4.3
+    master207_sp: float = P_LP_SP_BARA          # master SP (bar a); A/B/C apply split-range offsets
     pic207a_mode: str   = "AUTO"                # PIC-329207A vent      (SP = master + DB_LP)
     pic207a_sp:   float = P_LP_SP_BARA + DB_LP
     pic207c_mode: str   = "AUTO"                # PIC-329207C BL admit  (SP = master - DB_LP)

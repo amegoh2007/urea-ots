@@ -17,9 +17,9 @@
 - Test: `backend/test_hpcc_steam_export_response.py`
 
 1. Import `main`, reset to a fresh `State`, and settle the design point.
-2. Record `HPCC_322E002.steam_kg_h` and `STEAM.FT_329407_th`.
+2. Record `HPCC_322E002.steam.kgh` and `STEAM_SYSTEM.FT_329407_th`.
 3. Raise raw CO2 load by 20%, settle the load transient, and assert both values exceed their design baselines.
-4. Lower the active LP master setpoint by 0.5 bara, settle, and assert FT-329407 rises beyond the load-only result.
+4. Fork the settled load state into matched trajectories, lower the active LP master setpoint by 0.5 bara in one, and assert the lower-pressure trajectory raises more steam while FT-329407 remains above design.
 5. Run `python -m pytest backend/test_hpcc_steam_export_response.py -q`; confirm the load assertions fail before production edits.
 
 ## Task 2: Preserve HPCC NTU away from design
@@ -28,7 +28,7 @@
 - Modify: `backend/main.py` in `hpcc_322e002`
 - Test: `backend/test_hpcc_steam_export_response.py`
 
-1. Calculate `ua_effective = HPCC_UA * m_dot / _HPCC_DES["m_dot"]` after guarding both flows from zero.
+1. Calculate the flow-scaled conductance after guarding both flows from zero, then blend it from pinned `HPCC_UA` through the existing disturbance gate.
 2. Use `ua_effective` in the existing exponential gas-temperature calculation.
 3. Explain in the nearby comment why constant design `UA` caused NTU and absorbed CO2 to collapse at higher load.
 4. Run the focused test and confirm all load and master-setpoint assertions pass.

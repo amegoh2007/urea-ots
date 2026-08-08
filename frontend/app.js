@@ -438,7 +438,7 @@ function render322(s){
   setPI('EJ_Pdisch',  e.PI_disch - 1.01325,   'BAR G', false);   // barg = bara - 1 atm
   setPI('EJ_total',   e.total_th,   'T/H',   false);
   setPI('EJ_MW',      e.MW,         'KG/KMOL', false);
-  setPI('TI_322002',  178.8,        'C',     false);   // design suction temp (322E003 boundary)
+  setPI('TI_322002',  e.TI_322002,  'C',     false);
   setPI('PI_329201',  e.PI_disch - 1.01325,   'BAR G', false);   // HP loop pressure (barg = bara - 1 atm)
   setPI('HIC_322602', e.HIC_322602, '%',     false);
   const hv=document.getElementById('hv-op'); if(hv) hv.textContent = fmt(e.HIC_322602)+' %';

@@ -3662,8 +3662,14 @@ def hpcc_322e002(gas_feed: dict, liq_feed: dict, t_shell: float = HPCC_STEAM_TSA
     if HPCC_UA is None:                       # module-load back-calc pass: hold the design pin
         T_prod = HPCC_T_PROD_DES_C
     else:
+        # Preserve the conductance pinned at design, then blend toward constant NTU through the same
+        # disturbance gate used below.  A fixed off-design UA made NTU fall as process-gas flow rose;
+        # the hotter product then flashed enough CO2 that calculated absorption, reaction heat, and
+        # LP-steam generation all fell with plant load.
+        m_dot_des = max(_HPCC_DES["m_dot"], 1e-9)
+        ua_effective = HPCC_UA * (1.0 + gate * (m_dot / m_dot_des - 1.0))
         T_prod_live = t_shell + (T_adb - t_shell) \
-                      * math.exp(-HPCC_UA / max(m_dot * HPCC_CP_GAS, 1e-9))
+                      * math.exp(-ua_effective / max(m_dot * HPCC_CP_GAS, 1e-9))
         # Option-1 gate the off-design EXCESS above the design pin: gate==0 (no operator/feed
         #   disturbance) -> T_prod==HPCC_T_PROD_DES_C bit-exact (kills the loop-tear self-excitation);
         #   gate->1 (genuine disturbance) -> full live NTU quench (TT-322010 V-trough preserved).

@@ -43,10 +43,11 @@ The backend ejector model already couples HV-322602 to TT-322002. Opening the va
 Scale effective HPCC conductance by current process-gas mass flow relative to the pinned design flow:
 
 ```text
-UA_effective = UA_design * mass_flow / mass_flow_design
+UA_load = UA_design * mass_flow / mass_flow_design
+UA_effective = UA_design + disturbance_gate * (UA_load - UA_design)
 ```
 
-This keeps the calibrated design NTU constant during load changes. It adds no empirical coefficient, leaves the design point unchanged, and retains the existing shell-pressure, saturation-temperature, equilibrium, and energy-balance structure. Bind the legacy TT-322002 indicator to the backend `TI_322002` field.
+This keeps the calibrated design NTU constant during genuine load changes while the existing disturbance gate preserves the undisturbed design pin. It adds no empirical coefficient and retains the existing shell-pressure, saturation-temperature, equilibrium, and energy-balance structure. Bind the legacy TT-322002 indicator to the backend `TI_322002` field.
 
 ### B. Add a load feed-forward multiplier to steam generation — rejected
 
@@ -63,7 +64,7 @@ A clamp would hide the fixed-NTU defect by overriding phase-equilibrium and mass
 In the 322E002 gas-temperature calculation:
 
 1. Read the pinned design process-gas mass flow.
-2. Calculate flow-scaled effective `UA`.
+2. Calculate flow-scaled `UA` and blend it through the existing disturbance gate.
 3. Use effective `UA` in the existing exponential heat-transfer relation.
 4. Keep the existing product sensible-heat correction, shell heat balance, LP-steam drum dynamics, master-pressure controller, export valve, and FT-329407 calculation.
 
@@ -79,7 +80,7 @@ Update LP-header regression tests that still hardcode the former 4.4-bara absolu
 
 ## Verification
 
-- Add a full-model regression proving a plant-load increase raises 322E002 steam generation and FT-329407, then proving a lower LP master setpoint raises export further.
+- Add a full-model regression proving a plant-load increase raises 322E002 steam generation and FT-329407. Compare matched load trajectories to prove a lower LP master setpoint raises generation while export remains above design; PV-329207B may reach its physical opening limit as the turbine pressure drop falls.
 - Add a UI source regression proving the TT-322002 indicator uses live telemetry and contains no fixed design value.
 - Run 322E002 equation audits, LP-turbine export tests, ejector directional tests, syntax checks, and diff checks.
 - Compare the normal FT-329407 point with the 16,707 kg/h PFD value within the model's existing calibration tolerance.

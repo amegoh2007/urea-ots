@@ -7,6 +7,7 @@ import pytest
 
 
 OVERLAYS = Path(__file__).resolve().parents[1] / "frontend" / "overlays.js"
+APP = Path(__file__).resolve().parents[1] / "frontend" / "app.js"
 
 VALVE_DISPLAYS = (
     ("screen-323-1", "HIC-323605", "RECIRC_323.F010.HV_323605"),
@@ -43,3 +44,10 @@ def test_hand_valve_display_uses_percent_unit(page, tag, _expected_bind):
     record = _overlay_records()[(page, tag)]
 
     assert re.search(r"u:\s*'%'", record)
+
+
+def test_ejector_overflow_temperature_uses_live_telemetry():
+    source = APP.read_text(encoding="utf-8")
+
+    assert re.search(r"setPI\('TI_322002',\s*e\.TI_322002,", source)
+    assert not re.search(r"setPI\('TI_322002',\s*178\.8,", source)
