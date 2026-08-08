@@ -866,7 +866,7 @@ R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
 # LV-322501 (`drain_kgh`) from the remaining live overhead/reboiler load (`m_305`), consumes the
 # beginning-of-substep 323E003/323D001 pressure, and closes exactly at the PFD design point.
 # The retained 90 s lag is a simulator dynamic calibration, not a datasheet-derived gas inventory.
-R323_C003_P_TAU_S = 90.0
+R323_C003_P_TAU_S = 5.0
 
 # --- Stage 2: Flash Tank 323F004 (adiabatic flash 4.1 -> 1.13 bar a, -> 106 C)
 R323_F004_P_BARA    = 1.13                      # bar a, flash pressure
@@ -5385,17 +5385,12 @@ def step_sim(dt: float) -> dict:
     _fc         = 0.06     # empty-loop net-rate scale (Smith-calibrated to Section 6.4 band)
     _fe         = 8.0      # gate exponent (Smith-calibrated to Section 6.4 band)
     k_loop_fill = _fc + (1.0 - _fc) * _mf_prev ** _fe
-    
-    if s.strip_bot_kgh_lag is None:
-        s.strip_bot_kgh_lag = strip["bot_kgh"]
-    else:
-        tau_fall = 30.0  # seconds of transit delay
-        s.strip_bot_kgh_lag += (strip["bot_kgh"] - s.strip_bot_kgh_lag) * (dt / tau_fall)
+    delayed_bot_kgh = _delay(s.tlag, "322E001_BOT_KGH_LAG", strip["bot_kgh"], 60.0, dt)
         
     # bottom-sump mass balance -> LT-322501 level (%)
     m_span_kg = STRIP_SUMP_AREA_M2 * STRIP_LEVEL_SPAN_M * STRIP_RHO_BOTTOM
     s.strip_level = clamp(s.strip_level
-                          + k_loop_fill * (s.strip_bot_kgh_lag - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
+                          + k_loop_fill * (delayed_bot_kgh - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
                           0.0, 100.0)
     lic["pv"] = s.strip_level
     # L3-7 bottoms-sump ENERGY BALANCE -> TT-322004 (stream 322E001 falling-film exit -> LV-322501):
