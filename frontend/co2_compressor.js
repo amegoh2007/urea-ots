@@ -30,7 +30,11 @@
     if (document.getElementById('co2-comp-css')) return;
     var s = document.createElement('style'); s.id = 'co2-comp-css';
     s.textContent =
-      '.co2-comp{position:absolute;left:16px;top:610px;width:196px;z-index:6;' +
+      // The widget lives in its own full-screen .ov-layer sibling; that layer must NOT
+      // capture clicks or it blocks every indicator/faceplate under it. Make the layer
+      // click-through and re-enable pointer events only on the widget box.
+      '.co2-comp-layer{pointer-events:none;}' +
+      '.co2-comp{pointer-events:auto;position:absolute;left:16px;top:610px;width:196px;z-index:6;' +
         'background:var(--ratio,#2e8a8f);border:1px solid #99dadd;border-radius:3px;' +
         'padding:6px 8px 7px;box-shadow:0 2px 9px rgba(0,0,0,.45);user-select:none;}' +
       '.co2-comp .cc-hd{font:bold 10.5px Arial,Helvetica,sans-serif;letter-spacing:.7px;' +
