@@ -49,6 +49,7 @@ from steam_system import SteamState, step_steam  # MP/LP steam-header dynamics (
 from c003_pressure_coupling import c003_pressure_target_bara
 from historian import Historian  # background trend recorder (plant-time sampled)
 
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -8565,7 +8566,13 @@ def handle_cmd(cmd: dict):
 
 
 # ----- FastAPI app -----
-app = FastAPI()
+@asynccontextmanager
+async def _lifespan(app):
+    asyncio.create_task(sim_task())
+    asyncio.create_task(push_task())
+    yield
+
+app = FastAPI(lifespan=_lifespan)
 
 
 # ----- Controller REST API -----
@@ -8841,12 +8848,6 @@ async def push_task():
         await asyncio.sleep(0.1)
 
 
-@app.on_event("startup")
-async def on_start():
-    asyncio.create_task(sim_task())
-    asyncio.create_task(push_task())
-
-
 # Serve frontend from sibling folder (path anchored to this file, not CWD)
 _FRONTEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "frontend")
 
@@ -8886,8 +8887,8 @@ def _pin_hpcc_ua():
     global HPCC_NC_DES_LIVE
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
     _cap = {}
+    print("[boot-pin] settling design fixed point — phase 1/3 (18 000 ticks) …", flush=True)
     for _ in range(18000):
-        
         res = step_sim(0.1)
     _cap["r"] = res["sm_diagnostics"]["hpcc"]
     _cap["ejm"] = res["sm_diagnostics"]["ej"]["suction_kgh"] / res["sm_diagnostics"]["ej"]["mu"] if res["sm_diagnostics"]["ej"].get("mu", 0) else EJ_MOTIVE_NH3_DES
@@ -8921,6 +8922,7 @@ def _pin_hpcc_ua():
     #   REACT_OVERFLOW_DES / REACT_OFFGAS_DES exactly); only the feed mass is genuinely upstream-coupled
     #   (ejector phi_m^2 / HPCC), so capture it from the first MAN-seed reactor step.  Then every delta
     #   is identically 0 at the seed -> f_cons == 1.0 bit-exact (restores the design pin).
+    print("[boot-pin] phase 1 done — phase 2/3 (reactor-mass capture) …", flush=True)
     _capf = {}
     res = step_sim(0.1)
     rr = res["sm_diagnostics"]["react"]
@@ -8966,6 +8968,7 @@ def _pin_hpcc_ua():
     #     MP:  supply(50% seed) == m_strip  (self-pinned in steam_system via K_902; nothing to size here)
     #     LP:  M_USERS_LP == m_hpcc_des     (4-bar users load-follow HPCC steam-raising -> m_pic == 0)
     import steam_system as _ss
+    print("[boot-pin] phase 2 done — phase 3/3 (steam sizing, 3 000 ticks) …", flush=True)
     _cap2 = {}
     for _ in range(3000):
         res = step_sim(0.1)
@@ -9010,6 +9013,7 @@ def _pin_hpcc_ua():
 
     state = State()                                  # discard the capture step (fresh design seed)
     last_packet = {}
+    print("[boot-pin] all phases complete — design constants pinned.", flush=True)
 
 
 # ---- boot-pin result cache -----------------------------------------------------------------------
@@ -9106,8 +9110,10 @@ if HPCC_UA is None:
     except (OSError, ValueError):
         _cached = None
     if _cached is not None:
+        print("[boot-pin] cache hit — design constants restored instantly.", flush=True)
         _apply_pin(_cached)              # cache hit: skip the 21k-tick settle
     else:
+        print("[boot-pin] cache miss — running full settle (~20 s). This only happens after a model change.", flush=True)
         _pin_hpcc_ua()                   # cache miss/stale: full settle, then persist for next launch
         try:
             with open(_PIN_CACHE_PATH, "w", encoding="utf-8") as _f:
@@ -9118,4 +9124,4 @@ if HPCC_UA is None:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
