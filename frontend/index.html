@@ -219,8 +219,16 @@
   #msp-on.active{background:#0aa64d;border-color:#22ff22;}
   #msp-off.active{background:#a63a0a;border-color:#ff8a3d;}
 
-  /* ---------- Backend health LED (top-right, always visible) ---------- */
-  #sys-led{position:fixed;top:6px;right:96px;z-index:601;display:flex;align-items:center;
+  /* ---------- Backend health LED + reset (top-right, always visible) ---------- */
+  #sys-tools{position:fixed;top:6px;right:96px;z-index:601;display:flex;align-items:center;gap:6px;}
+  #sys-reset{display:flex;align-items:center;gap:5px;background:#3a1e0c;border:1px solid #c9772f;
+           border-radius:4px;padding:3px 9px;font:bold 11px Arial;color:#ffd8ad;cursor:pointer;
+           user-select:none;}
+  #sys-reset:hover{background:#5a2f12;border-color:#ffa24d;color:#fff;}
+  #sys-reset:active{background:#7a3f18;}
+  #sys-reset .ric{font-size:13px;line-height:1;}
+  #sys-reset.flash{background:#0aa64d;border-color:#22ff22;color:#fff;}
+  #sys-led{display:flex;align-items:center;
            gap:6px;background:#0c2b2e;border:1px solid #2f6f75;border-radius:4px;
            padding:3px 9px;font:bold 11px Arial;color:#cfeff1;cursor:pointer;user-select:none;}
   #sys-led .dot{width:11px;height:11px;border-radius:50%;background:#22c55e;
@@ -790,9 +798,15 @@
   </div>
 </div>
 
-<!-- Backend health LED: always-visible status pill; click opens the fault overlay -->
-<div id="sys-led" title="Backend status — click for details">
-  <span class="dot"></span><span id="sys-led-txt">BACKEND OK</span>
+<!-- Backend simulation status LED + reset button (always visible, top-right) -->
+<div id="sys-tools">
+  <button id="sys-reset" title="Reset simulation — restart from the fresh seed and zero all counters">
+    <span class="ric">&#8635;</span><span id="sys-reset-txt">RESET</span>
+  </button>
+  <!-- status pill; click opens the fault overlay -->
+  <div id="sys-led" title="Backend status — click for details">
+    <span class="dot"></span><span id="sys-led-txt">BACKEND OK</span>
+  </div>
 </div>
 
 <!-- Full-screen fault overlay: shown when the backend crashes, hangs, or the link drops -->

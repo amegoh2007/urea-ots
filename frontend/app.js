@@ -117,6 +117,15 @@ setInterval(()=>Health._tick(), 1000);
 document.addEventListener('DOMContentLoaded', ()=>{
   const on=(id,fn)=>{ const el=document.getElementById(id); if(el) el.addEventListener('click',fn); };
   on('sys-led', ()=>document.getElementById('fault-overlay').classList.add('show'));
+  // Reset simulation: confirm (guards accidental clicks), fire the backend reset command,
+  // and flash the button green as local acknowledgement (the fresh packet follows within a tick).
+  on('sys-reset', ()=>{
+    if(!confirm('Reset the simulation?\n\nThe plant clock and all counters/totalizers return to zero and the run restarts from the fresh seed.')) return;
+    send({type:'reset_sim'});
+    const b=document.getElementById('sys-reset'), t=document.getElementById('sys-reset-txt');
+    if(b&&t){ b.classList.add('flash'); t.textContent='RESET ✓';
+      setTimeout(()=>{ b.classList.remove('flash'); t.textContent='RESET'; }, 1200); }
+  });
   on('fault-dismiss', ()=>Health.dismiss());
   on('fault-reload', ()=>location.reload());
   on('fault-tb-toggle', ()=>{
