@@ -12,6 +12,7 @@ function connect(){
     const s = JSON.parse(e.data);
     lastState = s;
     Health.onPacket(s);           // read _health + refresh watchdog BEFORE rendering
+    ResetBtn.onPacket(s);         // confirm a pending reset actually took (t_sim dropped to ~0)
     render(s);
     render322(s);
     if(window.refreshF50) window.refreshF50(s);
@@ -114,19 +115,49 @@ const Health = (function(){
   };
 })();
 setInterval(()=>Health._tick(), 1000);
+
+// ---------- Reset button (verifies the backend actually reset) ----------
+// The button does NOT claim success on click: it sends reset_sim, then watches the plant
+// clock. Only once a packet arrives with t_sim collapsed back toward 0 does it show "RESET ✓".
+// If no such packet lands within the timeout, it shows "NO RESPONSE" -- the honest signal that
+// the running backend ignored the command (e.g. a server started before the reset handler
+// existed and never restarted). This is exactly the case that made a stale server look reset.
+const ResetBtn = (function(){
+  let pending = null;   // { prevTsim, deadline }
+  const btn = ()=>document.getElementById('sys-reset');
+  const txt = ()=>document.getElementById('sys-reset-txt');
+  function set(cls, label){ const b=btn(), t=txt(); if(!b||!t) return;
+    b.classList.remove('flash','nak'); if(cls) b.classList.add(cls); t.textContent=label; }
+  function idleSoon(ms){ setTimeout(()=>{ if(!pending) set('', 'RESET'); }, ms); }
+  return {
+    fire(){
+      if(!confirm('Reset the simulation?\n\nThe plant clock and all counters/totalizers return to zero and the run restarts from the fresh seed.')) return;
+      const prev = (lastState && typeof lastState.t_sim==='number') ? lastState.t_sim : Infinity;
+      pending = { prevTsim: prev, deadline: Date.now()+4000 };
+      send({type:'reset_sim'});
+      set('', 'RESETTING…');
+    },
+    onPacket(s){
+      if(!pending || !s || typeof s.t_sim!=='number') return;
+      // reset took if the clock fell far below where it was (or is essentially zero)
+      if(s.t_sim < 5 || s.t_sim < pending.prevTsim*0.5){
+        pending = null; set('flash', 'RESET ✓'); idleSoon(1400);
+      }
+    },
+    _tick(){
+      if(pending && Date.now() > pending.deadline){
+        pending = null; set('nak', 'NO RESPONSE'); idleSoon(3000);
+      }
+    }
+  };
+})();
+setInterval(()=>ResetBtn._tick(), 500);
+
 document.addEventListener('DOMContentLoaded', ()=>{
   const on=(id,fn)=>{ const el=document.getElementById(id); if(el) el.addEventListener('click',fn); };
   on('sys-led', ()=>document.getElementById('fault-overlay').classList.add('show'));
   on('sys-trend', ()=>{ if(window.TrendWindow) window.TrendWindow.open(); });
-  // Reset simulation: confirm (guards accidental clicks), fire the backend reset command,
-  // and flash the button green as local acknowledgement (the fresh packet follows within a tick).
-  on('sys-reset', ()=>{
-    if(!confirm('Reset the simulation?\n\nThe plant clock and all counters/totalizers return to zero and the run restarts from the fresh seed.')) return;
-    send({type:'reset_sim'});
-    const b=document.getElementById('sys-reset'), t=document.getElementById('sys-reset-txt');
-    if(b&&t){ b.classList.add('flash'); t.textContent='RESET ✓';
-      setTimeout(()=>{ b.classList.remove('flash'); t.textContent='RESET'; }, 1200); }
-  });
+  on('sys-reset', ()=>ResetBtn.fire());
   on('fault-dismiss', ()=>Health.dismiss());
   on('fault-reload', ()=>location.reload());
   on('fault-tb-toggle', ()=>{

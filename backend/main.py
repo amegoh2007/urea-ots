@@ -866,7 +866,7 @@ R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
 # LV-322501 (`drain_kgh`) from the remaining live overhead/reboiler load (`m_305`), consumes the
 # beginning-of-substep 323E003/323D001 pressure, and closes exactly at the PFD design point.
 # The retained 90 s lag is a simulator dynamic calibration, not a datasheet-derived gas inventory.
-R323_C003_P_TAU_S = 5.0
+R323_C003_P_TAU_S = 1.0
 
 # --- Stage 2: Flash Tank 323F004 (adiabatic flash 4.1 -> 1.13 bar a, -> 106 C)
 R323_F004_P_BARA    = 1.13                      # bar a, flash pressure
@@ -1360,7 +1360,7 @@ R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
 R3232_TW_SUP_T = 55.0 ; R3232_TW_RET_T = 65.0               # TIC-323013 SP (1102) ; TT-323015 (1103)
 R3232_TV13_DES_PCT = 50.0 ; R3232_TW_TAU_S = 25.0           # TV-323013A design stroke ; supply-T lag (s)
 R3232_E003_T744 = R3232_E003_T - 30.0                       # 44 °C wash to Comp II
-R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.03
+R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.30
 R3232_E003_PV_OP_DES = 25.0                                 # PV-323202 vent stroke
 R3232_D001_M_FULL = 11.10 * 1218.0                          # 13519.8 kg (V·ρ)
 R3232_D001_LVL_SP = 50.0
