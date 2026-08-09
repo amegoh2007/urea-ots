@@ -3376,6 +3376,9 @@ SCRUB_COND_VENT_GAIN       = 0.30 # -, condensation duty multiplier per unit ven
 SCRUB_LEVEL_SWELL_GAIN     = 15.0 # %, apparent level swell per unit vent-opening deviation (vigorous boiling)
 SCRUB_OFFGAS_P_BARA  = 140.7     # bar a, off-gas line pressure (synthesis)
 SCRUB_OFFGAS_RHO     = 111.0     # kg/m³, off-gas density (114 C, 140.7 bar a)
+SCRUB_WASH_SINK_KW         = 2500.0  # kW, sensible cooling capacity per unit of full design wash
+SCRUB_OFFGAS_WASH_COOLING  = 15.0    # C, offgas vent cooling per unit surplus wash (direct contact)
+SYN_P_WASH_COLLAPSE_GAIN   = 8000.0  # bar/h, synthesis pressure collapse rate per unit surplus wash
 SCRUB_OVERFLOW_T_C   = 178.8     # C, TT-322002 overflow temp -> 322F001 (= EJ_T_SUCTION_C)
 SCRUB_OVERFLOW_P_BARA = 140.7    # bar a, PT-329201 overflow-line pressure
 SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exotherm (diagnostic)
@@ -3841,7 +3844,8 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
                   m_ccw_kgh: float, vent_ratio: float = 1.0, nc_act: float = None,
                   hic604_pct: float = None,
                   liq_carry_kmolh: dict = None, t_carry_c: float = None,
-                  choke_level_pct: float = None, spindle_phi: float = 1.0) -> dict:
+                  choke_level_pct: float = None, spindle_phi: float = 1.0,
+                  wash_scale: float = 1.0) -> dict:
     """322E003 HP scrubber — reduced calibrated split-fraction, pinned to the shared design HMB.
     Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
     wash (323P001 A/B design vector × s).  Both discharges PINNED (proven IDENTICAL):
@@ -3855,7 +3859,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     With ṁ_ccw constant the sensible-heat balance then lifts TT-329125 proportionally:
         TT-329125 = t_ccw_in + Q_scrubber/(ṁ_ccw·cp).  vent_ratio defaults to 1.0 (design-exact)."""
     s = co2_scale
-    carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}      # 323P001 A/B wash
+    carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * wash_scale for k in MW_COMP}      # 323P001 A/B live wash
     feed     = {k: offgas_feed.get(k, 0.0) + carb[k] for k in MW_COMP}         # combined tube feed
     offgas   = {k: SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}    # pinned -> img1
     overflow = {k: SCRUB_OVERFLOW_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}  # pinned -> EJ suction
@@ -3904,6 +3908,10 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     theta_dev  = (hic604_pct if hic604_pct is not None else SCRUB_HIC604_DES_PCT) / SCRUB_HIC604_DES_PCT - 1.0
     chi_vent = 1.0 + SCRUB_COND_VENT_GAIN * theta_dev
     q_ccw_kw *= max(chi_vent, 0.1)
+    
+    # Observation 4: Cold recycle wash acts as a massive thermal sink, quenching the pool and stealing heat from the CW
+    q_wash_sensible = SCRUB_WASH_SINK_KW * (wash_scale - s)
+    q_ccw_kw = max(q_ccw_kw - q_wash_sensible, 0.0)
     # --- Phase-B-coupled CONDENSATION CHOKE derate (TDY-329125 / TT-322002 response to sump flood) -----
     # A flooding sump (LT-329501 above NLL, prior-step tear) floods the shell-side condensation surface,
     # so the carbamate-condensation duty Q_scrubber is constricted by χ_choke ∈ [SCRUB_COND_CHOKE_MIN, 1]:
@@ -3951,7 +3959,8 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     # Physically bounded: cannot fall below the CCW inlet, cannot exceed the condensation ceiling T_proc.
     nc = nc_act if nc_act is not None else SCRUB_OFFGAS_NC_DES                # AT-322701 (loop N/C); design fallback
     t_offgas   = min(max(SCRUB_OFFGAS_T_C + SCRUB_OFFGAS_T_GAIN * (nc - SCRUB_OFFGAS_NC_DES)
-                         + SCRUB_OFFGAS_T_VENT_GAIN * theta_dev,
+                         + SCRUB_OFFGAS_T_VENT_GAIN * theta_dev
+                         - SCRUB_OFFGAS_WASH_COOLING * (wash_scale - s),      # Observation 2: direct contact cooling
                          t_ccw_in), SCRUB_T_PROC_C)                           # TT-322011 (N/C + vent-coupled, clamped)
     return {"feed_kmolh": feed, "carb_kmolh": carb,
             "offgas_kmolh": offgas, "overflow_kmolh": overflow,
@@ -5744,7 +5753,8 @@ def step_sim(dt: float) -> dict:
                           vent_ratio=nu, nc_act=react_nc_ratio(react["overflow_kmolh"]),
                           hic604_pct=s.HIC_322604,
                           liq_carry_kmolh=react_carry_kmolh, t_carry_c=s.react_T_overflow,
-                          choke_level_pct=s.scrub_level_pct, spindle_phi=_phi_sp_theta)
+                          choke_level_pct=s.scrub_level_pct, spindle_phi=_phi_sp_theta,
+                          wash_scale=wash_scale)
     # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
     #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
     #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation
@@ -6633,6 +6643,7 @@ def step_sim(dt: float) -> dict:
     rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
     sic_op   = _ctrl_ipd(s.SIC_323901, rpm_pv, dt, lic502_op)            # cascade slave (speed)
     m_308    = R3232_E003_M308_DES * (sic_op / R3232_P001_RPM_DES)        # condensate -> boundary
+    s.tlag["M308"] = m_308                                                # save for next tick's wash_scale
     #   Tempered-water circuit (PFD 1102 supply / 1103 return).  TV-323013A admits cold make-up, TV-323013B
     #   bypasses hot return -> split-range opposites off one op.  House normalized-stroke valve char: at
     #   op == op_des the ratio is 1 -> T_ss == R3232_TW_SUP_T == sp -> PV stationary -> du == 0 (design exact).
@@ -7300,7 +7311,9 @@ def step_sim(dt: float) -> dict:
     m_in_loop = (F_pump_total_th * 1000.0) + F_CO2_feed_kgh + m_308
     m_out_loop = drain_kgh + hv604["mass_kgh"]
     
-    s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0),
+    # Observation 5: Cold, water-rich wash aggressively condenses vapor, collapsing the vapor space and dropping pressure
+    vapor_collapse_rate = SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - s.co2_scale, 0.0)
+    s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0) - vapor_collapse_rate * (dt / 3600.0),
                          10.0, 180.0)
                          
     return {
