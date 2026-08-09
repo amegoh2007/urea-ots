@@ -1,0 +1,218 @@
+{
+  "STRIP_T_TAU_S": {
+    "sim_val": 180.0,
+    "theta_emp": 2312.9567406682404,
+    "tau_emp": 2465.4229762724526,
+    "theta_credible": null,
+    "tau_credible": null,
+    "n_pairs": 2,
+    "mean_r": 0.6132326288983485,
+    "note": "\u03c4_bw reflects disturbance spectrum, not display lag. Sim \u03c4 retained.",
+    "entries": [
+      {
+        "mv": "HIC-322605",
+        "pv": "TT-322013",
+        "r": 0.788693485386777,
+        "tau_bw": 3360.0,
+        "theta_bw": 0.0
+      },
+      {
+        "mv": "LV-322501",
+        "pv": "TT-322004",
+        "r": -0.43777177240992005,
+        "tau_bw": 2688.0,
+        "theta_bw": 6480.0
+      }
+    ]
+  },
+  "REACT_THERM_TAU_MIN*60": {
+    "sim_val": 480.0,
+    "theta_emp": 7200.0,
+    "tau_emp": 2730.0,
+    "theta_credible": null,
+    "tau_credible": 2730.0,
+    "n_pairs": 1,
+    "mean_r": 0.7618139666640176,
+    "note": "",
+    "entries": [
+      {
+        "mv": "HIC-322605",
+        "pv": "TT-322014",
+        "r": -0.7618139666640176,
+        "tau_bw": 5040.0,
+        "theta_bw": 7200.0
+      }
+    ]
+  },
+  "OFFGAS_T_TAU_S": {
+    "sim_val": 120.0,
+    "theta_emp": 8550.0,
+    "tau_emp": 2038.5,
+    "theta_credible": null,
+    "tau_credible": null,
+    "n_pairs": 1,
+    "mean_r": 0.4692032493768138,
+    "note": "\u03c4_bw reflects disturbance spectrum, not display lag. Sim \u03c4 retained.",
+    "entries": [
+      {
+        "mv": "HIC-322604",
+        "pv": "TT-322011",
+        "r": 0.4692032493768138,
+        "tau_bw": 2036.9999999999998,
+        "theta_bw": 0.0
+      }
+    ]
+  },
+  "HPCC_T_TAU_S": {
+    "sim_val": 240.0,
+    "theta_emp": 7020.0,
+    "tau_emp": 4200.0,
+    "theta_credible": null,
+    "tau_credible": null,
+    "n_pairs": 1,
+    "mean_r": 0.6786450089995968,
+    "note": "\u03c4_bw reflects disturbance spectrum, not display lag. Sim \u03c4 retained.",
+    "entries": [
+      {
+        "mv": "HIC-322605",
+        "pv": "TT-322010",
+        "r": -0.6786450089995968,
+        "tau_bw": 5040.0,
+        "theta_bw": 7020.0
+      }
+    ]
+  },
+  "FEED_TD_S": {
+    "sim_val": 345.0,
+    "theta_emp": 450.0,
+    "tau_emp": 4837.5,
+    "theta_credible": 450.0,
+    "tau_credible": null,
+    "n_pairs": 1,
+    "mean_r": 0.6186124253123277,
+    "note": "Transport delay: \u03b8_emp = 450 s vs sim 345 s.",
+    "entries": [
+      {
+        "mv": "SIC-321951",
+        "pv": "TT-322014",
+        "r": 0.6186124253123277,
+        "tau_bw": 3255.0,
+        "theta_bw": 450.0
+      }
+    ]
+  },
+  "C_LP capacitance": {
+    "sim_val": 25.0,
+    "theta_emp": 0.0,
+    "tau_emp": 1654.5,
+    "theta_credible": 0.0,
+    "tau_credible": 1654.5,
+    "n_pairs": 1,
+    "mean_r": 0.9384601285980538,
+    "note": "",
+    "entries": [
+      {
+        "mv": "HV-322602",
+        "pv": "PT-329206",
+        "r": 0.9384601285980538,
+        "tau_bw": 2499.0,
+        "theta_bw": 0.0
+      }
+    ]
+  },
+  "EJ_T_TAU_S": {
+    "sim_val": 120.0,
+    "theta_emp": 0.0,
+    "tau_emp": 3195.0,
+    "theta_credible": 0.0,
+    "tau_credible": null,
+    "n_pairs": 1,
+    "mean_r": 0.758016983593338,
+    "note": "\u03c4_bw reflects disturbance spectrum, not display lag. Sim \u03c4 retained.",
+    "entries": [
+      {
+        "mv": "PIC-329204",
+        "pv": "TT-322012",
+        "r": 0.758016983593338,
+        "tau_bw": 5040.0,
+        "theta_bw": 0.0
+      }
+    ]
+  },
+  "FEED_TD_S+thermal": {
+    "sim_val": 345.0,
+    "theta_emp": 5040.0,
+    "tau_emp": 4470.0,
+    "theta_credible": null,
+    "tau_credible": null,
+    "n_pairs": 1,
+    "mean_r": 0.8355853741772162,
+    "note": "Insufficient \u03b8 signal at this SNR.",
+    "entries": [
+      {
+        "mv": "FYM-322403",
+        "pv": "TT-322005",
+        "r": -0.8355853741772162,
+        "tau_bw": 5040.0,
+        "theta_bw": 5040.0
+      }
+    ]
+  },
+  "REACT_TAU_REC_MIN*60": {
+    "sim_val": 300.0,
+    "theta_emp": 5130.0,
+    "tau_emp": 4545.0,
+    "theta_credible": null,
+    "tau_credible": null,
+    "n_pairs": 1,
+    "mean_r": 0.8145996851776061,
+    "note": "Process-scale \u03c4 \u2014 not a display lag. Retained as-is.",
+    "entries": [
+      {
+        "mv": "UREA-LOAD",
+        "pv": "TT-322005",
+        "r": -0.8145996851776061,
+        "tau_bw": 5040.0,
+        "theta_bw": 5130.0
+      }
+    ]
+  },
+  "AT_322701_TAU_S": {
+    "sim_val": 40.0,
+    "theta_emp": 0.0,
+    "tau_emp": 3120.0,
+    "theta_credible": 0.0,
+    "tau_credible": null,
+    "n_pairs": 1,
+    "mean_r": 0.5141008590789953,
+    "note": "\u03c4_bw reflects disturbance spectrum, not display lag. Sim \u03c4 retained.",
+    "entries": [
+      {
+        "mv": "UREA-LOAD",
+        "pv": "AY-322701",
+        "r": 0.5141008590789953,
+        "tau_bw": 5040.0,
+        "theta_bw": 0.0
+      }
+    ]
+  },
+  "CCW_T_TAU_S": {
+    "sim_val": 25.0,
+    "theta_emp": 6390.0,
+    "tau_emp": 1575.0,
+    "theta_credible": null,
+    "tau_credible": null,
+    "n_pairs": 1,
+    "mean_r": 0.5777901978140789,
+    "note": "\u03c4_bw reflects disturbance spectrum, not display lag. Sim \u03c4 retained.",
+    "entries": [
+      {
+        "mv": "TIC-329005",
+        "pv": "TDY-329125",
+        "r": 0.5777901978140789,
+        "tau_bw": 2310.0,
+        "theta_bw": 6390.0
+      }
+    ]
+  }
+}
