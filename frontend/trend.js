@@ -661,37 +661,37 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
 #tw-flash{position:absolute;top:8px;left:50%;transform:translateX(-50%);opacity:0;
   transition:opacity .25s;background:#3a0d0d;border:1px solid #ff3030;color:#ff8a8a;
   font:bold 11px Consolas,monospace;padding:3px 10px;border-radius:3px;pointer-events:none;z-index:2;}
-#tw-table{height:250px;overflow:auto;}
-#tw-table table{width:100%;border-collapse:collapse;font:11px Consolas,monospace;font-variant-numeric:tabular-nums;}
-#tw-table td{padding:2px 6px;border-bottom:1px solid #16292c;white-space:nowrap;}
+#tw-table{height:290px;overflow:auto;}
+#tw-table table{width:100%;border-collapse:collapse;font:13px Consolas,monospace;font-variant-numeric:tabular-nums;}
+#tw-table td{padding:3px 7px;border-bottom:1px solid #16292c;white-space:nowrap;}
 #tw-table tr{cursor:pointer;}
 #tw-table tr.empty td{color:#54706c;font-style:italic;}
 #tw-table tr.sel{background:#16323a;outline:1px solid #7fd0d8;}
 #tw-table tr.drop{background:#1d4d52;}
 #tw-table th{position:sticky;top:0;background:#0f1a24;color:#82b3a3;text-align:left;
-  font:bold 10px "Segoe UI",system-ui;letter-spacing:.5px;padding:3px 6px;border-bottom:1px solid #2a4a44;}
-#tw-table td.c-n{width:22px;color:#82b3a3;}
-#tw-table td.c-hl{width:20px;text-align:center;}
+  font:bold 11px "Segoe UI",system-ui;letter-spacing:.5px;padding:4px 7px;border-bottom:1px solid #2a4a44;}
+#tw-table td.c-n{width:26px;color:#82b3a3;}
+#tw-table td.c-hl{width:24px;text-align:center;}
 #tw-table td.c-hl input{cursor:pointer;margin:0;vertical-align:middle;accent-color:#4aa587;}
-#tw-table th.h-hl{width:20px;text-align:center;color:#4aa587;}
-#tw-table td.c-k{width:16px;}
-#tw-table td.c-k i{display:block;width:11px;height:9px;}
-#tw-table td.c-v{text-align:right;width:78px;color:#fff;font-weight:bold;}
-#tw-table td.c-min{text-align:right;width:70px;color:#7fd0d8;}
-#tw-table td.c-max{text-align:right;width:70px;color:#ff9a3c;}
-#tw-table td.c-avg{text-align:right;width:70px;color:#cfe;}
+#tw-table th.h-hl{width:24px;text-align:center;color:#4aa587;}
+#tw-table td.c-k{width:19px;}
+#tw-table td.c-k i{display:block;width:13px;height:10px;}
+#tw-table td.c-v{text-align:right;width:92px;color:#fff;font-weight:bold;}
+#tw-table td.c-min{text-align:right;width:84px;color:#7fd0d8;}
+#tw-table td.c-max{text-align:right;width:84px;color:#ff9a3c;}
+#tw-table td.c-avg{text-align:right;width:84px;color:#cfe;}
 #tw-table th.h-min{color:#7fd0d8;} #tw-table th.h-max{color:#ff9a3c;} #tw-table th.h-avg{color:#cfe;}
-#tw-table td.c-rng{text-align:right;width:120px;color:#d6f3e4;} #tw-table th.h-rng{color:#82b3a3;}
+#tw-table td.c-rng{text-align:right;width:144px;color:#d6f3e4;} #tw-table th.h-rng{color:#82b3a3;}
 #tw-table td.c-rng.auto{color:#8fb3ab;font-style:italic;}
-#tw-table td.c-r{text-align:right;width:74px;font-weight:bold;}
-#tw-table td.c-u{width:60px;color:#82b3a3;}
-#tw-table td.c-lo,#tw-table td.c-hi{width:78px;}
-#tw-table td.c-lo input,#tw-table td.c-hi input{width:70px;background:#0b1a16;color:#d6f3e4;
-  border:1px solid #2a4a44;font:11px Consolas,monospace;font-variant-numeric:tabular-nums;padding:1px 3px;text-align:right;}
+#tw-table td.c-r{text-align:right;width:88px;font-weight:bold;}
+#tw-table td.c-u{width:72px;color:#82b3a3;}
+#tw-table td.c-lo,#tw-table td.c-hi{width:92px;}
+#tw-table td.c-lo input,#tw-table td.c-hi input{width:83px;background:#0b1a16;color:#d6f3e4;
+  border:1px solid #2a4a44;font:13px Consolas,monospace;font-variant-numeric:tabular-nums;padding:1px 4px;text-align:right;}
 #tw-table td.c-lo input:focus,#tw-table td.c-hi input:focus{outline:none;border-color:#7fd0d8;background:#0f2a24;}
 #tw-table td.c-lo input.auto,#tw-table td.c-hi input.auto{color:#54706c;font-style:italic;}
 #tw-table td.c-lo input:disabled,#tw-table td.c-hi input:disabled{background:transparent;border-color:#16292c;}
-#tw-table td.c-x{width:18px;text-align:center;color:#e06f6f;font-weight:bold;}
+#tw-table td.c-x{width:22px;text-align:center;color:#e06f6f;font-weight:bold;}
 #tw-table td.c-x:hover{color:#ff3030;}
 .ov[draggable="true"]{cursor:grab;}
 #tw-menu{position:absolute;z-index:420;background:#222;border:1px solid #ccc;color:#fff;font:12px Arial;min-width:150px;display:none;}
