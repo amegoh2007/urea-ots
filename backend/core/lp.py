@@ -2,6 +2,10 @@ import math
 from typing import Dict, Any, List, Optional
 from core.unit import UnitOperation
 from core.stream import Stream
+from c003_pressure_coupling import (
+    C003_TO_E003_LINK_TAU_S,
+    lpcc_pressure_target_bara,
+)
 
 class LPSection328(UnitOperation):
     """
@@ -447,7 +451,19 @@ class LPSection328(UnitOperation):
                      + m_776    *(R328_D001_T  - Te003)
                      + R3232_M797_DES*(R3232_M797_T - Te003))/3600.0*R3232_CP)
         P_e003   = sens_e003 + m_cond/3600.0*R3232_E003_LAMC - Q_e003
-        s.r3232_d001_P = max(s.r3232_d001_P + R3232_D001_P_KP*(gen321 - m_321)/3600.0*dt, 0.1)
+        r_lv_c003 = (
+            getattr(s, "_debug_m_feed_323", main_module.STRIP_BOT_DES_KGH)
+            / main_module.STRIP_BOT_DES_KGH
+        )
+        p_d001_link_tgt = lpcc_pressure_target_bara(r_lv_c003)
+        dp_d001_link = (
+            (p_d001_link_tgt - s.r3232_d001_P) / C003_TO_E003_LINK_TAU_S
+        )
+        dp_d001_vent = R3232_D001_P_KP * (gen321 - m_321) / 3600.0
+        s.r3232_d001_P = max(
+            s.r3232_d001_P + (dp_d001_link + dp_d001_vent) * dt,
+            0.1,
+        )
         s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
         s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_308)/3600.0*dt, 1.0)
     

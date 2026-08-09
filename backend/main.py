@@ -3371,7 +3371,9 @@ SCRUB_CARB_P_BARA    = 140.7     # bar a, carbamate feed line
 SCRUB_OFFGAS_T_C     = 114.0     # C, TT-322011 off-gas vent-top temp -> HV-322604 (DESIGN PIN)
 SCRUB_OFFGAS_T_GAIN  = 120.0     # C / (N/C unit), TT-322011 rise w/ excess-NH3 loop slip: k*(AT-322701 - N/C_des)
 SCRUB_OFFGAS_T_VENT_GAIN  = 20.0 # C / (theta/theta_des - 1), TT-322011 rise w/ HV-322604 opening (more uncondensed vent overhead)
-SCRUB_OVERFLOW_T_VENT_GAIN = 12.0 # C / (theta/theta_des - 1), TT-322002 fall w/ HV-322604 opening (vent relief cools bottom overflow)
+SCRUB_OVERFLOW_T_VENT_GAIN = 12.0 # C / (theta/theta_des - 1), TT-322002 rise w/ HV-322604 opening (inert purge drives condensation exotherm)
+SCRUB_COND_VENT_GAIN       = 0.30 # -, condensation duty multiplier per unit vent-opening deviation
+SCRUB_LEVEL_SWELL_GAIN     = 15.0 # %, apparent level swell per unit vent-opening deviation (vigorous boiling)
 SCRUB_OFFGAS_P_BARA  = 140.7     # bar a, off-gas line pressure (synthesis)
 SCRUB_OFFGAS_RHO     = 111.0     # kg/m³, off-gas density (114 C, 140.7 bar a)
 SCRUB_OVERFLOW_T_C   = 178.8     # C, TT-322002 overflow temp -> 322F001 (= EJ_T_SUCTION_C)
@@ -3898,6 +3900,10 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     # + TDY-329125 (15.0) bit-exact; phi_sp-keyed so it is independent of the steady sump level (below NLL @θ_des).
     chi_sp    = 1.0 + SCRUB_COND_SPINDLE_GAIN * (1.0 - 1.0 / max(spindle_phi, 1e-6))
     q_ccw_kw *= max(chi_sp, SCRUB_COND_CHOKE_MIN)
+    # Inert purge coupling (Observation 6): venting inerts raises partial pressure of NH3/CO2 -> drives aggressive exothermic condensation
+    theta_dev  = (hic604_pct if hic604_pct is not None else SCRUB_HIC604_DES_PCT) / SCRUB_HIC604_DES_PCT - 1.0
+    chi_vent = 1.0 + SCRUB_COND_VENT_GAIN * theta_dev
+    q_ccw_kw *= max(chi_vent, 0.1)
     # --- Phase-B-coupled CONDENSATION CHOKE derate (TDY-329125 / TT-322002 response to sump flood) -----
     # A flooding sump (LT-329501 above NLL, prior-step tear) floods the shell-side condensation surface,
     # so the carbamate-condensation duty Q_scrubber is constricted by χ_choke ∈ [SCRUB_COND_CHOKE_MIN, 1]:
@@ -3921,14 +3927,13 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     C_ccw_kwk  = max(m_ccw_kgh * SCRUB_CCW_CP / 3600.0, 1e-6)                  # floored heat-capacity rate
     eps_ht     = 1.0 - math.exp(-SCRUB_UA_KWK / C_ccw_kwk)                     # single-stream effectiveness
     ua_eff_kwk = max(eps_ht * C_ccw_kwk, 1e-6)
-    # HV-322604 vent-opening deviation theta_dev = θ/θ_des − 1 ∈ [−1,+1] over 0..100 %; ≡ 0 at θ_des (50 %).
+    # HV-322604 vent-opening deviation theta_dev (computed above) = θ/θ_des − 1 ∈ [−1,+1] over 0..100 %; ≡ 0 at θ_des (50 %).
     # Two-sided LIVE coupling, zero at design -> off-gas/overflow HMB + every TT pin stay bit-exact at θ_des.
-    theta_dev  = (hic604_pct if hic604_pct is not None else SCRUB_HIC604_DES_PCT) / SCRUB_HIC604_DES_PCT - 1.0
     t_overflow_cond = min(t_ccw_in + q_ccw_kw / ua_eff_kwk, SCRUB_T_PROC_C)   # condensation-driven overflow T
     t_ccw_out  = t_ccw_in + (t_overflow_cond - t_ccw_in) * eps_ht            # TT-329125 (CCW pin anchored to cond. T)
-    # TT-322002: condensation T minus the vent-opening deviation — opening HV-322604 relieves the scrubber and
-    # cools the bottom carbamate overflow; closing pressurises and heats it (toward the T_proc ceiling).
-    t_overflow = min(max(t_overflow_cond - SCRUB_OVERFLOW_T_VENT_GAIN * theta_dev, t_ccw_in),
+    # TT-322002: condensation T plus the vent-opening deviation — opening HV-322604 drives exothermic condensation
+    # which spills vigorously over the weir, heating the bottom carbamate overflow.
+    t_overflow = min(max(t_overflow_cond + SCRUB_OVERFLOW_T_VENT_GAIN * theta_dev, t_ccw_in),
                      SCRUB_T_PROC_C)                                          # TT-322002 (vent-coupled, clamped)
     # Phase A: entrained hot reactor melt (t_carry_c ~ react_T_overflow) lifts the bottom-overflow
     # temperature by an enthalpy mass-blend over the post-carryover overflow mass.  w_carry == 0 below
@@ -5794,7 +5799,9 @@ def step_sim(dt: float) -> dict:
         ej["suction_kgh"] = max(m_cond_in, 0.0)
     s.scrub_holdup_kg = clamp(s.scrub_holdup_kg + (m_cond_in - ej["suction_kgh"]) * (dt / 3600.0),
                               0.0, SCRUB_HOLDUP_MAX_KG)
-    s.scrub_level_pct = clamp(s.scrub_holdup_kg / SCRUB_HOLDUP_NLL_KG * SCRUB_LEVEL_NLL_PCT,
+    _theta_dev_hic = s.HIC_322604 / SCRUB_HIC604_DES_PCT - 1.0
+    _base_lvl = s.scrub_holdup_kg / SCRUB_HOLDUP_NLL_KG * SCRUB_LEVEL_NLL_PCT
+    s.scrub_level_pct = clamp(_base_lvl + SCRUB_LEVEL_SWELL_GAIN * max(_theta_dev_hic, 0.0),
                               0.0, 100.0)
     _valve_og_in.comp = scrub["offgas_kmolh"]
     _valve_og_in.set_state(T=scrub["T_offgas"], P=scrub["P_offgas"])
