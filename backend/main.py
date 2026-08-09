@@ -46,7 +46,11 @@ thermo = EmpiricalThermo()
 from controllers import Controller
 import steam_system
 from steam_system import SteamState, step_steam  # MP/LP steam-header dynamics (quarantined)
-from c003_pressure_coupling import c003_pressure_target_bara
+from c003_pressure_coupling import (
+    C003_TO_E003_LINK_TAU_S,
+    c003_pressure_target_bara,
+    lpcc_pressure_target_bara,
+)
 from historian import Historian  # background trend recorder (plant-time sampled)
 
 from contextlib import asynccontextmanager
@@ -6642,7 +6646,18 @@ def step_sim(dt: float) -> dict:
                  + m_776    *(R328_D001_T  - Te003)
                  + R3232_M797_DES*(R3232_M797_T - Te003))/3600.0*R3232_CP)
     P_e003   = sens_e003 + m_cond/3600.0*R3232_E003_LAMC - Q_e003
-    s.r3232_d001_P = max(s.r3232_d001_P + R3232_D001_P_KP*(gen321 - m_321)/3600.0*dt, 0.1)
+    # No let-down valve separates 323C003 from 323E003/D001.  Apply the
+    # field-derived LV residual to their shared downstream pressure node;
+    # PT-323201 then adds only the live hydraulic pressure drop upstream.
+    p_d001_link_tgt = lpcc_pressure_target_bara(r_lv_c003)
+    dp_d001_link = (
+        (p_d001_link_tgt - s.r3232_d001_P) / C003_TO_E003_LINK_TAU_S
+    )
+    dp_d001_vent = R3232_D001_P_KP * (gen321 - m_321) / 3600.0
+    s.r3232_d001_P = max(
+        s.r3232_d001_P + (dp_d001_link + dp_d001_vent) * dt,
+        0.1,
+    )
     s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
     if s.r3232_d001_M <= 1.0 and m_308 > (in_e003 - m_321):
         m_308 = max(in_e003 - m_321, 0.0)
