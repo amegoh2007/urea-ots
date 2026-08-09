@@ -422,7 +422,7 @@
       if (!slot) {
         q('.c-t').textContent = '-- drop indicator here --';
         q('.c-v').textContent = ''; q('.c-min').textContent = ''; q('.c-max').textContent = '';
-        q('.c-avg').textContent = ''; q('.c-rng').textContent = ''; q('.c-u').textContent = '';
+        q('.c-avg').textContent = ''; q('.c-u').textContent = '';
         rc.forEach(c => { c.textContent = ''; c.style.display = 'none'; });
         loI.value = ''; hiI.value = ''; loI.disabled = hiI.disabled = true;
         q('.c-x').textContent = '';
@@ -437,10 +437,6 @@
       q('.c-min').textContent = st ? st.min.toFixed(dec) : '--';
       q('.c-max').textContent = st ? st.max.toFixed(dec) : '--';
       q('.c-avg').textContent = st ? st.avg.toFixed(dec) : '--';
-      const rngCell = q('.c-rng');
-      rngCell.textContent = slot.lo.toFixed(dec) + ' – ' + slot.hi.toFixed(dec) + (slot.auto ? ' A' : '');
-      rngCell.title = slot.auto ? 'Auto-scaled to the displayed data' : 'Operator-set range';
-      rngCell.classList.toggle('auto', slot.auto);
       for (let r = 0; r < RULERS_MAX; r++) {
         const cell = rc[r], on = r < rulers.length;
         cell.style.display = on ? '' : 'none';
@@ -681,8 +677,6 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
 #tw-table td.c-max{text-align:right;width:84px;color:#ff9a3c;}
 #tw-table td.c-avg{text-align:right;width:84px;color:#cfe;}
 #tw-table th.h-min{color:#7fd0d8;} #tw-table th.h-max{color:#ff9a3c;} #tw-table th.h-avg{color:#cfe;}
-#tw-table td.c-rng{text-align:right;width:144px;color:#d6f3e4;} #tw-table th.h-rng{color:#82b3a3;}
-#tw-table td.c-rng.auto{color:#8fb3ab;font-style:italic;}
 #tw-table td.c-r{text-align:right;width:88px;font-weight:bold;}
 #tw-table td.c-u{width:72px;color:#82b3a3;}
 #tw-table td.c-lo,#tw-table td.c-hi{width:92px;}
@@ -731,7 +725,6 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       '<div id="tw-table"><table>' +
         '<thead><tr id="tw-head-row"><th></th><th class="h-hl" title="Tick to highlight this trend">&#10003;</th><th></th><th>TAG</th><th>VALUE</th>' +
         '<th class="h-min">MIN</th><th class="h-max">MAX</th><th class="h-avg">AVG</th>' +
-        '<th class="h-rng">RANGE</th>' +
         rth + '<th>UNIT</th><th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
         '<tbody id="tw-rows"></tbody></table></div>';
     document.body.appendChild(win);
@@ -760,7 +753,6 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       tr.innerHTML = '<td class="c-n"></td><td class="c-hl"><input type="checkbox" title="Highlight this trend"></td>' +
         '<td class="c-k"><i></i></td><td class="c-t"></td>' +
         '<td class="c-v"></td><td class="c-min"></td><td class="c-max"></td><td class="c-avg"></td>' +
-        '<td class="c-rng"></td>' +
         rtd + '<td class="c-u"></td>' +
         '<td class="c-lo"><input type="number" step="any" disabled title="Display LOW — blank to auto-scale"></td>' +
         '<td class="c-hi"><input type="number" step="any" disabled title="Display HIGH — blank to auto-scale"></td>' +
