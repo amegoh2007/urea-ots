@@ -107,6 +107,22 @@ TT-322012     = (m_motive*cpN*T_motive + m_suc*cpC*T_overflow,prior) / (m_disch*
 
 The ejector entrains the prior-tick overflow at its live temperature `T_overflow,prior` (a tear that breaks the algebraic loop); at design it equals `EJ_T_SUCTION_C` (178.8 °C) so TT-322012 is bit-exact. Direction is datasheet-anchored (`References/322E003 HP Scrubber Describtion.md`); the coupling gains are calibrated magnitudes (see `handoff.md`).
 
+## 323P001 LP Recycle Pump Speed Control (SIC-323901)
+
+The LP weak-carbamate recycle pump 323P001 A/B is variable-speed; SIC-323901 is the speed loop, cascaded under the 323D001 drum-level master LIC-323502. It is modelled as a **direct VFD speed follower**, not a PID: the drive makes the actual speed track the demanded speed through a short first-order lag, and the recycle flow `m_308` is proportional to the actual speed.
+
+```text
+speed_demand = LIC-323502.op         (CAS  : drum-level cascade)
+             = SIC-323901.sp         (AUTO : operator speed setpoint)
+             = SIC-323901.op         (MAN  : operator manual output)
+speed_actual = lag_1(speed_demand, tau = 3 s)          # VFD dynamics, RPM
+m_308        = M308_design * speed_actual / RPM_design  # flow rises with speed
+```
+
+Increasing the speed (setpoint in AUTO, output in MAN, or master demand in CAS) always increases `m_308`. At design the cascade demand equals `RPM_design`, so `speed_actual = RPM_design` and `m_308 = M308_design` (wash_scale ≡ 1.0, every downstream pin bit-exact — see the wash cascade above).
+
+An earlier build controlled SIC-323901 with an inline I-PD whose PV was a lag of its **own** output — a degenerate self-referential loop with near-unity process gain, so a setpoint change in AUTO barely moved the speed and the operator could not command the pump. The follower model removes that; setpoint tracking is now prompt (≈ the 3 s VFD lag) with zero offset. Post-disturbance CAS recovery is governed by the master LIC-323502 (Ti = 300 s) and the coupled loop inventories, and returns to the design attractor.
+
 ## Assumptions and Limits
 
 - The model is reduced order: calibrated design conductance scales with process flow because no off-design exchanger datasheet is available.

@@ -2,18 +2,22 @@
 
 Running list of *currently open* modelling gaps only. Delete an entry when closed.
 
-## G-WASH-1 — SM-port classes diverge from the live wash cascade
-- **Node:** `backend/core/scrubber.py` `Scrubber322E003.solve()`, `backend/core/ejector.py` `Ejector322F001`.
-- **Missing:** the LP/MP recycle-wash coupling (Obs 1–6) now live in the `scrub_322e003` /
-  `ejector_322f001` *functions* is absent from the object-oriented SM-port classes — no
-  `wash_scale`, no `q_wash_sensible`, no off-gas direct-contact cooling, no live ejector
-  suction temp.
-- **Impact:** none on the running simulation — `_sm_flowsheet` is assembled but never
-  `.solve()`d, so the classes are dead scaffolding. Divergence matters only if the SM port
-  is ever activated for audits/tests.
-- **Tried:** confirmed via grep that no `_sm_flowsheet.solve/run` call exists in `step_sim`.
-- **To close:** mirror the three function-path couplings into the two classes (or delete the
-  dead SM-port if it is not going to be used).
+## G-WASH-1 — SM-port modules diverge from the live function path
+- **Node:** `backend/core/scrubber.py` `Scrubber322E003.solve()`, `backend/core/ejector.py`
+  `Ejector322F001`, `backend/core/lp.py` (LP stage, SIC-323901 speed loop).
+- **Missing:** live-path physics that the `core/` SM-port modules do not carry —
+  (a) the LP/MP recycle-wash coupling (Obs 1–6: `wash_scale`, `q_wash_sensible`, off-gas
+  direct-contact cooling, live ejector suction temp);
+  (b) the SIC-323901 direct VFD speed-follower — `core/lp.py:431-432` still runs the old
+  degenerate self-referential I-PD (`rpm_pv = lag(SIC.op)` then `_ctrl_ipd`) that the live
+  `main.py` path replaced.
+- **Impact:** none on the running simulation — nothing imports `core.lp` and `_sm_flowsheet`
+  is assembled but never `.solve()`d, so all `core/` unit modules are dead scaffolding.
+  Divergence matters only if the SM port is ever activated for audits/tests.
+- **Tried:** grep confirms no `_sm_flowsheet.solve/run` in `step_sim` and no live import of
+  `core.lp`.
+- **To close:** mirror the live-path models into the `core/` modules (or delete the dead
+  SM-port if it will not be used).
 
 ## G-WASH-2 — Wash-coupling gains are calibrated, not datasheet-derived
 - **Node:** `backend/main.py` constants `SCRUB_WASH_SINK_KW` (2500 kW), `SYN_P_WASH_COLLAPSE_GAIN`

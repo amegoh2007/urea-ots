@@ -6657,10 +6657,29 @@ def step_sim(dt: float) -> dict:
     m_321    = R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)   # vent -> 323E011
     gen321   = R3232_E003_PHI321 * (m_305 + R3232_M797_DES)
     lvl_d001_323 = s.r3232_d001_M / R3232_D001_M_DES * R3232_D001_LVL_SP
-    lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master
-    rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
-    sic_op   = _ctrl_ipd(s.SIC_323901, rpm_pv, dt, lic502_op)            # cascade slave (speed)
-    m_308    = R3232_E003_M308_DES * (sic_op / R3232_P001_RPM_DES)        # condensate -> boundary
+    lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master level -> pump-speed demand (rpm)
+    # SIC-323901 323P001 speed loop — direct VFD speed FOLLOWER (was a degenerate inline I-PD whose PV
+    # was a lag of its OWN output: a setpoint change in AUTO barely moved the speed, so the operator
+    # could not command the pump).  A variable-speed drive makes the ACTUAL speed track the demanded
+    # speed with a short first-order lag; the demand source follows the DCS mode:
+    #   CAS  -> master LIC-323502 output (drum-level cascade)
+    #   AUTO -> operator speed setpoint  (SIC-323901 sp, gated to AUTO in r323_ctrl_set)
+    #   MAN  -> operator manual drive output (SIC-323901 op)
+    # Flow is proportional to actual speed, so raising the speed always raises m_308.  At design the
+    # cascade demand == RPM_DES -> rpm_pv == RPM_DES -> m_308 == M308_DES (wash_scale 1.0, pins exact).
+    _sic = s.SIC_323901
+    if _sic["mode"] == "CAS":
+        _spd_dmd = clamp(lic502_op, _sic["sp_lo"], _sic["sp_hi"])
+        _sic["sp"] = _spd_dmd                                             # publish the remote (cascade) SP on the faceplate
+    elif _sic["mode"] == "AUTO":
+        _spd_dmd = clamp(_sic["sp"], _sic["sp_lo"], _sic["sp_hi"])        # operator commands the speed setpoint
+    else:                                                                # MAN
+        _spd_dmd = clamp(_sic["op"], _sic["op_lo"], _sic["op_hi"])        # operator commands the drive output directly
+    rpm_pv   = _lag1(s.tlag, "S_323901", _spd_dmd, 3.0, dt)              # VFD first-order lag -> actual pump speed (rpm)
+    _sic["op"] = _spd_dmd                                                # drive output = commanded speed
+    _sic["pv"] = _sic["pv1"] = _sic["pv2"] = rpm_pv                      # measured speed (bumpless history; no I-PD on a follower)
+    sic_op   = rpm_pv
+    m_308    = R3232_E003_M308_DES * (sic_op / R3232_P001_RPM_DES)        # condensate -> boundary (flow rises with speed)
     s.tlag["M308"] = m_308                                                # save for next tick's wash_scale
     #   Tempered-water circuit (PFD 1102 supply / 1103 return).  TV-323013A admits cold make-up, TV-323013B
     #   bypasses hot return -> split-range opposites off one op.  House normalized-stroke valve char: at
