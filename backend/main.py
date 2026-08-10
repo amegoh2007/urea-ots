@@ -3885,7 +3885,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
         overflow[k] += carb_dev[k]                                            # surplus absorbent -> bottom liquid
     d_co2 = SCRUB_CARB_ABS_GAIN * carb_dev_tot                                 # extra CO2 scrubbed by surplus wash
     cw_dt_dev = SCRUB_CCW_T_IN_DES - t_ccw_in
-    d_co2_cw = SCRUB_CW_ABS_GAIN * max(cw_dt_dev, 0.0)                         # extra CO2 scrubbed by colder CW
+    d_co2_cw = SCRUB_CW_ABS_GAIN * cw_dt_dev                                   # CW temp deviation modulates CO2 scrubbing
     d_co2 += d_co2_cw
     d_co2 = max(min(d_co2, 0.5 * offgas.get("CO2", 0.0)), -0.5 * offgas.get("CO2", 0.0))  # bounded -> off-gas>0
     d_nh3 = max(min(2.0 * d_co2, 0.5 * offgas.get("NH3", 0.0)), -0.5 * offgas.get("NH3", 0.0))  # 2 NH3:1 CO2
@@ -3909,7 +3909,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)          # kmol/h gas->carbamate (now wash-live)
     q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0                # full exotherm (diag)
     q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s × synthesis-vent load PT-329201)
-    q_ccw_kw += SCRUB_CW_COND_GAIN_KW * max(cw_dt_dev, 0.0)                    # increased condensation duty from colder CW
+    q_ccw_kw += SCRUB_CW_COND_GAIN_KW * cw_dt_dev                              # increased condensation duty from colder CW
     # --- HV-322602 ejector-spindle CONDENSATION-INTENSITY coupling (TT-322002 / TDY-329125 / 322E003 thermo) ---
     # The 322F001 motive jet sets how vigorously the off-gas is drawn through the bottom condensation zone.
     # CLOSING HV-322602 raises phi_sp>1 (stronger jet, deeper suction) -> more off-gas condensed into carbamate
@@ -3975,7 +3975,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     t_offgas   = min(max(SCRUB_OFFGAS_T_C + SCRUB_OFFGAS_T_GAIN * (nc - SCRUB_OFFGAS_NC_DES)
                          + SCRUB_OFFGAS_T_VENT_GAIN * theta_dev
                          - SCRUB_OFFGAS_WASH_COOLING * (wash_scale - s)       # Observation 2: direct contact cooling
-                         - SCRUB_OFFGAS_CW_COOLING * max(cw_dt_dev, 0.0),     # cooler CW chills off-gas
+                         - SCRUB_OFFGAS_CW_COOLING * cw_dt_dev,               # CW temp deviation directly affects off-gas sensible heat
                          t_ccw_in), SCRUB_T_PROC_C)                           # TT-322011 (N/C + vent-coupled, clamped)
     return {"feed_kmolh": feed, "carb_kmolh": carb,
             "offgas_kmolh": offgas, "overflow_kmolh": overflow,
@@ -5754,12 +5754,16 @@ def step_sim(dt: float) -> dict:
         if not math.isfinite(tic["op"]):  tic["op"] = SCRUB_TV005_DES_PCT
         tic["pv"] = SCRUB_CCW_T_IN_DES            # coerce finite so no NaN propagates downstream
     else:                                         # F4: first-order supply-T plant lag + AUTO velocity I-PD
-        #   T_ss = cooler valve char + exotherm load.  Load = gain·((s-1)+δ_X) -> 0 at design (bit-exact);
-        #   a throughput/conversion-deficit rise warms the returning tempered water, which the loop rejects.
+        # Observation 1: CCW flow reduces residence time in tempering cooler more severely than in the scrubber,
+        # causing the closed loop to heat up to a new equilibrium driven by the hot-side delta-T to the main CW (30 C).
+        t_ccw_out_prior = s.tlag.get("TT329125", SCRUB_CCW_T_OUT_DES)
+        flow_ratio = (max(fic["pv"], 1e-6) * 1000.0) / max(SCRUB_CCW_KGH_DES, 1e-6)
+        cooling_dt = (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) * \
+                     max((t_ccw_out_prior - 30.0) / (SCRUB_CCW_T_OUT_DES - 30.0), 0.1) * \
+                     (tic["op"] / max(SCRUB_TV005_DES_PCT, 1e-6)) / max(flow_ratio ** 1.5, 0.1)
+        
         t_load  = TIC_329005_LOAD_GAIN * ((react["co2_scale"] - 1.0) + react["delta_X"])
-        T_ss    = clamp(SCRUB_CCW_T_OUT_DES
-                        - (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) * (tic["op"] / max(SCRUB_TV005_DES_PCT, 1e-6))
-                        + t_load, 20.0, SCRUB_CCW_T_OUT_DES)
+        T_ss    = clamp(t_ccw_out_prior - cooling_dt + t_load, 20.0, SCRUB_T_PROC_C)
         pv_prev = tic["pv_prev"]                   # PV_{k-1} for the velocity proportional term
         tic["pv"] += (dt / TIC_329005_TAU_S) * (T_ss - tic["pv"])      # lag PV toward valve-char SS + load
         if tic["mode"] == "AUTO":                  # DIRECT-acting: PV above SP -> open TV-329005 (more cooling)
@@ -9069,6 +9073,7 @@ def _pin_hpcc_ua():
     # G8: the 4-bar header exports the design surplus to turbine 320MT02 (PFD-26 stream 932); the H.Ex
     # user boundary gets the generation NOT exported, so generation == users + turbine + vent(0) holds
     # at design with P_LP=4.4 bit-exact and FT-329407 == 16 707 kg/h from the connected PV-329207B.
+    #   at design with P_LP=4.4 bit-exact and FT-329407 == 16 707 kg/h from the connected PV-329207B.
     _ss.M_USERS_LP = max(_m_hpcc_des - _ss.M_TURBINE_DES, 0.0)   # 4-bar H.Ex boundary = generation - turbine
     _ss.M_504_DES  = max(_m_hpcc_des - _ss.M_503_DES, 0.0)  # makeup is the LP boiloff not supplied by LV503
                                    #   so at the seed m_lv503 + m_valve == m_hpcc -> dm == 0 and
