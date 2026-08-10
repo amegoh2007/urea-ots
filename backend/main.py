@@ -3388,7 +3388,9 @@ SCRUB_OFFGAS_P_BARA  = 140.7     # bar a, off-gas line pressure (synthesis)
 SCRUB_OFFGAS_RHO     = 111.0     # kg/m³, off-gas density (114 C, 140.7 bar a)
 SCRUB_WASH_SINK_KW         = 3656.0  # kW, rigorous sensible cooling (36915 kg/h * 3.4 kJ/kgK * 104.8 K)
 SCRUB_OFFGAS_WASH_COOLING  = 24.0    # C, rigorous direct contact thermal mass ratio cooling
-SYN_P_WASH_COLLAPSE_GAIN   = 8500.0  # bar/h, volumetric collapse based on reactor vapor holdup
+SYN_P_WASH_COLLAPSE_GAIN   = 8500.0  # bar/h, volumetric collapse based on reactor vapor holholdup
+SYN_P_HPCC_COLLAPSE_GAIN   = 5000.0  # bar/h, loop pressure collapse per degree HPCC steam drum subcooling
+SYN_P_STRIP_SWELL_GAIN     = 2000.0  # bar/h, loop pressure swell per degree Stripper steam superheating
 SCRUB_OVERFLOW_T_C   = 178.8     # C, TT-322002 overflow temp -> 322F001 (= EJ_T_SUCTION_C)
 SCRUB_OVERFLOW_P_BARA = 140.7    # bar a, PT-329201 overflow-line pressure
 SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exotherm (diagnostic)
@@ -7364,7 +7366,9 @@ def step_sim(dt: float) -> dict:
     
     # Observation 5: Cold, water-rich wash aggressively condenses vapor, collapsing the vapor space and dropping pressure
     vapor_collapse_rate = (SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - react["co2_scale"], 0.0)
-                           + SYN_P_CW_COLLAPSE_GAIN * max(SCRUB_CCW_T_IN_DES - tic["pv"], 0.0))
+                           + SYN_P_CW_COLLAPSE_GAIN * max(SCRUB_CCW_T_IN_DES - tic["pv"], 0.0)
+                           + SYN_P_HPCC_COLLAPSE_GAIN * (HPCC_STEAM_TSAT_C - T_shell_lp)
+                           - SYN_P_STRIP_SWELL_GAIN * (T_steam_live - STRIP_STEAM_T_DES_C))
     s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0) - vapor_collapse_rate * (dt / 3600.0),
                          10.0, 180.0)
                          
