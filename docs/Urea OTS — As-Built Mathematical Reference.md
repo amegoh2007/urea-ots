@@ -69,6 +69,44 @@ TT-322002,target = clamp(T_CCW,in + Q_scrubber / UA_effective,
 
 TT-322002 is published through a 180-second first-order measurement/holdup lag. The 322-2 HMI reads this live `TI_322002` telemetry; it does not substitute the design value.
 
+## 322E003 LP/MP Recycle-Carbamate Wash Cascade
+
+The cold (70–90 °C), water-rich weak-carbamate wash recycled from the LP recirculation stage (323P001 A/B → 322E003, live flow `m_308` = 323E003 condensate draw) is the master driver of the scrubber cascade. Its live deviation from design is a single dimensionless lever:
+
+```text
+wash_scale = m_308(prior tick) / m_308,design        # ≡ 1.0 at design (bit-exact pins)
+```
+
+`m_308,design` (its OWN design draw, not the nominal wash spec `SCRUB_CARB_KGH_DES`) is the denominator so every deviation term below is identically zero at design. Increasing the wash produces the observed six-step response:
+
+```text
+# Obs 1  overflow level: surplus wash spills the weir into the sump inventory ODE
+carb_dev   = carb - carb_design*s ;  overflow += carb_dev
+dM_sump/dt = m_overflow_in - m_ejector_entrain          # level rises
+
+# Obs 5a  reactive absorption (2 NH3 : 1 CO2), gas -> liquid, mass-conserving
+d_CO2 = SCRUB_CARB_ABS_GAIN * sum(carb_dev)
+d_NH3 = 2 * d_CO2 ;   offgas -= (d_CO2,d_NH3) ;  overflow += (d_CO2,d_NH3)
+
+# Obs 3,4  cold wash steals sensible duty from the pool -> both temps fall
+q_wash        = SCRUB_WASH_SINK_KW * (wash_scale - s)
+Q_scrubber    = max(Q_scrubber - q_wash, 0)
+TT-322002     = clamp(T_CCW,in + Q_scrubber/UA_eff, ...)      # overflow temp down
+TT-329125     = T_CCW,in + (TT-322002 - T_CCW,in)*epsilon     # CW outlet down
+
+# Obs 2  direct-contact vent cooling
+TT-322011     = clamp(... - SCRUB_OFFGAS_WASH_COOLING*(wash_scale - s), ...)
+
+# Obs 5b  water-rich solvent collapses the vapour space -> synthesis P falls
+dP_collapse   = SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - s, 0)   # s = react co2_scale
+d(PT-329201)/dt += (m_in - m_out)/C_loop - dP_collapse
+
+# Obs 6  colder pool -> colder ejector suction -> colder NH3 line to HPCC
+TT-322012     = (m_motive*cpN*T_motive + m_suc*cpC*T_overflow,prior) / (m_disch*cpD)
+```
+
+The ejector entrains the prior-tick overflow at its live temperature `T_overflow,prior` (a tear that breaks the algebraic loop); at design it equals `EJ_T_SUCTION_C` (178.8 °C) so TT-322012 is bit-exact. Direction is datasheet-anchored (`References/322E003 HP Scrubber Describtion.md`); the coupling gains are calibrated magnitudes (see `handoff.md`).
+
 ## Assumptions and Limits
 
 - The model is reduced order: calibrated design conductance scales with process flow because no off-design exchanger datasheet is available.

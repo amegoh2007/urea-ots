@@ -2419,7 +2419,8 @@ R324_FIC405_OP_DES = 50.0                            # % FIC-335405 slave design
 
 
 def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float,
-                    scrub_level_frac: float = 1.0) -> dict:
+                    scrub_level_frac: float = 1.0,
+                    T_suction_C: float = EJ_T_SUCTION_C) -> dict:
     """322F001 HP ejector: mix live motive NH3 with entrained 322E003 carbamate.
     Entrainment capacity is set by the HV-322602 spindle opening (HIC-322602).  Motive NH3
     is supplied by the 321P002 A/B POSITIVE-DISPLACEMENT (triplex) pumps -> motive MASS flow
@@ -2445,7 +2446,7 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
         #   no thermal-inertia decay.)  Mass leaves remain 0 -> no effect on the HPCC T_feed_mix
         #   (m_liq_in = 0), so this does not perturb TT-322010.
         return {"comp": {k: 0.0 for k in MW_COMP}, "total_kgh": 0.0, "suction_kgh": 0.0,
-                "mol_kmolh": 0.0, "MW": 0.0, "T_C": EJ_T_SUCTION_C, "P_bara": 0.0,
+                "mol_kmolh": 0.0, "MW": 0.0, "T_C": T_suction_C, "P_bara": 0.0,
                 "rho": 0.0, "vol_m3h": 0.0, "mu": 0.0}
     # HV-322602 (HIC-322602) sets entrainment: CLOSING the spindle -> higher jet momentum (const-ṁ) -> more 322E003 suction.
     open_eff = clamp(hv_open_pct, 10.0, 100.0)
@@ -2485,7 +2486,11 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     #   the design TT-322012 bit-exact).  NB: the literal mass-only denominator (m_mot+m_suc)
     #   is dimensionally an enthalpy, not a temperature, and breaks the design pin -> the
     #   dimensionally-correct cp-weighted form is retained.  Capped m_suc now drives T_d.
-    T_d = (motive_nh3_kgh*EJ_CP_N*T_motive_C + m_suc*EJ_CP_C*EJ_T_SUCTION_C) / (m_d*EJ_CP_D)
+    # Obs 6: the entrained 322E003 carbamate enters at the LIVE overflow temp (T_suction_C, a
+    # prior-tick tear).  Cold recycle wash quenches that pool, so a colder suction blends with the
+    # motive NH3 to a COLDER discharge -> TT-322012 (NH3 line -> 322E002 HPCC) falls.  At design
+    # T_suction_C = EJ_T_SUCTION_C (178.8) -> T_d bit-exact.
+    T_d = (motive_nh3_kgh*EJ_CP_N*T_motive_C + m_suc*EJ_CP_C*T_suction_C) / (m_d*EJ_CP_D)
     return {"comp": disch, "total_kgh": m_d, "suction_kgh": m_suc, "mol_kmolh": n_d,
             "MW": (m_d/n_d if n_d else 0.0), "T_C": T_d, "P_bara": EJ_P_DISCH_BARA,
             "rho": EJ_RHO_DISCH, "vol_m3h": m_d/EJ_RHO_DISCH, "mu": m_suc/motive_nh3_kgh}
@@ -5148,6 +5153,13 @@ _sm_flowsheet.add_unit(_vac_unit)
 
 def step_sim(dt: float) -> dict:
     s = state
+    # LP/MP weak-carbamate recycle wash (323P001 A/B, m_308 = 323E003 condensate draw) is the
+    # cold, water-rich absorbent that drives the whole 322E003 cascade (Obs 1-6).  Prior-tick
+    # m_308 breaks the algebraic loop (the 323E003 draw is computed later THIS tick).  Normalised
+    # by its OWN design R3232_E003_M308_DES (NOT SCRUB_CARB_KGH_DES, which differs ~0.22%) so
+    # wash_scale ≡ 1.0 at design -> every (wash_scale − s) / carb_dev deviation term is identically
+    # 0 -> the scrubber off-gas/overflow HMB and every TT boot-pin stay bit-exact.
+    wash_scale = s.tlag.get("M308", R3232_E003_M308_DES) / R3232_E003_M308_DES
     # Dynamic property evaluations for HP Loop
     _react_feed_in.viscosity = thermo.viscosity_liq_pas(s.react_T_overflow)
     _strip_overflow_in.viscosity = thermo.viscosity_liq_pas(s.react_T_overflow)
@@ -5301,7 +5313,12 @@ def step_sim(dt: float) -> dict:
     #   block, so it sees last-tick level).  frac=1 at NLL -> design entrainment; frac self-regulates
     #   the sump to L_eq=NLL*(overflow/capacity) -> stable at NLL on turndown, floods on a true stall.
     scrub_lvl_frac = s.scrub_level_pct / SCRUB_LEVEL_NLL_PCT
-    ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602, scrub_level_frac=scrub_lvl_frac)
+    # Obs 6 tear: ejector runs BEFORE the scrubber block, so it entrains the PRIOR-tick 322E003
+    # overflow at its live temperature (default = design 178.8 on tick 1).  Cold-wash quench of the
+    # pool then rides through to the ejector discharge (TT-322012 -> HPCC) one tick later.
+    T_suction_prev = s.tlag.get("SCRUB_TOVF", EJ_T_SUCTION_C)
+    ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602, scrub_level_frac=scrub_lvl_frac,
+                         T_suction_C=T_suction_prev)
     # motive fraction (PD pump -> flow ~ speed) and ejector developed-head forward-flow fraction.
     # phi_fwd ~ phi_m^2 (affinity head curve): drives the HPCC->reactor liquid circulation and the
     # discharge-header pressure.  ==1 at design motive -> all hydraulic states hold design.
@@ -5799,6 +5816,7 @@ def step_sim(dt: float) -> dict:
     f_ovf = _f_flow(scrub["T_overflow"], 60.0)
     scrub["overflow_kmolh"] = {k: v * f_ovf for k, v in scrub["overflow_kmolh"].items()}
     s.flags["SCRUBBER_SOLIDIFICATION"] = (f_ovf < 1.0)
+    s.tlag["SCRUB_TOVF"] = scrub["T_overflow"]    # Obs 6: live overflow temp -> next tick's 322F001 suction tear
     # --- Option 3: 322E003 sump inventory ODE (Euler) ---------------------------------------------
     #   dM/dt = ṁ_cond,in − ṁ_entrain.  ṁ_cond,in = the condensation/absorption make this tick
     #   (post-mushy-zone overflow mass); ṁ_entrain = what the ejector actually pulled this tick
@@ -7312,7 +7330,7 @@ def step_sim(dt: float) -> dict:
     m_out_loop = drain_kgh + hv604["mass_kgh"]
     
     # Observation 5: Cold, water-rich wash aggressively condenses vapor, collapsing the vapor space and dropping pressure
-    vapor_collapse_rate = SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - s.co2_scale, 0.0)
+    vapor_collapse_rate = SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - react["co2_scale"], 0.0)
     s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0) - vapor_collapse_rate * (dt / 3600.0),
                          10.0, 180.0)
                          
