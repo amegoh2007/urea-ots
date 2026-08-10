@@ -4733,7 +4733,7 @@ class State:
         self.PIC_323203 = {"mode": "AUTO", "op": R3232_E011_PV_OP_DES,
                            "sp": R3232_E011_P_BARA, "pv": R3232_E011_P_BARA,
                            "pv1": R3232_E011_P_BARA, "pv2": R3232_E011_P_BARA,
-                           "Kc": 0.6, "Ti": 100.0, "Td": -1.0, "act": -1.0,
+                           "Kc": 2.0, "Ti": 100.0, "Td": -1.0, "act": -1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.5, "sp_hi": 2.0}
         # LIC-323502 323D001 drum level (master) -> SIC-323901 pump-speed demand (DIRECT).
         self.LIC_323502 = {"mode": "AUTO", "op": R3232_P001_RPM_DES,
