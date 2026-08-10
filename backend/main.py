@@ -2899,7 +2899,8 @@ def _f_flow(T: float, T_cryst: float, dT_mush: float = 5.0) -> float:
 
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
                      overflow_kmolh: dict = None, L_feed: float = None,
-                     W_feed: float = None, T_feed_C: float = None) -> dict:
+                     W_feed: float = None, T_feed_C: float = None,
+                     strip_level_pct: float = None, air_trip: bool = False) -> dict:
     """HP Stripper 322E001 reduced steady-state model.
     Top liquid feed = 322R001 overflow (boundary constant, stream 207).
     Bottom strip gas = live CO2 feed (co2_feed_th, t/h).  Shell = condensing MP steam.
@@ -2913,7 +2914,12 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     if T_feed_C is None:
         T_feed_C = STRIP_FEED207_T_C                  # design reactor-overflow T (TT-322014)
     co2_scale = co2_feed_th / (CO2_DES_KGH / 1000.0)                     # 1.0 at design
-    co2_kmolh = {k: CO2_FEED_MOLFRAC.get(k, 0.0) * CO2_DES_KMOLH * co2_scale for k in MW_COMP}
+    molfrac = dict(CO2_FEED_MOLFRAC)
+    if air_trip:
+        molfrac["CO2"] += molfrac.get("O2", 0.0) + molfrac.get("N2", 0.0)
+        molfrac["O2"] = 0.0
+        molfrac["N2"] = 0.0
+    co2_kmolh = {k: molfrac.get(k, 0.0) * CO2_DES_KMOLH * co2_scale for k in MW_COMP}
     feed = {k: overflow_kmolh.get(k, 0.0) + co2_kmolh.get(k, 0.0) for k in MW_COMP}
 
     # 2. stripping efficiency: steam heat, PENALIZED by feed N/C and H/C.  Excess NH3 (high N/C) and
@@ -2960,12 +2966,14 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # literal 0.0 for any negative argument -- 0.7448 − 1.0 < 0.  Every term below is therefore an
     # exact identity at the seed (1 − e^0 = 0.0 ; 1/(1 + K·0.0) = 1.0), so the pin cannot move.
     flood_frac = m_feed_kgh / STRIP_N_TUBES / STRIP_FLOOD_KGH_TUBE
-    flood_x    = max(flood_frac - 1.0, 0.0)                       # 0.0 at design, exactly
-    # Flooded tubes hold un-decomposed carbamate and hot reactor liquor falls through untouched, so the
-    # BOTTOM RUNS HOTTER -- Brouwer's 3-4 °C signature -- capped by the same 183 °C reactor-liquor
-    # ceiling the steam-dilution branch already asymptotes to.
-    dT_flood   = strip_flood_gap * (1.0 - math.exp(-STRIP_FLOOD_T_K * flood_x))   # 0.0 at design
-    dT_bot     = dT_bot + dT_flood                                # + 0.0 is bit-exact
+    # Physical liquid level backs up into the tubes if > 100%. 1.5m sump, 6m tubes = 400% span to flood.
+    flood_tube_frac = max(strip_level_pct - 100.0, 0.0) / 400.0 if strip_level_pct is not None else 0.0
+    flood_tube_frac = min(flood_tube_frac, 1.0)
+    flood_x    = max(flood_frac - 1.0, 0.0) + flood_tube_frac
+    # Flooded tubes destroy the falling-film hydrodynamic regime and shift heat transfer to highly
+    # inefficient pool boiling. The solution absorbs less heat, causing the exit temperature to DROP.
+    dT_flood   = -15.0 * flood_tube_frac if flood_tube_frac > 0 else strip_flood_gap * (1.0 - math.exp(-STRIP_FLOOD_T_K * flood_x))
+    dT_bot     = dT_bot + dT_flood
     # ...and the split CLOSES: the volatiles stay in the bottoms and slip to the LP section via
     # LV-322501, which is exactly the cascade Brouwer describes (more NH3 in the bottoms -> more gas
     # to LP recirculation -> LP pressure rises -> operators must cut load).  g_flood itself is
@@ -3015,8 +3023,8 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     #     At design dT_flood is exactly 0.0, hence g_flood is exactly 1.0.
     n_carb_avail = max(avail["CO2"] - co2_kmolh["CO2"], 1e-9)          # kmol/h liquid-borne CO2
     q_carb_avail = n_carb_avail * STRIP_DH_CARB_JMOL                   # kJ/h  (kmol/h * J/mol)
-    q_flood_def  = m_feed_kgh * STRIP_CP_BOTTOM * dT_flood             # kJ/h, 0.0 at design
-    g_flood      = clamp(1.0 - q_flood_def / q_carb_avail, STRIP_FLOOD_ETA_FLOOR, 1.0)
+    q_flood_def  = m_feed_kgh * STRIP_CP_BOTTOM * max(dT_flood, 0.0)   # kJ/h, only pos dT_flood reduces carbamate break
+    g_flood      = clamp(1.0 - q_flood_def / q_carb_avail - flood_tube_frac, STRIP_FLOOD_ETA_FLOOR, 1.0)
 
     # 4. strip-fraction modulation: thermal steam heat x CO2 strip-gas dilution x synthesis-pressure
     #    (=1.0 at design).  The N/C+H/C choke does NOT cut the thermal split; instead it forces
@@ -5392,10 +5400,12 @@ def step_sim(dt: float) -> dict:
     dP_strip_live = dP_des_strip * (REACT_OVERFLOW_RHO / max(rho_live_strip, 1e-6)) * (m_strip_live / m_strip_des)**2
     
     P_strip_live = (s.p_syn_bara + dP_strip_live if _STEAM_READY else STRIP_P_DES_BARA)
+    air_trip = s.flags.get("AIR_COMPRESSOR_TRIP", False)
     strip = stripper_322e001(F_CO2_syn_th, T_steam_live, P_strip_live,
                              overflow_kmolh=s.react_overflow_kmolh,
                              L_feed=s.react_L_feed, W_feed=s.react_W_feed,
-                             T_feed_C=T_feed_live)
+                             T_feed_C=T_feed_live, strip_level_pct=s.strip_level,
+                             air_trip=air_trip)
 
     # LIC-322501 bottom-solution level control, DIRECT-acting on the FC LV-322501:
     #   level^ -> op^ -> air-to-open valve opens -> drain^ -> level v  (neg. feedback).
@@ -5450,7 +5460,7 @@ def step_sim(dt: float) -> dict:
         drain_kgh = delayed_bot_kgh
     s.strip_level = clamp(s.strip_level
                           + k_loop_fill * (delayed_bot_kgh - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
-                          0.0, 100.0)
+                          0.0, 500.0)  # up to 500% = full 6m tubes flooded
     lic["pv"] = s.strip_level
     # L3-7 bottoms-sump ENERGY BALANCE -> TT-322004 (stream 322E001 falling-film exit -> LV-322501):
     #   The bottom sump is a stirred buffer below the steam-heated falling-film tubes.  Steady-state sump
