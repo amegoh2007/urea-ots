@@ -123,6 +123,126 @@ Increasing the speed (setpoint in AUTO, output in MAN, or master demand in CAS) 
 
 An earlier build controlled SIC-323901 with an inline I-PD whose PV was a lag of its **own** output — a degenerate self-referential loop with near-unity process gain, so a setpoint change in AUTO barely moved the speed and the operator could not command the pump. The follower model removes that; setpoint tracking is now prompt (≈ the 3 s VFD lag) with zero offset. Post-disturbance CAS recovery is governed by the master LIC-323502 (Ti = 300 s) and the coupled loop inventories, and returns to the design attractor.
 
+## Deviation-Consequence Physics (`backend/consequence.py`)
+
+Every level-, temperature- and pressure-driven consequence in the flowsheet is produced by **one law
+per phenomenon**, applied at every vessel, valve and pump. Before this layer each written-up scenario
+was wired into the single tag it had been written up against, with its own hand-picked constant, so
+two identical events at two different vessels produced two different (or zero) consequences.
+
+Each law is in *anchored departure form*: at the published design state it returns exactly zero extra
+effect, so the boot pin and every steady-state audit stay bit-exact.
+
+### Loss of liquid seal — gas blow-through
+
+A control valve's flow coefficient is a property of the valve, so gas flow through a valve sized for
+liquid is fixed by its own liquid design duty plus IEC 60534-2-1 / ISA-75.01 compressible flow:
+
+```text
+x       = dP/P1 ;  F_k = gamma/1.40 ;  x_choked = F_k * x_T
+Y       = clamp(1 - x_eff/(3*x_choked), 2/3, 1)          # expansion factor
+m_gas   = m_liq_des * theta * Y * sqrt( rho_gas*dP_eff / (rho_liq*dP_des) ) * (1 - seal_frac)
+seal_frac = clamp((level - level_nozzle) / nozzle_bore, 0, 1)
+```
+
+The nozzle uncovers **progressively** across its bore, so both the gas escape and the liquid cut-off
+are continuous — no step in the right-hand side of a level ODE, and the transition reverses when
+level is restored. Beyond `x_choked` the escape is choked and cannot grow as the downstream section
+depressurises. Applied at LV-322501, LV-323501, LV-323505, LV-328504, LV-328505, LV-322502 and the
+322R001 bottom exit funnel.
+
+### Liquid carry-over — Souders-Brown disengagement
+
+```text
+R_u = (m_vap/m_vap_des) * sqrt(P_des/P) * sqrt(T/T_des) * sqrt(rho_L_des/rho_L)
+R_h = (1 - L_des)/(1 - L)                       # vertical vessel: h_disengagement ~ 1 - level
+E   = min(E_des * R_u^3.2 * R_h, E_cap)
+m_carry = m_vap * max(E - E_des, 0)             # == 0 at design, exactly
+```
+
+Rises with level, with vapour load, and with a **deepening vacuum** (a lighter vapour reaches the
+settling velocity at a lower mass flow). Applied at 322R001, 322E003, 323C003, 323F004, 323F010,
+324F001, 324F003, 328C002, 328C004, 328D001, 323D001 and 323D011.
+
+### Pump NPSH — one equation for "level fell" and "temperature rose"
+
+```text
+NPSHa/H = (P_vessel - Psat(T,composition)) / (rho*g*H) + level_fraction
+f_pump  = clamp((NPSHa/H - NPSHr_frac) / margin_frac, 0, 1)
+```
+
+A falling level removes static head; a rising liquid temperature raises the vapour pressure; a
+collapsing vessel pressure removes the subcooling term. All three cavitate the same pump through the
+same equation, and the flow ramps across the knee instead of switching off at a threshold. Applied at
+323P001, 323P003, 323P008, 328P002/P003, 322P002/328P006, 324P001 and 324P003.
+
+### Crystallisation — a solubility curve, not a constant
+
+The urea-water solubility table (CRC/Perry, converted to mass fraction and anchored at the 132.7 °C
+pure-urea melting point) plus a carbamate boundary anchored on the 322E003 overflow strength give
+each stream its own boundary, taking whichever solid appears first:
+
+| stream | urea | crystallisation boundary |
+|---|---|---|
+| 322E001 bottoms | 55.9 % | ≈ 30 °C |
+| 323C003 liquor | 68.7 % | ≈ 57 °C |
+| 323F010 / 323D002 | 80.0 % | ≈ 80 °C |
+| 324E003 melt | 98.6 % | ≈ 132 °C |
+
+Flow restriction begins one metastable-zone width below the boundary. The engine previously judged
+every urea stream against 132.7 °C, which is right only for the final melt.
+
+### Vacuum break — a load, not an assignment
+
+A broken seal is delivered to the affected vacuum node as a **mass rate** that competes with the
+ejector pull inside the node's existing pressure ODE, after a transport dead time. The pressure then
+ramps at a rate set by the imbalance and recovers when the operator restores the seal. Where the
+downstream side is atmosphere (the 324F003 barometric leg) the correct model is a choked orifice
+drawing air inward — critical ratio 0.528 for air, so the ingress depends only on the open area.
+
+## Bubble Points of the NH3-CO2-H2O Liquors (`backend/vle_nh3co2h2o.py`)
+
+323C003 and 323F004 hold liquors whose vapour is roughly a third ammonia and half CO2, so their
+bubble points are governed by NH3 and CO2 partial pressures, not water's. Both stages previously used
+a pure-water saturation line with a frozen offset, i.e. they responded to pressure and to nothing
+else. They now use the Extended UNIQUAC electrolyte model already present in
+`backend/props_nh3co2h2o.py` (Thomsen-Rasmussen / Darde), which had never been wired into the engine:
+
+```text
+P_bub(T) = f_dil * [ a_NH3*H_NH3(T) + a_CO2*H_CO2(T) + a_H2O*Psat_H2O(T) ]
+```
+
+with activities from the full gamma (combinatorial + residual + extended Debye-Hückel) over the R1–R5
+speciation, Rumpf-Maurer Henry constants, IAPWS-IF97 water saturation, and urea/biuret as
+non-volatile diluents. Validated against this plant's own PFD with **no fitted parameter**, on the
+engine's own composition vectors and through the interpolated path the engine actually calls:
+
+| stage | T (°C) | P model | P PFD | error |
+|---|---|---|---|---|
+| 323C003 | 135 | 4.387 | 4.10 | +7.0 % |
+| 323F004 | 106 | 1.328 | 1.13 | +17.5 % |
+| 323F010 | 99 | 0.468 | 0.46 | +1.7 % |
+
+323F004 is the loosest of the three because it is the stage where the CO2 term dominates and CO2 is
+where this model is weakest — at 0.66 wt% CO2 the carbamate equilibrium is steep, and urea (72 % of
+that liquor) enters as a mole-fraction diluent rather than a UNIQUAC species. Tracked as G-VLE-1.
+The offset is absorbed by the departure form; what reaches the engine is the slope. For scale, the
+pure-water anchor this replaces returns 103.3 °C at 323F004's 1.13 bar against an actual 106 °C —
+and responds to composition with a derivative of exactly zero.
+
+Activities are tabulated over the operating envelope and interpolated (log-space in the two loadings,
+which span four decades); Henry constants and the water saturation line stay analytic at the live
+temperature, so the temperature response the controllers act on carries no grid error. Both call
+sites use the departure form `T_des + [T_bub(live) − T_bub(design)]`, so the residual model offset
+cancels identically at design and only the slope reaches the engine.
+
+## Consequence Transport Lag
+
+A consequence arrives when the fluid arrives. Gas fronts carry `CQ_BLOW_TD_S`, liquid slugs carry
+`CQ_CARRY_TD_S`, and `consequence.transport_time_s(V, m_dot, rho)` derives a line's plug-flow transit
+from its own inventory where the geometry is known. A seal loss at 323F004 therefore reaches 323F010
+before it reaches 324F001, and 324F003 last — the ordering an operator sees on the trends.
+
 ## Assumptions and Limits
 
 - The model is reduced order: calibrated design conductance scales with process flow because no off-design exchanger datasheet is available.

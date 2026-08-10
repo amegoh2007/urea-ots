@@ -132,6 +132,17 @@ from c003_pressure_coupling import (
         lvl_c002 = s.a328_c002_M / R328_C002_M_DES * 50.0
         lic503_op= _ctrl_ipd(s.LIC_328503, lvl_c002, dt)
         m_743    = R328_C002_M743_DES * (lic503_op / 50.0)                    # bottoms -> hydrolyser
+        
+        # --- 328C002 Reflux Diagnostics & Cavitation Override ---
+        s.flags["328_REFLUX_HIGH"] = bool(m775_prev > R328_D001_M775_DES * 1.1)
+        s.flags["328_REFLUX_LOW"] = bool(m775_prev < R328_D001_M775_DES * 0.9)
+        s.flags["328E004_FOULING_TRIP"] = bool(m775_prev < R328_D001_M775_DES * 0.5)
+        
+        s.flags["328C002_LEVEL_LOW"] = bool(lvl_c002 < 10.0)
+        s.flags["328P003_CAVITATION"] = False
+        if s.a328_c002_M <= 1.5:
+            m_743 = 0.0
+            s.flags["328P003_CAVITATION"] = True
         sens_c002= ((m_738*(T_738 - Tc002)                                    # AUDIT C10: live 328E007 outlet
                      + m775_prev*(R328_D001_T   - Tc002)
                      + m748_prev*(R328_C002_T748 - Tc002)
@@ -184,6 +195,7 @@ from c003_pressure_coupling import (
             Tc003, m_746,
             w_urea=s.w_328c002.get("Urea", R328_C003_W_UREA_746),
             w_h2o=s.w_328c002.get("H2O", W_S743["H2O"]),
+            w_nh3=s.w_328c002.get("NH3", 0.0063),
         )
         # AUDIT F-8: the urea load is now READ OFF the live 328C002 bottoms vector instead of a hardcoded
         # fraction.  At the seed w_328c002["Urea"] == W_S743["Urea"] == R328_C003_W_UREA_746, so this is
@@ -452,6 +464,25 @@ from c003_pressure_coupling import (
         )
         s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
         s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_308)/3600.0*dt, 1.0)
+        
+        # --- LPCC Anomaly Symptom Flags ---
+        m_797_live = getattr(s, 'm_797', R3232_M797_DES)
+        s.flags["LPCC_AMMONIA_WATER_HIGH"] = bool(m_797_live > R3232_M797_DES * 1.1)
+        s.flags["LPCC_AMMONIA_WATER_LOW"] = bool(m_797_live < R3232_M797_DES * 0.9)
+        
+        lvl_d001_pct = s.r3232_d001_M / R3232_D001_M_DES * 50.0  # nominal 50%
+        s.flags["LPCC_LEVEL_HIGH"] = bool(lvl_d001_pct > 90.0)
+        s.flags["LPCC_LEVEL_LOW"] = bool(lvl_d001_pct < 10.0)
+        
+        s.flags["LPCC_PRESSURE_HIGH"] = bool(s.r3232_d001_P > 4.0)  # nominal 3.2
+        s.flags["LPCC_PRESSURE_LOW"] = bool(s.r3232_d001_P < 2.5)
+        
+        s.flags["LPCC_TW_TEMP_HIGH"] = bool(T_tw_sup > R3232_TW_SUP_T * 1.1)
+        s.flags["LPCC_TW_TEMP_LOW"] = bool(T_tw_sup < R3232_TW_SUP_T * 0.9)
+        
+        s.flags["LPCC_TW_FLOW_HIGH"] = bool(tva_op > R3232_TV13_DES_PCT * 1.2)
+        s.flags["LPCC_TW_FLOW_LOW"] = bool(tva_op < R3232_TV13_DES_PCT * 0.8)
+
     
         # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
         Te011    = s.r3232_e011_T
@@ -461,7 +492,16 @@ from c003_pressure_coupling import (
                     + (m_402 - R3232_E011_M402_DES))
         pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
         m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
-        gen_v011 = e011_vent_generation_kgh(in_e011 - m_402)
+        
+        # Condensation capacity is physically tied to available solvent (m_402)
+        from c003_pressure_coupling import E011_CONDENSATION_CAPACITY_DES_KGH
+        dynamic_condensation_cap = E011_CONDENSATION_CAPACITY_DES_KGH * min(1.0, m_402 / max(R3232_E011_M402_DES, 1e-6))
+        gen_v011 = max((in_e011 - m_402) - dynamic_condensation_cap, 0.0)
+        
+        # --- Flash Tank Condenser (323E011) Anomaly Symptom Flags ---
+        s.flags["323_FLASHCOND_AMMONIA_WATER_HIGH"] = bool(m_402 > R3232_E011_M402_DES * 1.1)
+        s.flags["323_FLASHCOND_AMMONIA_WATER_LOW"] = bool(m_402 < R3232_E011_M402_DES * 0.9)
+
         # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 (PFD stream
         # 734) fall in; the 323P008 lean-carbamate pumps draw out through LV-323503 on the common
         # discharge header, which then splits into the 718A and 718B legs (PFD 3562 / 3562 off 718 7123).
@@ -476,10 +516,32 @@ from c003_pressure_coupling import (
         # AUTO FICs reject the header stroke by integral action, so LIC-323503 wound up to op_hi and level
         # parked off SP (see scratchpad/dyn503.py).
         lvl_d011 = s.r3232_e011_M / R3232_D011_M_DES * R3232_D011_LVL_SP      # LT-323503 (%)
+        
+        s.flags["323_FLASHCOND_LEVEL_HIGH"] = bool(lvl_d011 > 90.0)
+        s.flags["323_FLASHCOND_LEVEL_LOW"] = bool(lvl_d011 < 10.0)
+        
         lic503_op= _ctrl_ipd(s.LIC_323503, lvl_d011, dt)                      # -> LV-323503 (total draw)
         m718_dmd = R3232_D011_M718_DES * (lic503_op / R3232_LV503_OP_DES)     # total draw demand (kg/h)
+        
+        # --- Extraction Pump Cavitation Override ---
+        s.flags["323P008_CAVITATION"] = False
+        if s.r3232_e011_M <= 1.5:
+            m718_dmd = 0.0
+            s.flags["323P008_CAVITATION"] = True
+
         m_718B   = _fic_flow(s.FIC_323418, R3232_M718B_DES, R3232_FIC418_OP_DES, s.tlag,
                              "F_323418", dt, tau_s=45.0, rho=RHO_718_KGM3)    # -> 323E003 (slipstream)
+        if s.flags["323P008_CAVITATION"]:
+            m_718B = 0.0
+
+                             
+        # --- Pump Anomaly Symptom Flags ---
+        m_702_live = getattr(s, 'm_702', A323_C005_M702_DES)
+        s.flags["LPCC_REFLUX_HIGH"] = bool(m_702_live > A323_C005_M702_DES * 1.1)
+        s.flags["LPCC_REFLUX_LOW"] = bool(m_702_live < A323_C005_M702_DES * 0.9)
+        
+        s.flags["LPCC_LEANCARB_PUMP_HIGH"] = bool(m718_dmd > R3232_D011_M718_DES * 1.1)
+        s.flags["LPCC_LEANCARB_PUMP_LOW"] = bool(m718_dmd < R3232_D011_M718_DES * 0.9)
     
         s.tlag["R328_739"] = m_739
         s.tlag["R328_748"] = m_748
