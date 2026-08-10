@@ -461,7 +461,7 @@ from c003_pressure_coupling import (
                     + (m_402 - R3232_E011_M402_DES))
         pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
         m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
-        gen_v011 = e011_vent_generation_kgh(in_e011)
+        gen_v011 = e011_vent_generation_kgh(in_e011 - m_402)
         # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 (PFD stream
         # 734) fall in; the 323P008 lean-carbamate pumps draw out through LV-323503 on the common
         # discharge header, which then splits into the 718A and 718B legs (PFD 3562 / 3562 off 718 7123).
