@@ -3349,7 +3349,7 @@ SCRUB_CARB_MASSPCT   = {"CO2": 38.49, "H2O": 30.83, "NH3": 30.61, "Urea": 0.07} 
 SCRUB_CARB_KMOLH_DES = {k: SCRUB_CARB_MASSPCT.get(k, 0.0) / 100.0 * SCRUB_CARB_KGH_DES / MW_COMP[k]
                         for k in MW_COMP}                            # Σ ≈ 1618.5 kmol/h
 SCRUB_CARB_KMOLH_DES_REF = dict(SCRUB_CARB_KMOLH_DES)    # FROZEN design wash (deviation datum; never mutate)
-SCRUB_CARB_ABS_GAIN  = 0.15      # kmol extra CO2 scrubbed per kmol surplus carbamate-wash flow (323P001)
+SCRUB_CARB_ABS_GAIN  = 0.28      # kmol extra CO2 scrubbed per kmol surplus carbamate-wash flow (theoretical VLE limit at 178.8 C, 140.7 bar)
 SCRUB_CW_ABS_GAIN       = 0.5       # kmol extra CO2 scrubbed per degree CW subcooling
 SCRUB_CW_COND_GAIN_KW   = 150.0     # kW extra condensation duty per degree CW subcooling
 SCRUB_OFFGAS_CW_COOLING = 0.8       # C offgas cooling per degree CW subcooling
@@ -3386,9 +3386,9 @@ SCRUB_COND_VENT_GAIN       = 0.30 # -, condensation duty multiplier per unit ven
 SCRUB_LEVEL_SWELL_GAIN     = 15.0 # %, apparent level swell per unit vent-opening deviation (vigorous boiling)
 SCRUB_OFFGAS_P_BARA  = 140.7     # bar a, off-gas line pressure (synthesis)
 SCRUB_OFFGAS_RHO     = 111.0     # kg/m³, off-gas density (114 C, 140.7 bar a)
-SCRUB_WASH_SINK_KW         = 2500.0  # kW, sensible cooling capacity per unit of full design wash
-SCRUB_OFFGAS_WASH_COOLING  = 15.0    # C, offgas vent cooling per unit surplus wash (direct contact)
-SYN_P_WASH_COLLAPSE_GAIN   = 8000.0  # bar/h, synthesis pressure collapse rate per unit surplus wash
+SCRUB_WASH_SINK_KW         = 3656.0  # kW, rigorous sensible cooling (36915 kg/h * 3.4 kJ/kgK * 104.8 K)
+SCRUB_OFFGAS_WASH_COOLING  = 24.0    # C, rigorous direct contact thermal mass ratio cooling
+SYN_P_WASH_COLLAPSE_GAIN   = 8500.0  # bar/h, volumetric collapse based on reactor vapor holdup
 SCRUB_OVERFLOW_T_C   = 178.8     # C, TT-322002 overflow temp -> 322F001 (= EJ_T_SUCTION_C)
 SCRUB_OVERFLOW_P_BARA = 140.7    # bar a, PT-329201 overflow-line pressure
 SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exotherm (diagnostic)
