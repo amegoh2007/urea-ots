@@ -3349,6 +3349,10 @@ SCRUB_CARB_KMOLH_DES = {k: SCRUB_CARB_MASSPCT.get(k, 0.0) / 100.0 * SCRUB_CARB_K
                         for k in MW_COMP}                            # Σ ≈ 1618.5 kmol/h
 SCRUB_CARB_KMOLH_DES_REF = dict(SCRUB_CARB_KMOLH_DES)    # FROZEN design wash (deviation datum; never mutate)
 SCRUB_CARB_ABS_GAIN  = 0.15      # kmol extra CO2 scrubbed per kmol surplus carbamate-wash flow (323P001)
+SCRUB_CW_ABS_GAIN       = 0.5       # kmol extra CO2 scrubbed per degree CW subcooling
+SCRUB_CW_COND_GAIN_KW   = 150.0     # kW extra condensation duty per degree CW subcooling
+SCRUB_OFFGAS_CW_COOLING = 0.8       # C offgas cooling per degree CW subcooling
+SYN_P_CW_COLLAPSE_GAIN  = 50.0      # kg/h vapor collapse rate per degree CW subcooling
 # -- SUPERSEDED off-gas datasheet (img1 MOL%, 64.78 kmol/h): does NOT route 100% of inerts -> vent and
 #   leaves the scrubber node open.  Retained as provenance + to keep audit imports resolvable; NOT live. --
 SCRUB_OFFGAS_MOLPCT  = {"N2": 68.81, "O2": 11.39, "NH3": 8.26, "CH4": 5.93,       # superseded img1 MOL%
@@ -3879,6 +3883,9 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     for k in MW_COMP:
         overflow[k] += carb_dev[k]                                            # surplus absorbent -> bottom liquid
     d_co2 = SCRUB_CARB_ABS_GAIN * carb_dev_tot                                 # extra CO2 scrubbed by surplus wash
+    cw_dt_dev = SCRUB_CCW_T_IN_DES - t_ccw_in
+    d_co2_cw = SCRUB_CW_ABS_GAIN * max(cw_dt_dev, 0.0)                         # extra CO2 scrubbed by colder CW
+    d_co2 += d_co2_cw
     d_co2 = max(min(d_co2, 0.5 * offgas.get("CO2", 0.0)), -0.5 * offgas.get("CO2", 0.0))  # bounded -> off-gas>0
     d_nh3 = max(min(2.0 * d_co2, 0.5 * offgas.get("NH3", 0.0)), -0.5 * offgas.get("NH3", 0.0))  # 2 NH3:1 CO2
     offgas["CO2"] -= d_co2;  overflow["CO2"] += d_co2                          # mass-conserving gas->liquid
@@ -3901,6 +3908,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)          # kmol/h gas->carbamate (now wash-live)
     q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0                # full exotherm (diag)
     q_ccw_kw  = SCRUB_Q_CCW_DES_KW * s * vent_ratio                            # Q_scrubber: carbamate-cond. duty (s × synthesis-vent load PT-329201)
+    q_ccw_kw += SCRUB_CW_COND_GAIN_KW * max(cw_dt_dev, 0.0)                    # increased condensation duty from colder CW
     # --- HV-322602 ejector-spindle CONDENSATION-INTENSITY coupling (TT-322002 / TDY-329125 / 322E003 thermo) ---
     # The 322F001 motive jet sets how vigorously the off-gas is drawn through the bottom condensation zone.
     # CLOSING HV-322602 raises phi_sp>1 (stronger jet, deeper suction) -> more off-gas condensed into carbamate
@@ -3965,7 +3973,8 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     nc = nc_act if nc_act is not None else SCRUB_OFFGAS_NC_DES                # AT-322701 (loop N/C); design fallback
     t_offgas   = min(max(SCRUB_OFFGAS_T_C + SCRUB_OFFGAS_T_GAIN * (nc - SCRUB_OFFGAS_NC_DES)
                          + SCRUB_OFFGAS_T_VENT_GAIN * theta_dev
-                         - SCRUB_OFFGAS_WASH_COOLING * (wash_scale - s),      # Observation 2: direct contact cooling
+                         - SCRUB_OFFGAS_WASH_COOLING * (wash_scale - s)       # Observation 2: direct contact cooling
+                         - SCRUB_OFFGAS_CW_COOLING * max(cw_dt_dev, 0.0),     # cooler CW chills off-gas
                          t_ccw_in), SCRUB_T_PROC_C)                           # TT-322011 (N/C + vent-coupled, clamped)
     return {"feed_kmolh": feed, "carb_kmolh": carb,
             "offgas_kmolh": offgas, "overflow_kmolh": overflow,
@@ -7349,7 +7358,8 @@ def step_sim(dt: float) -> dict:
     m_out_loop = drain_kgh + hv604["mass_kgh"]
     
     # Observation 5: Cold, water-rich wash aggressively condenses vapor, collapsing the vapor space and dropping pressure
-    vapor_collapse_rate = SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - react["co2_scale"], 0.0)
+    vapor_collapse_rate = (SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - react["co2_scale"], 0.0)
+                           + SYN_P_CW_COLLAPSE_GAIN * max(SCRUB_CCW_T_IN_DES - tic["pv"], 0.0))
     s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0) - vapor_collapse_rate * (dt / 3600.0),
                          10.0, 180.0)
                          
