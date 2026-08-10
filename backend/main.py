@@ -3272,6 +3272,8 @@ REACT_G_NODES, REACT_G_OV = reactor.node_heat_weights(REACT_ZETA_NODES, REACT_BE
 _react_zeta_prev   = [0.0] + REACT_ZETA_NODES[:-1]
 REACT_TAU_NODE_MIN = [(z - zp) * REACT_TAU_TOT_MIN for z, zp in zip(REACT_ZETA_NODES, _react_zeta_prev)]  # node residence, min
 REACT_DT_COL_DES   = REACT_OVERFLOW_T_C - HPCC_T_PROD_DES_C           # 13.0 C design column rise (conv=1)
+REACT_NC_BUB_GAIN  = 15.0        # C / (N/C), boiling point depression per unit excess NH3
+REACT_P_BUB_GAIN   = 0.25        # C / bar, boiling point rise with synthesis pressure
 REACT_OFFGAS_GAMMA = 0.6         # off-gas blend: T_offgas = T_top + γ_o·(T_overflow - T_top)
 REACT_NODE_SS_DES  = reactor.node_profile_ss(HPCC_T_PROD_DES_C, REACT_OVERFLOW_T_C,
                                              REACT_ZETA_NODES, REACT_BETA_DAMK)  # design SS seed [T1..T4]
@@ -5568,7 +5570,13 @@ def step_sim(dt: float) -> dict:
     s.react_conv_fac = conv_fac                              # tear -> next step's design-anchored f_T base
     dT_col   = REACT_DT_COL_DES * conv_fac
     T_old     = list(s.react_T_node)
-    T_up      = hpcc["T_prod"]                               # node-0 upstream = LIVE HPCC two-phase feed T (cascade)
+    
+    # Bubble-point shift: The Stamicarbon reactor sits exactly on its bubble point curve.
+    # Excess NH3 (high N/C) acts as a volatile diluent, depressing the boiling point.
+    # Higher loop pressure raises the boiling point. We apply this thermodynamic boundary 
+    # condition to the upstream anchor of the sensible heat profile.
+    T_bub_offset = REACT_P_BUB_GAIN * (s.p_syn_bara - SYN_P_DES_BARA) - REACT_NC_BUB_GAIN * (L_blend - reactor.L0_DES)
+    T_up      = hpcc["T_prod"] + T_bub_offset                # node-0 upstream = LIVE HPCC feed T + bubble point shift
     flow_frac = max(clamp(react["co2_scale"], 0.0, 1.0), 1.0e-3)  # m_dot/m_dot_des proxy (§7.6 P5-B: floor 1e-3>0 so tau_n=tau_des/flow_frac stays finite as load->0; bit-exact at design, co2_scale>>1e-3); tau-scale + loss gate
     new_T     = []
     for n in range(4):
