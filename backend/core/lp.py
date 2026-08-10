@@ -4,11 +4,10 @@ from core.unit import UnitOperation
 from core.stream import Stream
 from c003_pressure_coupling import (
     C003_TO_E003_LINK_TAU_S,
+    c003_pressure_target_bara,
+    e011_vent_generation_kgh,
     lpcc_pressure_target_bara,
 )
-
-class LPSection328(UnitOperation):
-    """
     328 Low Pressure Section - Sequential Modular Port
     """
     def __init__(self, name: str):
@@ -423,19 +422,6 @@ class LPSection328(UnitOperation):
         # ----- Stage 8 : 323E003 + 323D001  LPCC (74°C, tempered water) -------
         Te003    = s.r3232_e003_T
         in_e003  = m_305 + m718B_prev + m_776 + R3232_M797_DES
-        pic202_op= _ctrl_ipd(s.PIC_323202, s.r3232_d001_P, dt)
-        m_321    = R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)   # vent -> 323E011
-        gen321   = R3232_E003_PHI321 * (m_305 + R3232_M797_DES)
-        lvl_d001_323 = s.r3232_d001_M / R3232_D001_M_DES * R3232_D001_LVL_SP
-        lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master
-        rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
-        sic_op   = _ctrl_ipd(s.SIC_323901, rpm_pv, dt, lic502_op)            # cascade slave (speed)
-        m_308    = R3232_E003_M308_DES * (sic_op / R3232_P001_RPM_DES)        # condensate -> boundary
-        #   Tempered-water circuit (PFD 1102 supply / 1103 return).  TV-323013A admits cold make-up, TV-323013B
-        #   bypasses hot return -> split-range opposites off one op.  House normalized-stroke valve char: at
-        #   op == op_des the ratio is 1 -> T_ss == R3232_TW_SUP_T == sp -> PV stationary -> du == 0 (design exact).
-        #   Duty now rides the physical driving force (live TW mean vs shell) instead of a linear op fudge:
-        #   at design 1000*(74 - 60) == 14000 kW, identical to the retired (tic13_op/50) form.
         tva_op   = s.TIC_323013["op"]                              # prior-step TV-323013A stroke
         T_tw_ss  = clamp(R3232_TW_RET_T - (R3232_TW_RET_T - R3232_TW_SUP_T)
                          * (tva_op / max(R3232_TV13_DES_PCT, 1e-6)), 20.0, R3232_TW_RET_T)
@@ -475,7 +461,7 @@ class LPSection328(UnitOperation):
                     + (m_402 - R3232_E011_M402_DES))
         pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
         m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES)     # vapour -> 323C005
-        gen_v011 = R3232_E011_PHIV * in_e011
+        gen_v011 = e011_vent_generation_kgh(in_e011)
         # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 (PFD stream
         # 734) fall in; the 323P008 lean-carbamate pumps draw out through LV-323503 on the common
         # discharge header, which then splits into the 718A and 718B legs (PFD 3562 / 3562 off 718 7123).
