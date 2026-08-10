@@ -3240,6 +3240,8 @@ REACT_OFFGAS_RHO   = 113.30      # off-gas density (kg/m³)
 REACT_ID_MM          = 2950.0    # reactor inside diameter (datasheet shell 2950 ID)
 REACT_LIQ_H_MM       = 25000.0   # liquid height bottom T.L -> top T.L (overflow zone)
 REACT_THERM_TAU_MIN  = 8.0       # carbamate-exotherm thermal time constant (min)
+# Reactor temperature indicators elevation. Validated against 'Reactor Datasheet2.pdf'
+# (Nozzles N6 A, B, C, D correspond to tags 322005-08 and their exact heights in mm from bottom TL)
 REACT_TT_EL_MM = {"TT_322005": 21700.0, "TT_322006": 14800.0,    # N6 A (top), N6 B
                   "TT_322007": 7900.0,  "TT_322008": 1000.0}      # N6 C, N6 D (bottom)
 _react_area_m2   = (math.pi / 4.0) * (REACT_ID_MM / 1000.0) ** 2
