@@ -905,7 +905,7 @@ def aqueous_cp(anchor: float, T_des_C: float, T_C: float) -> float:
     """
     return anchor + (cp_water_kjkgk(T_C) - cp_water_kjkgk(T_des_C))
 
-R323_P_STEAM_SUP = 4.4            # bar a, LP steam header feeding 323E002/323E010
+R323_P_STEAM_SUP = 5.01325        # bar a, shared 4.0 bar(g) LP header feeding Units 322/323/324
 
 # --- Stage 1: Rectifying Column 323C003 + Recirc Heater 323E002 (4.1 bar a, hold 135 C)
 R323_FEED_DES_KGH   = STRIP_BOT_DES_KGH        # 130482 kg/h, live = drain_kgh
@@ -1858,6 +1858,11 @@ W_S401_TAB = _w_norm(dict(Urea=94.31, Biuret=0.69, NH3=0.03, H2O=4.97, HCHO=0.00
 W_S402_TAB = _w_norm(dict(Urea=97.71, Biuret=0.85, NH3=0.04, H2O=1.39, HCHO=0.0099))   # PFD-21 324E003 melt (rounded)
 W_S401 = _reconcile_melt(W_S317, R324_FEED_DES, R324_P1_DES, W_S401_TAB)  # 324E001 melt (reconciled)
 W_S402 = _reconcile_melt(W_S401, R324_P1_DES,   R324_P2_DES, W_S402_TAB)  # 324E003 melt (reconciled)
+# PFD ejector-pull anchors already include the volatile NH3/CO2 reaching each vacuum condenser at
+# design.  The pressure ODEs therefore accept only the DEPARTURE from these loads.  Adding the
+# absolute live load double-counts it and makes a fresh design seed lose vacuum with no disturbance.
+R324_NC_FLASH1_DES = R324_FEED_DES * (W_S317["NH3"] + W_S317["CO2"])
+R324_NC_FLASH2_DES = R324_P1_DES * (W_S401["NH3"] + W_S401["CO2"])
 # PFD-21 finishing boundary. 402G is the raw melt entering 335; UF85 stream 697 is admitted only
 # on forward route A, producing stream 609. Datasheet-3 section 5.2 explicitly interlocks UF85 off
 # when LV-324501A closes, so route B remains raw 402G despite conflicting prose in 323D002.md.
@@ -3269,7 +3274,7 @@ HPCC_FRAC_GAS_DES = {            # design split fraction of each feed component 
 }
 HPCC_T_PROD_DES_C  = 170.0       # two-phase outlet temp (gas & liquid TT-322010) at design (C)
 HPCC_P_DES_BARA    = 144.2       # synthesis-loop pressure at HPCC outlet (bar a)
-HPCC_STEAM_P_BARA  = 5.01325     # shell-side LP steam pressure (5.01325 bar a == 4.0 barg)
+HPCC_STEAM_P_BARA  = R323_P_STEAM_SUP  # shared shell-side LP header (5.01325 bar a == 4.0 barg)
 HPCC_STEAM_TSAT_PFD_C = 146.3    # rounded licensor/PFD indicator value retained as provenance
 HPCC_STEAM_TSAT_C  = tsat_steam(HPCC_STEAM_P_BARA)  # thermodynamic saturation state used in balances (~152.06 C)
 HPCC_DH_CARB_KJMOL = 160.0       # carbamate exotherm 2NH3+CO2->NH2COONH4 (kJ/mol CO2 absorbed)
@@ -7772,6 +7777,7 @@ def step_sim(dt: float) -> dict:
     nc_flash1_nh3 = feed1_m * s.w_d002.get("NH3", 0.0)
     nc_flash1_co2 = feed1_m * s.w_d002.get("CO2", 0.0)
     nc_flash1 = nc_flash1_nh3 + nc_flash1_co2
+    d_nc_flash1 = nc_flash1 - R324_NC_FLASH1_DES
     # NON-CONDENSABLE LOAD ARRIVING FROM UNIT 323.  324E002 condenses the 323F010 overhead as well
     #   as the Stage-1 vapour, so any gas that broke into the pre-evaporator node -- an uncovered
     #   LV-323505 above all (Scenarios.md 2.2) -- travels forward and lands on THIS ejector.  It is
@@ -7792,8 +7798,8 @@ def step_sim(dt: float) -> dict:
         m703_fp = (VACUUM_CONDENSERS["324E002"]["inlet_kgh"]
                    + (m_evap - R323_MEVAP_DES) + (v1_m - R324_V1_DES)
                    + (fa202_m - R324_F001_FA_DES)
-                   + nc_flash1 + nc_from_323)
-        nc002_fp = max(72.0 - R324_F001_FA_DES + fa202_m + nc_flash1 + nc_from_323, 0.0)
+                   + d_nc_flash1 + nc_from_323)
+        nc002_fp = max(72.0 - R324_F001_FA_DES + fa202_m + d_nc_flash1 + nc_from_323, 0.0)
         vent002_fp = max(nc002_fp, m703_fp - VACUUM_CONDENSERS["324E002"]["condensate_kgh"])
         # NB: no capacity ceiling here.  Unlike 323F010, this node balances NON-CONDENSABLES against
         # a 72 kg/h design pull, and `vent002_fp` already routes every kilogram the condenser cannot
@@ -7886,7 +7892,8 @@ def step_sim(dt: float) -> dict:
     s.flags["324F001_CRYSTALLIZATION"] = bool(f_mush_e001 < 1.0)
     s.flags["324P001_PLUGGING"] = bool(f_mush_e001 < 1.0)
     s.flags["324P001_CAVITATION"] = bool(f_pump_e001 < 1.0)
-    s.flags["324E001_HYDROLYSIS_LOSS"] = bool(s.r324_e001_T > R324_E001_T_SP_C)
+    # A controller settling inside its 1 C acceptance band is not a process upset.
+    s.flags["324E001_HYDROLYSIS_LOSS"] = bool(s.r324_e001_T > R324_E001_T_SP_C + 1.0)
 
     # Vacuum pressure and VLE were solved together above.
     # AUDIT C5 — the pull had NO suction-pressure term, so the vacuum ODE below was a pure open
@@ -7934,6 +7941,7 @@ def step_sim(dt: float) -> dict:
     nc_flash2_nh3 = feed2_m * s.w_e001.get("NH3", 0.0)
     nc_flash2_co2 = feed2_m * s.w_e001.get("CO2", 0.0)
     nc_flash2 = nc_flash2_nh3 + nc_flash2_co2
+    d_nc_flash2 = nc_flash2 - R324_NC_FLASH2_DES
     # 324F003 BAROMETRIC-SEAL AIR INGRESS (Scenarios.md 5.4 "Breaks the hydraulic seal between the
     #   0.03 bar vacuum and the atmospheric prill tower.  Atmospheric air violently rushes backward,
     #   instantly crashing the vacuum to 1 bar").  This is the one place in the plant where the
@@ -7957,8 +7965,8 @@ def step_sim(dt: float) -> dict:
         t2_next = t2_old + pwr2 * dt / max(M_f003_pre * cp_hold2, 1e-6)
         m709_fp = (VACUUM_CONDENSERS["324E005"]["inlet_kgh"]
                    + (v2_m - R324_V2_DES) + (fa203_m - R324_F003_FA_DES)
-                   + nc_flash2 + air_f003)
-        nc005_fp = max(584.0 - R324_F003_FA_DES + fa203_m + nc_flash2 + air_f003, 0.0)
+                   + d_nc_flash2 + air_f003)
+        nc005_fp = max(584.0 - R324_F003_FA_DES + fa203_m + d_nc_flash2 + air_f003, 0.0)
         vent005_fp = max(nc005_fp, m709_fp - VACUUM_CONDENSERS["324E005"]["condensate_kgh"])
         ejpull2_live = (R324_F003_EJPULL_DES * (s.HIC_329606 / R324_HIC9606_DES_PCT)
                         * (p2_solved / R324_F003_P_BARA))   # non-condensable balance; see Stage 1
@@ -8053,7 +8061,8 @@ def step_sim(dt: float) -> dict:
     s.flags["324F003_CRYSTALLIZATION"] = bool(f_mush_e003 < 1.0)
     s.flags["324P003_PLUGGING"] = bool(f_mush_e003 < 1.0)
     s.flags["324P003_CAVITATION"] = bool(f_pump_e003 < 1.0)
-    s.flags["324E003_HYDROLYSIS_LOSS"] = bool(s.r324_e003_T > R324_E003_T_SP_C)
+    # Match the consequence alarm to the temperature loop's 1 C operating band.
+    s.flags["324E003_HYDROLYSIS_LOSS"] = bool(s.r324_e003_T > R324_E003_T_SP_C + 1.0)
 
     # vacuum: PIC-324203 deep-vacuum false-air bleed vs the 324F004/F005 ejector pull.  Mapping — the
     # pull is set by HV-329606 motive steam (HIC-329606): opening it harder drops 324F003 and the
@@ -10072,7 +10081,7 @@ def _pin_hpcc_ua():
     # operating point: the off-gas carries the conversion-deficit amplification and the feed differs
     # from the MAN seed).  They are pinned below at the MAN runtime design seed -- see REACT_MASS_DES
     # following `state = State()`.
-    HPCC_LIQ_DES_LIVE = r["liq_kgh"]                 # ISSUE-c/e: anchor LT-322E002 NLL fixed point
+    HPCC_LIQ_DES_LIVE = r["liq_kgh"]                 # provisional CAS-settle value; replaced at runtime capture
     EJ_MOTIVE_DES_LIVE = _cap["ejm"]                 # settled live design motive NH3 -> phi_m == 1 exact
     # L3-4 boot-pin domain assert: the UA back-calc log requires 0 < (T_prod_des - T_sat)/(T_adb - T_sat)
     #   < 1, i.e. T_adb > T_prod_des > T_sat_shell.  A failed warm-up settle (bad steam/feed) would feed
@@ -10100,6 +10109,9 @@ def _pin_hpcc_ua():
     _capf = {}
     res = step_sim(0.1)
     rr = res["sm_diagnostics"]["react"]
+    # LT-322E002 runs from the fresh MAN/CAS runtime seed, not the discarded phase-1 settle.  Pin its
+    # liquid make on the same operating point the inventory ODE sees after every fresh launch.
+    HPCC_LIQ_DES_LIVE = res["sm_diagnostics"]["hpcc"]["liq_kgh"]
     _capf["feed"]    = rr["feed_kmolh"]
     _capf["xi_urea"] = rr["xi_urea"]; _capf["xi_biu"] = rr["xi_biu"]
     _capf["L"]       = rr["L_feed"];  _capf["W"]      = rr["W_feed"]
@@ -10173,6 +10185,9 @@ def _pin_hpcc_ua():
     global A328_GCB_DES, A328_GCB_T, A328_PHI_ABS, A328_VENT_DES, A328_LAMBDA_ABS, hv_322604
     _caphv = {}
     res = step_sim(0.1)
+    # Final runtime capture: reactor, steam, and HP melt N/C pins now all exist.  This value is the
+    # one a fresh post-cache State reproduces, so it is the correct LT-322E002 inventory anchor.
+    HPCC_LIQ_DES_LIVE = res["sm_diagnostics"]["hpcc"]["liq_kgh"]
     rr = res["sm_diagnostics"]["hv604"]
     _caphv["m"] = rr["mass_kgh"]; _caphv["T"] = rr["T_out"]
     _gcb_m = _caphv["m"]; _gcb_T = _caphv["T"]

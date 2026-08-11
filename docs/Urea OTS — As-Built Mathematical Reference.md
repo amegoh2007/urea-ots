@@ -325,6 +325,41 @@ The 322E002 sump was the second symptom: the comment block there describes a gra
 under it read `phi_out = phi_fwd` — the level term was missing, leaving exactly the pure integrator
 the comment says was fixed. Restored as documented.
 
+## Scenario Coverage and Startup Fixed Point
+
+`backend/scenario_coverage.py` is the executable traceability contract for all 48 actionable
+subsections in `References/scenarios/Scenarios.md`, `Scenarios2.md`, and `Scenarios3.md`. Every entry
+names the operator/process driver, the local response, the downstream response, and the test family
+that proves its governing law. The coverage test parses the Markdown files, so adding a scenario
+without adding evidence fails the build.
+
+Thermodynamic services are routed by process envelope rather than forced through one package:
+
+| domain | thermodynamic service |
+|---|---|
+| 141-bar synthesis reactor and HP recycle | Voskov-Voronin HP UNIQUAC/virial correlation |
+| LP aqueous NH3-CO2-H2O recovery and absorption | Darde Extended UNIQUAC with SRK gas phase |
+| urea-water vacuum concentration | neutral UNIQUAC departure with IAPWS-IF97 water properties |
+| steam and condensate network | IAPWS-IF97 |
+
+The two vacuum evaporator balances previously counted the design NH3/CO2 flash load twice: once in
+the PFD ejector pull and again as an absolute live addition. They now add only the live departure:
+
+```text
+d_nc,1 = m_feed,1 * (w_NH3 + w_CO2) - m_feed,1,des * (w_NH3,des + w_CO2,des)
+d_nc,2 = m_feed,2 * (w_NH3 + w_CO2) - m_feed,2,des * (w_NH3,des + w_CO2,des)
+```
+
+The HPCC liquid-inventory anchor is captured after the final reactor/steam pin, from the same runtime
+state used by `step_sim`; the discarded CAS warm-up state no longer supplies that anchor. The three
+LP steam users are seeded against the live 5.01325 bar(a) header, not a separate 4.4 bar value.
+
+A fresh process is accepted only after 600 simulated seconds with no false consequence alarm, finite
+states, nonnegative inventories, synthesis pressure within 0.15 bar, HP levels within 1 percentage
+point, controlled temperatures within 1 C, and both vacuum pressures within 3% of their PFD values.
+The deterministic boot-pin cache is rebuilt whenever its source hash changes, then restores these
+design constants on subsequent launches.
+
 ## Assumptions and Limits
 
 - The model is reduced order: calibrated design conductance scales with process flow because no off-design exchanger datasheet is available.
@@ -337,6 +372,7 @@ the comment says was fixed. Restored as documented.
 - `backend/main.py`: `hpcc_322e002`, `ejector_322f001`, 322E003 scrubber energy model, telemetry packet.
 - `backend/thermo_urea_hp.py`: Voskov-Voronin HP equilibrium correlation and synthesis-ratio definitions.
 - `backend/hp_recycle.py`: 323P001 displacement, finite scrubber capacity, valve retention, and recycle-burden laws.
+- `backend/scenario_coverage.py`: 48-scenario traceability manifest and thermodynamic-domain router.
 - `backend/steam_system.py`: LP-header balances, PIC-329207 master logic, PV-329207B export.
 - `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`: design mass, pressure, and temperature points.
 - `References/HPCC description.md`: carbamate exotherm and shell-side nucleate boiling.

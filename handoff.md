@@ -26,16 +26,15 @@ around this envelope will inherit it.
 **Needs:** a data reconciliation of the 322 envelope against the PFD (`reconcile_crowe.py` exists
 for exactly this and is not currently applied to unit 322).
 
-## G-LOOP-2 — Residual slow creep in the 322E003 sump
-**Affects:** 322E003 scrubber sump level, and a small standing bottoms offset.
-**Symptom:** the current regression holds loop pressure, but the design-settle diagnostic still moves
-the scrubber sump from 50.0 to 51.1 % over 600 s. The absolute off-gas/overflow disagreement in
-G-HMB-1 remains the leading boundary-data suspect.
-**Not yet tried:** the sump ODE has genuine feedback through the ejector entrainment curve
-(`scrub_lvl_frac`), so this is likely an offset in `m_cond_in` vs `EJ_SUC_TOT_DES` rather than a
-missing feedback path. Two orders of magnitude smaller than what G-LOOP-1 was; check it against
-G-HMB-1 first, since the engine and PFD still disagree by 4 196 kg/h on how design scrubber outlet
-mass divides between gas and liquid.
+## G-LOOP-2 — Residual long-horizon creep in the 322E003 sump
+**Affects:** 322E003 scrubber sump level beyond the startup acceptance window.
+**Symptom:** the dedicated fresh-start regression holds the scrubber within 1 percentage point for
+600 simulated seconds. The older cumulative settle diagnostic runs 60 seconds and then another 600
+seconds (despite labelling the latter sample `t=600 s`); at that effective 660-second point it reports
+51.20%. The state remains bounded and no consequence alarm is raised, but the longer-horizon offset
+is still measurable.
+**Contained, not fixed:** startup is stable for the verified ten-minute criterion. The remaining
+offset should be reconciled with G-HMB-1 before changing the genuine sump feedback path.
 
 ## G-HP-THERMO-1 — Full HP ionic speciation and rate-based absorption
 **Affects:** extreme 322R001/322E003 excursions, redesign studies, and predictions outside the
