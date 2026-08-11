@@ -4477,6 +4477,26 @@ CQ_BLOW_TD_S       = 8.0     # s, transport dead time on a blow-through gas fron
 #   vessel.  Gas travels the connecting line at near sonic velocity, liquid does not — which is why
 #   the two consequences of one seal loss arrive at the downstream unit at different times.
 
+# Every seal-loss connection uses one conservative packet route. The effective line inventory is
+# design_carrier * design_dead_time / 3600; live dead time is that inventory divided by live carrier
+# flow. Route names describe equipment topology only -- scenario names never enter the physics.
+CONSEQUENCE_ROUTES = {
+    "322E001_TO_323C003": cq.ConsequenceRoute(
+        "322E001", "323C003", STRIP_BOT_DES_KGH, CQ_BLOW_TD_S),
+    "323C003_TO_323F004": cq.ConsequenceRoute(
+        "323C003", "323F004", R323_M314_DES, CQ_BLOW_TD_S),
+    "323F004_TO_323F010": cq.ConsequenceRoute(
+        "323F004", "323F010", R323_M319_DES, CQ_BLOW_TD_S),
+    "323F010_TO_324E002": cq.ConsequenceRoute(
+        "323F010", "324E002", R323_MEVAP_DES, CQ_BLOW_TD_S),
+    "328C003_TO_328C004": cq.ConsequenceRoute(
+        "328C003", "328C004", R328_C003_M747_DES, CQ_BLOW_TD_S),
+    "328C004_TO_740": cq.ConsequenceRoute(
+        "328C004", "stream 740", R328_C004_M739_DES, CQ_BLOW_TD_S),
+    "322C001_TO_323E003": cq.ConsequenceRoute(
+        "322C001", "323E003/323D001", A328_M756_DES, CQ_BLOW_TD_S),
+}
+
 
 def _cq_seal(level_pct: float, seal_pct: float = 0.0) -> float:
     """Fraction of a drain nozzle still covered.  1.0 at every design level -> pin bit-exact."""
@@ -4577,6 +4597,51 @@ def _cq_mush(t_c: float, w: dict) -> float:
     moves the lines that were wrong and leaves the one that was right."""
     return cq.mushy_flow_factor(t_c, cq.liquor_crystallization_T(w),
                                 CQ_UREA_MUSH_DT_C, cq.UREA_METASTABLE_DT_C)
+
+
+def _cq_packet(mass_kgh: float, temperature_c: float, mass_fraction: dict,
+               cp_kj_kgk: float = STRIP_CP_GAS) -> cq.StreamPacket:
+    """Build one closed consequence packet from a live source composition."""
+    mass = max(float(mass_kgh), 0.0)
+    positive = {k: max(float(mass_fraction.get(k, 0.0)), 0.0) for k in MW_COMP}
+    total_fraction = sum(positive.values())
+    if mass <= 0.0 or total_fraction <= 0.0:
+        return cq.ZERO_PACKET
+    components = {
+        k: mass * value / total_fraction for k, value in positive.items() if value > 0.0
+    }
+    return cq.make_stream_packet(mass, components, temperature_c, cp_kj_kgk)
+
+
+def _cq_packet_from_kmol(mass_kgh: float, temperature_c: float,
+                         component_kmolh: dict) -> cq.StreamPacket:
+    """Build a gas consequence packet using the source vapor's live molar composition."""
+    component_mass = {
+        k: max(component_kmolh.get(k, 0.0), 0.0) * MW_COMP[k] for k in MW_COMP
+    }
+    return _cq_packet(mass_kgh, temperature_c, component_mass, STRIP_CP_GAS)
+
+
+def _transport_consequence(s, route_name: str, packet: cq.StreamPacket,
+                           live_carrier_kgh: float, dt: float) -> cq.StreamPacket:
+    """Transport and publish the exact packet that destination physics consumes."""
+    route = CONSEQUENCE_ROUTES[route_name]
+    key = "CQ_ROUTE:" + route_name
+    arrived = cq.transport_stream_packet(
+        s.tlag, key, packet, route, max(live_carrier_kgh, 0.0), dt
+    )
+    route_state = s.tlag[key]
+    diagnostics = s.tlag.setdefault("CQ_DIAGNOSTICS", {})
+    diagnostics[route_name] = {
+        "source": route.source,
+        "destination": route.destination,
+        "dead_time_s": route_state["dead_time_s"],
+        "arrived_mass_kgh": arrived.mass_kgh,
+        "temperature_c": arrived.temperature_c,
+        "component_kgh": arrived.component_kgh,
+        "mass_fraction": arrived.mass_fraction,
+    }
+    return arrived
 
 
 def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None, h_kjkg=None):
@@ -6460,8 +6525,14 @@ def step_sim(dt: float) -> dict:
     #   letdown line.  Gas moves fast, so the dead time is short -- but it is not zero, and giving
     #   the consequence a real arrival time is what separates "the stripper lost its seal" from
     #   "everything downstream moved on the same tick".
-    blowthrough_gas = _delay(s.tlag, "C003_BLOW_ARRIVE",
-                             s.tlag.get("STRIP_BLOWTHROUGH_GAS_KGH", 0.0), CQ_BLOW_TD_S, dt)
+    strip_blow_packet = _cq_packet_from_kmol(
+        s.tlag.get("STRIP_BLOWTHROUGH_GAS_KGH", 0.0), strip["T_top"], strip["top_kmolh"]
+    )
+    strip_blow_arrived = _transport_consequence(
+        s, "322E001_TO_323C003", strip_blow_packet,
+        drain_kgh + strip_blow_packet.mass_kgh, dt,
+    )
+    blowthrough_gas = strip_blow_arrived.mass_kgh
 
 
     # OVERHEAD LIQUID CARRY-OVER (Scenarios2.md 4.2 "High Level ... boils over into the overhead
@@ -6509,6 +6580,13 @@ def step_sim(dt: float) -> dict:
         lv501_op / R323_LV501_OP_DES,
         s.r323_c003_P, R323_F004_P_BARA, R323_C003_P_BARA - R323_F004_P_BARA,
         R323_BLOW_MW_C003, s.r323_c003_T, seal_c003)
+    c003_blow_packet = _cq_packet(
+        c003_blowthrough, s.r323_c003_T, sol_vapour_y(s.w_c003, SOL_C003["alpha"])
+    )
+    c003_blow_arrived = _transport_consequence(
+        s, "323C003_TO_323F004", c003_blow_packet,
+        m_314 + c003_blowthrough, dt,
+    )
     m_314 *= seal_c003
     s.flags["LV323501_BLOWTHROUGH"] = bool(seal_c003 < 1.0)
 
@@ -6532,6 +6610,16 @@ def step_sim(dt: float) -> dict:
     # downstream train was blind to it.  y_305 follows the live liquid through the relative
     # volatilities (C6 normalisation); the biuret extent is the real 2 Urea -> Biuret + NH3.
     y_305      = sol_vapour_y(s.w_c003, SOL_C003["alpha"])
+    packet_305 = cq.mix_stream_packets(
+        _cq_packet(
+            m_305_evap,
+            R3232_E003_T305 + (s.r323_c003_T - R323_C003_T_SP_C),
+            y_305,
+        ),
+        strip_blow_arrived,
+        _cq_packet(m_305_carryover, s.r323_c003_T, s.w_c003, R323_CP_SOLN),
+    )
+    T_305_live = packet_305.temperature_c if packet_305.mass_kgh > 0.0 else R3232_E003_T305
     xi_c003    = sol_biuret_xi("C003", M_c003_pre, s.w_c003, s.r323_c003_T)
     # C2 bookkeeping: the carry-over leaves as LIQUID at the bulk composition, so it belongs in the
     # liquid outflow term, not silently in the total-mass ODE alone (which would renormalise w).
@@ -6623,12 +6711,21 @@ def step_sim(dt: float) -> dict:
     y_701      = sol_vapour_y(s.w_f004, SOL_F004["alpha"])          # AUDIT F-8: flash vapour comp
     if f004_carryover > 0.0 and (m_701 + f004_carryover) > 0.0:
         y_701 = {k: (m_701*y_701.get(k, 0.0) + f004_carryover*(s.w_f004.get(k, 0.0)/100.0)) / (m_701 + f004_carryover) for k in y_701}
+    packet_701 = cq.mix_stream_packets(
+        _cq_packet(m_701 + f004_carryover, s.r323_f004_T, y_701),
+        c003_blow_arrived,
+    )
+    m_701_down = packet_701.mass_kgh
+    T_701_down = packet_701.temperature_c if packet_701.mass_kgh > 0.0 else R3232_E011_T701
     xi_f004    = sol_biuret_xi("F004", M_f004_pre, s.w_f004, s.r323_f004_T)
     s.w_f004   = sol_advance(s.w_f004, M_f004_pre, s.r323_f004_M, m_314, s.w_c003,
                              m_701 + f004_carryover, y_701, m_319, xi_f004, dt)
     #  323F004 hydraulic coupling: forward pressure accumulation from live flash-vapour flow (701).
     #  Opening LV-323501 raises m_314 -> m_701 > design => flash-drum P relaxes UP (feeds PIC-323203 LP node).
-    p_f004_tgt = R323_F004_P_BARA + R323_F004_P_GAIN * (m_701 + c003_blowthrough - R323_M701_DES) / R323_M701_DES + p_f004_choke
+    p_f004_tgt = (R323_F004_P_BARA
+                  + R323_F004_P_GAIN
+                  * (m_701 + c003_blow_arrived.mass_kgh - R323_M701_DES) / R323_M701_DES
+                  + p_f004_choke)
     s.r323_f004_P = clamp(s.r323_f004_P + (p_f004_tgt - s.r323_f004_P) / R323_F004_P_TAU_S * dt, 0.3, 6.0)
 
     # ---- Stage 3: Pre-evaporator 323F010 + Heater 323E010  (vacuum 0.46 bar, hold 99 C) ------
@@ -6729,7 +6826,14 @@ def step_sim(dt: float) -> dict:
     #   `s.r323_f010_P = 1.013` override could not do: the ejector's suction-pressure roll-off
     #   pulls the node back down when the operator restores the seal, and a PARTIAL seal loss gives
     #   a PARTIAL vacuum degradation instead of an all-or-nothing collapse.
-    blow_arrive_f010 = _delay(s.tlag, "F010_BLOW_ARRIVE", f004_blowthrough, CQ_BLOW_TD_S, dt)
+    f004_blow_packet = _cq_packet(
+        f004_blowthrough, s.r323_f004_T, sol_vapour_y(s.w_f004, SOL_F004["alpha"])
+    )
+    f004_blow_arrived = _transport_consequence(
+        s, "323F004_TO_323F010", f004_blow_packet,
+        m_319 + f004_blowthrough, dt,
+    )
+    blow_arrive_f010 = f004_blow_arrived.mass_kgh
     s.r323_f010_P = clamp(s.r323_f010_P
                           + R323_F010_P_KP * (m_evap + blow_arrive_f010 - pull_f010) / 3600.0 * dt,
                           0.05, 1.0)
@@ -6962,6 +7066,7 @@ def step_sim(dt: float) -> dict:
     m718B_prev = s.tlag.get("R3232_718B", R3232_M718B_DES)
     m931_prev  = s.tlag.get("R328_M931",  R328_C004_M931_DES)
     m739_prev  = s.tlag.get("R328_739",   R328_C004_M739_DES)   # 328C004 bottoms -> 328E007 -> 740
+    cq740_prev = s.tlag.get("R328_740_CQ_PACKET", cq.ZERO_PACKET)
 
     # ----- Stage 1 : 323C005 vent scrub -> 328V001 -> Comp-II feed --------
     Tc005    = s.a323_c005_T
@@ -7110,6 +7215,12 @@ def step_sim(dt: float) -> dict:
                                 + R328_E007_LOSS_DT) / max(m739_prev, 1e-6)
     T_740    = min(max(T740_raw, min(s.a328_d003_TII, s.a328_c004_T)),
                    max(s.a328_d003_TII, s.a328_c004_T))
+    packet_740 = cq.mix_stream_packets(
+        _cq_packet(m739_prev, T_740, W_S739, R328_CP),
+        cq740_prev,
+    )
+    m_740_total = packet_740.mass_kgh
+    T_740 = packet_740.temperature_c if packet_740.mass_kgh > 0.0 else T_740
 
     # ----- Stage 3 : 328C002  Desorber-I (bottoms 139°C, floats PIC-328202)
     Tc002    = s.a328_c002_T
@@ -7221,6 +7332,13 @@ def step_sim(dt: float) -> dict:
         R328_C003_M747_DES, R328_C002_RHO, lic504_op / 50.0,
         s.a328_c003_P, s.a328_c004_P, R328_C003_P_BARA - R328_C004_P_BARA,
         MW_COMP["H2O"], s.a328_c003_T, seal_c003_328)
+    c003_328_blow_packet = _cq_packet(
+        c003_328_blow, s.a328_c003_T, s.y_328_748, STRIP_CP_GAS
+    )
+    c003_328_blow_arrived = _transport_consequence(
+        s, "328C003_TO_328C004", c003_328_blow_packet,
+        m_747 + c003_328_blow, dt,
+    )
     m_747   *= seal_c003_328
     s.flags["LV328504_BLOWTHROUGH"] = bool(seal_c003_328 < 1.0)
     # AUDIT F-7: urea slipping through unreacted -> AI-328701.  A MASS-BALANCE result now, not the
@@ -7283,7 +7401,10 @@ def step_sim(dt: float) -> dict:
     sens_c004= m_749/3600.0*cp_328c004*(T_749 - Tc004)
     # AUDIT F-8: energy-limited overhead, same anchored-ratio form as 328C002 -- what the LP strip
     # steam plus the sensible net can boil, capped by throughput.  Replaces R328_C004_PHI750.
-    q_c004   = sens_c004 + m_931/3600.0*R328_C004_M931_DH
+    q_c004   = (sens_c004 + m_931/3600.0*R328_C004_M931_DH
+                + c003_328_blow_arrived.mass_kgh/3600.0
+                * c003_328_blow_arrived.cp_kj_kgk
+                * (c003_328_blow_arrived.temperature_c - Tc004))
     # AUDIT C1 — same split as 328C002: boil-up from the net duty, outflow from the live column
     # pressure through the overhead line into the 328C002 bottom, temperature = bubble point.  This
     # is the column where it matters most for training: losing the LP strip steam must drop the
@@ -7305,7 +7426,12 @@ def step_sim(dt: float) -> dict:
     c004_entrain = min(c004_entrain, max(s.a328_c004_M - 1.0, 0.0) * (3600.0 / dt))
     s.flags["328C004_FLOODING"] = bool(c004_entrain > 0.0)
     M_c004_pre = s.a328_c004_M
-    s.a328_c004_P = max(s.a328_c004_P + R328_C004_P_KP*(gen750 - m_750)/3600.0*dt, 0.1)
+    s.a328_c004_P = max(
+        s.a328_c004_P
+        + R328_C004_P_KP
+        * (gen750 + c003_328_blow_arrived.mass_kgh - m_750) / 3600.0 * dt,
+        0.1,
+    )
     # Hydraulic shift: column pressure drop scales with vapor traffic squared
     dp_col_live = R328_C004_DP_COL * (max(m_931, 1e-6) / R328_C004_M931_DES)**2
     # Thermal Shift: Colder feed from Hydrolyzer drops the bulk temperature of the 2nd Desorber
@@ -7316,7 +7442,22 @@ def step_sim(dt: float) -> dict:
     s.w_328c004, y_750 = des_advance(s.w_328c004, s.a328_c004_M,
                                      [(s.w_328c003, m_749), (W_STEAM, m_931)],
                                      m_750, a_c004, m_739 + c004_entrain, 0.0, dt)
-    s.y_328_750 = y_750
+    gas_750_source = cq.mix_stream_packets(
+        _cq_packet(gen750, s.a328_c004_T, y_750),
+        c003_328_blow_arrived,
+    )
+    s.y_328_750 = (
+        gas_750_source.mass_fraction if gas_750_source.mass_kgh > 0.0 else y_750
+    )
+    # The 750 line passes the pressure-driven m_750 capacity. Extra incoming gas raises C004
+    # pressure until that capacity increases; it must not also bypass the line as additive output.
+    m_750_down = m_750
+
+    c004_blow_packet = _cq_packet(c004_blow, s.a328_c004_T, y_750, STRIP_CP_GAS)
+    c004_blow_arrived = _transport_consequence(
+        s, "328C004_TO_740", c004_blow_packet,
+        m_739 + c004_blow, dt,
+    )
 
     # ----- Stage 6 : 328D001  Desorber-I reflux drum (61°C, 328E004) -----
     Td001    = s.a328_d001_T
@@ -7522,12 +7663,27 @@ def step_sim(dt: float) -> dict:
                                    [(W_S755, m_755), (W_CPL, s.cpl_flow_kgh), (w_abs, abs_c001)],
                                    0.0, A328_C001_ALPHA, m_756, 0.0, dt)
 
+    if y_vent is None:
+        c001_source_w = {
+            k: hv604["comp_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP
+        }
+    else:
+        c001_source_w = y_vent
+    c001_blow_packet = _cq_packet(c001_blow, s.a328_c001_T, c001_source_w)
+    c001_blow_arrived = _transport_consequence(
+        s, "322C001_TO_323E003", c001_blow_packet,
+        m_756 + c001_blow, dt,
+    )
+
     # ----- Stage 8 : 323E003 + 323D001  LPCC (74°C, tempered water) -------
     Te003    = s.r3232_e003_T
-    in_e003  = m_305 + m718B_prev + m_776 + R3232_M797_DES
+    in_e003  = (m_305 + m718B_prev + m_776 + R3232_M797_DES
+                + c001_blow_arrived.mass_kgh)
     pic202_op= _ctrl_ipd(s.PIC_323202, s.r3232_d001_P, dt)
     m_321    = R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)   # vent -> 323E011
-    gen321   = R3232_E003_PHI321 * (m_305 + R3232_M797_DES)
+    gen321   = R3232_E003_PHI321 * (
+        m_305 + R3232_M797_DES + c001_blow_arrived.mass_kgh
+    )
     lvl_d001_323 = s.r3232_d001_M / R3232_D001_M_DES * R3232_D001_LVL_SP
     lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master level -> pump-speed demand (rpm)
     # SIC-323901 323P001 speed loop — direct VFD speed FOLLOWER (was a degenerate inline I-PD whose PV
@@ -7584,8 +7740,9 @@ def step_sim(dt: float) -> dict:
     Q_e003   = R3232_E003_UA_KW * (Te003 - 0.5*(T_tw_sup + T_tw_ret))
     T_tw_ret = T_tw_sup + (R3232_TW_RET_T - R3232_TW_SUP_T) * (Q_e003 / R3232_E003_Q_DES_KW)  # 1103 (65 °C)
     s.tlag["R3232_TW_RET"] = T_tw_ret                          # TT-323015
-    m_cond   = m_305 + R3232_M797_DES - m_321
-    sens_e003= ((m_305*(R3232_E003_T305 - Te003)
+    m_cond   = m_305 + c001_blow_arrived.mass_kgh + R3232_M797_DES - m_321
+    sens_e003= ((m_305*(T_305_live - Te003)
+                 + c001_blow_arrived.mass_kgh*(c001_blow_arrived.temperature_c - Te003)
                  + m718B_prev*(R3232_E011_T - Te003)
                  + m_776    *(R328_D001_T  - Te003)
                  + R3232_M797_DES*(R3232_M797_T - Te003))/3600.0*R3232_CP)
@@ -7610,7 +7767,7 @@ def step_sim(dt: float) -> dict:
 
     # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
     Te011    = s.r3232_e011_T
-    in_e011  = (R3232_E011_IN_DES + (m_701 - R3232_E011_M701_DES)
+    in_e011  = (R3232_E011_IN_DES + (m_701_down - R3232_E011_M701_DES)
                 + (m_786_d001 - R3232_E011_M786_DES)
                 + (m_321 - R3232_E011_M321_DES)
                 + (m_402 - R3232_E011_M402_DES))
@@ -7675,7 +7832,7 @@ def step_sim(dt: float) -> dict:
     m_718A   = _lag1(s.tlag, "F_718A", m718A_dmd, R3232_M718A_TAU_S, dt)  # -> 328E004/328D001 (bal)
     m_718_tot= m_718A + m_718B                                            # -> 323D011 draw (kg/h)
     Q_e011   = R3232_E011_UA_KW * (Te011 - 35.0)
-    sens_e011= (((m_701 + R3232_E011_RECON_KGH)*(R3232_E011_T701 - Te011)
+    sens_e011= (((m_701_down + R3232_E011_RECON_KGH)*(T_701_down - Te011)
                  + m_786_d001*(R3232_E011_T786    - Te011)
                  + m_321*(74.0 - Te011)
                  + m_402*(56.0 - Te011))/3600.0*R3232_CP)
@@ -7691,13 +7848,14 @@ def step_sim(dt: float) -> dict:
     s.tlag["R3232_702"]  = m_v011
     s.tlag["R322_756"]   = m_756
     s.tlag["R328_748"]   = m_748
-    s.tlag["R328_750"]   = m_750
+    s.tlag["R328_750"]   = m_750_down
     s.tlag["R328_775"]   = m_775
     s.tlag["R3232_718A"] = m_718A
     s.tlag["R3232_744"]  = m_744
     s.tlag["R3232_718B"] = m_718B
     s.tlag["R328_M931"]  = m_931
     s.tlag["R328_739"]   = m_739       # 328C004 bottoms this tick -> caps next tick's 741 recycle
+    s.tlag["R328_740_CQ_PACKET"] = c004_blow_arrived
 
     # ======================================================================
     #  UNIT 324 — TWO-STAGE VACUUM EVAPORATION  (rigorous, conservative)
@@ -7786,7 +7944,11 @@ def step_sim(dt: float) -> dict:
     #   as `s.r324_f001_P = 1.013`: an assignment to a state, arriving on the same tick as the cause,
     #   from which no operator action could recover because nothing had actually changed in the
     #   balance that state integrates.
-    nc_from_323 = _delay(s.tlag, "R324_NC_FROM_323", blow_arrive_f010, CQ_BLOW_TD_S, dt)
+    unit324_blow_arrived = _transport_consequence(
+        s, "323F010_TO_324E002", f004_blow_arrived,
+        m_evap + f004_blow_arrived.mass_kgh, dt,
+    )
+    nc_from_323 = unit324_blow_arrived.mass_kgh
     for t1_fp_iterations in range(1, R324_PT_LOOP_MAXIT + 1):
         Q_e001_kw = max(R324_E001_UA_KW * (tsat_steam(p_chest_e001) - t1_solved), 0.0)
         w_eq1 = evap_w_eq(t1_solved, p1_solved,
@@ -8293,6 +8455,11 @@ def step_sim(dt: float) -> dict:
                                        "721 condenser-III condensate", "324E006", "328D003 Comp I", "liquid", rho=1036.0),
         "S0722": make_stream_mass_pct(vac_stream["722"], PFD_324_MASS_PCT["722"], 55.0, 1.0,
                                        "722 final vacuum vent", "324E007", "atmosphere", "vapor"),
+        "S0740": make_stream(
+            {k: packet_740.component_kgh.get(k, 0.0) / MW_COMP[k] for k in MW_COMP},
+            T_740, 1.0, "740 purified process condensate", "328E007", "battery limit",
+            "two-phase" if cq740_prev.mass_kgh > 0.0 else "liquid", rho=RHO_741_KGM3,
+        ),
         "S0744": make_stream_mass_pct(m_744, PFD_324_MASS_PCT["744"], 44.0, 1.0,
                                        "744 absorber-pump suction", "328D003 Comp I", "322P002", "liquid", rho=1002.0),
         "S0755": make_stream_mass_pct(m_755, PFD_324_MASS_PCT["755"], 40.0, 3.9,
@@ -8333,8 +8500,18 @@ def step_sim(dt: float) -> dict:
                                     "1051 main CW return", "CW consumers", "cooling towers", "liquid")
 
     # AI-328701 process-condensate conductivity soft sensor (stream 740, read-only)
-    _nh3_740, _urea_740 = ppm_infer_328701(s.a328_c004_T, s.a328_c003_T, m_931_live=m_931, m_739_live=m_739)
-    _ai701_uS = cond_infer_328701(_nh3_740, _urea_740, 0.0)                  # CO2 fully co-stripped with NH3
+    _nh3_base_740, _urea_base_740 = ppm_infer_328701(
+        s.a328_c004_T, s.a328_c003_T, m_931_live=m931_prev, m_739_live=m739_prev
+    )
+    _nh3_740 = ((_nh3_base_740 * m739_prev / 1.0e6
+                 + cq740_prev.component_kgh.get("NH3", 0.0))
+                / max(m739_prev + cq740_prev.mass_kgh, 1.0e-9) * 1.0e6)
+    _urea_740 = ((_urea_base_740 * m739_prev / 1.0e6
+                  + cq740_prev.component_kgh.get("Urea", 0.0))
+                 / max(m739_prev + cq740_prev.mass_kgh, 1.0e-9) * 1.0e6)
+    _co2_740 = (cq740_prev.component_kgh.get("CO2", 0.0)
+                / max(m739_prev + cq740_prev.mass_kgh, 1.0e-9) * 1.0e6)
+    _ai701_uS = cond_infer_328701(_nh3_740, _urea_740, _co2_740)
     _d003_levels = d003_level_telemetry(s)
 
     # Dynamic sequential-modular tear audit.  These recycle signals cross real vessel/line
@@ -8343,7 +8520,7 @@ def step_sim(dt: float) -> dict:
     # can detect convergence and dynamic callers can distinguish transport lag from solver failure.
     _tear_pairs = {
         "328C003_overhead_748": (m748_prev, m_748),
-        "328C004_overhead_750": (m750_prev, m_750),
+        "328C004_overhead_750": (m750_prev, m_750_down),
         "328D001_reflux_775": (m775_prev, m_775),
         "323D011_return_718A": (m718A_prev, m_718A),
         "328C004_steam_931": (m931_prev, m_931),
@@ -8450,6 +8627,10 @@ def step_sim(dt: float) -> dict:
     return {
         "t":           time.time(),      # desktop clock (epoch s)
         "t_sim":       s.sim_t,          # plant clock (s since program init); trend X axis
+        "CONSEQUENCE_TRANSPORT": {
+            name: dict(values)
+            for name, values in s.tlag.get("CQ_DIAGNOSTICS", {}).items()
+        },
         "RECYCLE_TEAR_RESIDUAL": {
             "method": "observed_dynamic_transport_tears",
             "is_solver_convergence": False,

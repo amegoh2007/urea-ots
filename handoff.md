@@ -100,6 +100,17 @@ static-head term is in level fraction and is exact.
 **Tried:** a uniform `CQ_SEAL_BAND_PCT = 3.0 %` of level span. 322R001 is exempt — its exit funnel
 elevation is a real datasheet number and is used directly.
 
+## G-CQ-6 — Field line inventories for consequence transport
+**Affects:** the exact arrival time of seal-loss gas and entrained-liquid disturbances at downstream
+equipment.
+**Implemented:** every consequence travels as one mass/temperature/species packet. Each physical
+route has an effective line inventory back-calculated from the established 8 s gas-front or 20 s
+liquid-slug design anchor; live dead time varies as inventory divided by live carrier flow and is
+capped at 1 800 s. Receiving-vessel response comes from its existing mass and energy holdup.
+**Missing:** field pipe lengths, fittings, and retained volumes for the seven routed connections.
+Replacing an effective inventory with surveyed geometry requires no change to the packet or
+downstream-balance equations.
+
 ## G-VLE-1 — Urea is a diluent, not a UNIQUAC species
 **Affects:** the 323C003 and 323F004 bubble points.
 **Missing:** urea interaction parameters for the Extended UNIQUAC NH3-CO2-H2O parameter set (Darde's

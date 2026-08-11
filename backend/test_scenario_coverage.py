@@ -66,6 +66,32 @@ def test_thermodynamic_router_rejects_unknown_process_domains():
         thermo_package_for("UNKNOWN")
 
 
+def test_equivalent_unlisted_consequences_transport_identical_properties_and_composition():
+    """Catch scenario identity changing the D/S stream produced by the shared consequence law."""
+    route = cq.ConsequenceRoute("source", "destination", 3600.0, 5.0)
+    consequence = cq.make_stream_packet(
+        100.0, {"NH3": 20.0, "CO2": 30.0, "H2O": 50.0}, 120.0, 2.0
+    )
+    stores = ({}, {})
+    for _ in range(100):
+        for store in stores:
+            cq.transport_stream_packet(
+                store, "route", cq.ZERO_PACKET, route, 3600.0, 0.1
+            )
+    outputs = []
+    for _ in range(51):
+        outputs = [
+            cq.transport_stream_packet(
+                store, "route", consequence, route, 3600.0, 0.1
+            )
+            for store in stores
+        ]
+
+    assert outputs[0] == outputs[1] == consequence
+    assert sum(outputs[0].component_kgh.values()) == pytest.approx(outputs[0].mass_kgh)
+    assert sum(outputs[0].mass_fraction.values()) == pytest.approx(1.0)
+
+
 def _carry(level: float, vapour: float = 100.0, pressure: float = 1.0) -> float:
     return cq.entrainment_carryover_kgh(
         vapour, 100.0, level, 0.5,

@@ -158,9 +158,28 @@ check("328C004 seal loss produces blow-through (no scenario was ever written for
 
 print("\n=== 4b. UNLISTED: 328C003 hydrolyser low level (16.8 bar -> 3.7 bar) ===")
 s = fresh(); run(20)
-s.a328_c003_M = 1.0
-run(50)
+s.LIC_328504["mode"] = "MAN"; s.LIC_328504["op"] = 100.0
+p_c004_0 = s.a328_c004_P
+route_peak = 0.0; route_early = 0.0; p_c004_peak = p_c004_0; route_diag = None
+for i in range(250):
+    s.a328_c003_M = 1.0
+    packet = run(1)
+    diag = packet["CONSEQUENCE_TRANSPORT"]["328C003_TO_328C004"]
+    if i < 10:
+        route_early = max(route_early, diag["arrived_mass_kgh"])
+    if diag["arrived_mass_kgh"] > route_peak:
+        route_peak = diag["arrived_mass_kgh"]
+        route_diag = diag
+    p_c004_peak = max(p_c004_peak, s.a328_c004_P)
 check("328C003 seal loss produces blow-through", s.flags.get("LV328504_BLOWTHROUGH", False))
+check("328C003 consequence does not teleport to 328C004", route_early == 0.0)
+check("328C003 gas reaches and pressurizes 328C004 after line residence",
+      route_diag is not None and route_peak > 0.0 and p_c004_peak > p_c004_0,
+      f"arrival {route_peak:,.0f} kg/h, P {p_c004_0:.3f}->{p_c004_peak:.3f} bar a")
+check("328C003 arrived stream closes its component balance",
+      route_diag is not None
+      and abs(sum(route_diag["component_kgh"].values()) - route_peak) < 1e-6,
+      str(route_diag["mass_fraction"] if route_diag else {}))
 
 # ------------------------------------------------- 5. Scenarios3.md 1.2 LPCC drum level
 print("\n=== 5. LPCC DRUM (323D011) LEVEL (Scenarios3.md 1.2) ===")

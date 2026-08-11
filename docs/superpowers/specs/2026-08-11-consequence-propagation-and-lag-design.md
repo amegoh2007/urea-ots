@@ -1,6 +1,6 @@
 # Consequence Propagation and Lag Design
 
-**Date:** 2026-08-11  
+**Date:** 2026-08-11
 **Scope:** Unlisted deviations that produce the same physical consequence classes as the 48 scenarios in
 `References/scenarios/Scenarios.md`, `Scenarios2.md`, and `Scenarios3.md`
 

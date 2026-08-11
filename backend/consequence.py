@@ -68,6 +68,8 @@ REFERENCES
 from __future__ import annotations
 
 import math
+from collections import deque
+from dataclasses import dataclass
 
 R_GAS_J = 8.314462618          # J/mol.K
 G_ACC   = 9.80665              # m/s2
@@ -366,6 +368,143 @@ def mushy_flow_factor(t_c: float, t_cryst_c: float, dt_mush: float = 5.0,
 # ==================================================================================================
 #  6.  TRANSPORT LAG  --  a consequence arrives when the fluid arrives, not on the same tick
 # ==================================================================================================
+
+
+@dataclass(frozen=True)
+class StreamPacket:
+    """One conservative stream-rate sample transported as an indivisible packet.
+
+    Component rates are stored as a sorted tuple so a frozen packet cannot retain a caller-owned mutable
+    dictionary.  Total flow, composition, and sensible enthalpy are therefore different views of the same
+    component vector, not independently lagged signals.
+    """
+
+    mass_kgh: float
+    temperature_c: float
+    cp_kj_kgk: float
+    _component_items: tuple[tuple[str, float], ...]
+
+    @property
+    def component_kgh(self) -> dict[str, float]:
+        return dict(self._component_items)
+
+    @property
+    def mass_fraction(self) -> dict[str, float]:
+        if self.mass_kgh <= 0.0:
+            return {name: 0.0 for name, _ in self._component_items}
+        return {name: flow / self.mass_kgh for name, flow in self._component_items}
+
+    @property
+    def sensible_kw(self) -> float:
+        return self.mass_kgh * self.cp_kj_kgk * self.temperature_c / 3600.0
+
+
+ZERO_PACKET = StreamPacket(0.0, 0.0, 0.0, ())
+
+
+def make_stream_packet(mass_kgh: float, component_kgh: dict[str, float],
+                       temperature_c: float, cp_kj_kgk: float) -> StreamPacket:
+    """Build a closed stream packet, rejecting an independently inconsistent total."""
+    values: dict[str, float] = {}
+    for name, raw in component_kgh.items():
+        value = float(raw)
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(f"component mass flow must be finite and nonnegative: {name}")
+        if value > 0.0:
+            values[str(name)] = value
+
+    total = sum(values.values())
+    stated = float(mass_kgh)
+    tolerance = max(1.0e-9, 1.0e-9 * max(abs(total), abs(stated), 1.0))
+    if not math.isfinite(stated) or stated < 0.0 or abs(stated - total) > tolerance:
+        raise ValueError(
+            f"component mass flow sum {total:g} kg/h does not match total {stated:g} kg/h"
+        )
+    if total <= tolerance:
+        return ZERO_PACKET
+    if not math.isfinite(temperature_c):
+        raise ValueError("temperature must be finite")
+    if not math.isfinite(cp_kj_kgk) or cp_kj_kgk <= 0.0:
+        raise ValueError("heat capacity must be finite and positive")
+    return StreamPacket(
+        total,
+        float(temperature_c),
+        float(cp_kj_kgk),
+        tuple(sorted(values.items())),
+    )
+
+
+def mix_stream_packets(*packets: StreamPacket) -> StreamPacket:
+    """Mass- and sensible-enthalpy-mix packets without desynchronizing their properties."""
+    components: dict[str, float] = {}
+    heat_capacity_rate = 0.0
+    sensible_kw = 0.0
+    for packet in packets:
+        if packet.mass_kgh <= 0.0:
+            continue
+        for name, flow in packet._component_items:
+            components[name] = components.get(name, 0.0) + flow
+        heat_capacity_rate += packet.mass_kgh * packet.cp_kj_kgk
+        sensible_kw += packet.sensible_kw
+    total = sum(components.values())
+    if total <= 0.0:
+        return ZERO_PACKET
+    cp_mix = heat_capacity_rate / total
+    temperature_c = sensible_kw * 3600.0 / heat_capacity_rate
+    return make_stream_packet(total, components, temperature_c, cp_mix)
+
+
+@dataclass(frozen=True)
+class ConsequenceRoute:
+    """Physical connection whose effective line inventory sets consequence dead time."""
+
+    source: str
+    destination: str
+    design_carrier_kgh: float
+    design_dead_time_s: float
+    max_dead_time_s: float = 1800.0
+
+    @property
+    def line_inventory_kg(self) -> float:
+        return max(self.design_carrier_kgh, 0.0) * max(self.design_dead_time_s, 0.0) / 3600.0
+
+    def dead_time_s(self, live_carrier_kgh: float) -> float:
+        if live_carrier_kgh <= 1.0e-9:
+            return max(self.max_dead_time_s, 0.0)
+        value = self.line_inventory_kg * 3600.0 / live_carrier_kgh
+        return clamp(value, 0.0, max(self.max_dead_time_s, 0.0))
+
+
+def transport_stream_packet(store: dict, key: str, target: StreamPacket,
+                            route: ConsequenceRoute, live_carrier_kgh: float,
+                            dt: float) -> StreamPacket:
+    """Delay a complete packet through one line using a timestamped, zero-order-held FIFO.
+
+    Identical consecutive packets are coalesced, so a long settled run keeps only one history sample.
+    The initial output is zero because this API transports departures/consequences, not background duty.
+    """
+    if dt <= 0.0:
+        return target
+    state = store.get(key)
+    if state is None:
+        state = {"time_s": 0.0, "buffer": deque(), "output": ZERO_PACKET,
+                 "dead_time_s": route.dead_time_s(live_carrier_kgh)}
+        store[key] = state
+    state["time_s"] += dt
+    now = state["time_s"]
+    dead_time = route.dead_time_s(live_carrier_kgh)
+    state["dead_time_s"] = dead_time
+    buffer = state["buffer"]
+    if not buffer or buffer[-1][1] != target:
+        buffer.append((now, target))
+    cutoff = now - dead_time
+    while len(buffer) >= 2 and buffer[1][0] <= cutoff + 1.0e-9:
+        buffer.popleft()
+    if buffer and buffer[0][0] <= cutoff + 1.0e-9:
+        state["output"] = buffer[0][1]
+    return state["output"]
+
+
 def transport_time_s(volume_m3: float, mass_flow_kgh: float, rho: float,
                      td_max_s: float = 1800.0) -> float:
     """Plug-flow transit time of a connecting line, s:  td = rho*V / m_dot.

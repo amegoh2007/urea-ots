@@ -270,10 +270,50 @@ cancels identically at design and only the slope reaches the engine.
 
 ## Consequence Transport Lag
 
-A consequence arrives when the fluid arrives. Gas fronts carry `CQ_BLOW_TD_S`, liquid slugs carry
-`CQ_CARRY_TD_S`, and `consequence.transport_time_s(V, m_dot, rho)` derives a line's plug-flow transit
-from its own inventory where the geometry is known. A seal loss at 323F004 therefore reaches 323F010
-before it reaches 324F001, and 324F003 last — the ordering an operator sees on the trends.
+A consequence arrives when its fluid parcel arrives. `consequence.StreamPacket` carries one closed
+set of total mass rate, per-component mass rates, temperature, heat capacity, and sensible-enthalpy
+rate. Total flow and mass fractions are derived from the component vector, so flow, temperature, and
+composition cannot be delayed on different clocks.
+
+Packets mix by component and sensible-enthalpy balances:
+
+```text
+m_mix,i = sum_j(m_j,i)
+m_mix   = sum_i(m_mix,i)
+Cp_mix  = sum_j(m_j Cp_j) / m_mix
+T_mix   = sum_j(m_j Cp_j T_j) / (m_mix Cp_mix)
+w_mix,i = m_mix,i / m_mix
+```
+
+`ConsequenceRoute` treats a connection as plug flow. Its effective line inventory is struck from the
+established design travel-time anchor, then its live delay varies with the live carrier:
+
+```text
+M_line = m_design * theta_design / 3600
+theta_live = clamp(3600 M_line / m_live, 0, 1800 s)
+```
+
+Gas fronts use the 8 s design anchor and liquid slugs use 20 s. A timestamped FIFO delays the whole
+packet; the downstream vessel's existing mass, energy, species, and gas-inventory ODEs supply the
+additional mixed-holdup response. No second output filter is added, so residence time is not counted
+twice. For example, the relatively small 322C001 seal-loss gas rate gives about 83 s live transit
+through a line sized for 33 t/h of liquid, while higher gas loads arrive sooner.
+
+The physical route registry covers:
+
+| source | destination | downstream balances consuming the arrived packet |
+|---|---|---|
+| 322E001 | 323C003 / LP overhead | overhead mass, temperature, components, LPCC duty |
+| 323C003 | 323F004 | flash pressure and LPCC overhead mass/energy/species |
+| 323F004 | 323F010 | pre-evaporator vacuum gas inventory |
+| 323F010 | 324E002 | Stage-1 condenser/ejector non-condensable load |
+| 328C003 | 328C004 | desorber-II sensible load, gas inventory, and recycle species |
+| 328C004 | stream 740 | process-condensate flow, temperature, composition, and AI-328701 |
+| 322C001 | 323E003/323D001 | LPCC mass, energy, condensation, and pressure load |
+
+`CONSEQUENCE_TRANSPORT` publishes the exact arrived packets consumed by physics, including live dead
+time and component closure. Route names describe topology only. The generating scenario's name is
+never an input, so an unlisted seal loss uses the same downstream equations as a listed one.
 
 ## PT-329201 Synthesis-Loop Pressure
 
