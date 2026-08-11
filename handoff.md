@@ -2,29 +2,38 @@
 
 Running list of *currently open* modelling gaps only. Delete an entry when closed.
 
-## G-LOOP-1 — The static design seed is not the coupled-loop fixed point (PRE-EXISTING)
-**Affects:** the whole HP synthesis loop, and through it every downstream section.
-**Symptom:** integrating from a fresh `State()` — the seed the live server starts on, since
-`_apply_pin` re-creates it after the boot settle — the loop does not stay at the design point. It
-walks to a pressure clamp within ~10 min of plant time, together with the stripper sump, the HPCC
-sump and the scrubber sump saturating.
-**Measured 2026-08-11**, fresh `State()`, 600 s of plant time, no operator action:
+## G-HMB-1 — The HP-loop boundary anchors do not reconcile with each other
+**Affects:** any calculation that sums ABSOLUTE flows around the synthesis envelope.
+**Symptom:** three different numbers exist for the HP scrubber off-gas (PFD stream 204), and no two
+of them agree:
 
-| build | p_syn (bar a) | strip level | HPCC level | scrub level |
-|---|---|---|---|---|
-| committed baseline `f08149e` | **10.0** (lower clamp) | 99.9 % | 20.0 % | 43.0 % |
-| current working tree | **180.0** (upper clamp) | 47.3 % | 100.0 % | 77.7 % |
+| source | 204 off-gas, kg/h |
+|---|---|
+| engine `SCRUB_OFFGAS_KMOLH_DES` | 5 901 |
+| PFD stream table, 1750 MTPD 100 % load | 1 708 |
+| value that would close the boundary balance | 3 733 |
 
-Both builds diverge; the consequence-physics work changed the SIGN of the divergence, not its
-existence. Each individual tick is stationary at the seed (verified: relative change < 1e-4 on
-tick 1, so the design HMB and the boot pin are exact), so this is a slow accumulation in the coupled
-tear structure, not a bad anchor.
-**Not yet tried:** the likely candidates are the one-tick tear ordering around
-`p_syn_bara ← (m_in_loop − m_out_loop)/C_loop` and the sump ODEs that feed it; a tear-convergence
-sweep (iterate the synthesis tears to an algebraic residual within a tick, as unit 324 already does
-for its P/T loop) would show whether the drift is a tear artefact or a genuine imbalance.
-**Do not** paper over it with a lag or a clamp — the clamps at 10 and 180 bar a are what is
-currently hiding it, and both are far outside `SYN_P_MAX_BARA = 144.2`.
+With the engine's value the envelope is open by −2 168 kg/h at the design point
+(in: NH3 42 762 + CO2 54 618 + wash 36 835 = 134 215; out: bottoms 130 480 + off-gas 5 901).
+With the PFD's it is open by +2 005 the other way. The scrubber's own balance does not close either
+(in 22 356 reactor off-gas + 36 915 wash vs out 1 708 off-gas + 53 368 overflow, residual +4 195).
+**Contained, not fixed:** the PT-329201 pressure balance is now written in DEPARTURE form, so the
+residual can no longer act as a standing pressure forcing and the answer does not depend on which
+number is right. But the disagreement is still there and any future code that sums absolute flows
+around this envelope will inherit it.
+**Needs:** a data reconciliation of the 322 envelope against the PFD (`reconcile_crowe.py` exists
+for exactly this and is not currently applied to unit 322).
+
+## G-LOOP-2 — Residual slow creep in the 322E003 sump
+**Affects:** 322E003 scrubber sump level, and a small standing bottoms offset.
+**Symptom:** with the G-LOOP-1 pressure runaway fixed, the loop holds (p_syn 140.70 → 140.46 over
+6 000 s and turning back up; HPCC level 50 → 52.4 % and steady; stripper level 50.00 flat). What
+remains is the scrubber sump creeping 50 → 55 % over the same 6 000 s, alongside a persistent
+`d_bot` of +300…+500 kg/h — i.e. the stripper is draining slightly above its design rate throughout.
+**Not yet tried:** the sump ODE has genuine feedback through the ejector entrainment curve
+(`scrub_lvl_frac`), so this is likely an offset in `m_cond_in` vs `EJ_SUC_TOT_DES` rather than a
+missing feedback path. Two orders of magnitude smaller than what G-LOOP-1 was; check it against
+G-HMB-1 first, since a 4 195 kg/h unreconciled scrubber balance is the obvious suspect.
 
 ## G-CW-1 — 323E011 has no cooling-water boundary
 **Affects:** Scenarios3.md 1.4/1.5 as they apply to the 323E011 LP carbamate condenser.

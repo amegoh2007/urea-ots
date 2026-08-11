@@ -243,6 +243,58 @@ A consequence arrives when the fluid arrives. Gas fronts carry `CQ_BLOW_TD_S`, l
 from its own inventory where the geometry is known. A seal loss at 323F004 therefore reaches 323F010
 before it reaches 324F001, and 324F003 last — the ordering an operator sees on the trends.
 
+## PT-329201 Synthesis-Loop Pressure
+
+The loop pressure is a gas-inventory balance over the HP envelope, written entirely in **departure
+form** — every stream enters as its deviation from its own design value:
+
+```text
+gas_space_frac = clamp((1 - L_react) / (1 - L_react,design), 0.05, 1.5)
+C_loop         = 1500 kg/bar * gas_space_frac
+dP/dt          = [ (Δm_NH3 + Δm_CO2 + Δm_wash) - (Δm_bottoms + Δm_vent + m_blowthrough)
+                   - vapour_collapse ] / C_loop
+vapour_collapse = k_wash*(wash_scale - co2_scale)⁺ + k_CW*(T_CCW,des - T_CCW)⁺
+                  + k_HPCC*(T_sat,HPCC,des - T_sat(P_LP)) - k_strip*(T_sat(P_MP) - T_sat,strip,des)
+```
+
+All four collapse/swell terms are **vapour mass rates in kg/h** through the same `C_loop`, bounded by
+`SYN_P_COLLAPSE_MAX_KGH`, so they are commensurate with the boundary balance rather than competing
+with it. Every bracket is a literal 0.0 at design, so `dP/dt = 0` there.
+
+### Why it was rewritten (G-LOOP-1, 2026-08-11)
+
+The previous form could not hold its own design point: from a fresh seed, with no operator action,
+the loop railed to a pressure clamp inside 600 s. Three measured defects:
+
+| # | defect | measured |
+|---|---|---|
+| 1 | balance summed **absolute** flows over an envelope whose anchors do not reconcile | open by −2 168 kg/h at design |
+| 2 | `gas_space_frac` divided by `(100 − REACT_LEVEL_NLL_PCT)` = 20 while being fed the *physical head* %, design 97.52 | `C_loop` = 186 instead of 1500 — every imbalance amplified 8× |
+| 3 | three of four collapse gains were **bar/h per K** applied to live steam-header saturation temperatures, at 5000 and 2000 | at t = 200 s: HPCC +1287, strip −1395, mass −27 bar/h |
+
+Defect 3 is why the direction of the drift flipped between builds: two terms ~50× the mass balance,
+opposite in sign, cancelling only by accident, and diverging when the steam headers moved. The loop
+pressure was effectively decided by sub-degree LP/MP header noise. (A fourth gain,
+`SYN_P_CW_COLLAPSE_GAIN`, was documented in kg/h and summed with the other three as bar/h.)
+
+Result, fresh design seed, 6 000 s of plant time, nothing touched:
+
+| | before | after |
+|---|---|---|
+| p_syn | rails to a clamp in 600 s | 140.700 → 140.463, turning back up |
+| HPCC level | 50 → 100 % (railed) | 50 → 52.4 %, steady |
+| stripper level | 99.9 % / 47.3 % depending on build | 50.00 %, flat |
+
+Step response is preserved: −20 % CO2 → −1.31 bar; HV-322604 opened 50→90 % → −1.74 bar; pinched
+50→20 % → +0.20 bar; CCW −10 K → −0.20 bar; LV-322501 wide open → −4.68 bar. Magnitudes are much
+smaller than the old gains produced — those values could not be retained, because they rail the loop
+unprompted.
+
+The 322E002 sump was the second symptom: the comment block there describes a gravity-head outflow
+`phi_out = phi_fwd·(L/NLL)` that "settles at a bounded equilibrium instead of railing", but the code
+under it read `phi_out = phi_fwd` — the level term was missing, leaving exactly the pure integrator
+the comment says was fixed. Restored as documented.
+
 ## Assumptions and Limits
 
 - The model is reduced order: calibrated design conductance scales with process flow because no off-design exchanger datasheet is available.

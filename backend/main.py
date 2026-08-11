@@ -3499,7 +3499,8 @@ SCRUB_CARB_ABS_GAIN  = 0.28      # kmol extra CO2 scrubbed per kmol surplus carb
 SCRUB_CW_ABS_GAIN       = 0.5       # kmol extra CO2 scrubbed per degree CW subcooling
 SCRUB_CW_COND_GAIN_KW   = 150.0     # kW extra condensation duty per degree CW subcooling
 SCRUB_OFFGAS_CW_COOLING = 0.8       # C offgas cooling per degree CW subcooling
-SYN_P_CW_COLLAPSE_GAIN  = 50.0      # kg/h vapor collapse rate per degree CW subcooling
+# (SYN_P_CW_COLLAPSE_GAIN retired -> SYN_P_CW_COLLAPSE_KGH_K, same value, same units; see
+#  the synthesis-loop gas-inventory block below.)
 # -- SUPERSEDED off-gas datasheet (img1 MOL%, 64.78 kmol/h): does NOT route 100% of inerts -> vent and
 #   leaves the scrubber node open.  Retained as provenance + to keep audit imports resolvable; NOT live. --
 SCRUB_OFFGAS_MOLPCT  = {"N2": 68.81, "O2": 11.39, "NH3": 8.26, "CH4": 5.93,       # superseded img1 MOL%
@@ -3511,6 +3512,10 @@ SCRUB_OFFGAS_MOL_DES = 64.78     # kmol/h OLD design off-gas total (322E003 -> 3
 _SCRUB_OFFGAS_RECON = {"CO2": 62.18213955, "CH4": 3.86000000, "H2": 2.02000000, "N2": 44.53000000,
                        "NH3": 94.76367511, "O2": 7.42000000, "H2O": 0.0}
 SCRUB_OFFGAS_KMOLH_DES = {k: _SCRUB_OFFGAS_RECON.get(k, 0.0) for k in MW_COMP}   # span all 9 comps (Urea/Biuret=0)
+SCRUB_OFFGAS_DES_KGH = sum(SCRUB_OFFGAS_KMOLH_DES[k] * MW_COMP[k] for k in MW_COMP)
+#   5901.4 kg/h.  NOTE (G-HMB-1): PFD stream 204 gives 1708 kg/h for this same off-gas, and
+#   closing the HP-loop boundary balance would need 3733.  The three numbers disagree; the
+#   PT-329201 balance is written in departure form so it does not depend on which is right.
 # Overflow design vector IS the 322F001 ejector suction (single source of truth -> DRY, bit-identical):
 SCRUB_OVERFLOW_KMOLH_DES = {k: EJ_SUCTION_KGH[k] / MW_COMP[k] for k in MW_COMP}   # Σ ≈ 2519.4 kmol/h
 # --- 322E003 sump liquid inventory (Option 3: TRUE dynamic state, not a display lag) ---
@@ -3534,9 +3539,28 @@ SCRUB_OFFGAS_P_BARA  = 140.7     # bar a, off-gas line pressure (synthesis)
 SCRUB_OFFGAS_RHO     = 111.0     # kg/m³, off-gas density (114 C, 140.7 bar a)
 SCRUB_WASH_SINK_KW         = 3656.0  # kW, rigorous sensible cooling (36915 kg/h * 3.4 kJ/kgK * 104.8 K)
 SCRUB_OFFGAS_WASH_COOLING  = 24.0    # C, rigorous direct contact thermal mass ratio cooling
-SYN_P_WASH_COLLAPSE_GAIN   = 8500.0  # bar/h, volumetric collapse based on reactor vapor holholdup
-SYN_P_HPCC_COLLAPSE_GAIN   = 5000.0  # bar/h, loop pressure collapse per degree HPCC steam drum subcooling
-SYN_P_STRIP_SWELL_GAIN     = 2000.0  # bar/h, loop pressure swell per degree Stripper steam superheating
+# --- Synthesis-loop gas-inventory terms (see the PT-329201 block in step_sim, G-LOOP-1) ----------
+# All four are VAPOUR MASS RATES (kg/h) and go through C_loop, so they are commensurate with the
+# boundary-flow balance instead of being free bar/h gains that dwarfed it by ~50x.  Each is scaled on
+# a real design duty rather than picked:
+SYN_P_C_LOOP_KG_BAR        = 1500.0  # kg of gas inventory per bar of loop pressure, at the design
+#   reactor head.  Retained from the original model; it is the one number in this block that was
+#   dimensionally sound.  gas_space_frac scales it as the reactor floods.
+SYN_P_WASH_COLLAPSE_KGH    = 18000.0 # kg/h of vapour absorbed per unit of (wash_scale - co2_scale).
+#   Scaled on the design wash flow R3232_E003_M308_DES (36 835 kg/h): a full unit of excess cold
+#   water-rich wash absorbs roughly half its own mass out of the vapour space before it saturates.
+SYN_P_CW_COLLAPSE_KGH_K    = 50.0    # kg/h of extra carbamate condensed per K of CCW subcooling.
+#   Unchanged in value -- the original constant was ALREADY documented in kg/h; it was the only one
+#   of the four with honest units and it was being summed with three bar/h terms.
+SYN_P_HPCC_COLLAPSE_KGH_K  = 3000.0  # kg/h of extra stripper overhead condensed per K of HPCC shell
+#   subcooling.  ~2 % of the design HPCC liquid make per K, which is the right order for a shell
+#   whose duty is set by (T_sat,shell - T_process).
+SYN_P_STRIP_SWELL_KGH_K    = 1500.0  # kg/h boiled back out of the bottoms per K of extra stripper
+#   shell superheat.  ~1 % of the design stripper overhead per K.
+SYN_P_COLLAPSE_MAX_KGH     = 60000.0 # kg/h ceiling on the net collapse/swell.  A condensing surface
+#   cannot condense more than it can condense: this bounds the term at roughly the design HPCC
+#   liquid make, so no combination of excursions can drive the pressure faster than the loop's own
+#   condensing capacity allows.
 SCRUB_OVERFLOW_T_C   = 178.8     # C, TT-322002 overflow temp -> 322F001 (= EJ_T_SUCTION_C)
 SCRUB_OVERFLOW_P_BARA = 140.7    # bar a, PT-329201 overflow-line pressure
 SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exotherm (diagnostic)
@@ -6114,7 +6138,14 @@ def step_sim(dt: float) -> dict:
     # L = NLL -> phi_out = phi_fwd -> dL = 0 (NLL is now an exact fixed point; bit-exact design).
     _hpcc_liq_des = HPCC_LIQ_DES_LIVE or HPCC_LIQ_DES_KGH      # live settled ref once pinned
     phi_in_hpcc  = (hpcc["liq_kgh"] / _hpcc_liq_des) if _hpcc_liq_des else phi_fwd
-    phi_out_hpcc = phi_fwd
+    # G-LOOP-1, second symptom.  The comment block above describes the gravity-head outflow that
+    # makes this a stable first-order lag -- "phi_out = phi_fwd·(L/NLL) ... settles at the bounded
+    # equilibrium L_eq = NLL·(phi_in/phi_fwd) instead of railing" -- but the code that followed it
+    # was `phi_out_hpcc = phi_fwd`, with the level term missing.  So the level was exactly the pure
+    # integrator that comment says was fixed, and it walked 50 -> 100 % in ~65 min of plant time from
+    # the design seed with nothing else moving.  Restored as documented.  At design L == NLL, so the
+    # ratio is exactly 1.0, phi_out == phi_fwd, dL == 0 -- bit-exact, and the pin is untouched.
+    phi_out_hpcc = phi_fwd * (s.hpcc_level_pct / HPCC_LEVEL_NLL_PCT)
     if s.hpcc_level_pct <= 0.0 and phi_out_hpcc > phi_in_hpcc:
         phi_out_hpcc = phi_in_hpcc
     dL_hpcc      = k_loop_fill * (phi_in_hpcc - phi_out_hpcc) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
@@ -8281,22 +8312,87 @@ def step_sim(dt: float) -> dict:
     _tear_tol = 1.0e-6
     _tear_norm = max(_tear_resid.values(), default=0.0)
 
-    # Dynamic Pressure Anchor (Mass Balance ODE)
-    # Loop mass capacity ~ 1500 kg/bar. 
-    # Scenario B: Reactor Hydraulic Overpressure. As level rises, gas space compresses.
-    gas_space_frac = clamp((100.0 - s.react_level_pct) / (100.0 - REACT_LEVEL_NLL_PCT), 0.05, 1.5)
-    C_loop = 1500.0 * gas_space_frac
-    m_in_loop = (F_pump_total_th * 1000.0) + F_CO2_feed_kgh + m_308
-    m_out_loop = drain_kgh + hv604["mass_kgh"] + s.tlag.get("STRIP_BLOWTHROUGH_GAS_KGH", 0.0)
-    
-    # Observation 5: Cold, water-rich wash aggressively condenses vapor, collapsing the vapor space and dropping pressure
-    vapor_collapse_rate = (SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - react["co2_scale"], 0.0)
-                           + SYN_P_CW_COLLAPSE_GAIN * max(SCRUB_CCW_T_IN_DES - tic["pv"], 0.0)
-                           + SYN_P_HPCC_COLLAPSE_GAIN * (HPCC_STEAM_TSAT_C - T_shell_lp)
-                           - SYN_P_STRIP_SWELL_GAIN * (T_steam_live - STRIP_STEAM_T_DES_C))
-    s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0) - vapor_collapse_rate * (dt / 3600.0),
-                         10.0, 180.0)
-                         
+    # =============================================================================================
+    #  PT-329201 SYNTHESIS-LOOP PRESSURE  —  gas-inventory balance over the HP envelope
+    # =============================================================================================
+    #  Rewritten 2026-08-11 after the G-LOOP-1 investigation.  What was here could not hold its own
+    #  design point: from a fresh design seed, with no operator action, the loop walked to a pressure
+    #  clamp inside 600 s of plant time.  Three separate defects, all measured:
+    #
+    #  (1) THE BALANCE WAS OPEN AT DESIGN, by -2168 kg/h.  It summed absolute flows:
+    #          in  = NH3 feed 42 762 + CO2 feed 54 618 + wash 308 36 835 = 134 215 kg/h
+    #          out = bottoms 130 480 + HV-322604 off-gas 5 901           = 136 381 kg/h
+    #      Those anchors do not reconcile, and the PFD says why: stream 204 (the HP scrubber off-gas
+    #      to 322C001) is 1708 kg/h, while the engine's SCRUB_OFFGAS_KMOLH_DES sums to 5901 -- 3.5x
+    #      the licensor value.  Closure would need 3733.  So the envelope was never a reconciled
+    #      control volume, and the residual acted as a permanent pressure forcing.
+    #      FIX: the same DEPARTURE idiom every other term in this engine uses.  Each stream enters as
+    #      its deviation from its OWN design value, so the design residual is identically zero by
+    #      construction and only CHANGES in the flows move the pressure.  This does not require the
+    #      anchors to be reconciled with each other -- which is a separate data question (G-HMB-1) --
+    #      and it cannot be silently re-opened by a future anchor edit.
+    #
+    #  (2) THE LOOP CAPACITANCE WAS 8x TOO SMALL, from a unit mismatch.  `gas_space_frac` divides by
+    #      (100 - REACT_LEVEL_NLL_PCT) = 20, i.e. it was written when `react_level_pct` meant the
+    #      LT-322504 NARROW-BAND reading whose design value is 80 %.  It is now the PHYSICAL head as
+    #      a % of the 25 m T/T span, whose design value is 97.52 %.  So at design the fraction
+    #      evaluated to 0.124 instead of 1.0 and C_loop was 186 kg/bar instead of 1500 -- every
+    #      imbalance amplified eightfold.  Now referenced to the design head, so it is exactly 1.0 at
+    #      design and still compresses as the reactor floods (the Scenario-B overpressure path).
+    #
+    #  (3) THE VAPOUR-COLLAPSE TERMS DWARFED THE MASS BALANCE AND DECIDED THE SIGN OF THE DRIFT.
+    #      Three of the four gains were bar/h per degree, applied to LIVE steam-header saturation
+    #      temperatures, at 5000 and 2000 bar/h/K.  Measured at t = 200 s from the design seed:
+    #          HPCC term  +1287 bar/h        strip term  -1395 bar/h        mass term  -27 bar/h
+    #      i.e. two terms ~50x the mass balance, opposite in sign, cancelling only by accident --
+    #      and diverging to -8363 / +1633 when the steam headers moved at t ~ 350 s, which is what
+    #      railed the loop.  It also explains why the drift SIGN flipped between builds: it was set
+    #      by sub-degree steam-header noise, not by the synthesis loop.  (The fourth gain,
+    #      SYN_P_CW_COLLAPSE_GAIN, is documented in kg/h and was being summed with the other three
+    #      as bar/h -- the unit inconsistency was in the source.)
+    #      FIX: every collapse/swell term is now a VAPOUR MASS RATE in kg/h and goes through the same
+    #      C_loop as the mass balance, so all four are commensurate, bounded by the same capacitance,
+    #      and scaled on real design duties instead of free gains.  Each is still exactly zero at
+    #      design.  Consequence to be aware of: the operator-visible MAGNITUDE of these responses is
+    #      much smaller than before -- the previous values could not be kept, because they rail the
+    #      loop unprompted.
+    #
+    #  Design-exactness: every bracket below is a literal 0.0 at the design seed, so dP/dt == 0 and
+    #  the pin is untouched.
+    gas_space_frac = clamp((1.0 - s.react_level_pct / 100.0)
+                           / max(1.0 - REACT_LEVEL_DES_M / REACT_LIQ_H_M, 1e-6), 0.05, 1.5)
+    C_loop = SYN_P_C_LOOP_KG_BAR * gas_space_frac
+    # Departure balance: deviation of each boundary flow from its own design value.
+    d_nh3  = (F_pump_total_th * 1000.0) - EJ_MOTIVE_NH3_DES
+    d_co2  = F_CO2_feed_kgh - CO2_DES_KGH
+    d_wash = m_308 - R3232_E003_M308_DES
+    d_bot  = drain_kgh - STRIP_BOT_DES_KGH
+    d_vent = hv604["mass_kgh"] - SCRUB_OFFGAS_DES_KGH
+    d_blow = s.tlag.get("STRIP_BLOWTHROUGH_GAS_KGH", 0.0)          # 0 at design by construction
+    m_in_loop  = d_nh3 + d_co2 + d_wash                            # kg/h ABOVE design entering
+    m_out_loop = d_bot + d_vent + d_blow                           # kg/h ABOVE design leaving
+    # Vapour condensed (+) or evolved (-) inside the loop, kg/h.  Condensing vapour removes gas
+    # inventory and drops the pressure; boiling it back adds inventory and raises it.
+    #   * cold water-rich wash absorbs NH3/CO2 out of the vapour space  (Observation 5)
+    #   * a colder CCW supply condenses more carbamate in the 322E003 shell
+    #   * a colder HPCC shell (lower LP header) condenses more of the stripper overhead
+    #   * hotter stripper shell steam boils more back out of the bottoms
+    vapor_collapse_kgh = (SYN_P_WASH_COLLAPSE_KGH * max(wash_scale - react["co2_scale"], 0.0)
+                          + SYN_P_CW_COLLAPSE_KGH_K * max(SCRUB_CCW_T_IN_DES - tic["pv"], 0.0)
+                          + SYN_P_HPCC_COLLAPSE_KGH_K * (HPCC_STEAM_TSAT_C - T_shell_lp)
+                          - SYN_P_STRIP_SWELL_KGH_K * (T_steam_live - STRIP_STEAM_T_DES_C))
+    # Bounded by what the loop's condensing surfaces can physically do in an hour.
+    vapor_collapse_kgh = clamp(vapor_collapse_kgh, -SYN_P_COLLAPSE_MAX_KGH, SYN_P_COLLAPSE_MAX_KGH)
+    s.p_syn_bara = clamp(s.p_syn_bara
+                         + (m_in_loop - m_out_loop - vapor_collapse_kgh) / C_loop * (dt / 3600.0),
+                         10.0, SYN_P_MAX_BARA)
+    s._dbg_psyn = {"C_loop": C_loop, "gas_space_frac": gas_space_frac,
+                   "d_nh3": d_nh3, "d_co2": d_co2, "d_wash": d_wash,
+                   "d_bot": d_bot, "d_vent": d_vent, "d_blow": d_blow,
+                   "collapse_kgh": vapor_collapse_kgh,
+                   "dPdt_bar_h": (m_in_loop - m_out_loop - vapor_collapse_kgh) / C_loop}
+
+
     return {
         "t":           time.time(),      # desktop clock (epoch s)
         "t_sim":       s.sim_t,          # plant clock (s since program init); trend X axis
