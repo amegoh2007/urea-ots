@@ -15,8 +15,10 @@ of them agree:
 
 With the engine's value the envelope is open by −2 168 kg/h at the design point
 (in: NH3 42 762 + CO2 54 618 + wash 36 835 = 134 215; out: bottoms 130 480 + off-gas 5 901).
-With the PFD's it is open by +2 005 the other way. The scrubber's own balance does not close either
-(in 22 356 reactor off-gas + 36 915 wash vs out 1 708 off-gas + 53 368 overflow, residual +4 195).
+With the PFD's it is open by +2 005 the other way. The live scrubber now closes every component to
+machine precision because its gas/liquid split is derived from feed and absorption capacity. That
+internal closure does not reconcile the conflicting absolute outlet anchors: the engine still uses
+5 901 kg/h off-gas and 53 368 kg/h overflow; the PFD gives 1 708 and 57 564 kg/h.
 **Contained, not fixed:** the PT-329201 pressure balance is now written in DEPARTURE form, so the
 residual can no longer act as a standing pressure forcing and the answer does not depend on which
 number is right. But the disagreement is still there and any future code that sums absolute flows
@@ -26,14 +28,26 @@ for exactly this and is not currently applied to unit 322).
 
 ## G-LOOP-2 — Residual slow creep in the 322E003 sump
 **Affects:** 322E003 scrubber sump level, and a small standing bottoms offset.
-**Symptom:** with the G-LOOP-1 pressure runaway fixed, the loop holds (p_syn 140.70 → 140.46 over
-6 000 s and turning back up; HPCC level 50 → 52.4 % and steady; stripper level 50.00 flat). What
-remains is the scrubber sump creeping 50 → 55 % over the same 6 000 s, alongside a persistent
-`d_bot` of +300…+500 kg/h — i.e. the stripper is draining slightly above its design rate throughout.
+**Symptom:** the current regression holds loop pressure, but the design-settle diagnostic still moves
+the scrubber sump from 50.0 to 51.1 % over 600 s. The absolute off-gas/overflow disagreement in
+G-HMB-1 remains the leading boundary-data suspect.
 **Not yet tried:** the sump ODE has genuine feedback through the ejector entrainment curve
 (`scrub_lvl_frac`), so this is likely an offset in `m_cond_in` vs `EJ_SUC_TOT_DES` rather than a
 missing feedback path. Two orders of magnitude smaller than what G-LOOP-1 was; check it against
-G-HMB-1 first, since a 4 195 kg/h unreconciled scrubber balance is the obvious suspect.
+G-HMB-1 first, since the engine and PFD still disagree by 4 196 kg/h on how design scrubber outlet
+mass divides between gas and liquid.
+
+## G-HP-THERMO-1 — Full HP ionic speciation and rate-based absorption
+**Affects:** extreme 322R001/322E003 excursions, redesign studies, and predictions outside the
+published correlation range.
+**Implemented:** `thermo_urea_hp.py` uses the published Voskov-Voronin HP urea-equilibrium
+correlation over 135–230 °C, N/C 2–5.5, and H/C −0.75–1.2, normalized to the plant design point.
+322E003 uses a PFD-anchored, component-closing reactive-capacity model. This is appropriate for the
+real-time OTS and keeps the LP/MP Extended UNIQUAC package outside its pressure/temperature range.
+**Missing:** a simultaneous ionic liquid speciation, real-gas fugacity, VLE, heat balance, and
+rate-based film/packing solve for the full HP reactor/scrubber. Zhang's electrolyte UNIQUAC plus
+perturbed-hard-sphere formulation, or the full Voskov UNIQUAC/virial implementation, would supply
+that capability. It requires validated plant-specific binary parameters and absorber geometry.
 
 ## G-CW-1 — 323E011 has no cooling-water boundary
 **Affects:** Scenarios3.md 1.4/1.5 as they apply to the 323E011 LP carbamate condenser.

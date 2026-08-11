@@ -1,4 +1,5 @@
 import math
+import hp_recycle
 from typing import List, Optional
 from core.unit import UnitOperation
 from core.stream import Stream
@@ -7,7 +8,8 @@ from core.stream import Stream
 # if we import scrubber at the bottom or inside step_sim.
 from main import (
     MW_COMP, SCRUB_CARB_KMOLH_DES, SCRUB_OFFGAS_KMOLH_DES, SCRUB_OVERFLOW_KMOLH_DES,
-    SCRUB_CARB_KMOLH_DES_REF, SCRUB_CARB_ABS_GAIN, SCRUB_DH_CARB_KJMOL, SCRUB_Q_CCW_DES_KW,
+    SCRUB_ABS_CAP_KMOLH_DES, SCRUB_CW_ABS_GAIN, SCRUB_CCW_T_IN_DES,
+    SCRUB_DH_CARB_KJMOL, SCRUB_Q_CCW_DES_KW,
     SCRUB_COND_SPINDLE_GAIN, SCRUB_COND_CHOKE_MIN, SCRUB_LEVEL_NLL_PCT, SCRUB_CCW_CP,
     SCRUB_UA_KWK, SCRUB_HIC604_DES_PCT, SCRUB_T_PROC_C, SCRUB_OVERFLOW_T_VENT_GAIN,
     SCRUB_OFFGAS_NC_DES, SCRUB_OFFGAS_T_C, SCRUB_OFFGAS_T_GAIN, SCRUB_OFFGAS_T_VENT_GAIN,
@@ -53,23 +55,20 @@ class Scrubber322E003(UnitOperation):
         t_ccw_in = ccw_in.T
         m_ccw_kgh = ccw_in.mass_flow
         
-        # Logic ported from main.py's scrub_322e003
-        carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}
-        feed     = {k: offgas_feed.get(k, 0.0) + carb[k] for k in MW_COMP}
-        offgas   = {k: SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}
-        overflow = {k: SCRUB_OVERFLOW_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}
-
-        carb_dev     = {k: carb[k] - SCRUB_CARB_KMOLH_DES_REF.get(k, 0.0) * s for k in MW_COMP}
-        carb_dev_tot = sum(carb_dev.values())
-        for k in MW_COMP:
-            overflow[k] += carb_dev[k]
-            
-        d_co2 = SCRUB_CARB_ABS_GAIN * carb_dev_tot
-        d_co2 = max(min(d_co2, 0.5 * offgas.get("CO2", 0.0)), -0.5 * offgas.get("CO2", 0.0))
-        d_nh3 = max(min(2.0 * d_co2, 0.5 * offgas.get("NH3", 0.0)), -0.5 * offgas.get("NH3", 0.0))
-        
-        offgas["CO2"] -= d_co2;  overflow["CO2"] += d_co2
-        offgas["NH3"] -= d_nh3;  overflow["NH3"] += d_nh3
+        # Same finite-capacity, component-closing split as main.scrub_322e003.
+        carb = {k: wash_in.comp.get(k, 0.0) for k in MW_COMP}
+        wash_scale = sum(carb.values()) / max(sum(SCRUB_CARB_KMOLH_DES.values()), 1e-9)
+        co2_capacity = max(SCRUB_ABS_CAP_KMOLH_DES.get("CO2", 0.0), 1e-9)
+        capacity_ratio = max(
+            wash_scale + SCRUB_CW_ABS_GAIN * (SCRUB_CCW_T_IN_DES - t_ccw_in) / co2_capacity,
+            0.0,
+        )
+        split = hp_recycle.reactive_scrubber_split(
+            offgas_feed, carb, SCRUB_ABS_CAP_KMOLH_DES, capacity_ratio
+        )
+        feed = {k: offgas_feed.get(k, 0.0) + carb[k] for k in MW_COMP}
+        offgas = {k: split["gas"].get(k, 0.0) for k in MW_COMP}
+        overflow = {k: split["liquid"].get(k, 0.0) for k in MW_COMP}
 
         carry_mass_kgh = 0.0
         if self.liq_carry_kmolh:
@@ -79,7 +78,8 @@ class Scrubber322E003(UnitOperation):
                 overflow[k]    += c
                 carry_mass_kgh += c * MW_COMP[k]
                 
-        closure_resid = sum(feed.values()) - sum(offgas.values()) - sum(overflow.values())
+        closure_kmolh = {k: feed[k] - offgas[k] - overflow[k] for k in MW_COMP}
+        closure_resid = sum(closure_kmolh.values())
         co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)
         q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0
         
@@ -149,7 +149,10 @@ class Scrubber322E003(UnitOperation):
         self.diagnostics = {
             "feed_kmolh": feed, "carb_kmolh": carb,
             "offgas_kmolh": offgas, "overflow_kmolh": overflow,
-            "closure_resid": closure_resid, "co2_abs": co2_abs,
+            "closure_resid": closure_resid, "closure_kmolh": closure_kmolh,
+            "capacity_ratio": capacity_ratio, "absorbed_kmolh": split["absorbed"],
+            "breakthrough_kmolh": offgas.get("NH3", 0.0) + offgas.get("CO2", 0.0),
+            "co2_abs": co2_abs,
             "q_carb_kw": q_carb_kw, "q_ccw_kw": q_ccw_kw,
             "t_ccw_in": t_ccw_in, "t_ccw_out": t_ccw_out, "dT_ccw": dT_ccw,
             "m_ccw_kgh": m_ccw_kgh, "co2_scale": s, "vent_ratio": self.vent_ratio,

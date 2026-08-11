@@ -77,49 +77,58 @@ The cold (70–90 °C), water-rich weak-carbamate wash recycled from the LP reci
 wash_scale = m_308(prior tick) / m_308,design        # ≡ 1.0 at design (bit-exact pins)
 ```
 
-`m_308,design` (its OWN design draw, not the nominal wash spec `SCRUB_CARB_KGH_DES`) is the denominator so every deviation term below is identically zero at design. Increasing the wash produces the observed six-step response:
+The scrubber uses finite, component-wise absorption capacity derived from its design split:
 
 ```text
-# Obs 1  overflow level: surplus wash spills the weir into the sump inventory ODE
-carb_dev   = carb - carb_design*s ;  overflow += carb_dev
-dM_sump/dt = m_overflow_in - m_ejector_entrain          # level rises
-
-# Obs 5a  reactive absorption (2 NH3 : 1 CO2), gas -> liquid, mass-conserving
-d_CO2 = SCRUB_CARB_ABS_GAIN * sum(carb_dev)
-d_NH3 = 2 * d_CO2 ;   offgas -= (d_CO2,d_NH3) ;  overflow += (d_CO2,d_NH3)
-
-# Obs 3,4  cold wash steals sensible duty from the pool -> both temps fall
-q_wash        = SCRUB_WASH_SINK_KW * (wash_scale - s)
-Q_scrubber    = max(Q_scrubber - q_wash, 0)
-TT-322002     = clamp(T_CCW,in + Q_scrubber/UA_eff, ...)      # overflow temp down
-TT-329125     = T_CCW,in + (TT-322002 - T_CCW,in)*epsilon     # CW outlet down
-
-# Obs 2  direct-contact vent cooling
-TT-322011     = clamp(... - SCRUB_OFFGAS_WASH_COOLING*(wash_scale - s), ...)
-
-# Obs 5b  water-rich solvent collapses the vapour space -> synthesis P falls
-dP_collapse   = SYN_P_WASH_COLLAPSE_GAIN * max(wash_scale - s, 0)   # s = react co2_scale
-d(PT-329201)/dt += (m_in - m_out)/C_loop - dP_collapse
-
-# Obs 6  colder pool -> colder ejector suction -> colder NH3 line to HPCC
-TT-322012     = (m_motive*cpN*T_motive + m_suc*cpC*T_overflow,prior) / (m_disch*cpD)
+A_i,design = max(gas_feed_i,design - offgas_i,design, 0)  # NH3, CO2, H2O
+capacity_ratio = max(wash_scale
+                     + k_CW*(T_CCW,design - T_CCW)/A_CO2,design, 0)
+A_i        = min(gas_feed_i, A_i,design * capacity_ratio)
+offgas_i   = gas_feed_i - A_i
+overflow_i = wash_i + A_i
+closure_i  = gas_feed_i + wash_i - offgas_i - overflow_i = 0
+dM_sump/dt = m_overflow - m_ejector,entrained
 ```
 
-The ejector entrains the prior-tick overflow at its live temperature `T_overflow,prior` (a tear that breaks the algebraic loop); at design it equals `EJ_T_SUCTION_C` (178.8 °C) so TT-322012 is bit-exact. Direction is datasheet-anchored (`References/322E003 HP Scrubber Describtion.md`); the coupling gains are calibrated magnitudes (see `handoff.md`).
+Cold wash also changes the energy balance:
+
+```text
+q_wash     = SCRUB_WASH_SINK_KW * (wash_scale - s)
+Q_scrubber = max(Q_scrubber - q_wash, 0)
+TT-322002  = clamp(T_CCW,in + Q_scrubber/UA_eff, ...)
+TT-329125  = T_CCW,in + (TT-322002 - T_CCW,in)*epsilon
+TT-322011  = clamp(... - K_wash,T*(wash_scale - s), ...)
+TT-322012  = (m_motive*cpN*T_motive + m_suc*cpC*T_overflow,prior) / (m_disch*cpD)
+```
+
+HV-322604 has finite hydraulic capacity instead of multiplying whatever gas reaches it:
+
+```text
+m_capacity = m_vent,design * R^[(opening-opening_design)/100]
+             * sqrt(ΔP/ΔP_design)
+m_vented   = min(m_available, m_capacity)
+m_retained = m_available - m_vented
+LP_absorber_load = m_available / m_vent,design
+m_relief/emission = max(m_available - 1.15*m_vent,design, 0)
+```
+
+Low wash raises NH3/CO2 breakthrough. Gas above valve capacity remains in the HP inventory and raises PT-329201; downstream absorber load and ammonia-emission diagnostics rise at the same time. High wash increases liquid traffic, reduces breakthrough, and cools ejector suction and HPCC feed. The ejector consumes prior-tick overflow temperature to break the algebraic loop.
 
 ## 323P001 LP Recycle Pump Speed Control (SIC-323901)
 
-The LP weak-carbamate recycle pump 323P001 A/B is variable-speed; SIC-323901 is the speed loop, cascaded under the 323D001 drum-level master LIC-323502. It is modelled as a **direct VFD speed follower**, not a PID: the drive makes the actual speed track the demanded speed through a short first-order lag, and the recycle flow `m_308` is proportional to the actual speed.
+The LP weak-carbamate recycle pump 323P001 A/B is a variable-speed URACA KD 825-Carb triplex reciprocating pump. SIC-323901 is cascaded under the 323D001 drum-level master LIC-323502. The drive tracks demanded speed through a short first-order lag; the pump then follows its equipment-sheet displacement law:
 
 ```text
 speed_demand = LIC-323502.op         (CAS  : drum-level cascade)
              = SIC-323901.sp         (AUTO : operator speed setpoint)
              = SIC-323901.op         (MAN  : operator manual output)
-speed_actual = lag_1(speed_demand, tau = 3 s)          # VFD dynamics, RPM
-m_308        = M308_design * speed_actual / RPM_design  # flow rises with speed
+speed_actual = lag_1(speed_demand, tau = 3 s)
+Q_323P001    = 0                                      if stopped
+             = 0.5046 * clamp(speed_actual, 19, 81)   if running       [m3/h]
+m_308        = rho_carbamate * Q_323P001 * f_NPSH
 ```
 
-Increasing the speed (setpoint in AUTO, output in MAN, or master demand in CAS) always increases `m_308`. At design the cascade demand equals `RPM_design`, so `speed_actual = RPM_design` and `m_308 = M308_design` (wash_scale ≡ 1.0, every downstream pin bit-exact — see the wash cascade above).
+Discharge pressure is absent from the flow law. Head changes load the drive and relief protection; they do not create a centrifugal-pump head-flow curve. Suction availability remains active through the common NPSH/cavitation factor. At design, the displacement equation reproduces `m_308,design` exactly.
 
 An earlier build controlled SIC-323901 with an inline I-PD whose PV was a lag of its **own** output — a degenerate self-referential loop with near-unity process gain, so a setpoint change in AUTO barely moved the speed and the operator could not command the pump. The follower model removes that; setpoint tracking is now prompt (≈ the 3 s VFD lag) with zero offset. Post-disturbance CAS recovery is governed by the master LIC-323502 (Ti = 300 s) and the coupled loop inventories, and returns to the design attractor.
 
@@ -200,6 +209,29 @@ ramps at a rate set by the imbalance and recovers when the operator restores the
 downstream side is atmosphere (the 324F003 barometric leg) the correct model is a choked orifice
 drawing air inward — critical ratio 0.528 for air, so the ingress depends only on the open area.
 
+## HP Urea-Synthesis Equilibrium (`backend/thermo_urea_hp.py`)
+
+The HP reactor and the LP/MP recovery section use different thermodynamic services. Extended UNIQUAC/SRK remains on the lower-pressure aqueous-carbamate flashes inside its validated range. The 141-bar, 165–183 °C synthesis loop uses the Voskov-Voronin high-pressure urea-equilibrium correlation, whose published domain is 135–230 °C, N/C 2–5.5, and H/C −0.75–1.2:
+
+```text
+X_corr = (-121.1458 - 5.1135e-5*T_K^2 + 21.6826*ln(T_K))
+         * exp[-2.1908*L^-2*W - 4.1059e-3*L^2*W - 2.8380*L^-2]
+X_plant = 0.543 * X_corr(L,W,T) / X_corr(L_design,W_design,T_design)
+```
+
+Inputs are clamped at the published domain boundary and raise `HP_UREA_THERMO_EXTRAPOLATED`. The plant normalization preserves the verified 0.543 design conversion; it does not alter the off-design slopes.
+
+The synthesis ratios count reacted products as original feed equivalents:
+
+```text
+C = n_CO2 + n_urea + 2*n_biuret
+N = n_NH3 + 2*n_urea + 3*n_biuret
+L = N/C
+W = (n_H2O - n_urea - 2*n_biuret)/C
+```
+
+Increasing recycle water raises `W` and lowers `X_plant`. The atom-conserving reactor shift leaves more NH3/CO2 for the stripper and HPCC. Telemetry reports the lost-conversion recycle mass and the carbamate-dissociation steam equivalent. A recycle shortage reports `sustainable_production_factor = min(wash_scale/synthesis_load, 1)`, flags `FRONT_END_CUTBACK_REQUIRED` below 0.95, and lets the live HPCC composition and reactor inventory disturb N/C and level.
+
 ## Bubble Points of the NH3-CO2-H2O Liquors (`backend/vle_nh3co2h2o.py`)
 
 323C003 and 323F004 hold liquors whose vapour is roughly a third ammonia and half CO2, so their
@@ -245,21 +277,19 @@ before it reaches 324F001, and 324F003 last — the ordering an operator sees on
 
 ## PT-329201 Synthesis-Loop Pressure
 
-The loop pressure is a gas-inventory balance over the HP envelope, written entirely in **departure
-form** — every stream enters as its deviation from its own design value:
+The loop pressure is a gas-inventory balance over the HP envelope. Liquid wash no longer enters the gas equation directly; its effect arrives through absorbed or retained vapour:
 
 ```text
 gas_space_frac = clamp((1 - L_react) / (1 - L_react,design), 0.05, 1.5)
 C_loop         = 1500 kg/bar * gas_space_frac
-dP/dt          = [ (Δm_NH3 + Δm_CO2 + Δm_wash) - (Δm_bottoms + Δm_vent + m_blowthrough)
+dP/dt          = [ (Δm_NH3 + Δm_CO2 + m_scrubber,retained)
+                   - (Δm_bottoms + m_blowthrough)
                    - vapour_collapse ] / C_loop
-vapour_collapse = k_wash*(wash_scale - co2_scale)⁺ + k_CW*(T_CCW,des - T_CCW)⁺
-                  + k_HPCC*(T_sat,HPCC,des - T_sat(P_LP)) - k_strip*(T_sat(P_MP) - T_sat,strip,des)
+vapour_collapse = max(m_absorbed - m_absorbed,design*s, 0)
+                   + k_HPCC*(T_sat,HPCC,des - T_sat(P_LP)) - k_strip*(T_sat(P_MP) - T_sat,strip,des)
 ```
 
-All four collapse/swell terms are **vapour mass rates in kg/h** through the same `C_loop`, bounded by
-`SYN_P_COLLAPSE_MAX_KGH`, so they are commensurate with the boundary balance rather than competing
-with it. Every bracket is a literal 0.0 at design, so `dP/dt = 0` there.
+Every term is a vapour mass rate in kg/h through the same `C_loop`, bounded by `SYN_P_COLLAPSE_MAX_KGH`. Less wash raises `m_scrubber,retained`; more wash raises absorbed mass. This corrects the former wrong-sign result in which less liquid wash appeared as an immediate loss of HP gas inventory.
 
 ### Why it was rewritten (G-LOOP-1, 2026-08-11)
 
@@ -305,7 +335,11 @@ the comment says was fixed. Restored as documented.
 ## Source Anchors
 
 - `backend/main.py`: `hpcc_322e002`, `ejector_322f001`, 322E003 scrubber energy model, telemetry packet.
+- `backend/thermo_urea_hp.py`: Voskov-Voronin HP equilibrium correlation and synthesis-ratio definitions.
+- `backend/hp_recycle.py`: 323P001 displacement, finite scrubber capacity, valve retention, and recycle-burden laws.
 - `backend/steam_system.py`: LP-header balances, PIC-329207 master logic, PV-329207B export.
 - `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`: design mass, pressure, and temperature points.
 - `References/HPCC description.md`: carbamate exotherm and shell-side nucleate boiling.
 - `References/Stamicarbon_Steam_Condensate_Network.md`: steam generation, control, and turbine-export topology.
+- Voskov and Voronin, *J. Chem. Eng. Data* 61 (2016) 4110–4125, DOI `10.1021/acs.jced.6b00557`.
+- Zhang et al., *Computers & Chemical Engineering* 29 (2005) 983–992, DOI `10.1016/j.compchemeng.2004.10.004`.
