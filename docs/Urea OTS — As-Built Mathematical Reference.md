@@ -400,6 +400,52 @@ point, controlled temperatures within 1 C, and both vacuum pressures within 3% o
 The deterministic boot-pin cache is rebuilt whenever its source hash changes, then restores these
 design constants on subsequent launches.
 
+## HMI Indicator Time Constants and Dead Time
+
+Every bound numeric `t: 'ind'` record in `frontend/overlays.js`, plus every legacy `.pi` readout
+updated through `frontend/app.js::setPI`, passes through one shared measurement block in
+`frontend/indicator_dynamics.js`. Duplicate tags on different screens share the same state and
+therefore display the same delayed value. The independent variable is packet field `t_sim` (plant
+simulation time), not wall time, so FAST and SLOW pacing produce identical plant-time responses.
+
+The measurement transfer function is first-order plus dead time (FOPDT):
+
+```text
+G(s) = exp(-theta*s) / (tau*s + 1)
+y(k) = y(k-1) + [1 - exp(-delta_t/tau)] * [u(t-theta) - y(k-1)]
+```
+
+`u(t-theta)` is a zero-order-held value from a timestamped FIFO. The exact exponential update makes
+the discrete first-order response independent of packet rate: one `tau` after a delayed step arrives,
+the indication has completed `1 - exp(-1) = 63.212%` of its final change. First use seeds `y=u`, so
+the design point has no artificial startup transient. A backward jump in `t_sim` clears every FIFO,
+matching a simulator reset.
+
+| instrument service | tau (s) | theta (s) |
+|---|---:|---:|
+| anti-surge pressure/flow profile | 0.05 | 0.002 |
+| standard pressure | 0.75 | 0.10 |
+| standard flow | 2.0 | 0.10 |
+| turbulent level (`LT-322504`, `LIC-322501`, `LT-329501`) | 7.5 | 0.50 |
+| calm level | 3.5 | 0.50 |
+| thermowell temperature | 30.0 | 1.0 |
+| composition analyzer | 60.0 | 600.0 |
+| speed/current | 1.0 | 0.10 |
+| valve/hand-station position | 3.5 | 0.25 |
+| totalizer | 0.5 | 0.10 |
+| generic numeric fallback | 1.0 | 0.10 |
+
+The values use the midpoint of each range in `Plant PID Simulation Sequence.md`; small nonzero scan
+delays are used where that procedure specifies fast DCS acquisition but no separate transport value.
+The fallback is intentional: a newly added numeric indicator cannot silently bypass dynamics.
+Tooltips publish the selected service, `tau`, and `theta` for operator/auditor inspection.
+
+This is a transmitter/HMI measurement layer. It does not replace or feed back into equipment mass,
+component, energy, pressure, or holdup equations and does not retune PID controllers. Vessel residence
+times, exchanger thermal masses, hydraulic inventories, and existing backend controller-PV filters
+remain the owners of physical process dynamics; applying those same lags again inside the equipment
+balances would double-count inertia.
+
 ## Assumptions and Limits
 
 - The model is reduced order: calibrated design conductance scales with process flow because no off-design exchanger datasheet is available.
@@ -414,6 +460,10 @@ design constants on subsequent launches.
 - `backend/hp_recycle.py`: 323P001 displacement, finite scrubber capacity, valve retention, and recycle-burden laws.
 - `backend/scenario_coverage.py`: 48-scenario traceability manifest and thermodynamic-domain router.
 - `backend/steam_system.py`: LP-header balances, PIC-329207 master logic, PV-329207B export.
+- `frontend/indicator_dynamics.js`: tag-class measurement profiles, timestamped dead-time FIFO, and exact first-order update.
+- `References/Sources/Plant PID Simulation Sequence.md`: transmitter response/dead-time ranges and service classifications.
+- `References/Sources/PIDs.pdf`, pages 3, 13, and 20: representative analyzer, pressure, and level instrument tags.
+- `References/Sources/Manual.pdf`, page 83: flushed LI-329501, PI-329201, and N/C measurement service.
 - `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`: design mass, pressure, and temperature points.
 - `References/HPCC description.md`: carbamate exotherm and shell-side nucleate boiling.
 - `References/Stamicarbon_Steam_Condensate_Network.md`: steam generation, control, and turbine-export topology.

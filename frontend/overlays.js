@@ -586,11 +586,16 @@
       if (!o.bind) { if (b) b.textContent = o.tag; if (sp) sp.textContent = ''; if (mt) { mt.textContent = ''; mt.className = 'mt'; } return; }   // empty slot keeps tag text
       let v = gp(lastS, o.bind);
       let u = o.u;
+      const dynamics = window.IndicatorDynamics;
+      if (dynamics && typeof v === 'number') {
+        v = window.IndicatorDynamics.sample('instrument:' + o.tag, o.tag, v, lastS.t_sim, o.dynamics);
+      }
       if (u === 'BAR A' && typeof v === 'number') { v = v - 1.01325; u = 'BARG'; }   // Domain 1a: all PT/PIC show gauge pressure (barg = bara - 1 atm)
       if (b) b.textContent = fmt(v, o.dec);
       if (sp) sp.textContent = u || '';
       if (mt) { const ml = modeLetter(o); mt.textContent = ml; mt.className = 'mt' + (ml ? ' m-' + ml : ''); }   // controller mode badge (A/M/E/O); '' for non-controllers
-      el.dataset.tip = o.tag + (u ? ' [' + u + ']' : '') + (modeLetter(o) ? ' — ' + { A: 'AUTO', M: 'MAN', E: 'CAS', O: 'OOS' }[modeLetter(o)] : '');
+      el.dataset.tip = o.tag + (u ? ' [' + u + ']' : '') + (modeLetter(o) ? ' — ' + { A: 'AUTO', M: 'MAN', E: 'CAS', O: 'OOS' }[modeLetter(o)] : '')
+        + (dynamics ? ' — ' + window.IndicatorDynamics.describe(o.tag, o.dynamics) : '');
     }
   }
   function renderAll() { buildBindMap(); for (const sid in OV) cfg(sid).forEach(o => renderOne(sid, o)); }

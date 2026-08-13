@@ -1,0 +1,56 @@
+{
+  "app.js": {
+    "mtime": 1786655074.1471925,
+    "seen": 1786656451.751922,
+    "ast_hash": "51673afe1d6c91294ad6bd3e09272906",
+    "semantic_hash": "51673afe1d6c91294ad6bd3e09272906"
+  },
+  "builder.js": {
+    "mtime": 1786498576.0716078,
+    "seen": 1786656451.751929,
+    "ast_hash": "fb1ecb23789fd8b2b35da4dba2ffa9b1",
+    "semantic_hash": "fb1ecb23789fd8b2b35da4dba2ffa9b1"
+  },
+  "co2_compressor.js": {
+    "mtime": 1786216000.3972528,
+    "seen": 1786656451.7519321,
+    "ast_hash": "4add4860447d93a6dd017d9f7ab56c89",
+    "semantic_hash": "4add4860447d93a6dd017d9f7ab56c89"
+  },
+  "editor.js": {
+    "mtime": 1786500290.2537694,
+    "seen": 1786656451.751934,
+    "ast_hash": "f78e285181bd33125ef02b3a390d1957",
+    "semantic_hash": "f78e285181bd33125ef02b3a390d1957"
+  },
+  "indicator_dynamics.js": {
+    "mtime": 1786655009.8540235,
+    "seen": 1786656451.7519355,
+    "ast_hash": "41a0460988ff60531874dc81eb267cdf",
+    "semantic_hash": "41a0460988ff60531874dc81eb267cdf"
+  },
+  "lv324501_route.js": {
+    "mtime": 1786015235.4139419,
+    "seen": 1786656451.751937,
+    "ast_hash": "f0d670513bed9084684766ae349cb499",
+    "semantic_hash": "f0d670513bed9084684766ae349cb499"
+  },
+  "overlays.js": {
+    "mtime": 1786655074.1471925,
+    "seen": 1786656451.751939,
+    "ast_hash": "6b033c0ded8470f22453e6516ba67423",
+    "semantic_hash": "6b033c0ded8470f22453e6516ba67423"
+  },
+  "test_indicator_dynamics.js": {
+    "mtime": 1786654952.5970283,
+    "seen": 1786656451.7519403,
+    "ast_hash": "37e41c3dbf7deb928eb057be485af365",
+    "semantic_hash": "37e41c3dbf7deb928eb057be485af365"
+  },
+  "trend.js": {
+    "mtime": 1786275304.1665466,
+    "seen": 1786656451.7519417,
+    "ast_hash": "ba12c82579282335487e46a4a3cbc8e5",
+    "semantic_hash": "ba12c82579282335487e46a4a3cbc8e5"
+  }
+}

@@ -67,7 +67,7 @@ Turbulent level overrides cover the reactor, HP stripper, and HP scrubber tags c
 
 ## Data flow and UI behavior
 
-1. WebSocket packet becomes `lastState`.
+1. WebSocket packet becomes `lastState`; packet field `t_sim` supplies plant time.
 2. Legacy `setPI()` resolves the displayed tag and samples the shared FOPDT service.
 3. Overlay `renderOne()` samples the same service for every bound numeric `ind` record.
 4. Gauge-pressure conversion and numeric formatting occur after dynamics.
@@ -85,4 +85,3 @@ Unbound white-frame indicators retain their tag only. Digital pumps, block valve
 ## Error handling and boundaries
 
 Non-finite inputs display through existing `--` handling and do not corrupt FOPDT state. Missing/invalid simulation time seeds or returns the raw measurement. Profile overrides must contain finite nonnegative numbers; invalid overrides fall back to the class profile.
-

@@ -181,10 +181,16 @@ function fmt(v){
   return Number(v).toFixed(1);
 }
 function setPI(tag,val,unit,alarm){
+  const instrumentTag = TAG_MAP[tag] || String(tag || '').replace(/_/g, '-');
+  const dynamics = window.IndicatorDynamics;
+  const shown = dynamics && typeof val === 'number'
+    ? window.IndicatorDynamics.sample('instrument:' + instrumentTag, instrumentTag, val, lastState.t_sim)
+    : val;
   document.querySelectorAll(`.pi[data-tag="${tag}"]`).forEach(el=>{
     const u = unit || (el.querySelector('.u')?.textContent||'');
-    el.innerHTML = `${fmt(val)} <span class="u">${u}</span>`;
+    el.innerHTML = `${fmt(shown)} <span class="u">${u}</span>`;
     el.classList.toggle('alarm', !!alarm);
+    if(dynamics) el.dataset.tip = instrumentTag + ' — ' + window.IndicatorDynamics.describe(instrumentTag);
   });
 }
 function setXV(id,open){
