@@ -6488,8 +6488,8 @@ def step_sim(dt: float) -> dict:
 
     # ==================================================================================
     #  UNIT 323 - LP RECIRCULATION & PRE-EVAPORATION  (rigorous state-space, conservative)
-    #  Boundary feed = 322E001 letdown bottoms:  m_feed = drain_kgh (kg/h) at T = TT_323001
-    #  (post-LV-322501 flash, un-lagged).  Four lumped liquid stages; each stage carries an
+    #  Boundary feed = 322E001 letdown bottoms transported as one flow/T/composition packet.
+    #  Four lumped liquid stages; each stage carries an
     #  inventory ODE  dM/dt = m_in - m_vap - m_out  and a well-mixed energy ODE
     #        M*cp*dT/dt = m_in*cp*(T_in - T) + Q - m_vap*lambda
     #  integrated with the live sub-step dt.  Vapor rates are the DESIGN mass split fractions
