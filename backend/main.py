@@ -5966,7 +5966,8 @@ def step_sim(dt: float) -> dict:
         T_bot_disp = min(T_bot_disp, strip["T_steam"])   # bottoms can never out-heat the condensing shell
     else:
         T_bot_disp = strip["T_bot"]                      # cold start / solidified: no hot-film sump residence effect
-    TT_323001 = STRIP_T_DOWN_DES_C + 0.7 * (T_bot_disp - STRIP_T_BOTTOM_DES_C)   # post-flash ripples the same bottoms T
+    _lagged_t_bot = s.tlag.get("TT322004", STRIP_T_BOTTOM_DES_C)
+    TT_323001 = STRIP_T_DOWN_DES_C + 0.7 * (_lagged_t_bot - STRIP_T_BOTTOM_DES_C)   # post-flash ripples the same lagged bottoms T
 
     # HP carbamate condenser 322E002: strip gas + ejector liquid -> two-phase product to 322R001.
     #   Shell-side LP-steam saturation T tracks the live LP header, but as an OFFSET about the
@@ -6587,7 +6588,7 @@ def step_sim(dt: float) -> dict:
     T_bub_c003 = R323_C003_T_SP_C + (_tbub_c003_live - _R323_TBUB_C003_DES)
     q305_relax_kw = (s.r323_c003_M * cp_c003 * (T_bub_c003 - s.r323_c003_T)
                      / R323_C003_M_TAU_S)                                         # kW retained to reach bubble point
-    T_strip_bot = s.tlag.get("TT_322004", STRIP_T_BOTTOM_DES_C)
+    T_strip_bot = s.tlag.get("TT322004", STRIP_T_BOTTOM_DES_C)
     T_flash_sat = TT_323001
     q_flash_avail_kw = (m_feed_323 / 3600.0 * cp_feed323 * (T_strip_bot - T_flash_sat))  # kW released by letdown flash
     m_flash_gas = max(R323_M305_DES * (q_flash_avail_kw / R323_Q305_DES_KW), 0.0)
@@ -6634,10 +6635,7 @@ def step_sim(dt: float) -> dict:
         
     m_305       = m_305_evap + blowthrough_gas + m_305_carryover                                  # top vapor -> 323E003 LPCC (305, kg/h)
     
-    s._debug_m_feed_323 = m_feed_323
-    s._debug_m_305 = m_305
-    s._debug_m_flash = m_flash_gas
-    s._debug_m_pool  = m_pool_vap
+    m_305_evap  = min(R323_PHI_V305 * max(m_feed_323, 1e-6), m_flash_gas + m_pool_vap)
     q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                  # total available latent kW
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
