@@ -15,10 +15,15 @@ function connect(){
     ResetBtn.onPacket(s);         // confirm a pending reset actually took (t_sim dropped to ~0)
     render(s);
     render322(s);
+    if(window.OV_apply) window.OV_apply(s);
+    if(window.OTS_FACE && window.OTS_FACE.hicSync) window.OTS_FACE.hicSync();
+    if(window.refreshIndicatorFaceplate) window.refreshIndicatorFaceplate();
+    if(window.refreshPIC) window.refreshPIC(s);
+    if(window.refreshHIC2) window.refreshHIC2(s);
+    if(window.refreshCtl) window.refreshCtl(s);
     if(window.refreshF50) window.refreshF50(s);
     if(window.refreshF51) window.refreshF51(s);
     if(window.refreshMSP) window.refreshMSP(s);
-    if(window.OV_apply) window.OV_apply(s);
     if(window.TrendWindow) window.TrendWindow.onPacket(s);
   };
   ws.onclose = () => { Health.onDisconnect(); setTimeout(connect, 1000); };
@@ -180,6 +185,12 @@ function fmt(v){
   if(Math.abs(v)>=1000) return Number(v).toFixed(2);
   return Number(v).toFixed(1);
 }
+function liveFaceplateSample(tag, fallback, unit){
+  const api=window.IndicatorFaceplate;
+  const key=String(tag||'').replace(/_/g,'-');
+  const sample=api && api.read(key);
+  return sample || {tag:key, value:fallback, unit:unit||'', display:api ? window.IndicatorFaceplate.display(fallback) : fmt(fallback)};
+}
 function setPI(tag,val,unit,alarm){
   const instrumentTag = TAG_MAP[tag] || String(tag || '').replace(/_/g, '-');
   const dynamics = window.IndicatorDynamics;
@@ -188,6 +199,9 @@ function setPI(tag,val,unit,alarm){
     : val;
   document.querySelectorAll(`.pi[data-tag="${tag}"]`).forEach(el=>{
     const u = unit || (el.querySelector('.u')?.textContent||'');
+    if(window.IndicatorFaceplate) window.IndicatorFaceplate.publish(instrumentTag, shown, u);
+    el.dataset.faceTag = instrumentTag;
+    el.dataset.faceUnit = u;
     el.innerHTML = `${fmt(shown)} <span class="u">${u}</span>`;
     el.classList.toggle('alarm', !!alarm);
     if(dynamics) el.dataset.tip = instrumentTag + ' — ' + window.IndicatorDynamics.describe(instrumentTag);
@@ -303,8 +317,8 @@ document.addEventListener('keydown', e=>{
 
 // ---------- Faceplate routing (SIC controllers -> dedicated REST modals) ----------
 const FP_MAP = {
-  PA_speed:'SIC_321950', PA_current:'SIC_321950',
-  PB_speed:'SIC_321951', PB_current:'SIC_321951'
+  PA_speed:'SIC_321950',
+  PB_speed:'SIC_321951'
 };
 const $ = id => document.getElementById(id);
 
@@ -315,9 +329,33 @@ document.querySelectorAll('.pi[data-tag]').forEach(el=>{
     const fp = FP_MAP[tag];
     if(fp==='SIC_321950') { if(window.openF50) window.openF50(); }        // SIC_321950 REST faceplate
     else if(fp==='SIC_321951') { if(window.openF51) window.openF51(); }   // SIC_321951 REST faceplate
+    else if(window.OTS_FACE && window.OTS_FACE.indicator) window.OTS_FACE.indicator({
+      tag:el.dataset.faceTag || TAG_MAP[tag] || String(tag||'').replace(/_/g,'-'),
+      u:el.dataset.faceUnit || (el.querySelector('.u')?.textContent||'')
+    });
   });
   el.addEventListener('contextmenu', e=>{ e.preventDefault(); openCtxMenu(e.pageX,e.pageY,tag); });
 });
+
+// ---------- Generic read-only indicator faceplate ----------
+(function(){
+  const m=document.getElementById('indicatorModal'); if(!m) return;
+  const ttl=document.getElementById('indicator-title'), pv=document.getElementById('indicator-pv'),
+        unit=document.getElementById('indicator-unit'), cl=document.getElementById('indicator-close');
+  let cur=null;
+  const refresh=()=>{
+    if(!cur) return;
+    const sample=liveFaceplateSample(cur.tag, null, cur.u);
+    ttl.textContent=cur.tag || 'INDICATOR';
+    pv.value=sample.display;
+    unit.value=sample.unit || cur.u || '';
+  };
+  const open=o=>{ cur=o||{}; refresh(); m.classList.add('show'); };
+  window.OTS_FACE=Object.assign(window.OTS_FACE||{}, {indicator:open});
+  window.refreshIndicatorFaceplate=()=>{ if(m.classList.contains('show')) refresh(); };
+  if(cl) cl.onclick=()=>m.classList.remove('show');
+  m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
+})();
 
 // ---------- Stream popups ----------
 document.querySelectorAll('.stream-click').forEach(p=>{
@@ -491,11 +529,12 @@ function render322(s){
     if(ttl)  ttl.textContent  = TTL[num] || (num ? ('HIC-'+num+' → HV-'+num+' (MANUAL)') : 'HV (MANUAL)');
     if(note) note.textContent = NOTE[num] || 'Hand valve — operator sets opening directly (no controller mode).';
     const v=(cur&&cur.bind)? gp(window.OTS_LAST||{}, cur.bind) : null;   // prefill from THIS valve's live opening
-    if(v!=null && document.activeElement!==inp) inp.value=fmt(v);
+    const sample=liveFaceplateSample((cur&&cur.tag)||'HIC-322602', v, (cur&&cur.u)||'%');
+    if(sample.value!=null && document.activeElement!==inp) inp.value=sample.display;
     if(m) m.classList.add('show'); };
   window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { hic: open,
     hicSync: ()=>{ if(!m||!m.classList.contains('show')||!cur||!cur.bind||document.activeElement===inp) return;
-                   const v=gp(window.OTS_LAST||{}, cur.bind); if(v!=null) inp.value=fmt(v); } });   // per-tick live field
+                   const v=gp(window.OTS_LAST||{}, cur.bind), sample=liveFaceplateSample(cur.tag, v, cur.u); if(sample.value!=null) inp.value=sample.display; } });   // per-tick live field
   if(box) box.addEventListener('click', ()=>open(null));
   const pibox=document.querySelector('.pi[data-tag="HIC_322602"]'); if(pibox) pibox.addEventListener('click', ()=>open(null));
   if(cl&&m) cl.onclick=()=> m.classList.remove('show');
@@ -509,7 +548,7 @@ function render322(s){
         op=document.getElementById('pic-op'), btn=document.getElementById('pic-set-btn'),
         cl=document.getElementById('pic-close'),
         mMan=document.getElementById('pic-man'), mAuto=document.getElementById('pic-auto');
-  let mode='AUTO';
+  let mode='AUTO', cur={tag:'PIC-322203',u:'BARG'};
   const setMode=v=>{ mode=v;
     mMan.classList.toggle('active',v==='MAN'); mAuto.classList.toggle('active',v==='AUTO');
     if(pv) pv.readOnly = true;            // PV = measured pressure, always read-only
@@ -518,8 +557,10 @@ function render322(s){
   };
   mMan.onclick=()=>setMode('MAN');
   mAuto.onclick=()=>{ if(mode!=='AUTO' && pv && pv.value!=='') sp.value = parseFloat(pv.value); setMode('AUTO'); };  // bumpless: SP<-PV on MAN->AUTO (mirrors backend snap)
-  const open=()=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{};
-    if(pv) pv.value = c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '';   // display barg = bara - 1 atm
+  const refreshPV=()=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{}, raw=c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : null;
+    if(pv) pv.value=liveFaceplateSample(cur.tag, raw, cur.u).display; };
+  const open=o=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{}; cur=o||cur;
+    refreshPV();
     if(sp) sp.value = c.PIC_sp!=null ? (c.PIC_sp - 1.01325) : (c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '');
     if(op) op.value = c.PIC_op!=null ? c.PIC_op : '';
     setMode(c.PIC_mode||'AUTO'); m.classList.add('show'); };
@@ -530,6 +571,7 @@ function render322(s){
     send(msg); };
   btn.onclick=apply;
   window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { pic: open });   // overlay PIC-322203 left-click -> faceplate
+  window.refreshPIC=()=>{ if(m.classList.contains('show')) refreshPV(); };
   if(cl) cl.onclick=()=> m.classList.remove('show');
   m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
@@ -539,11 +581,14 @@ function render322(s){
   const m=document.getElementById('hic2Modal'); if(!m) return;
   const inp=document.getElementById('hic2-inp'), btn=document.getElementById('hic2-set-btn'),
         cl=document.getElementById('hic2-close');
-  const open=()=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{};
-    if(inp&&c.HIC_322203!=null) inp.value=c.HIC_322203; m.classList.add('show'); };
+  let cur={tag:'HIC-322203',u:'%'};
+  const refresh=()=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{}, sample=liveFaceplateSample(cur.tag, c.HIC_322203, cur.u);
+    if(inp&&sample.value!=null&&document.activeElement!==inp) inp.value=sample.display; };
+  const open=o=>{ cur=o||cur; refresh(); m.classList.add('show'); };
   const apply=()=>{ const v=parseFloat(inp.value); if(!isNaN(v)) send({type:'hic2_set',value:v}); };
   btn.onclick=apply; inp.addEventListener('change',apply);
   window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { hic2: open });   // overlay HIC-322203 left-click -> faceplate
+  window.refreshHIC2=()=>{ if(m.classList.contains('show')) refresh(); };
   if(cl) cl.onclick=()=> m.classList.remove('show');
   m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
@@ -607,8 +652,9 @@ function render322(s){
     cur=o; ttl.textContent=o.tag;
     if(bCas) bCas.style.display = o.cas ? '' : 'none';   // CAS button only for cascade slaves (o.cas)
     const v = o.bind ? gp(window.OTS_LAST||{}, o.bind) : null;
-    pv.value = (v==null||v==='') ? '—' : (v + (o.u?(' '+o.u):''));
-    curPV = (v==null||v==='') ? null : parseFloat(v);
+    const sample=liveFaceplateSample(o.tag, v, o.u);
+    pv.value = sample.display + ((sample.unit||o.u) ? (' '+(sample.unit||o.u)) : '');
+    curPV = typeof sample.value==='number' ? sample.value : null;
     // authoritative telemetry: modelled loops expose a sibling {pv,sp,op,mode} block (bind ends in .pv)
     const blk = (o.bind && o.bind.endsWith('.pv')) ? gp(window.OTS_LAST||{}, o.bind.slice(0,-3)) : null;
     if(blk && typeof blk==='object' && blk.mode!=null){     // backend-authoritative loop -> live sp/op/mode
@@ -651,6 +697,12 @@ function render322(s){
   };
   btn.onclick=apply;
   window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { ctl: open });   // overlay *IC-3* left-click -> generic faceplate
+  window.refreshCtl=()=>{
+    if(!m.classList.contains('show')||!cur) return;
+    const v=cur.bind ? gp(window.OTS_LAST||{}, cur.bind) : null, sample=liveFaceplateSample(cur.tag, v, cur.u);
+    pv.value=sample.display + ((sample.unit||cur.u) ? (' '+(sample.unit||cur.u)) : '');
+    curPV=typeof sample.value==='number' ? sample.value : null;
+  };
   if(cl) cl.onclick=()=> m.classList.remove('show');
   m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
@@ -744,7 +796,7 @@ connect();
   // write field values from a controller packet, respecting focus (don't clobber typing)
   function fillFields(d){
     const ae = document.activeElement;
-    f('f51-pv').value = fmt(d.pv);                                  // PV: always read-only/live
+    f('f51-pv').value = liveFaceplateSample(TAG, d.pv, 'RPM').display; // PV: post-dynamics, always read-only/live
     if(ae !== f('f51-mv'))   f('f51-mv').value   = fmt(d.mv);
     if(ae !== f('f51-sp'))   f('f51-sp').value   = fmt(d.sp);
     if(ae !== f('f51-bias')) f('f51-bias').value = fmt(d.bias);
@@ -866,7 +918,7 @@ connect();
 
   function fillFields(d){
     const ae = document.activeElement;
-    f('f50-pv').value = fmt(d.pv);                                  // PV: always read-only/live
+    f('f50-pv').value = liveFaceplateSample(TAG, d.pv, 'RPM').display; // PV: post-dynamics, always read-only/live
     if(ae !== f('f50-mv'))   f('f50-mv').value   = fmt(d.mv);
     if(ae !== f('f50-sp'))   f('f50-sp').value   = fmt(d.sp);
     if(ae !== f('f50-bias')) f('f50-bias').value = fmt(d.bias);
@@ -961,7 +1013,7 @@ connect();
   const CMD  = { a:'pic329207a_set', b:'pic329207b_set', c:'pic329207c_set' };
   const KEY  = { a:'PIC_329207A', b:'PIC_329207B', c:'PIC_329207C' };
   const modeOf = {};                       // last-seen per-leg mode (drives OP-input gating)
-  let masterOn = false;
+  let masterOn = false, curIndicator=null;
 
   const ss  = s => (s && s.STEAM_SYSTEM) || null;
   const num = v => (typeof v === 'number' && isFinite(v)) ? v : NaN;
@@ -997,7 +1049,8 @@ connect();
     const m = S.MASTER_SP_329207 || {};
     const ae = document.activeElement;
     masterOn = !!m.on;
-    if(ae !== f('msp-pv')) f('msp-pv').value = fmt(bg(m.pv));
+    const pvTag=(curIndicator&&curIndicator.tag)||'MASTER-SP';
+    if(ae !== f('msp-pv')) f('msp-pv').value = liveFaceplateSample(pvTag, bg(m.pv), 'BARG').display;
     if(ae !== f('msp-sp')) f('msp-sp').value = fmt(bg(m.sp));
     LEGS.forEach(L => {
       const d = S[KEY[L]] || {};
@@ -1011,7 +1064,8 @@ connect();
       : 'MASTER OFF: PIC-329207A/B/C independent — set each SP / mode (OP in MAN).';
   }
 
-  function open(){
+  function open(o){
+    curIndicator=o||null;
     if(lastState) fill(lastState); else setMsg('waiting for telemetry...', false);
     modal.classList.add('show');
   }

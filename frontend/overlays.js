@@ -588,11 +588,13 @@
       let u = o.u;
       if (o.digital === 'level-switch') {
         const low = !!v;
-        if (b) b.textContent = low ? 'LOW' : 'ON';
+        v = low ? 'LOW' : 'ON';
+        if (b) b.textContent = v;
         if (sp) sp.textContent = '';
         if (mt) { mt.textContent = ''; mt.className = 'mt'; }
         el.classList.toggle('switch-ok', !low);
         el.classList.toggle('switch-low', low);
+        if (window.IndicatorFaceplate) window.IndicatorFaceplate.publish(o.tag, v, '');
         el.dataset.tip = o.tag + ' — discrete level switch: green at/above +1200 mm; red below +1200 mm (+200 mm lower connection)';
         return;
       }
@@ -601,6 +603,7 @@
         v = window.IndicatorDynamics.sample('instrument:' + o.tag, o.tag, v, lastS.t_sim, o.dynamics);
       }
       if (u === 'BAR A' && typeof v === 'number') { v = v - 1.01325; u = 'BARG'; }   // Domain 1a: all PT/PIC show gauge pressure (barg = bara - 1 atm)
+      if (window.IndicatorFaceplate) window.IndicatorFaceplate.publish(o.tag, v, u);
       if (b) b.textContent = fmt(v, o.dec);
       if (sp) sp.textContent = u || '';
       if (mt) { const ml = modeLetter(o); mt.textContent = ml; mt.className = 'mt' + (ml ? ' m-' + ml : ''); }   // controller mode badge (A/M/E/O); '' for non-controllers
@@ -635,6 +638,7 @@
       if (o.fp === 'SIC_321951' && window.openF51) { window.openF51(); return; }   // SIC_321951 REST faceplate
       if (o.fp === 'MASTER_SP_329207' && window.OTS_FACE && window.OTS_FACE.msp) { window.OTS_FACE.msp(o); return; }   // 4-bar header MASTER SP cascade
       if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); return; }   // any *IC-3* -> generic faceplate
+      if (window.OTS_FACE && window.OTS_FACE.indicator) { window.OTS_FACE.indicator(o); return; }
       return;
     }
     const key = sid + '|' + o.k;                // unbound pump/xv -> local toggle
@@ -708,7 +712,8 @@
       if (o.t === 'ind' || o.t === 'avalve') {                                 // avalve = modulating PV opening %, rendered as a numeric indicator (bug 3: opening was never shown)
         const eo = eff(o);
         if (!eo.bind) el.classList.add('empty');
-        if (eo.fp || eo.face || CTRL_RE.test(o.tag)) el.classList.add('fp');
+        if (o.t === 'ind') el.classList.add('fp');
+        else if (eo.fp || eo.face || CTRL_RE.test(o.tag)) el.classList.add('fp');
         el.innerHTML = '<b></b> <span class="ou"></span><i class="mt"></i>';   // stable value/unit/mode nodes; renderOne sets textContent only (no innerHTML churn that swallows clicks)
       } else if (o.t === 'nav') {
         el.style.width = (o.w || 60) + 'px';

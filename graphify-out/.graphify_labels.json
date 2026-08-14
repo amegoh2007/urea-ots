@@ -7,9 +7,10 @@
   "5": "builder.js",
   "6": "trend.js",
   "7": "co2_compressor.js",
-  "8": "buildWindow",
-  "9": "popupInit",
-  "10": "backfill",
-  "11": "commitRange",
-  "12": "lv324501_route.js"
+  "8": "test_indicator_faceplate.js",
+  "9": "buildWindow",
+  "10": "popupInit",
+  "11": "backfill",
+  "12": "commitRange",
+  "13": "lv324501_route.js"
 }

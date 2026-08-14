@@ -1,16 +1,16 @@
 # Graph Report - frontend  (2026-08-14)
 
 ## Corpus Check
-- 9 files · ~117,039 words
+- 11 files · ~117,644 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 191 nodes · 415 edges · 13 communities (12 shown, 1 thin omitted)
+- 203 nodes · 430 edges · 14 communities (13 shown, 1 thin omitted)
 - Extraction: 98% EXTRACTED · 2% INFERRED · 0% AMBIGUOUS · INFERRED: 9 edges (avg confidence: 0.5)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `bcf85e9b`
+- Built from commit: `0368c458`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -23,6 +23,7 @@
 - builder.js
 - trend.js
 - co2_compressor.js
+- test_indicator_faceplate.js
 - buildWindow
 - popupInit
 - backfill
@@ -43,24 +44,24 @@
 
 ## Surprising Connections (you probably didn't know these)
 - `pan()` --indirect_call--> `backfill()`  [INFERRED]
-  frontend/trend.js → frontend/trend.js  _Bridges community 10 → community 4_
+  frontend/trend.js → frontend/trend.js  _Bridges community 11 → community 4_
 - `setSpan()` --indirect_call--> `backfill()`  [INFERRED]
-  frontend/trend.js → frontend/trend.js  _Bridges community 10 → community 8_
+  frontend/trend.js → frontend/trend.js  _Bridges community 11 → community 9_
 - `exportPNG()` --calls--> `hms()`  [EXTRACTED]
-  frontend/trend.js → frontend/trend.js  _Bridges community 4 → community 11_
+  frontend/trend.js → frontend/trend.js  _Bridges community 4 → community 12_
 - `afterDatasetsDraw()` --calls--> `save()`  [EXTRACTED]
-  frontend/trend.js → frontend/trend.js  _Bridges community 9 → community 4_
+  frontend/trend.js → frontend/trend.js  _Bridges community 10 → community 4_
 - `commitRange()` --calls--> `save()`  [EXTRACTED]
-  frontend/trend.js → frontend/trend.js  _Bridges community 9 → community 11_
+  frontend/trend.js → frontend/trend.js  _Bridges community 10 → community 12_
 
 ## Import Cycles
 - None detected.
 
-## Communities (13 total, 1 thin omitted)
+## Communities (14 total, 1 thin omitted)
 
 ### Community 0 - "app.js"
 Cohesion: 0.09
-Nodes (32): applyGates(), buildTabs(), COMP_LBL, connect(), ctx, fill(), fillFields(), fmt() (+24 more)
+Nodes (33): applyGates(), buildTabs(), COMP_LBL, connect(), ctx, fill(), fillFields(), fmt() (+25 more)
 
 ### Community 1 - "overlays.js"
 Cohesion: 0.14
@@ -90,24 +91,28 @@ Nodes (11): binds(), bound(), closeMenu(), enqueueAdd(), entry(), flashMain(), i
 Cohesion: 0.39
 Nodes (11): boot(), clamp(), ensure(), gp(), hook(), injectCSS(), livePct(), now() (+3 more)
 
-### Community 8 - "buildWindow"
+### Community 8 - "test_indicator_faceplate.js"
+Cohesion: 0.20
+Nodes (6): display(), publish(), assert, faceplate, fs, path
+
+### Community 9 - "buildWindow"
 Cohesion: 0.25
 Nodes (11): addRuler(), applyCustomSpan(), buildWindow(), flash(), parseSpan(), pxToTime(), removeRuler(), rulerNear() (+3 more)
 
-### Community 9 - "popupInit"
+### Community 10 - "popupInit"
 Cohesion: 0.33
 Nodes (9): coreAddTag(), coreOpen(), drainPending(), markHist(), popupInit(), removeSlot(), save(), saved() (+1 more)
 
-### Community 10 - "backfill"
+### Community 11 - "backfill"
 Cohesion: 0.40
 Nodes (6): backfill(), connectWS(), goLive(), isLive(), noteTime(), onPacket()
 
-### Community 11 - "commitRange"
+### Community 12 - "commitRange"
 Cohesion: 0.40
 Nodes (6): commitRange(), exportPNG(), renderRows(), stamp(), valueAt(), windowStats()
 
 ## Knowledge Gaps
-- **21 isolated node(s):** `lastState`, `Health`, `ResetBtn`, `MODE_LETTER`, `FP_MAP` (+16 more)
+- **25 isolated node(s):** `lastState`, `Health`, `ResetBtn`, `MODE_LETTER`, `FP_MAP` (+20 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **1 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -115,14 +120,14 @@ Nodes (6): commitRange(), exportPNG(), renderRows(), stamp(), valueAt(), windowS
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `redraw()` connect `redraw` to `trend.js`, `buildWindow`, `popupInit`, `backfill`, `commitRange`?**
-  _High betweenness centrality (0.006) - this node is a cross-community bridge._
+  _High betweenness centrality (0.005) - this node is a cross-community bridge._
 - **Why does `buildWindow()` connect `buildWindow` to `popupInit`, `commitRange`, `redraw`, `trend.js`?**
-  _High betweenness centrality (0.003) - this node is a cross-community bridge._
+  _High betweenness centrality (0.002) - this node is a cross-community bridge._
 - **Why does `viewEnd()` connect `redraw` to `buildWindow`, `commitRange`, `trend.js`?**
   _High betweenness centrality (0.001) - this node is a cross-community bridge._
 - **What connects `lastState`, `Health`, `ResetBtn` to the rest of the system?**
-  _21 weakly-connected nodes found - possible documentation gaps or missing edges._
+  _25 weakly-connected nodes found - possible documentation gaps or missing edges._
 - **Should `app.js` be split into smaller, more focused modules?**
-  _Cohesion score 0.08858858858858859 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.08961593172119488 - nodes in this community are weakly interconnected._
 - **Should `overlays.js` be split into smaller, more focused modules?**
   _Cohesion score 0.13903743315508021 - nodes in this community are weakly interconnected._

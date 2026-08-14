@@ -78,4 +78,14 @@ test('loads and calls the shared service from both indicator render paths', () =
   assert.match(overlays, /IndicatorDynamics\.describe/);
 });
 
+test('publishes post-dynamics values from both indicator render paths', () => {
+  const html = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
+  const app = fs.readFileSync(path.join(__dirname, 'app.js'), 'utf8');
+  const overlays = fs.readFileSync(path.join(__dirname, 'overlays.js'), 'utf8');
+  assert.ok(html.indexOf('indicator_dynamics.js') < html.indexOf('indicator_faceplate.js'), 'dynamics must load before the faceplate registry');
+  assert.ok(html.indexOf('indicator_faceplate.js') < html.indexOf('app.js'), 'faceplate registry must load before renderers');
+  assert.match(app, /IndicatorFaceplate\.publish\(instrumentTag, shown, u\)/);
+  assert.match(overlays, /IndicatorFaceplate\.publish\(o\.tag, v, u\)/);
+});
+
 process.stdout.write(`# ${passed} indicator-dynamics tests passed\n`);

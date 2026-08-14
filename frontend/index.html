@@ -701,6 +701,14 @@
   <div class="btns"><button id="ctl-close">Close</button><button class="primary" id="ctl-set-btn">SET</button></div>
 </div></div>
 
+<!-- Generic read-only indicator faceplate; layout intentionally matches controller faceplates -->
+<div class="modal" id="indicatorModal"><div class="card">
+  <h3 id="indicator-title">INDICATOR</h3>
+  <div class="row"><label>PV</label><input id="indicator-pv" type="text" readonly></div>
+  <div class="row"><label>Unit</label><input id="indicator-unit" type="text" readonly></div>
+  <div class="btns"><button id="indicator-close">Close</button></div>
+</div></div>
+
 <!-- SIC-321950 faceplate (REST /api/ctrl/SIC_321950 + controllers WS block) -->
 <div class="modal" id="f50">
   <div class="card">
@@ -848,6 +856,7 @@
 </div>
 
 <script src="indicator_dynamics.js"></script>
+<script src="indicator_faceplate.js"></script>
 <script src="app.js"></script>
 <script src="lv324501_route.js"></script>
 <script src="overlays.js"></script>
