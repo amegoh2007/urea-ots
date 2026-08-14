@@ -9,22 +9,113 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from c003_pressure_coupling import (  # noqa: E402
     c003_pressure_target_bara,
     e011_vent_generation_kgh,
+    C003_Q301_DES_M3H,
+    C003_QOTHER_DES_M3H,
+    C003_GAS_LOAD_COEFF_M3H_PER_BAR,
+    C003_P_DES_BARA,
+    E003_P_DES_BARA,
 )
 
 
+# ---------------------------------------------------------------------------
+# Unit tests for c003_pressure_target_bara (two-path model)
+# ---------------------------------------------------------------------------
+
 def test_c003_design_point_closes_exactly():
+    """At design both ratios == 1.0 and P must be exactly 4.1 bar a."""
     assert c003_pressure_target_bara(1.0, 1.0, 3.2) == pytest.approx(4.1, abs=1.0e-12)
 
 
+def test_c003_lv_flash_path_sensitivity():
+    """Opening LV-322501 (more flash gas) raises C003 pressure.
+
+    Startup-trend field gain: 0.100 bar per % LV opening,
+    normalised at the 46.1 % design opening.
+    ∂P/∂(flash_ratio) at design == (field_gain + hydraulic) per unit ratio.
+    """
+    step = 1.0e-3
+    p_hi = c003_pressure_target_bara(1.0 + step, 1.0, 3.2)
+    p_lo = c003_pressure_target_bara(1.0 - step, 1.0, 3.2)
+    slope = (p_hi - p_lo) / (2.0 * step)
+    # sensitivity must be positive and substantial (≥ 1 bar per unit ratio)
+    assert slope > 1.0
+
+
+def test_c003_e002_vap_path_sensitivity():
+    """More 323E002 reboiler vapour (r_e002 > 1) raises C003 pressure
+    INDEPENDENTLY of the LV-322501 flash path (r_flash held at design)."""
+    step = 1.0e-3
+    p_hi = c003_pressure_target_bara(1.0, 1.0 + step, 3.2)
+    p_lo = c003_pressure_target_bara(1.0, 1.0 - step, 3.2)
+    slope = (p_hi - p_lo) / (2.0 * step)
+    # E002 vapour only uses the hydraulic term (no field-gain correction)
+    # at design:  ∂P_hydr/∂r_e002 = Q_OTHER_des / C_gas / sqrt(1 - (P_down/P_des)^2)
+    # sign must be strictly positive
+    assert slope > 0.0
+
+
+def test_c003_both_paths_additive_at_design():
+    """Doubling both ratios simultaneously raises pressure more than
+    doubling either one alone — the two terms genuinely add."""
+    p_flash_only = c003_pressure_target_bara(2.0, 1.0, 3.2)
+    p_e002_only  = c003_pressure_target_bara(1.0, 2.0, 3.2)
+    p_both       = c003_pressure_target_bara(2.0, 2.0, 3.2)
+    assert p_both > p_flash_only
+    assert p_both > p_e002_only
+
+
 def test_c003_local_lv_sensitivity_matches_startup_band():
-    opening_step = 1.0e-3
-    ratio_step = opening_step / 46.1
+    """Combined (flash-path hydraulic + field-gain) sensitivity must sit inside
+    the startup-trend band of 0.10–0.13 bar per % LV opening at design."""
+    opening_step = 1.0e-3          # % LV opening step
+    ratio_step   = opening_step / 46.1  # normalised at design 46.1 %
     p_hi = c003_pressure_target_bara(1.0 + ratio_step, 1.0, 3.2)
     p_lo = c003_pressure_target_bara(1.0 - ratio_step, 1.0, 3.2)
     slope = (p_hi - p_lo) / (2.0 * opening_step)
     assert slope == pytest.approx(0.122931746, rel=1.0e-5)
     assert 0.10 <= slope <= 0.13
 
+
+def test_c003_target_never_falls_below_downstream_pressure():
+    assert c003_pressure_target_bara(0.0, 1.0, 3.2) == pytest.approx(3.2)
+    assert c003_pressure_target_bara(0.0, 0.0, 3.2) == pytest.approx(3.2)
+
+
+def test_c003_flash_path_zero_e002_still_works():
+    """With zero reboiler vapour the flash path alone must give a finite pressure."""
+    p = c003_pressure_target_bara(1.0, 0.0, 3.2)
+    # Only the flash term contributes; result must be finite and > downstream
+    assert math.isfinite(p)
+    assert p >= 3.2
+
+
+def test_c003_e002_path_zero_flash_still_works():
+    """With zero flash gas the reboiler path alone must give a finite pressure."""
+    p = c003_pressure_target_bara(0.0, 1.0, 3.2)
+    assert math.isfinite(p)
+    assert p >= 3.2
+
+
+# ---------------------------------------------------------------------------
+# Validation constants (ensure design arithmetic is self-consistent)
+# ---------------------------------------------------------------------------
+
+def test_c003_q305_des_split_adds_up():
+    """C003_Q301_DES_M3H + C003_QOTHER_DES_M3H must equal C003_Q305_DES_M3H."""
+    from c003_pressure_coupling import C003_Q305_DES_M3H
+    assert C003_Q301_DES_M3H + C003_QOTHER_DES_M3H == pytest.approx(C003_Q305_DES_M3H, rel=1e-12)
+
+
+def test_c003_hydraulic_coefficient_correct():
+    """GAS_LOAD_COEFF must produce P_des when the design load is used."""
+    load = C003_Q301_DES_M3H + C003_QOTHER_DES_M3H
+    p_hyd = math.sqrt(E003_P_DES_BARA ** 2 + (load / C003_GAS_LOAD_COEFF_M3H_PER_BAR) ** 2)
+    assert p_hyd == pytest.approx(C003_P_DES_BARA, abs=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# e011 vent generation
+# ---------------------------------------------------------------------------
 
 def test_e011_design_gas_closes_pfd_balance():
     assert e011_vent_generation_kgh(6029.0) == pytest.approx(440.0)
@@ -35,15 +126,15 @@ def test_e011_incremental_gas_exceeds_fixed_condensation_capacity():
     assert e011_vent_generation_kgh(5029.0) == 0.0
 
 
-def test_c003_target_never_falls_below_downstream_pressure():
-    assert c003_pressure_target_bara(0.0, 1.0, 3.2) == pytest.approx(3.2)
-
-
 @pytest.mark.parametrize("gas_inlet", [math.nan, math.inf, -0.01])
 def test_e011_rejects_invalid_gas_inlet(gas_inlet):
     with pytest.raises(ValueError):
         e011_vent_generation_kgh(gas_inlet)
 
+
+# ---------------------------------------------------------------------------
+# Integration tests against the running simulator
+# ---------------------------------------------------------------------------
 
 from typing import NamedTuple
 
@@ -71,6 +162,7 @@ def _run_lv_case(opening_pct: float) -> LvCase:
 
 
 def test_lv_opening_materially_separates_pt323201():
+    """Opening LV-322501 (more flash gas) must raise 323C003 pressure by > 2.5 bar."""
     closed = _run_lv_case(30.0)
     opened = _run_lv_case(60.0)
     assert opened.pt323201_bara - closed.pt323201_bara > 2.5

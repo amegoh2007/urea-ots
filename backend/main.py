@@ -1043,6 +1043,14 @@ R323_Q701_DES_KW  = (R323_M314_DES/3600.0*R323_CP_SOLN
 R323_QEVAP_DES_KW = (R323_M319_DES/3600.0*R323_CP_SOLN*(R323_F004_T_SP_C - R323_F010_T_SP_C)
                      + R323_M331_DES/3600.0*R323_CP_SOLN*(R323_M331_T_C - R323_F010_T_SP_C)
                      + R323_E010_Q_DES_KW)                            # kW available to evaporate
+# Design normalisers for the two-path 323C003 pressure model (see c003_pressure_coupling.py).
+# At design: q_flash_des = Q305_total - Q_E002  (letdown flash contribution)
+#            q_pool_des  = Q_E002_des            (reboiler contribution, relaxation=0 at design)
+# Both ratios equal 1.0 at design so the pressure pin is bit-identical.
+_R323_Q_FLASH_DES_KW  = R323_Q305_DES_KW - R323_E002_Q_DES_KW  # kW, letdown flash contribution
+_R323_Q_POOL_DES_KW   = R323_E002_Q_DES_KW                      # kW, reboiler contribution
+R323_M_FLASH_GAS_DES_KGH = R323_M305_DES * (_R323_Q_FLASH_DES_KW / R323_Q305_DES_KW)   # kg/h
+R323_M_POOL_VAP_DES_KGH  = R323_M305_DES * (_R323_Q_POOL_DES_KW  / R323_Q305_DES_KW)   # kg/h
 # 323F004 isenthalpic-flash saturation anchor.  T and P of a flashing drum are NOT independent:
 # the liquid sits at its bubble point.  The boiling-point elevation of the urea liquor is held at
 # its design value (same frozen-activity assumption `conc_infer_324` makes), so the live flash
@@ -6629,6 +6637,7 @@ def step_sim(dt: float) -> dict:
     s._debug_m_feed_323 = m_feed_323
     s._debug_m_305 = m_305
     s._debug_m_flash = m_flash_gas
+    s._debug_m_pool  = m_pool_vap
     q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                  # total available latent kW
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
@@ -6690,11 +6699,18 @@ def step_sim(dt: float) -> dict:
     # liquid outflow term, not silently in the total-mass ODE alone (which would renormalise w).
     s.w_c003   = sol_advance(s.w_c003, M_c003_pre, s.r323_c003_M, m_feed_323, w_feed_323,
                              m_305_evap, y_305, m_314 + m_305_carryover, xi_c003, dt)
-    # PT-323201 reduced-order gas-load coupling. `s.r3232_d001_P` is the beginning-of-substep
-    # E003/D001 pressure; that state is advanced later, preserving the explicit tear.
-    r_lv_c003 = m_feed_323 / STRIP_BOT_DES_KGH
-    r_305_c003 = m_305 / R323_M305_DES
-    p_c003_tgt = c003_pressure_target_bara(r_lv_c003, r_305_c003, s.r3232_d001_P)
+    # PT-323201 two-path pressure coupling.  Two physically distinct gas sources charge the
+    # 323C003 overhead and each drives pressure through its own design volumetric coefficient:
+    #   1. LV-322501 letdown FLASH GAS (stream 301): more LV opening -> more m_feed_323
+    #      -> more q_flash_avail_kw -> more m_flash_gas.  r_flash_c003 normalises by design.
+    #   2. 323E002 REBOILER POOL-BOIL VAPOUR: more steam to E002 (or more sump inventory
+    #      via natural circulation) -> more m_pool_vap.  r_e002_c003 normalises by design.
+    # Both ratios == 1.0 at design -> pressure pin bit-identical to the old model.
+    # r_lv_c003 (liquid feed ratio) is retained because lpcc_pressure_target_bara still needs it.
+    r_lv_c003    = m_feed_323  / STRIP_BOT_DES_KGH
+    r_flash_c003 = m_flash_gas / max(R323_M_FLASH_GAS_DES_KGH, 1e-6)  # LV-322501 flash gas ratio
+    r_e002_c003  = m_pool_vap  / max(R323_M_POOL_VAP_DES_KGH,  1e-6)  # 323E002 pool-boil vapour ratio
+    p_c003_tgt   = c003_pressure_target_bara(r_flash_c003, r_e002_c003, s.r3232_d001_P)
     s.r323_c003_P = clamp(
         s.r323_c003_P + (p_c003_tgt - s.r323_c003_P) / R323_C003_P_TAU_S * dt,
         1.0,
