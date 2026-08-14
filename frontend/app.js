@@ -508,9 +508,9 @@ function render322(s){
               'HIC-322604':{t:'hic604_set',f:'op'},    'HV-322604':{t:'hic604_set',f:'op'},
               'HIC-329601':{t:'steam_hpvent_set',f:'op'}, 'HV-329601':{t:'steam_hpvent_set',f:'op'},
               'HIC-329602':{t:'hic329602_set',   f:'op'}, 'HV-329602':{t:'hic329602_set',   f:'op'},   // hand valve HV-329602, driven ONLY by HIC-329602 (NOT the PIC-329207C steam_963_set valve)
-              'HIC-329605':{t:'hic9605_set',      f:'value'}, 'HV-329605':{t:'hic9605_set',      f:'value'},
-              'HIC-329606':{t:'hic9606_set',      f:'value'}, 'HV-329606':{t:'hic9606_set',      f:'value'},
-              'HIC-323605':{t:'hic323605_set',      f:'value'}, 'HV-323605':{t:'hic323605_set',      f:'value'},
+              'HIC-329605':{t:'hic9605_set',      f:'op'}, 'HV-329605':{t:'hic9605_set',      f:'op'},
+              'HIC-329606':{t:'hic9606_set',      f:'op'}, 'HV-329606':{t:'hic9606_set',      f:'op'},
+              'HIC-323605':{t:'hic323605_set',      f:'op'}, 'HV-323605':{t:'hic323605_set',      f:'op'},
               'FT-322404':{t:'cpl_set', f:'value'} };                          // 954 condensate feed -> 322C001 (kg/h, not a %-opening)
   const NOTE={ '322602':'↓ opening ⇒ ↑ 322E003 suction (↑ μ)',
                '323605':'↓ opening ⇒ ↑ 323F010 pressure (↓ vacuum)',

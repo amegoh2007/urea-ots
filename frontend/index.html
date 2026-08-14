@@ -709,6 +709,18 @@
   <div class="btns"><button id="indicator-close">Close</button></div>
 </div></div>
 
+<!-- FFIC-321404A/B ratio station faceplate (shared ratio_SP → SIC-321950/951 cascade) -->
+<div class="modal" id="fficModal"><div class="card">
+  <h3 id="ffic-title">FFIC-321404</h3>
+  <div class="row"><label>PV (N/C)</label><input id="ffic-pv" type="text" readonly></div>
+  <div class="row"><label>SP (N/C)</label><input id="ffic-sp" type="number" step="0.001" min="2.0" max="5.0"></div>
+  <div class="row"><label>Total N/C</label><input id="ffic-total" type="text" readonly></div>
+  <div id="ffic-note" style="font-size:11px;color:#ffd27f;margin:4px 0;">
+    SP sets the target molar N/C ratio for both pumps. Drives SIC-321950/951 cascade.
+  </div>
+  <div class="btns"><button id="ffic-close">Close</button><button class="primary" id="ffic-set-btn">SET</button></div>
+</div></div>
+
 <!-- SIC-321950 faceplate (REST /api/ctrl/SIC_321950 + controllers WS block) -->
 <div class="modal" id="f50">
   <div class="card">
@@ -716,7 +728,8 @@
     <div class="row"><label>PV (%)</label><input id="f50-pv" type="number" step="0.1" readonly></div>
     <div class="row"><label>SP (%)</label><input id="f50-sp" type="number" step="0.1"></div>
     <div class="row"><label>MV (%)</label><input id="f50-mv" type="number" step="0.1"></div>
-    <div class="row"><label>N/C bias (%)</label><input id="f50-bias" type="number" step="0.1"></div>
+    <div class="row"><label>N/C feed</label><input id="f50-nc" type="text" readonly></div>
+    <div class="row"><label>FFIC SP</label><input id="f50-ratio" type="number" step="0.001"></div>
     <div class="row"><label>Mode</label>
       <div class="mg50">
         <button data-mode="MAN"  id="f50-man">MAN</button>
@@ -741,7 +754,8 @@
     <div class="row"><label>PV (%)</label><input id="f51-pv" type="number" step="0.1" readonly></div>
     <div class="row"><label>SP (%)</label><input id="f51-sp" type="number" step="0.1"></div>
     <div class="row"><label>MV (%)</label><input id="f51-mv" type="number" step="0.1"></div>
-    <div class="row"><label>N/C bias (%)</label><input id="f51-bias" type="number" step="0.1"></div>
+    <div class="row"><label>N/C feed</label><input id="f51-nc" type="text" readonly></div>
+    <div class="row"><label>FFIC SP</label><input id="f51-ratio" type="number" step="0.001"></div>
     <div class="row"><label>Mode</label>
       <div class="mg51">
         <button data-mode="MAN"  id="f51-man">MAN</button>

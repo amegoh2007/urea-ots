@@ -42,8 +42,8 @@
       { k: 'i62',  t: 'ind', x: 1108, y: 486, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
       { k: 's50',  t: 'ind', x: 876,  y: 544, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
       { k: 's51',  t: 'ind', x: 1088, y: 544, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
-      { k: 'nca',  t: 'ind', x: 288,  y: 538, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
-      { k: 'ncb',  t: 'ind', x: 288,  y: 606, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
+      { k: 'nca',  t: 'ind', x: 288,  y: 538, tag: 'FFIC-321404A', bind: 'ratio.NC_A', u: '', dec: 3, fp: 'FFIC_321404' },
+      { k: 'ncb',  t: 'ind', x: 288,  y: 606, tag: 'FFIC-321404B', bind: 'ratio.NC_B', u: '', dec: 3, fp: 'FFIC_321404' },
       { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LSL_321501', digital: 'level-switch' },
       { k: 'ft3',  t: 'ind', x: 93,   y: 452, tag: 'FT-322403', bind: 'CO2_FEED.FT_322403', u: 'NM3/H', dec: 0 },   // CO2 feed 320K002 -> XV-322902 -> 322E001
       // ---- pumps ----
@@ -129,8 +129,8 @@
       // ---- pump speed / ratio controllers (modelled in 321) ----
       { k: 's950b', t: 'ind', x: 491, y: 443, tag: 'SIC-321950',    bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
       { k: 's951b', t: 'ind', x: 497, y: 492, tag: 'SIC-321951',    bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
-      { k: 'nca2',  t: 'ind', x: 419, y: 448, tag: 'N/C 321P002A',  bind: 'ratio.NC_A', u: '', dec: 3 },
-      { k: 'ncb2',  t: 'ind', x: 414, y: 497, tag: 'N/C 321P002B',  bind: 'ratio.NC_B', u: '', dec: 3 },
+      { k: 'nca2',  t: 'ind', x: 419, y: 448, tag: 'FFIC-321404A',  bind: 'ratio.NC_A', u: '', dec: 3, fp: 'FFIC_321404' },
+      { k: 'ncb2',  t: 'ind', x: 414, y: 497, tag: 'FFIC-321404B',  bind: 'ratio.NC_B', u: '', dec: 3, fp: 'FFIC_321404' },
       // ---- screen-nav hotspots (Item 3) ----
       { k: 'nav-321',  t: 'nav', x: 494,  y: 534, w: 70, h: 24, tag: '321-1',             goto: 'screen-321-1' },
       { k: 'nav-e003', t: 'nav', x: 1271, y: 78,  w: 80, h: 22, tag: '322E003 → 322-2', goto: 'screen-322-2' },
@@ -634,6 +634,7 @@
       return;
     } else if (o.t === 'ind') {
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
+      if (o.fp === 'FFIC_321404' && window.OTS_FACE && window.OTS_FACE.ffic) { window.OTS_FACE.ffic(o); return; }   // FFIC-321404A/B ratio station faceplate
       if (o.fp === 'SIC_321950' && window.openF50) { window.openF50(); return; }   // SIC_321950 REST faceplate
       if (o.fp === 'SIC_321951' && window.openF51) { window.openF51(); return; }   // SIC_321951 REST faceplate
       if (o.fp === 'MASTER_SP_329207' && window.OTS_FACE && window.OTS_FACE.msp) { window.OTS_FACE.msp(o); return; }   // 4-bar header MASTER SP cascade
