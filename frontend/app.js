@@ -253,7 +253,7 @@ function render(s){
 
   const lsl=document.querySelector('[data-tag="LSL_321501"]');
   if(lsl && s.LSL_321501!=null){
-    lsl.textContent = s.LSL_321501 ? 'LO' : 'OK';
+    lsl.textContent = s.LSL_321501 ? 'LOW' : 'ON';
     lsl.classList.toggle('alarm', !!s.LSL_321501);
   }
 

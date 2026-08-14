@@ -100,16 +100,19 @@ static-head term is in level fraction and is exact.
 **Tried:** a uniform `CQ_SEAL_BAND_PCT = 3.0 %` of level span. 322R001 is exempt — its exit funnel
 elevation is a real datasheet number and is used directly.
 
-## G-CQ-6 — Field line inventories for consequence transport
-**Affects:** the exact arrival time of seal-loss gas and entrained-liquid disturbances at downstream
-equipment.
-**Implemented:** every consequence travels as one mass/temperature/species packet. Each physical
-route has an effective line inventory back-calculated from the established 8 s gas-front or 20 s
-liquid-slug design anchor; live dead time varies as inventory divided by live carrier flow and is
-capped at 1 800 s. Receiving-vessel response comes from its existing mass and energy holdup.
-**Missing:** field pipe lengths, fittings, and retained volumes for the seven routed connections.
-Replacing an effective inventory with surveyed geometry requires no change to the packet or
-downstream-balance equations.
+## G-CQ-6 — Field line inventories for process and consequence transport
+**Affects:** the exact arrival time of normal stream-property changes, seal-loss gas, and
+entrained-liquid disturbances at downstream equipment.
+**Implemented:** every normal or consequence disturbance travels as one
+mass/temperature/species packet. Seven consequence routes use the established 8 s gas-front or
+20 s liquid-slug anchors; five normal liquid routes from 322E001 through 324E001 use the 20 s anchor.
+Live dead time varies as effective line inventory divided by live carrier flow and is capped at
+1 800 s. Receiving-vessel response comes from existing mass, component, and energy holdup.
+**Missing:** field pipe lengths, fittings, retained volumes, and raw higher-resolution historian
+samples for the twelve routed connections. The supplied trend workbooks contain only hourly
+independent points; their 30-second rows are synthetic interpolation, which supports only a
+`<3600 s` bound. Replacing an effective inventory with surveyed geometry or fitted transit time
+requires no change to the packet or downstream-balance equations.
 
 ## G-VLE-1 — Urea is a diluent, not a UNIQUAC species
 **Affects:** the 323C003 and 323F004 bubble points.

@@ -44,7 +44,7 @@
       { k: 's51',  t: 'ind', x: 1088, y: 544, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
       { k: 'nca',  t: 'ind', x: 288,  y: 538, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
       { k: 'ncb',  t: 'ind', x: 288,  y: 606, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
-      { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LI_321501',  u: '%',     dec: 1 },
+      { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LSL_321501', digital: 'level-switch' },
       { k: 'ft3',  t: 'ind', x: 93,   y: 452, tag: 'FT-322403', bind: 'CO2_FEED.FT_322403', u: 'NM3/H', dec: 0 },   // CO2 feed 320K002 -> XV-322902 -> 322E001
       // ---- pumps ----
       { k: 'pa',  t: 'pump', x: 861,  y: 445, bind: 'pumpA', id: 'A', tag: '321P002A' },
@@ -586,6 +586,16 @@
       if (!o.bind) { if (b) b.textContent = o.tag; if (sp) sp.textContent = ''; if (mt) { mt.textContent = ''; mt.className = 'mt'; } return; }   // empty slot keeps tag text
       let v = gp(lastS, o.bind);
       let u = o.u;
+      if (o.digital === 'level-switch') {
+        const low = !!v;
+        if (b) b.textContent = low ? 'LOW' : 'ON';
+        if (sp) sp.textContent = '';
+        if (mt) { mt.textContent = ''; mt.className = 'mt'; }
+        el.classList.toggle('switch-ok', !low);
+        el.classList.toggle('switch-low', low);
+        el.dataset.tip = o.tag + ' — discrete level switch: green at/above +1200 mm; red below +1200 mm (+200 mm lower connection)';
+        return;
+      }
       const dynamics = window.IndicatorDynamics;
       if (dynamics && typeof v === 'number') {
         v = window.IndicatorDynamics.sample('instrument:' + o.tag, o.tag, v, lastS.t_sim, o.dynamics);

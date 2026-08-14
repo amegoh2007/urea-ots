@@ -505,6 +505,43 @@ def transport_stream_packet(store: dict, key: str, target: StreamPacket,
     return state["output"]
 
 
+def transport_process_packet(store: dict, key: str, target: StreamPacket,
+                             route: ConsequenceRoute, live_carrier_kgh: float,
+                             dt: float) -> StreamPacket:
+    """Delay a normal process packet while preserving the boot steady state.
+
+    Unlike :func:`transport_stream_packet`, whose background consequence is zero, a process line
+    is full at simulation start.  Seed both history and output from the first live packet.  Later
+    packets use the same timestamped zero-order-held FIFO, so component rates, temperature, and
+    sensible enthalpy always cross the equipment boundary together.
+    """
+    if dt <= 0.0:
+        return target
+    state = store.get(key)
+    if state is None:
+        dead_time = route.dead_time_s(live_carrier_kgh)
+        state = {
+            "time_s": 0.0,
+            "buffer": deque([(0.0, target)]),
+            "output": target,
+            "dead_time_s": dead_time,
+        }
+        store[key] = state
+    state["time_s"] += dt
+    now = state["time_s"]
+    dead_time = route.dead_time_s(live_carrier_kgh)
+    state["dead_time_s"] = dead_time
+    buffer = state["buffer"]
+    if not buffer or buffer[-1][1] != target:
+        buffer.append((now, target))
+    cutoff = now - dead_time
+    while len(buffer) >= 2 and buffer[1][0] <= cutoff + 1.0e-9:
+        buffer.popleft()
+    if buffer and buffer[0][0] <= cutoff + 1.0e-9:
+        state["output"] = buffer[0][1]
+    return state["output"]
+
+
 def transport_time_s(volume_m3: float, mass_flow_kgh: float, rho: float,
                      td_max_s: float = 1800.0) -> float:
     """Plug-flow transit time of a connecting line, s:  td = rho*V / m_dot.

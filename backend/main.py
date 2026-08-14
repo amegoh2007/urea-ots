@@ -308,11 +308,24 @@ PUMP_RATED_I    = 51.0           # A (display proxy; DCS 43.9 A @ 131 rpm = 86 %
 TANK_ID         = 0.970          # m
 TANK_H          = 1.400          # m
 TANK_VOL        = (math.pi/4.0) * TANK_ID**2 * TANK_H                # m^3
+# LSL-321501 is a two-connection discrete switch, not an analog transmitter. Vendor principle
+# sketch UD-AU-321-EC-0001 locates N7B at +200 mm and N7A at +1200 mm above the lower tangent line.
+# The switch is healthy/green while liquid wets the upper connection and goes low/red below it.
+LSL_321501_LOW_M  = 0.200
+LSL_321501_HIGH_M = 1.200
+
+
+def lsl_321501_low(level_fraction: float) -> bool:
+    """True when 321D003 liquid falls below the +1200 mm upper switch connection."""
+    liquid_height_m = clamp(level_fraction, 0.0, 1.0) * TANK_H
+    return liquid_height_m < LSL_321501_HIGH_M
+
+
 # 321D003 feed-drum level control (LIC-321501).  BL NH3 import tracks the live feed-pump draw plus a
 # proportional level-restoring term, so import == draw at steady state (the drum neither drains into the
 # 21_2 low-level trip nor floods on a feed disturbance).  P-only on the tank integrator with a draw
 # feed-forward holds the level at SP with ZERO offset; bit-exact at design (level==SP -> makeup==draw).
-TANK_LEVEL_SP_FRAC = 0.65        # 321D003 design working level (LI-321501 setpoint, fraction)
+TANK_LEVEL_SP_FRAC = 1.00        # 321D003 is liquid-full in normal service; LSL-321501 stays green
 TANK_LIC_KP_TH     = 80.0        # t/h per unit level-fraction error, feed-drum makeup level gain
 TANK_BL_MAX_TH     = 90.0        # t/h, BL NH3 import-line max capacity (makeup valve fully open)
 P_SYN_DOWN_BAR  = 165.0          # bar a, downstream synthesis nominal
@@ -4497,6 +4510,22 @@ CONSEQUENCE_ROUTES = {
         "322C001", "323E003/323D001", A328_M756_DES, CQ_BLOW_TD_S),
 }
 
+# Normal product flow uses a separate, boot-filled transport history.  The trend exports resolve
+# only hourly samples, so they bound these delays below 3600 s but cannot identify a minute value.
+# Retain the established 20 s effective liquid-slug anchor until field line volumes are available.
+PROCESS_ROUTES = {
+    "322E001_TO_323C003": cq.ConsequenceRoute(
+        "322E001", "323C003", STRIP_BOT_DES_KGH, CQ_CARRY_TD_S),
+    "323C003_TO_323F004": cq.ConsequenceRoute(
+        "323C003", "323F004", R323_M314_DES, CQ_CARRY_TD_S),
+    "323F004_TO_323F010": cq.ConsequenceRoute(
+        "323F004", "323F010", R323_M319_DES, CQ_CARRY_TD_S),
+    "323F010_TO_323D002": cq.ConsequenceRoute(
+        "323F010", "323D002", R323_M317_DES, CQ_CARRY_TD_S),
+    "323D002_TO_324E001": cq.ConsequenceRoute(
+        "323D002", "324E001", R323_M324_DES, CQ_CARRY_TD_S),
+}
+
 
 def _cq_seal(level_pct: float, seal_pct: float = 0.0) -> float:
     """Fraction of a drain nozzle still covered.  1.0 at every design level -> pin bit-exact."""
@@ -4603,7 +4632,9 @@ def _cq_packet(mass_kgh: float, temperature_c: float, mass_fraction: dict,
                cp_kj_kgk: float = STRIP_CP_GAS) -> cq.StreamPacket:
     """Build one closed consequence packet from a live source composition."""
     mass = max(float(mass_kgh), 0.0)
-    positive = {k: max(float(mass_fraction.get(k, 0.0)), 0.0) for k in MW_COMP}
+    positive = {
+        str(k): max(float(value), 0.0) for k, value in mass_fraction.items()
+    }
     total_fraction = sum(positive.values())
     if mass <= 0.0 or total_fraction <= 0.0:
         return cq.ZERO_PACKET
@@ -4638,6 +4669,31 @@ def _transport_consequence(s, route_name: str, packet: cq.StreamPacket,
         "dead_time_s": route_state["dead_time_s"],
         "arrived_mass_kgh": arrived.mass_kgh,
         "temperature_c": arrived.temperature_c,
+        "component_kgh": arrived.component_kgh,
+        "mass_fraction": arrived.mass_fraction,
+    }
+    return arrived
+
+
+def _transport_process(s, route_name: str, packet: cq.StreamPacket,
+                       live_carrier_kgh: float, dt: float) -> cq.StreamPacket:
+    """Transport one normal-process parcel and publish the exact boundary values consumed."""
+    route = PROCESS_ROUTES[route_name]
+    key = "PROCESS_ROUTE:" + route_name
+    arrived = cq.transport_process_packet(
+        s.tlag, key, packet, route, max(live_carrier_kgh, 0.0), dt
+    )
+    route_state = s.tlag[key]
+    diagnostics = s.tlag.setdefault("PROCESS_DIAGNOSTICS", {})
+    diagnostics[route_name] = {
+        "source": route.source,
+        "destination": route.destination,
+        "dead_time_s": route_state["dead_time_s"],
+        "departure_mass_kgh": packet.mass_kgh,
+        "departure_temperature_c": packet.temperature_c,
+        "departure_component_kgh": packet.component_kgh,
+        "arrived_mass_kgh": arrived.mass_kgh,
+        "arrived_temperature_c": arrived.temperature_c,
         "component_kgh": arrived.component_kgh,
         "mass_fraction": arrived.mass_fraction,
     }
@@ -4708,7 +4764,7 @@ class State:
     def __init__(self):
         self.r322_r001_P = 144.9  # HP loop pressure anchor (bar a)
         # tank
-        self.tank_level_frac = 0.65
+        self.tank_level_frac = TANK_LEVEL_SP_FRAC
         self.tank_T_C        = 25.0
         self.tank_P_top_barG = 12.3
         self.F_in_BL_th      = 42.762   # t/h, BL NH3 makeup (seed; set live by LIC-321501 = pump draw)
@@ -6442,16 +6498,25 @@ def step_sim(dt: float) -> dict:
     #  All latent/duty coefficients were back-solved at the design seed, so at boot every
     #  dM/dt == dT/dt == 0 (the MB/PFD anchors are the exact fixed point).
     # ==================================================================================
-    m_feed_323 = max(drain_kgh, 0.0)                       # live 322E001 bottoms -> 323C003 (kg/h)
-    T_feed_323 = TT_323001                                 # C, post-LV-322501 flash (un-lagged)
+    m_depart_323 = max(drain_kgh, 0.0)                     # leaves 322E001 now (kg/h)
+    T_depart_323 = TT_323001                               # C, post-LV-322501 flash
     # AUDIT C10 — cp is a PROPERTY, not a constant.  One lumped 2.5 kJ/kg.K used to cover the 44 %
     # granulation return at 40 C, the 55.9 % stripper bottoms at 119 C and the 80 % product at 99 C.
     # Each stream now carries its own, as a departure from that lumped anchor so every back-solved
     # lambda and UA above stays exactly valid (see the R323_CP_*_DES block).  The feed composition is
     # hoisted above the energy terms because the FEED's cp is what the feed sensible duty needs.
-    w_feed_323 = _w_norm({k: strip["bot_mass_pct"].get(k, 0.0) for k in SOL_SPECIES})
+    w_depart_323 = _w_norm({k: strip["bot_mass_pct"].get(k, 0.0) for k in SOL_SPECIES})
     _cp = lambda w, T, des: R323_CP_SOLN + (urea_soln_cp(w, T) - des)   # noqa: E731 -- departure form
-    cp_feed323 = _cp(w_feed_323.get("Urea", 0.0),          T_feed_323,        R323_CP_S208_DES)
+    cp_depart323 = _cp(w_depart_323.get("Urea", 0.0),      T_depart_323,      R323_CP_S208_DES)
+    feed_323_packet = _transport_process(
+        s, "322E001_TO_323C003",
+        _cq_packet(m_depart_323, T_depart_323, w_depart_323, cp_depart323),
+        m_depart_323, dt,
+    )
+    m_feed_323 = feed_323_packet.mass_kgh
+    T_feed_323 = feed_323_packet.temperature_c
+    w_feed_323 = _w_norm(feed_323_packet.mass_fraction)
+    cp_feed323 = feed_323_packet.cp_kj_kgk
     cp_c003    = _cp(s.w_c003.get("Urea", 0.0),            s.r323_c003_T,     R323_CP_C003_DES)
     cp_f004    = _cp(s.w_f004.get("Urea", 0.0),            s.r323_f004_T,     R323_CP_F004_DES)
     cp_f010    = _cp(s.w_f010.get("Urea", 0.0),            s.r323_f010_T,     R323_CP_F010_DES)
@@ -6627,7 +6692,7 @@ def step_sim(dt: float) -> dict:
                              m_305_evap, y_305, m_314 + m_305_carryover, xi_c003, dt)
     # PT-323201 reduced-order gas-load coupling. `s.r3232_d001_P` is the beginning-of-substep
     # E003/D001 pressure; that state is advanced later, preserving the explicit tear.
-    r_lv_c003 = drain_kgh / STRIP_BOT_DES_KGH
+    r_lv_c003 = m_feed_323 / STRIP_BOT_DES_KGH
     r_305_c003 = m_305 / R323_M305_DES
     p_c003_tgt = c003_pressure_target_bara(r_lv_c003, r_305_c003, s.r3232_d001_P)
     s.r323_c003_P = clamp(
@@ -6635,6 +6700,16 @@ def step_sim(dt: float) -> dict:
         1.0,
         12.0,
     )
+
+    feed_f004_packet = _transport_process(
+        s, "323C003_TO_323F004",
+        _cq_packet(m_314, s.r323_c003_T, s.w_c003, cp_c003),
+        m_314, dt,
+    )
+    m_314_in = feed_f004_packet.mass_kgh
+    T_314_in = feed_f004_packet.temperature_c
+    w_314_in = _w_norm(feed_f004_packet.mass_fraction)
+    cp_314_in = feed_f004_packet.cp_kj_kgk
 
     # ---- Stage 2: Flash Tank 323F004  (adiabatic letdown 4.1 -> 1.13 bar, hold 106 C) --------
     # AUDIT F-1 — TRUE isenthalpic flash (was a frozen split fraction of m_314, so a ±30 °C swing
@@ -6657,7 +6732,7 @@ def step_sim(dt: float) -> dict:
     T_sat_f004 = R323_F004_T_SP_C + (_tbub_f004_live - _R323_TBUB_F004_DES)
     q701_relax_kw = (s.r323_f004_M * cp_f004 * (T_sat_f004 - s.r323_f004_T)
                      / R323_F004_M_TAU_S)                                         # kW retained to reach bubble point
-    q701_avail_kw = m_314 / 3600.0 * cp_c003 * (s.r323_c003_T - s.r323_f004_T)      # kW released by the letdown
+    q701_avail_kw = m_314_in / 3600.0 * cp_314_in * (T_314_in - s.r323_f004_T)      # kW released by the letdown
     m_701     = max(R323_M701_DES * ((q701_avail_kw - q701_relax_kw) / R323_Q701_DES_KW),
                     0.0)                                                          # flash vapor -> LPCC (701, kg/h)
     lvl_f004  = clamp(s.r323_f004_M / R323_F004_M_FULL * 100.0, 0.0, 100.0)
@@ -6703,11 +6778,11 @@ def step_sim(dt: float) -> dict:
     s.flags["CONDENSATE_TANK_HIGH_ALARM"] = bool(f004_carryover > 0.0)
     s.flags["VAPOR_LINE_TEMP_DROP"] = bool(f004_carryover > 0.0)
 
-    P_f004    = (m_314 / 3600.0 * cp_c003 * (s.r323_c003_T - s.r323_f004_T)
+    P_f004    = (m_314_in / 3600.0 * cp_314_in * (T_314_in - s.r323_f004_T)
                  - m_701 / 3600.0 * R323_LAMBDA_701)                              # adiabatic (no Q) kW
     M_f004_pre = s.r323_f004_M
     s.r323_f004_T = s.r323_f004_T + P_f004 * dt / max(M_f004_pre * cp_f004, 1e-6)
-    s.r323_f004_M = max(M_f004_pre + (m_314 - m_701 - f004_carryover - m_319) / 3600.0 * dt, 1.0)
+    s.r323_f004_M = max(M_f004_pre + (m_314_in - m_701 - f004_carryover - m_319) / 3600.0 * dt, 1.0)
     y_701      = sol_vapour_y(s.w_f004, SOL_F004["alpha"])          # AUDIT F-8: flash vapour comp
     if f004_carryover > 0.0 and (m_701 + f004_carryover) > 0.0:
         y_701 = {k: (m_701*y_701.get(k, 0.0) + f004_carryover*(s.w_f004.get(k, 0.0)/100.0)) / (m_701 + f004_carryover) for k in y_701}
@@ -6718,7 +6793,7 @@ def step_sim(dt: float) -> dict:
     m_701_down = packet_701.mass_kgh
     T_701_down = packet_701.temperature_c if packet_701.mass_kgh > 0.0 else R3232_E011_T701
     xi_f004    = sol_biuret_xi("F004", M_f004_pre, s.w_f004, s.r323_f004_T)
-    s.w_f004   = sol_advance(s.w_f004, M_f004_pre, s.r323_f004_M, m_314, s.w_c003,
+    s.w_f004   = sol_advance(s.w_f004, M_f004_pre, s.r323_f004_M, m_314_in, w_314_in,
                              m_701 + f004_carryover, y_701, m_319, xi_f004, dt)
     #  323F004 hydraulic coupling: forward pressure accumulation from live flash-vapour flow (701).
     #  Opening LV-323501 raises m_314 -> m_701 > design => flash-drum P relaxes UP (feeds PIC-323203 LP node).
@@ -6727,6 +6802,16 @@ def step_sim(dt: float) -> dict:
                   * (m_701 + c003_blow_arrived.mass_kgh - R323_M701_DES) / R323_M701_DES
                   + p_f004_choke)
     s.r323_f004_P = clamp(s.r323_f004_P + (p_f004_tgt - s.r323_f004_P) / R323_F004_P_TAU_S * dt, 0.3, 6.0)
+
+    feed_f010_packet = _transport_process(
+        s, "323F004_TO_323F010",
+        _cq_packet(m_319, s.r323_f004_T, s.w_f004, cp_f004),
+        m_319, dt,
+    )
+    m_319_in = feed_f010_packet.mass_kgh
+    T_319_in = feed_f010_packet.temperature_c
+    w_319_in = _w_norm(feed_f010_packet.mass_fraction)
+    cp_319_in = feed_f010_packet.cp_kj_kgk
 
     # ---- Stage 3: Pre-evaporator 323F010 + Heater 323E010  (vacuum 0.46 bar, hold 99 C) ------
     #  Cascade  TIC-323012 (temp master) -> PIC-329208 (LP-steam chest-P slave) -> heater duty.
@@ -6744,7 +6829,7 @@ def step_sim(dt: float) -> dict:
     Q_e010_kw = max(R323_E010_UA_KW * (tsat_steam(p_chest_e010) - s.r323_f010_T), 0.0)  # heater duty (kW, F-10 floored)
     # AUDIT F-3 — same energy limit as Stage 1: the pre-evaporator cannot evaporate more water
     # than its live LP-steam duty (plus the feed's sensible surplus) can supply.
-    qevap_avail_kw = (m_319 / 3600.0 * cp_f004 * (s.r323_f004_T - s.r323_f010_T)
+    qevap_avail_kw = (m_319_in / 3600.0 * cp_319_in * (T_319_in - s.r323_f010_T)
                       + m_331 / 3600.0 * cp_331 * (R323_M331_T_C - s.r323_f010_T)
                       + Q_e010_kw)                                                # kW available as latent
     # Flow cap in anchored-ratio form: at design the numerator and denominator are bit-identical, so
@@ -6761,7 +6846,7 @@ def step_sim(dt: float) -> dict:
                   + (bubble_T_raoult(s.r323_f010_P, s.w_f010) - R323_F010_TBUB_DES))
     qevap_relax_kw = (s.r323_f010_M * cp_f010 * (T_bub_f010 - s.r323_f010_T)
                       / R323_F010_M_TAU_S)                                        # kW retained to reach bubble point
-    m_evap    = min(R323_MEVAP_DES * ((m_319 + m_331) / (R323_M319_DES + R323_M331_DES)),
+    m_evap    = min(R323_MEVAP_DES * ((m_319_in + m_331) / (R323_M319_DES + R323_M331_DES)),
                     max(R323_MEVAP_DES * ((qevap_avail_kw - qevap_relax_kw) / R323_QEVAP_DES_KW),
                         0.0))                                                     # vapour 790 -> vac (kg/h)
     m_317     = gravity_outflow_323f010(s.r323_f010_M)                              # gravity drain -> tank (kg/h)
@@ -6780,12 +6865,12 @@ def step_sim(dt: float) -> dict:
                                  t_c=s.r323_f010_T, t_des_c=R323_F010_T_SP_C)
     f010_entrain = min(f010_entrain, max(s.r323_f010_M - 1.0, 0.0) * (3600.0 / dt))
     s.flags["F010_CARRYOVER"] = bool(f010_entrain > 0.0)
-    P_f010    = (m_319 / 3600.0 * cp_f004 * (s.r323_f004_T - s.r323_f010_T)
+    P_f010    = (m_319_in / 3600.0 * cp_319_in * (T_319_in - s.r323_f010_T)
                  + m_331 / 3600.0 * cp_331 * (R323_M331_T_C - s.r323_f010_T)
                  + Q_e010_kw - m_evap / 3600.0 * R323_EVAP_LAMBDA)               # net kW on holdup
     M_f010_pre = s.r323_f010_M
     s.r323_f010_T = s.r323_f010_T + P_f010 * dt / max(M_f010_pre * cp_f010, 1e-6)
-    s.r323_f010_M = max(M_f010_pre + (m_319 + m_331 - m_evap - m_317 - f010_entrain) / 3600.0 * dt, 1.0)
+    s.r323_f010_M = max(M_f010_pre + (m_319_in + m_331 - m_evap - m_317 - f010_entrain) / 3600.0 * dt, 1.0)
     s.flags["F010_CRYSTALLIZATION"] = bool(s.r323_f010_T < 75.0)
     # Mapping — live 323F010 vacuum (PT-323204).  The evolved vapour m_evap is pulled out through
     # HV-323605 (gas outlet, HIC-323605) and evacuated by the 324F002 ejector on HV-329605; opening
@@ -6844,9 +6929,19 @@ def step_sim(dt: float) -> dict:
 
     y_evap     = sol_vapour_y(s.w_f010, SOL_F010["alpha"])          # AUDIT F-8: vacuum vapour comp
     xi_f010    = sol_biuret_xi("F010", M_f010_pre, s.w_f010, s.r323_f010_T)
-    s.w_f010   = sol_advance(s.w_f010, M_f010_pre, s.r323_f010_M, m_319, s.w_f004,
+    s.w_f010   = sol_advance(s.w_f010, M_f010_pre, s.r323_f010_M, m_319_in, w_319_in,
                              m_evap, y_evap, m_317 + f010_entrain, xi_f010, dt,
                              m_in2=m_331, w_in2=W_S331)
+
+    feed_d002_packet = _transport_process(
+        s, "323F010_TO_323D002",
+        _cq_packet(m_317, s.r323_f010_T, s.w_f010, cp_f010),
+        m_317, dt,
+    )
+    m_317_in = feed_d002_packet.mass_kgh
+    T_317_in = feed_d002_packet.temperature_c
+    w_317_in = _w_norm(feed_d002_packet.mass_fraction)
+    cp_317_in = feed_d002_packet.cp_kj_kgk
 
     # ---- Stage 4: Urea Solution Tank 323D002  (atmospheric, two compartments) -----------------
     #  TOPOLOGY (References/323D002.md §3, confirmed by operations 2026-07-23):
@@ -6931,13 +7026,13 @@ def step_sim(dt: float) -> dict:
     if tie_open:
         # One pooled inventory redistributed to a common level fraction.  Comp II now has an outlet
         # (through the spool, into Comp I's suction), which is the whole point of opening it.
-        M_tot    = clamp(M_I_pre + M_II_pre + (m_317 + d002_recyc - m_324) / 3600.0 * dt,
+        M_tot    = clamp(M_I_pre + M_II_pre + (m_317_in + d002_recyc - m_324) / 3600.0 * dt,
                          1.0, v_tie_full)
         frac     = M_tot / v_tie_full
         M_I_new  = frac * v_I_full
         M_II_new = frac * v_II_full
     else:
-        M_I_new = M_I_pre + (m_317 + d002_recyc - m_324) / 3600.0 * dt
+        M_I_new = M_I_pre + (m_317_in + d002_recyc - m_324) / 3600.0 * dt
         if M_I_new > v_I_full:                                                    # weir spill -> Comp II
             d002_overflow = M_I_new - v_I_full
             M_I_new = v_I_full
@@ -6950,12 +7045,12 @@ def step_sim(dt: float) -> dict:
     # 80 % liquor toward its crystallisation boundary and blocks the 323P003 suction -- so the tank
     # needs its own thermal inertia to show that at all.  At design T_in == T == 99 C, so the bracket
     # is a literal 0.0 and the seed is bit-exact.  cp is live on both sides (audit C10).
-    cp_d002_in  = urea_soln_cp(s.w_f010.get("Urea", R324_W_IN), s.r323_f010_T)
+    cp_d002_in  = cp_317_in
     cp_d002_recyc = urea_soln_cp(d002_recyc_w.get("Urea", R324_W_EV2), d002_recyc_T)
     cp_d002     = urea_soln_cp(s.w_d002.get("Urea", R324_W_IN), s.r323_d002_T)
     M_d002_T    = (M_I_pre + M_II_pre) if tie_open else M_I_pre
     s.r323_d002_T = s.r323_d002_T + (
-        m_317 / 3600.0 * cp_d002_in * (s.r323_f010_T - s.r323_d002_T)
+        m_317_in / 3600.0 * cp_d002_in * (T_317_in - s.r323_d002_T)
         + d002_recyc / 3600.0 * cp_d002_recyc * (d002_recyc_T - s.r323_d002_T)
     ) * dt / max(M_d002_T * cp_d002, 1e-6)
     # AUDIT F-8: the buffer tank is a well-mixed species blender -- no vapour, no reaction (99 C,
@@ -7013,7 +7108,7 @@ def step_sim(dt: float) -> dict:
                       / M_pool_pre for k in SOL_SPECIES}
                   if M_pool_pre > 1e-9 else dict(s.w_d002))
         w_pool = sol_advance(w_pool, M_pool_pre, s.r323_d002_M_I + s.r323_d002_M_II,
-                             m_317, s.w_f010, 0.0, w_pool, m_324, 0.0, dt,
+                             m_317_in, w_317_in, 0.0, w_pool, m_324, 0.0, dt,
                              m_in2=d002_recyc, w_in2=d002_recyc_w)
         s.w_d002    = w_pool
         s.w_d002_II = dict(w_pool)
@@ -7021,7 +7116,7 @@ def step_sim(dt: float) -> dict:
         # Comp I loses mass through BOTH outlets: the pump draw and, when it is spilling, the weir.
         # The weir stream leaves at the bulk composition, so it cannot move w by itself -- passing it
         # here is a C2 bookkeeping statement, not a correction.
-        w_I_new = sol_advance(s.w_d002, M_I_pre, s.r323_d002_M_I, m_317, s.w_f010,
+        w_I_new = sol_advance(s.w_d002, M_I_pre, s.r323_d002_M_I, m_317_in, w_317_in,
                               0.0, s.w_d002, m_324 + d002_overflow * 3600.0 / max(dt, 1e-9),
                               0.0, dt, m_in2=d002_recyc, w_in2=d002_recyc_w)
         if d002_overflow > 0.0 and s.r323_d002_M_II > 1e-9:      # the spill carries Comp-I liquor
@@ -7029,6 +7124,17 @@ def step_sim(dt: float) -> dict:
                                + d002_overflow * s.w_d002.get(k, 0.0)) / s.r323_d002_M_II
                            for k in SOL_SPECIES}
         s.w_d002 = w_I_new
+
+    feed_324_packet = _transport_process(
+        s, "323D002_TO_324E001",
+        _cq_packet(
+            m_324,
+            s.r323_d002_T,
+            s.w_d002,
+            urea_soln_cp(s.w_d002.get("Urea", R324_W_IN), s.r323_d002_T),
+        ),
+        m_324, dt,
+    )
 
     # ======================================================================
     #  UNITS 323-2 / 328-1 / 328-2  — LP RECIRCULATION & DESORPTION
@@ -7875,21 +7981,22 @@ def step_sim(dt: float) -> dict:
     # composition and temperature; urea_soln_cp returns the design anchor bit-exactly at the design
     # composition, so the seed is untouched and only the off-design response changes.
     # ---- Stage 1 : Evaporator I 324E001 + separator 324F001 (0.33 bar a, 130 C) --
-    feed1_m    = max(m_324, 0.0)                                               # 323D002 pump discharge (kg/h)
+    feed1_m    = feed_324_packet.mass_kgh                                      # arrived 323D002 pump discharge (kg/h)
     # AUDIT B1 (ripple).  This read the FROZEN R324_W_IN, so no composition change anywhere
     # upstream could reach the evaporators -- a measured 0 of 66 unit-324 telemetry leaves
     # responded to a reactor-overflow composition step.  It now reads the live 323D002 tank
     # vector.  (That vector is itself held at the design strength by sol_pin_strength; see the
     # note there -- both had to change for the ripple to actually flow.)
-    w_tank     = s.w_d002.get("Urea", R324_W_IN)
+    feed1_w    = _w_norm(feed_324_packet.mass_fraction)
+    w_tank     = feed1_w.get("Urea", R324_W_IN)
     urea1_in   = w_tank * feed1_m                                             # urea into Stage 1 (kg/h)
     w_feed1    = w_tank
     # AUDIT C18 — the Stage-1 feed enthalpy term used the FROZEN R324_FEED_T_C = 99 C while the
     # 323D002 tank temperature is a live ODE state carrying (by the code's own note at the tank) a
     # LOW-temperature alarm.  A 10 K tank cooldown withholds 644 kW = 6.1 % of R324_E001_Q_DES_KW,
     # i.e. ~1067 kg/h less water evaporated -- and the model moved none of it.
-    T_feed1    = s.r323_d002_T
-    cp_feed1   = urea_soln_cp(w_feed1, T_feed1)
+    T_feed1    = feed_324_packet.temperature_c
+    cp_feed1   = feed_324_packet.cp_kj_kgk
     cp_hold1   = urea_soln_cp(s.w_e001.get("Urea", R324_W_EV1), s.r324_e001_T)
     tic1_op    = _ctrl_ipd(s.TIC_324001, s.r324_e001_T, dt)                   # steam chest-P demand (bar a)
     pic203_pv  = clamp(s.PIC_329203["op"]/100.0*s.steam.P_LP, 0.0, s.steam.P_LP)
@@ -7932,8 +8039,8 @@ def step_sim(dt: float) -> dict:
     t1_fp_residual = math.inf
     t1_fp_converged = False
     t1_fp_iterations = 0
-    nc_flash1_nh3 = feed1_m * s.w_d002.get("NH3", 0.0)
-    nc_flash1_co2 = feed1_m * s.w_d002.get("CO2", 0.0)
+    nc_flash1_nh3 = feed1_m * feed1_w.get("NH3", 0.0)
+    nc_flash1_co2 = feed1_m * feed1_w.get("CO2", 0.0)
     nc_flash1 = nc_flash1_nh3 + nc_flash1_co2
     d_nc_flash1 = nc_flash1 - R324_NC_FLASH1_DES
     # NON-CONDENSABLE LOAD ARRIVING FROM UNIT 323.  324E002 condenses the 323F010 overhead as well
@@ -8041,7 +8148,7 @@ def step_sim(dt: float) -> dict:
     # a genuine component balance rather than the urea/W_EV bookkeeping.  Both are published: see
     # finding F-11 for why they differ by ~1.5 pp (the PFD's stream-317 composition is not reachable
     # from stream 319 by evaporation alone -- a source-data inconsistency, not a model defect).
-    feed1_w    = dict(s.w_d002)
+    feed1_w    = dict(feed1_w)
     y_v1       = sol_vapour_y(s.w_e001, SOL_E001["alpha"])
     xi_e001    = sol_biuret_xi("E001", M_f001_pre, s.w_e001, s.r324_e001_T)
     s.w_e001   = sol_pin_strength(
@@ -8631,6 +8738,10 @@ def step_sim(dt: float) -> dict:
             name: dict(values)
             for name, values in s.tlag.get("CQ_DIAGNOSTICS", {}).items()
         },
+        "PROCESS_TRANSPORT": {
+            name: dict(values)
+            for name, values in s.tlag.get("PROCESS_DIAGNOSTICS", {}).items()
+        },
         "RECYCLE_TEAR_RESIDUAL": {
             "method": "observed_dynamic_transport_tears",
             "is_solver_convergence": False,
@@ -8692,7 +8803,8 @@ def step_sim(dt: float) -> dict:
         #     offset below TT-321001 (empties -> larger vapour-space gradient); tracks both live
         #     tank_T_C and tank_level_frac so boundary disturbances still ripple through.
         "TI_top2":     round(s.tank_T_C - 0.8 * (1.0 - s.tank_level_frac), 1),  # TT-321002 (right)
-        "LSL_321501":  (s.tank_level_frac < 0.15),   # low-level switch (active=LO)
+        "LSL_321501":  lsl_321501_low(s.tank_level_frac),  # discrete low state: red below +1200 mm
+        "LSL_321501_level_mm": round(s.tank_level_frac * TANK_H * 1000.0, 1),
         "PI_top1":     round(s.tank_P_top_barG, 1),
         "PI_top2":     round(s.tank_P_top_barG, 1),
         "PI_header":   round(7.3 * phi_fwd, 1),      # F6: PI-321003 feed-header P de-pinned — affinity-law w/ pump motive (phi_fwd^=1 at design -> 7.3)

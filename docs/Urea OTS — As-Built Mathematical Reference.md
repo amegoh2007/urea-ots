@@ -315,6 +315,46 @@ The physical route registry covers:
 time and component closure. Route names describe topology only. The generating scenario's name is
 never an input, so an unlisted seal loss uses the same downstream equations as a listed one.
 
+## Normal Process Stream Transport and Ripple
+
+Normal liquid traffic through the finishing train uses the same conserved packet definition and
+plug-flow law as consequence transport, but a separate boot-seeded FIFO. Its first packet fills the
+route history, so design operation starts at the receiver's design inlet rather than with a false
+empty-line transient. Every subsequent parcel keeps flow, temperature, heat capacity, sensible
+enthalpy, and all component rates on one timestamp:
+
+```text
+packet = {m_i, T, Cp};  m = sum_i(m_i);  H_sens = m Cp T
+M_line = m_design theta_design / 3600
+theta_live = clamp(3600 M_line / m_live, 0, 1800 s)
+d(M_receiver w_i)/dt = m_in w_i,in - m_out w_i,out + generation_i
+d(M_receiver Cp T)/dt = sum(m_in Cp_in T_in) - sum(m_out Cp T) + Q
+tau_receiver approximately M_receiver / m_throughput
+```
+
+The route registry follows the PFD/PID sequence:
+
+| source | destination | design-flow anchor | design dead time |
+|---|---|---:|---:|
+| 322E001 | 323C003 | stripper bottoms | 20 s |
+| 323C003 | 323F004 | stream 314 | 20 s |
+| 323F004 | 323F010 | stream 319 | 20 s |
+| 323F010 | 323D002 | stream 317 | 20 s |
+| 323D002 | 324E001 | stream 324 | 20 s |
+
+The two supplied trend exports contain 30-second rows, but their own notices identify those rows as
+synthetic linear interpolation between hourly measurements. Only 17 normal-operation and 7 startup
+anchors are independent. Feed and multiple Unit 322 gradients occur in the same hourly bin, so the
+data support only `theta < 3600 s`; they cannot identify a 20-second or any other subhour delay.
+Accordingly, 20 seconds is retained as the existing reduced-order liquid-slug engineering anchor,
+not presented as a fitted historian result. Field line inventories or raw higher-resolution
+historian data are required to calibrate it.
+
+`PROCESS_TRANSPORT` publishes departure and arrived mass, temperature, components, and live dead
+time for all five boundaries. The receiving vessels' existing mass, component, and energy ODEs own
+the downstream gradient and process time constant. Adding another output lag would delay the same
+physical inventory twice.
+
 ## PT-329201 Synthesis-Loop Pressure
 
 The loop pressure is a gas-inventory balance over the HP envelope. Liquid wash no longer enters the gas equation directly; its effect arrives through absorbed or retained vapour:
@@ -440,6 +480,13 @@ delays are used where that procedure specifies fast DCS acquisition but no separ
 The fallback is intentional: a newly added numeric indicator cannot silently bypass dynamics.
 Tooltips publish the selected service, `tau`, and `theta` for operator/auditor inspection.
 
+`LSL-321501` is a discrete level switch, not a numeric level transmitter and therefore does not use
+the FOPDT indicator block. Vendor drawing `UD-AU-321-EC-0001`, sheet 5, places its two vessel
+connections at +200 mm (N7B) and +1200 mm (N7A). The HMI is green `ON` while the 321D003 liquid
+height reaches the upper +1200 mm connection and red `LOW` below it. The normal model seed is a
+liquid-full 321D003, consistent with the unit mapping; telemetry also publishes the calculated
+liquid height in millimetres for audit.
+
 This is a transmitter/HMI measurement layer. It does not replace or feed back into equipment mass,
 component, energy, pressure, or holdup equations and does not retune PID controllers. Vessel residence
 times, exchanger thermal masses, hydraulic inventories, and existing backend controller-PV filters
@@ -461,9 +508,12 @@ balances would double-count inertia.
 - `backend/scenario_coverage.py`: 48-scenario traceability manifest and thermodynamic-domain router.
 - `backend/steam_system.py`: LP-header balances, PIC-329207 master logic, PV-329207B export.
 - `frontend/indicator_dynamics.js`: tag-class measurement profiles, timestamped dead-time FIFO, and exact first-order update.
+- `tools/analyze_stream_lag.py` and `docs/analysis/urea_stream_lag_analysis.xlsx`: reproducible hourly-anchor extraction, gradient-lag correlations, route inventories, and evidence limits.
+- `Urea_NormalOp_29-06-2025_Trends.xlsx` and `Urea_Startup_28-06-2025_Trends.xlsx`: hourly measured anchors and synthetic-interpolation notices.
 - `References/Sources/Plant PID Simulation Sequence.md`: transmitter response/dead-time ranges and service classifications.
 - `References/Sources/PIDs.pdf`, pages 3, 13, and 20: representative analyzer, pressure, and level instrument tags.
 - `References/Sources/Manual.pdf`, page 83: flushed LI-329501, PI-329201, and N/C measurement service.
+- Vendor sheet `UD-AU-321-EC-0001`, page 5: 321D003 dimensions and LSL-321501 connections N7A (+1200 mm) and N7B (+200 mm).
 - `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`: design mass, pressure, and temperature points.
 - `References/HPCC description.md`: carbamate exotherm and shell-side nucleate boiling.
 - `References/Stamicarbon_Steam_Condensate_Network.md`: steam generation, control, and turbine-export topology.

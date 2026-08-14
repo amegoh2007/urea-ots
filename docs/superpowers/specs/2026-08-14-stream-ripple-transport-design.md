@@ -1,6 +1,6 @@
 # Stream Ripple Transport Design
 
-**Date:** 2026-08-14  
+**Date:** 2026-08-14
 **Scope:** Normal-process stream changes from the Unit 322 stripper bottoms through Units 323 and 324
 
 ## Goal

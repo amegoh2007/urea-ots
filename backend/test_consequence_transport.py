@@ -116,3 +116,40 @@ def test_whole_packet_arrives_after_dead_time_without_property_desynchronization
     assert arrived.mass_fraction == pytest.approx(
         {"NH3": 0.25, "CO2": 0.50, "H2O": 0.25}
     )
+
+
+def test_process_transport_seeds_the_live_packet_instead_of_an_empty_line():
+    """Catch a fresh design simulation draining every process line at boot."""
+    route = cq.ConsequenceRoute("A", "B", 3600.0, 5.0, 120.0)
+    baseline = cq.make_stream_packet(100.0, {"H2O": 100.0}, 80.0, 4.0)
+
+    arrived = cq.transport_process_packet({}, "route", baseline, route, 3600.0, 0.1)
+
+    assert arrived == baseline
+
+
+def test_process_step_arrives_as_one_packet_after_dead_time():
+    """Catch normal flow, temperature, or composition travelling on separate clocks."""
+    route = cq.ConsequenceRoute("A", "B", 3600.0, 5.0, 120.0)
+    baseline = cq.make_stream_packet(100.0, {"H2O": 100.0}, 80.0, 4.0)
+    changed = cq.make_stream_packet(
+        120.0, {"H2O": 60.0, "Urea": 60.0}, 110.0, 3.0
+    )
+    store = {}
+    for _ in range(100):
+        assert cq.transport_process_packet(
+            store, "route", baseline, route, 3600.0, 0.1
+        ) == baseline
+
+    for _ in range(50):
+        arrived = cq.transport_process_packet(
+            store, "route", changed, route, 3600.0, 0.1
+        )
+        assert arrived == baseline
+
+    arrived = cq.transport_process_packet(
+        store, "route", changed, route, 3600.0, 0.1
+    )
+    assert arrived == changed
+    assert arrived.mass_fraction == pytest.approx({"H2O": 0.5, "Urea": 0.5})
+    assert arrived.temperature_c == pytest.approx(110.0)
