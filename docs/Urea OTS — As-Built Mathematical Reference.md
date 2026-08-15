@@ -430,6 +430,28 @@ d_nc,1 = m_feed,1 * (w_NH3 + w_CO2) - m_feed,1,des * (w_NH3,des + w_CO2,des)
 d_nc,2 = m_feed,2 * (w_NH3 + w_CO2) - m_feed,2,des * (w_NH3,des + w_CO2,des)
 ```
 
+### Steam Chest Pressure and Orifice Coupling
+
+Steam chest pressures in process heaters (e.g., 323E002, 323E010, 324E001, 324E003) are determined dynamically by a 1D Newton-Raphson solver coupling the steam valve orifice equation with the condensation heat transfer. The solver finds the equilibrium chest pressure $P$ where the mass of steam supplied by the valve exactly equals the mass of steam condensed by the process heat duty:
+
+```text
+m_valve(P) = m_condense(P)
+```
+
+The supply mass flow is governed by the compressible orifice law:
+```text
+m_valve = OP * (1 / OP_des) * m_des * sqrt((P_header - P) / (P_header - P_des))
+```
+where $OP$ is the current steam valve opening percentage.
+
+The condensation mass flow is governed by the available heat transfer (which depends on the physical saturation temperature of the chest pressure) divided by the latent heat of condensation:
+```text
+m_condense = Q_actual / h_fg
+Q_actual = UA * (T_sat(P) - T_process)
+```
+
+If the process feed flow increases (meaning colder tubes), $T_{process}$ drops. This increases the $\Delta T$ across the tubes, driving up $Q_{actual}$ and thus $m_{condense}$. The increased condensation pulls the equilibrium chest pressure $P$ down until $m_{valve}$ increases enough to match. The pressure drop is read by the PIC controller, which responds by opening the steam valve to restore the chest pressure to its setpoint.
+
 The HPCC liquid-inventory anchor is captured after the final reactor/steam pin, from the same runtime
 state used by `step_sim`; the discarded CAS warm-up state no longer supplies that anchor. The three
 LP steam users are seeded against the live 5.01325 bar(a) header, not a separate 4.4 bar value.

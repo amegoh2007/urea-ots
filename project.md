@@ -92,6 +92,7 @@ Every unit operation satisfies:
 - **Phase Equilibrium:** y_i = K_i · x_i (via Extended UNIQUAC or Antoine, depending on system)
 - **Chemical Equilibrium / Kinetics:** Modified Inoue-Kanai for urea synthesis; Arrhenius rate law
 - **Heat Transfer:** Q = UA · ΔT_lm (with design-anchored UA scaling)
+- **Compressible Orifice Flow:** m = OP * (1/OP_des) * m_des * sqrt(ΔP / ΔP_des) (for steam letdown and steam chest coupling)
 - **Constitutive:** Σx_i = 1, Σy_i = 1, plus Darcy-Weisbach / Ergun pressure-drop correlations
 
 ---
