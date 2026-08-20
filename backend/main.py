@@ -4913,7 +4913,7 @@ class State:
         self.FIC_328402 = {"mode": "AUTO", "op": 50.0,
                            "sp": R3232_E003_M744_DES / RHO_744_KGM3, "pv": R3232_E003_M744_DES / RHO_744_KGM3,
                            "pv1": R3232_E003_M744_DES / RHO_744_KGM3, "pv2": R3232_E003_M744_DES / RHO_744_KGM3,
-                           "Kc": 0.75 * RHO_744_KGM3, "Ti": 60.0, "Td": 0.0, "act": +1.0,   # Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.  Kc*RHO_744 holds the vol-loop coef equal.
+                           "Kc": 0.06 * RHO_744_KGM3, "Ti": 60.0, "Td": 0.0, "act": +1.0,   # AUDIT G16: restored from 0.75 to 0.06 per comment's stability analysis. Kc 1.2->0.06: design=31478 large, g=629.6, loop coef 1-Kc*a*g, a=0.0196. Kc=1.2 gives M=755 (VIOLENTLY unstable if perturbed; quiet only at bit-exact fixed-point seed). Kc=0.06 -> M=37.8, coef 0.26 monotone. Defends Domino live tie-ins.  Kc*RHO_744 holds the vol-loop coef equal.
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": 60000.0 / RHO_744_KGM3}
         # FIC-328406 328D003 standby transfer pump flow (MAN 0, spare).
         # FIC-328406 indicates the PFD-741 process-condensate RECYCLE, 328E007 -> 328E001 ->
@@ -6414,8 +6414,14 @@ def step_sim(dt: float) -> dict:
     # because that loop is now m3/h -- so on CAS the FIC-329401 slave SP is FIC-328402 * ratio
     # and FV-329401 strokes to hold it.  Same float operation order as R328_FFIC_RATIO_DES, so
     # at design ffic_pv == sp -> du == 0 and the LP-steam draw holds 6495 kg/h bit-exactly.
+    # AUDIT G15: Remove double-lag that causes ratio hunting. Both m931_prev and m744_prev already
+    # carry 5-second measurement lags from their respective _fic_flow calls (line 4076). Adding
+    # another 5-second lag here (tau=5.0) creates a 10-second effective lag on the ratio PV, which
+    # causes the cascade to oscillate when FIC-328402 SP changes. The ratio calculation itself is
+    # instantaneous algebra on already-lagged measurements, so no additional lag is needed.
+    # Changed tau from 5.0 to 0.0 to make the ratio measurement respond immediately to flow changes.
     ffic_pv  = _lag1(s.tlag, "FF_ratio",
-                     (m931_prev / 1000.0) / max(m744_prev / RHO_744_KGM3, 1e-6), 5.0, dt)
+                     (m931_prev / 1000.0) / max(m744_prev / RHO_744_KGM3, 1e-6), 0.0, dt)
     ffic_op  = _ctrl_ipd(s.FFIC_329401, ffic_pv, dt)                     # 931-flow demand (kg/h)
     m_931    = _fic_flow(s.FIC_329401, R328_C004_M931_DES, 50.0, s.tlag, "F_329401", dt, cas_sp=ffic_op)
     in_c004  = m_749 + m_931
