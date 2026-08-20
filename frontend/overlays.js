@@ -42,9 +42,9 @@
       { k: 'i62',  t: 'ind', x: 1108, y: 486, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
       { k: 's50',  t: 'ind', x: 876,  y: 544, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
       { k: 's51',  t: 'ind', x: 1088, y: 544, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
-      { k: 'nca',  t: 'ind', x: 288,  y: 538, tag: 'FFIC-321404A', bind: 'ratio.NC_A', u: '', dec: 3, fp: 'FFIC_321404' },
-      { k: 'ncb',  t: 'ind', x: 288,  y: 606, tag: 'FFIC-321404B', bind: 'ratio.NC_B', u: '', dec: 3, fp: 'FFIC_321404' },
-      { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LSL_321501', digital: 'level-switch' },
+      { k: 'nca',  t: 'ind', x: 288,  y: 538, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
+      { k: 'ncb',  t: 'ind', x: 288,  y: 606, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
+      { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LI_321501',  u: '%',     dec: 1 },
       { k: 'ft3',  t: 'ind', x: 93,   y: 452, tag: 'FT-322403', bind: 'CO2_FEED.FT_322403', u: 'NM3/H', dec: 0 },   // CO2 feed 320K002 -> XV-322902 -> 322E001
       // ---- pumps ----
       { k: 'pa',  t: 'pump', x: 861,  y: 445, bind: 'pumpA', id: 'A', tag: '321P002A' },
@@ -129,8 +129,8 @@
       // ---- pump speed / ratio controllers (modelled in 321) ----
       { k: 's950b', t: 'ind', x: 491, y: 443, tag: 'SIC-321950',    bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
       { k: 's951b', t: 'ind', x: 497, y: 492, tag: 'SIC-321951',    bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
-      { k: 'nca2',  t: 'ind', x: 419, y: 448, tag: 'FFIC-321404A',  bind: 'ratio.NC_A', u: '', dec: 3, fp: 'FFIC_321404' },
-      { k: 'ncb2',  t: 'ind', x: 414, y: 497, tag: 'FFIC-321404B',  bind: 'ratio.NC_B', u: '', dec: 3, fp: 'FFIC_321404' },
+      { k: 'nca2',  t: 'ind', x: 419, y: 448, tag: 'N/C 321P002A',  bind: 'ratio.NC_A', u: '', dec: 3 },
+      { k: 'ncb2',  t: 'ind', x: 414, y: 497, tag: 'N/C 321P002B',  bind: 'ratio.NC_B', u: '', dec: 3 },
       // ---- screen-nav hotspots (Item 3) ----
       { k: 'nav-321',  t: 'nav', x: 494,  y: 534, w: 70, h: 24, tag: '321-1',             goto: 'screen-321-1' },
       { k: 'nav-e003', t: 'nav', x: 1271, y: 78,  w: 80, h: 22, tag: '322E003 → 322-2', goto: 'screen-322-2' },
@@ -586,29 +586,11 @@
       if (!o.bind) { if (b) b.textContent = o.tag; if (sp) sp.textContent = ''; if (mt) { mt.textContent = ''; mt.className = 'mt'; } return; }   // empty slot keeps tag text
       let v = gp(lastS, o.bind);
       let u = o.u;
-      if (o.digital === 'level-switch') {
-        const low = !!v;
-        v = low ? 'LOW' : 'ON';
-        if (b) b.textContent = v;
-        if (sp) sp.textContent = '';
-        if (mt) { mt.textContent = ''; mt.className = 'mt'; }
-        el.classList.toggle('switch-ok', !low);
-        el.classList.toggle('switch-low', low);
-        if (window.IndicatorFaceplate) window.IndicatorFaceplate.publish(o.tag, v, '');
-        el.dataset.tip = o.tag + ' — discrete level switch: green at/above +1200 mm; red below +1200 mm (+200 mm lower connection)';
-        return;
-      }
-      const dynamics = window.IndicatorDynamics;
-      if (dynamics && typeof v === 'number') {
-        v = window.IndicatorDynamics.sample('instrument:' + o.tag, o.tag, v, lastS.t_sim, o.dynamics);
-      }
       if (u === 'BAR A' && typeof v === 'number') { v = v - 1.01325; u = 'BARG'; }   // Domain 1a: all PT/PIC show gauge pressure (barg = bara - 1 atm)
-      if (window.IndicatorFaceplate) window.IndicatorFaceplate.publish(o.tag, v, u);
       if (b) b.textContent = fmt(v, o.dec);
       if (sp) sp.textContent = u || '';
       if (mt) { const ml = modeLetter(o); mt.textContent = ml; mt.className = 'mt' + (ml ? ' m-' + ml : ''); }   // controller mode badge (A/M/E/O); '' for non-controllers
-      el.dataset.tip = o.tag + (u ? ' [' + u + ']' : '') + (modeLetter(o) ? ' — ' + { A: 'AUTO', M: 'MAN', E: 'CAS', O: 'OOS' }[modeLetter(o)] : '')
-        + (dynamics ? ' — ' + window.IndicatorDynamics.describe(o.tag, o.dynamics) : '');
+      el.dataset.tip = o.tag + (u ? ' [' + u + ']' : '') + (modeLetter(o) ? ' — ' + { A: 'AUTO', M: 'MAN', E: 'CAS', O: 'OOS' }[modeLetter(o)] : '');
     }
   }
   function renderAll() { buildBindMap(); for (const sid in OV) cfg(sid).forEach(o => renderOne(sid, o)); }
@@ -634,12 +616,10 @@
       return;
     } else if (o.t === 'ind') {
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
-      if (o.fp === 'FFIC_321404' && window.OTS_FACE && window.OTS_FACE.ffic) { window.OTS_FACE.ffic(o); return; }   // FFIC-321404A/B ratio station faceplate
       if (o.fp === 'SIC_321950' && window.openF50) { window.openF50(); return; }   // SIC_321950 REST faceplate
       if (o.fp === 'SIC_321951' && window.openF51) { window.openF51(); return; }   // SIC_321951 REST faceplate
       if (o.fp === 'MASTER_SP_329207' && window.OTS_FACE && window.OTS_FACE.msp) { window.OTS_FACE.msp(o); return; }   // 4-bar header MASTER SP cascade
       if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); return; }   // any *IC-3* -> generic faceplate
-      if (window.OTS_FACE && window.OTS_FACE.indicator) { window.OTS_FACE.indicator(o); return; }
       return;
     }
     const key = sid + '|' + o.k;                // unbound pump/xv -> local toggle
@@ -713,8 +693,7 @@
       if (o.t === 'ind' || o.t === 'avalve') {                                 // avalve = modulating PV opening %, rendered as a numeric indicator (bug 3: opening was never shown)
         const eo = eff(o);
         if (!eo.bind) el.classList.add('empty');
-        if (o.t === 'ind') el.classList.add('fp');
-        else if (eo.fp || eo.face || CTRL_RE.test(o.tag)) el.classList.add('fp');
+        if (eo.fp || eo.face || CTRL_RE.test(o.tag)) el.classList.add('fp');
         el.innerHTML = '<b></b> <span class="ou"></span><i class="mt"></i>';   // stable value/unit/mode nodes; renderOne sets textContent only (no innerHTML churn that swallows clicks)
       } else if (o.t === 'nav') {
         el.style.width = (o.w || 60) + 'px';

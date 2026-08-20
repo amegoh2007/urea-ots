@@ -1,23 +1,104 @@
-"""322R001 reactor conversion coupled to the HP urea-equilibrium package.
+"""322R001 HP urea-reactor conversion kinetics — quarantined Modified Inoue-Kanai model.
 
-``thermo_urea_hp`` transcribes the published Voskov-Voronin equilibrium
-correlation.  This module applies the result as an atom-conserving reaction
-shift and normalizes it to the verified plant design conversion.
+main.py is the state router / WebSocket hub; the per-pass CO2->urea conversion math lives
+here, isolated and unit-testable, with ZERO dependency on main.py.
+
+Modified Inoue-Kanai separable equilibrium structure (re-fitted to plant HMB, NOT a
+transcription of published I-K polynomial coefficients):
+
+    X(L, W, T) = min( X_inf * f_L(L) * f_W(W) * f_T(T),  X_inf )      # Guard 2 thermo re-clamp
+
+        f_L(L) = a*(L-2) / (1 + a*(L-2))                # NH3-excess saturation (L = N/C molar)
+        f_W(W) = 1 / (1 + b*W)                          # water penalty  (W = H/C molar) -- Stamicarbon
+        f_T(T) = exp[ -k ( (T-Topt)^2 - (T0-Topt)^2 ) ] # Guard 1 renormalized parabola, = 1 at T0
+                 Topt = Topt(L) in [185, 195] C         # N/C-dependent optimum (excess NH3 lifts it)
+
+L = 2 is the dehydration stoichiometric floor (2 NH3 + 1 CO2 -> 1 urea + 1 H2O); excess NH3
+drives the second (dehydration) step forward and saturates at high L. Product / recycle water
+back-shifts the dehydration equilibrium -> the H/C "water penalty" the stripping loop is
+sensitive to.
+
+CALIBRATION (anchored to as-built design HMB, no fabrication):
+    L0 = 3.072961   (live reactor-feed NH3/CO2 molar at design steady state)
+    W0 = 0.407828   (live reactor-feed H2O/CO2 molar at design steady state)
+    T0 = 183.0 C    (REACT_OVERFLOW_T_C)
+    X_des = 0.543   (xi_urea / CO2_feed = 1302.27 / 2397.7, CO2 per-pass)
+    a = 3.6180      NH3-excess saturation coeff -- FROZEN: sets the f_L N/C slope (test_1_nc_shift).
+                    f_L(L0) = a*(L0-2)/(1+a*(L0-2))          = 0.795165
+    b = 0.85        water-penalty strength -- calibrated UP from 0.60 for an aggressive Stamicarbon
+                    H/C penalty.  f_W(W0) = 1/(1+0.85*0.407828) = 0.742582
+    X_inf = 0.9196  high-NH3 low-water ceiling -- now SOLVED (was 0.85) to hold the anchor with a,b
+                    fixed, giving f_W the headroom a stronger b needs (else f_L/f_W fight one budget):
+                    X_inf = X_des/(f_L(L0)*f_W(W0)) = 0.543/(0.795165*0.742582) = 0.9196
+    k = 0.0015      parabolic T-penalty curvature, 1/C^2.  f_T peaks at Topt(L) and falls either
+       (1/C^2)      side -> over-temperature equilibrium REVERSAL.  At the (L=1000,W=0) corner the
+                    conversion holds ~91.96% (X_inf ceiling) up to ~207 C, then drops to ~30% by
+                    225 C and collapses past 250 C -> a noticeable drop is already visible by 210 C.
+    Topt(L)         N/C-dependent optimum = clip(185 + 2*(L-2), 185, 195) C.  Excess NH3 drives the
+                    endothermic dehydration step, lifting the optimum; design L0 -> ~187 C, so the
+                    design T0 = 183 C sits on the RISING flank (below the peak), not on it.
+    GUARD 1         the (T0-Topt)^2 offset pins f_T(T0) = 1.0 for ANY Topt -> design HMB bit-exact
+                    (conversion_factor == 1.000000 at design, downstream stripper init cannot drift).
+    GUARD 2         hard re-clamp X = min(X_inf*fL*fW*fT, X_inf): the thermodynamic ceiling is
+                    honored even where the parabola peak pushes f_T > 1 near Topt.  This closes the
+                    old unbounded-Arrhenius hole (X > X_inf -> cf > 1.0 -> phantom conversion).
+
+The engine consumes the DIMENSIONLESS ratio X(L,W,T)/X(L0,W0,T0): it equals 1.000000 at design
+by construction, so the pinned design HMB (xi_urea = 1302.27) is reproduced bit-exact and the
+downstream stripper initialization cannot drift. Off-design, f_L / f_W supply the N/C and H/C
+slopes.
 """
 import math
-import thermo_urea_hp as hp
 
-# --- plant anchors ---------------------------------------------------------------------------
+# --- calibration constants (tunable; see module docstring) -----------------------------------
 R_GAS      = 8.314          # J/(mol*K)
-L0_DES     = hp.NC_DES      # design reactor-feed N/C molar, live-probed
-W0_DES     = hp.HC_DES      # design reactor-feed H/C molar, live-probed
-T0_DES_C   = hp.T_DES_C     # design reactor bulk temperature, C
-X_DES      = hp.X_DES       # as-built design per-pass CO2 conversion (display anchor)
+L0_DES     = 3.072961       # design reactor-feed N/C molar  (NH3/CO2), live-probed
+W0_DES     = 0.407828       # design reactor-feed H/C molar  (H2O/CO2), live-probed
+T0_DES_C   = 183.0          # design reactor bulk temperature, C  (REACT_OVERFLOW_T_C)
+X_INF      = 0.9196         # thermodynamic conversion ceiling -- SOLVED to hold X_des with a,b fixed (was 0.85)
+ALPHA_NC   = 3.6180         # NH3-excess saturation coefficient  (FROZEN -- sets f_L slope, see test_1)
+BETA_HC    = 0.85           # water-penalty coefficient (aggressive Stamicarbon H/C penalty; was 0.60)
+K_TOPT     = 0.0015         # parabolic T-penalty curvature, 1/C^2 (noticeable conversion drop by 210 C)
+T_OPT_LO_C = 185.0          # lower bound of the N/C-dependent conversion optimum, C
+T_OPT_HI_C = 195.0          # upper bound of the conversion optimum, C
+T_OPT_GAMMA = 2.0           # dTopt / d(N/C) above the dehydration floor L=2, C per N/C unit (pre-clip)
+X_DES      = 0.543          # as-built design per-pass CO2 conversion (display anchor)
+
+def t_opt_c(L: float) -> float:
+    """N/C-dependent optimum reactor temperature, deg C, clamped to [T_OPT_LO_C, T_OPT_HI_C].
+
+    Excess NH3 (higher N/C = higher L) drives the endothermic dehydration step, lifting the
+    conversion optimum; clipped to the physical band.  Design L0 -> ~187 C, so the design point
+    T0 = 183 C sits on the RISING flank below the peak (not on it).
+    """
+    return min(max(T_OPT_LO_C + T_OPT_GAMMA * (L - 2.0), T_OPT_LO_C), T_OPT_HI_C)
+
+
+def f_T_parabola(T_c: float, L: float) -> float:
+    """Guard 1 -- renormalized parabolic temperature penalty (replaces the unbounded Arrhenius f_T).
+
+        f_T(T) = exp[ -k ( (T - Topt)^2 - (T0 - Topt)^2 ) ]
+
+    Peaks at T = Topt(L) (bounded value exp[k (T0 - Topt)^2]) and falls symmetrically either side
+    -> over-temperature equilibrium reversal.  The (T0 - Topt)^2 offset pins f_T(T0) = 1.0 for ANY
+    Topt, so the design HMB anchor (conversion_factor = 1.0 at T0) is bit-exact regardless of L.
+    """
+    topt = t_opt_c(L)
+    return math.exp(-K_TOPT * ((T_c - topt) ** 2 - (T0_DES_C - topt) ** 2))
 
 
 def inoue_kanai_X(L: float, W: float, T_c: float = T0_DES_C) -> float:
-    """Compatibility alias for the plant-anchored HP equilibrium conversion."""
-    return hp.plant_anchored_conversion(L, W, T_c)
+    """Absolute per-pass CO2->urea conversion X(L, W, T).
+
+    L   = reactor-feed N/C molar (NH3/CO2)
+    W   = reactor-feed H/C molar (H2O/CO2)
+    T_c = reactor bulk temperature, deg C
+    """
+    g  = max(L - 2.0, 0.0)                                    # excess NH3 above dehydration floor
+    fL = (ALPHA_NC * g) / (1.0 + ALPHA_NC * g)               # saturation
+    fW = 1.0 / (1.0 + BETA_HC * W)                           # water penalty
+    fT = f_T_parabola(T_c, L)                                # Guard 1: renormalized T-optimum parabola
+    return min(X_INF * fL * fW * fT, X_INF)                  # Guard 2: hard thermodynamic re-clamp
 
 
 # normalization anchor: X at the exact design feed -> ratio is 1.000000 at design SS
@@ -26,7 +107,7 @@ X_DES_RAW = inoue_kanai_X(L0_DES, W0_DES, T0_DES_C)
 
 def conversion_factor(L: float, W: float, T_c: float = T0_DES_C) -> float:
     """X(L,W,T) / X(L0,W0,T0). Exactly 1.0 at the design feed; HMB-preserving."""
-    return hp.conversion_factor(L, W, T_c)
+    return inoue_kanai_X(L, W, T_c) / X_DES_RAW
 
 
 def react_couple(feed: dict, overflow_scaled: dict, xi_urea_scaled: float,
@@ -38,8 +119,10 @@ def react_couple(feed: dict, overflow_scaled: dict, xi_urea_scaled: float,
         overflow_scaled : pinned overflow = REACT_OVERFLOW_DES * s * (phi/phi_des), kmol/h
         xi_urea_scaled  : pinned urea extent = REACT_XI_UREA_DES * s, kmol/h
         T_c             : reactor bulk temperature, deg C (design-pinned today)
-        L_override      : optional loop-coupled N/C in place of the conserved feed ratio.
-        W_override      : optional loop-coupled H/C in place of the conserved feed ratio.
+        L_override      : if given, drive f_L off this N/C (loop-coupled, blended L) instead of the
+                          raw feed N/C. None -> pure feed N/C (unit-test path).
+        W_override      : if given, drive f_W off this H/C (loop-coupled, blended W) instead of the
+                          raw feed H/C. None -> pure feed H/C (unit-test path).
 
     Returns (xi_urea, overflow_adjusted, X, L, W):
         xi_urea          = xi_urea_scaled * conversion_factor(L, W, T)
@@ -50,9 +133,8 @@ def react_couple(feed: dict, overflow_scaled: dict, xi_urea_scaled: float,
     co2 = feed.get("CO2", 0.0)
     if co2 <= 0.0:                                            # degenerate guard
         return xi_urea_scaled, dict(overflow_scaled), X_DES_RAW, L0_DES, W0_DES
-    L_raw, W_raw = hp.synthesis_ratios(feed)
-    L = L_raw if L_override is None else L_override
-    W = W_raw if W_override is None else W_override
+    L = (feed.get("NH3", 0.0) / co2) if L_override is None else L_override
+    W = (feed.get("H2O", 0.0) / co2) if W_override is None else W_override
     xi_urea = xi_urea_scaled * conversion_factor(L, W, T_c)
     d = xi_urea - xi_urea_scaled                             # extra urea vs pinned design
     ov = dict(overflow_scaled)

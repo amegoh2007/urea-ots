@@ -23,19 +23,13 @@ if not defined PY for /f "delims=" %%i in ('python -c "import sys;print(sys.exec
 if not defined PY goto nopython
 echo Using Python: %PY%
 
-REM 2- check Python dependencies are present (fast probe; only pip install on miss)
+REM 2- install / update Python dependencies (silent on second run when already up-to-date)
 echo Checking Python dependencies...
-"%PY%" -c "import importlib.util,sys;missing=[p for p in ['fastapi','uvicorn','pydantic'] if importlib.util.find_spec(p) is None];sys.exit(1) if missing else sys.exit(0)" 2>nul
+"%PY%" -m pip install -r requirements.txt --quiet
 if errorlevel 1 (
-    echo Installing missing dependencies...
-    "%PY%" -m pip install -r requirements.txt --quiet
-    if errorlevel 1 (
-        echo ERROR: pip install failed against %PY%.
-        pause
-        exit /b 1
-    )
-) else (
-    echo   All dependencies present.
+    echo ERROR: pip install failed against %PY%.
+    pause
+    exit /b 1
 )
 
 REM 3- clean start: stop any backend left running from a previous launch, so this run
