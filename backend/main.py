@@ -929,8 +929,8 @@ R323_C003_T313_C    = 121.0                     # C, column-bottom sump liquid (
 R323_PHI_V305       = 24582.0 / 130582.0        # 0.188249 vapor split -> LPCC (stream 305)
 R323_305_T_C        = 119.0                     # C, top vapor to 323E003 LPCC
 R323_E002_Q_DES_KW  = 5858.0                    # kW, design heater duty (PDS: Q=5858, A=535)
-R323_E002_OP_DES    = 40.0                      # %, PV-329202 design stroke
-R323_E002_PCHEST_DES = 90.0 / 100.0 * R323_P_STEAM_SUP   # 3.96 bar a
+R323_E002_OP_DES    = 90.0                      # %, PV-329202 design stroke
+R323_E002_PCHEST_DES = R323_E002_OP_DES / 100.0 * R323_P_STEAM_SUP   # 3.96 bar a
 R323_C003_M_TAU_S   = 120.0                     # s, liquid residence -> holdup sizing
 R323_C003_LVL_SP    = 60.0                      # %, LIC-323501 level setpoint
 R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
@@ -1706,8 +1706,8 @@ R324_COND_DES  = R323_MEVAP_DES + R324_V1_DES + R324_V2_DES    # kg/h (12013.3 +
 R324_F001_P_BARA = 0.33                           # bar a separator vacuum boundary (HARD)
 R324_E001_T_SP_C = 130.0                          # C melt boundary (HARD)
 R324_LAM_V1      = 2174.0                          # kJ/kg water latent @130 C
-R324_E001_OP_DES = 40.0                           # % PIC-329203 design steam-valve stroke
-R324_E001_PCHEST_DES = 90.0/100.0 * R323_P_STEAM_SUP   # bar a steam-chest press.
+R324_E001_OP_DES = 90.0                           # % PIC-329203 design steam-valve stroke
+R324_E001_PCHEST_DES = R324_E001_OP_DES/100.0 * R323_P_STEAM_SUP   # bar a steam-chest press.
 # Q_E001 = feed sensible (99->130) + latent(V1) ; kW
 R324_CP_FEED1 = urea_soln_cp(R324_W_IN,  R324_FEED_T_C)      # 80 % urea @ 99 C -> 2.5 BIT-EXACTLY
 R324_CP_HOLD1 = urea_soln_cp(R324_W_EV1, R324_E001_T_SP_C)   # 94.31 % @ 130 C  -> ~2.19
@@ -1759,8 +1759,8 @@ R324_HV9605_SPAN      = R324_F002_MOTIVE_DES / (R324_HIC9605_DES_PCT/100.0)   # 
 R324_F003_P_BARA = 0.131                           # bar a deep-vacuum boundary (HARD)
 R324_E003_T_SP_C = 140.0                           # C melt boundary (HARD)
 R324_LAM_V2      = 2144.0                           # kJ/kg water latent @140 C
-R324_E003_OP_DES = 40.0                             # % PIC-329212 design steam-valve stroke
-R324_E003_PCHEST_DES = 90.0/100.0 * steam_system.P_MP_BARA
+R324_E003_OP_DES = 90.0                             # % PIC-329212 design steam-valve stroke
+R324_E003_PCHEST_DES = R324_E003_OP_DES/100.0 * steam_system.P_MP_BARA
 # Q_E003 = P1 sensible (130->140) + latent(V2) ; kW
 # Stage 2's feed IS the Stage-1 melt, so its cp is the Stage-1 melt cp -- same composition, same
 # temperature.  Naming it separately keeps the two roles readable at the call sites below.
@@ -2665,70 +2665,14 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def steam_chest_pressure(
-    valve_open_pct: float,
-    header_pressure_bara: float,
-    op_des: float = None,
-    p_chest_des: float = None,
-    UA_kw: float = None,
-    T_process: float = None,
-    Q_des_kw: float = None,
-    p_prev: float = None,
-) -> float:
-    """Valve-position chest pressure driven by the connected live header,
-    with physical condensation balance using the Orifice Law: Win(valve) = Wcond(heater).
-    If heater params are omitted, falls back to simple linear scaling.
-    """
-    if op_des is None or Q_des_kw == 0.0 or Q_des_kw is None:
-        return clamp(
-            valve_open_pct / 100.0 * header_pressure_bara,
-            0.02,
-            header_pressure_bara,
-        )
+def steam_chest_pressure(valve_open_pct: float, header_pressure_bara: float) -> float:
+    """Valve-position chest pressure driven by the connected live header."""
 
-    op_frac = max(valve_open_pct, 1.0) / 100.0
-    op_des_frac = max(op_des, 1.0) / 100.0
-    dp_des = max(header_pressure_bara - p_chest_des, 1e-3)
-    
-    p = p_prev if p_prev is not None and p_prev > 0.0 else p_chest_des
-    p = clamp(p, 0.05, header_pressure_bara - 0.001)
-
-    for _ in range(5):
-        t_sat = tsat_steam(p)
-        Q_actual = max(UA_kw * (t_sat - T_process), 0.0)
-        
-        # Orifice Law: Q_valve proportional to op * sqrt(dP)
-        dp_curr = max(header_pressure_bara - p, 0.0)
-        # Using sqrt(dp_curr / dp_des)
-        Q_valve = (op_frac / op_des_frac) * math.sqrt(dp_curr / dp_des) * Q_des_kw
-        
-        f = Q_valve - Q_actual
-        
-        # dQ_valve/dP:
-        # d(sqrt(dP))/dP = - 0.5 / sqrt(dP)
-        if dp_curr > 1e-6:
-            dQv_dp = -0.5 * (op_frac / op_des_frac) * Q_des_kw / math.sqrt(dp_curr * dp_des)
-        else:
-            dQv_dp = -1e6  # large negative slope if saturated
-            
-        # Numeric derivative for tsat
-        t_sat_plus = tsat_steam(p + 0.01)
-        dt_sat_dp = (t_sat_plus - t_sat) / 0.01
-        dQact_dp = UA_kw * dt_sat_dp if t_sat > T_process else 0.0
-        
-        df_dp = dQv_dp - dQact_dp
-        if abs(df_dp) < 1e-6:
-            break
-            
-        dp_step = -f / df_dp
-        dp_step = clamp(dp_step, -2.0, 2.0)
-        p += dp_step
-        p = clamp(p, 0.02, header_pressure_bara - 1e-6)
-        
-        if abs(f) < 0.1:
-            break
-
-    return float(p)
+    return clamp(
+        valve_open_pct / 100.0 * header_pressure_bara,
+        0.02,
+        header_pressure_bara,
+    )
 
 
 def gravity_outflow_323f010(holdup_kg: float) -> float:
@@ -6590,13 +6534,9 @@ def step_sim(dt: float) -> dict:
     # ---- Stage 1: Rectifying Column 323C003 + Recirc Heater 323E002  (hold 135 C) ------------
     #  Cascade  TIC-323007 (temp master, EU) -> PIC-329202 (LP-steam chest-P slave) -> heater duty.
     tic07_op  = _ctrl_ipd(s.TIC_323007, s.r323_c003_T, dt)                        # steam-P demand (bar a)
-    p_chest_e002 = steam_chest_pressure(
-        s.PIC_329202["op"], s.steam.P_LP,
-        R323_E002_OP_DES, R323_E002_PCHEST_DES, R323_E002_UA_KW,
-        s.r323_c003_T, R323_E002_Q_DES_KW, p_prev=s.PIC_329202.get("pv")
-    )
-    pic02_pv  = p_chest_e002
+    pic02_pv  = clamp(s.PIC_329202["op"] / 100.0 * s.steam.P_LP, 0.0, s.steam.P_LP)  # live LP-header chest P
     pic02_op  = _ctrl_ipd(s.PIC_329202, pic02_pv, dt, cas_sp=tic07_op)            # steam valve stroke (%)
+    p_chest_e002 = steam_chest_pressure(pic02_op, s.steam.P_LP)
     # AUDIT F-10 — a CONDENSING-STEAM chest can only ADD heat.  Un-floored, shutting PV-329202
     # clamps p_chest to 0.02 bar a (tsat ~17.5 C) and UA·(tsat − T) becomes a large NEGATIVE duty,
     # i.e. the heater turns into a refrigerator and drags the column to ~14 C.  Physically the
@@ -6897,13 +6837,9 @@ def step_sim(dt: float) -> dict:
     #  feeds the vacuum vapour; without it the stage could not reach the PFD's 80 % product.
     m_331     = R323_M331_DES                                                     # kg/h, PFD stream 331
     tic12_op  = _ctrl_ipd(s.TIC_323012, s.r323_f010_T, dt)                        # steam-P demand (bar a)
-    p_chest_e010 = steam_chest_pressure(
-        s.PIC_329208["op"], s.steam.P_LP,
-        R323_E010_OP_DES, R323_E010_PCHEST_DES, R323_E010_UA_KW,
-        s.r323_f010_T, R323_E010_Q_DES_KW, p_prev=s.PIC_329208.get("pv")
-    )
-    pic08_pv  = p_chest_e010
+    pic08_pv  = clamp(s.PIC_329208["op"] / 100.0 * s.steam.P_LP, 0.0, s.steam.P_LP)
     pic08_op  = _ctrl_ipd(s.PIC_329208, pic08_pv, dt, cas_sp=tic12_op)            # steam valve stroke (%)
+    p_chest_e010 = steam_chest_pressure(pic08_op, s.steam.P_LP)
     Q_e010_kw = max(R323_E010_UA_KW * (tsat_steam(p_chest_e010) - s.r323_f010_T), 0.0)  # heater duty (kW, F-10 floored)
     # AUDIT F-3 — same energy limit as Stage 1: the pre-evaporator cannot evaporate more water
     # than its live LP-steam duty (plus the feed's sensible surplus) can supply.
@@ -8077,13 +8013,9 @@ def step_sim(dt: float) -> dict:
     cp_feed1   = feed_324_packet.cp_kj_kgk
     cp_hold1   = urea_soln_cp(s.w_e001.get("Urea", R324_W_EV1), s.r324_e001_T)
     tic1_op    = _ctrl_ipd(s.TIC_324001, s.r324_e001_T, dt)                   # steam chest-P demand (bar a)
-    p_chest_e001 = steam_chest_pressure(
-        s.PIC_329203["op"], s.steam.P_LP,
-        R324_E001_OP_DES, R324_E001_PCHEST_DES, R324_E001_UA_KW,
-        s.r324_e001_T, R324_E001_Q_DES_KW, p_prev=s.PIC_329203.get("pv")
-    )
-    pic203_pv  = p_chest_e001
+    pic203_pv  = clamp(s.PIC_329203["op"]/100.0*s.steam.P_LP, 0.0, s.steam.P_LP)
     pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
+    p_chest_e001 = steam_chest_pressure(pic203_op, s.steam.P_LP)
     Q_e001_kw  = max(R324_E001_UA_KW*(tsat_steam(p_chest_e001) - s.r324_e001_T), 0.0)
     # AUDIT F-4 — evaporation is DUTY-LIMITED, and the melt strength FOLLOWS it (was pinned at
     # R324_W_EV1 by construction, so no operator action could dilute the product).  q1_avail is
@@ -8271,13 +8203,9 @@ def step_sim(dt: float) -> dict:
     cp_hold2   = urea_soln_cp(s.w_e003.get('Urea', R324_W_EV2), s.r324_e003_T)
     urea2_in   = w1_live * feed2_m                                            # urea into Stage 2 (kg/h, LIVE frac)
     tic2_op    = _ctrl_ipd(s.TIC_324002, s.r324_e003_T, dt)                   # steam chest-P demand (bar a)
-    p_chest_e003 = steam_chest_pressure(
-        s.PIC_329212["op"], s.steam.P_9,
-        R324_E003_OP_DES, R324_E003_PCHEST_DES, R324_E003_UA_KW,
-        s.r324_e003_T, R324_E003_Q_DES_KW, p_prev=s.PIC_329212.get("pv")
-    )
-    pic212_pv  = p_chest_e003
+    pic212_pv  = clamp(s.PIC_329212["op"]/100.0*s.steam.P_9, 0.0, s.steam.P_9)
     pic212_op  = _ctrl_ipd(s.PIC_329212, pic212_pv, dt, cas_sp=tic2_op)       # steam valve stroke (%)
+    p_chest_e003 = steam_chest_pressure(pic212_op, s.steam.P_9)
     Q_e003_kw  = max(R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T), 0.0)  # Evap-II duty (kW, F-10 floored)
     # AUDIT TD-016 — Evaporator II, same smooth-equilibrium closure as Evaporator I: the melt
     # strength follows the continuous Extended-UNIQUAC departure at 0.131 bar a, so the

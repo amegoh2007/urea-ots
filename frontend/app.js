@@ -18,7 +18,6 @@ function connect(){
     if(window.OV_apply) window.OV_apply(s);
     if(window.OTS_FACE && window.OTS_FACE.hicSync) window.OTS_FACE.hicSync();
     if(window.refreshIndicatorFaceplate) window.refreshIndicatorFaceplate();
-    if(window.refreshFFIC) window.refreshFFIC();
     if(window.refreshPIC) window.refreshPIC(s);
     if(window.refreshHIC2) window.refreshHIC2(s);
     if(window.refreshCtl) window.refreshCtl(s);
@@ -355,51 +354,6 @@ document.querySelectorAll('.pi[data-tag]').forEach(el=>{
   window.OTS_FACE=Object.assign(window.OTS_FACE||{}, {indicator:open});
   window.refreshIndicatorFaceplate=()=>{ if(m.classList.contains('show')) refresh(); };
   if(cl) cl.onclick=()=>m.classList.remove('show');
-  m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
-})();
-
-// ---------- FFIC-321404 A/B ratio station faceplate ----------
-(function(){
-  const m = document.getElementById('fficModal');
-  if(!m) return;
-  const f = id => document.getElementById(id);
-  const pvInput = f('ffic-pv');
-  const spInput = f('ffic-sp');
-  const totalInput = f('ffic-total');
-  const setBtn = f('ffic-set-btn');
-  const closeBtn = f('ffic-close');
-
-  function refresh(){
-    const s = window.OTS_LAST || {};
-    const ratio = s.ratio || {};
-    if(pvInput && document.activeElement !== spInput) {
-      pvInput.value = (ratio.SP != null) ? ratio.SP.toFixed(3) : '—';
-    }
-    if(totalInput) {
-      const total = (ratio.NC_A || 0) + (ratio.NC_B || 0);
-      totalInput.value = total.toFixed(3);
-    }
-  }
-
-  function open(o){
-    refresh();
-    m.classList.add('show');
-  }
-
-  function apply(){
-    const sp = parseFloat(spInput.value);
-    if(isNaN(sp) || sp < 2.0 || sp > 5.0) {
-      alert('SP must be between 2.0 and 5.0 N/C');
-      return;
-    }
-    send({type: 'ratio_set', sp: sp});
-    m.classList.remove('show');
-  }
-
-  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, {ffic: open});
-  window.refreshFFIC = ()=> { if(m.classList.contains('show')) refresh(); };
-  if(setBtn) setBtn.onclick = apply;
-  if(closeBtn) closeBtn.onclick = ()=> m.classList.remove('show');
   m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
 
@@ -846,11 +800,6 @@ connect();
     if(ae !== f('f51-mv'))   f('f51-mv').value   = fmt(d.mv);
     if(ae !== f('f51-sp'))   f('f51-sp').value   = fmt(d.sp);
     if(ae !== f('f51-bias')) f('f51-bias').value = fmt(d.bias);
-    // Display N/C feed and ratio (read-only derived values)
-    if(lastState && lastState.ratio){
-      f('f51-nc').value = fmt(lastState.ratio.NC_B || 0);
-      f('f51-ratio').value = fmt(lastState.ratio_SP || 0);
-    }
     const st = d.status || {};
     const flags = [];
     if(st.pv_bad)      flags.push('PV BAD');
@@ -973,12 +922,7 @@ connect();
     if(ae !== f('f50-mv'))   f('f50-mv').value   = fmt(d.mv);
     if(ae !== f('f50-sp'))   f('f50-sp').value   = fmt(d.sp);
     if(ae !== f('f50-bias')) f('f50-bias').value = fmt(d.bias);
-    // Display N/C feed and ratio (read-only derived values)
-    if(lastState && lastState.ratio){
-      f('f50-nc').value = fmt(lastState.ratio.NC_A || 0);
-      f('f50-ratio').value = fmt(lastState.ratio_SP || 0);
-    }
-    const st = d.status || ;
+    const st = d.status || {};
     const flags = [];
     if(st.pv_bad)      flags.push('PV BAD');
     if(st.mv_hi_clamp) flags.push('MV @ HI');
