@@ -27,6 +27,45 @@ A full Principal Process Simulation Architect audit has been conducted covering:
 
 ---
 
+## COMPREHENSIVE CONSTRAINT & BOUNDARY AUDIT — COMPLETED 2026-08-20
+
+**Status:** ✓ AUDIT COMPLETE
+
+A rigorous Principal Process Control & DCS Architect audit was conducted covering:
+- **Phase 1:** Controller algorithmic constraints (SP/OP limits, rate-of-change)
+- **Phase 2:** Valve physical & aerodynamic constraints (actuator delays, choked flow)
+- **Phase 3:** Override control & safety interlocks (ESD, bad-PV detection)
+- **Phase 4:** Diagnostic reporting with violation severity classification
+
+**Report Location:** `CONSTRAINT_AUDIT_REPORT.md` (430+ lines)
+
+**Test Coverage:**
+- Phase 1: 7 algorithmic tests (ALL PASS)
+- Phase 2: 6 physical constraint tests (3 PASS, 3 LIMITATION documented)
+- Phase 3: 5 interlock/safety tests (ALL PASS)
+
+**Findings:**
+- **Overall Assessment:** COMPLIANT with industrial DCS standards
+- **Zero critical violations** identified
+- 4 medium-to-low severity enhancements recommended
+
+**Violations & Recommendations:**
+1. **MEDIUM:** MAN mode bypasses slew rate -- implement separate ValveActuator class
+2. **MEDIUM:** Choked flow model built (ISA 75.01.01) but not integrated into main.py runtime
+3. **LOW:** Valve mechanical stiction not modeled -- add Kano stiction model
+4. **LOW:** Explicit selector blocks not implemented -- current mode-switching adequate
+
+**Constraints Verified CORRECT:**
+- ✓ SP clamping at [sp_lo, sp_hi]
+- ✓ OP saturation at [op_lo, op_hi] with clamp flags
+- ✓ Rate-of-change limits in AUTO/CAS/OOS modes
+- ✓ Bad PV detection → fail-freeze
+- ✓ Bumpless transfer on mode switching
+- ✓ Anti-windup protection (velocity I-PD)
+- ✓ Fail-safe actions (OOS mode strokes to FC/FO/FL)
+
+---
+
 ## FIC-328402 Valve Hunting - RESOLVED
 
 **Status:** FIXED in commit f6c9df9
@@ -65,6 +104,7 @@ Previous AUDIT markers remain:
 
 ---
 
-**Last Updated:** 2026-08-20 (session comprehensive-audit)
-**Next Session:** All major audits complete. System ready for production training deployment.
+**Last Updated:** 2026-08-20 (session constraint-boundary-audit)
+**Next Session:** All major audits complete. Priority enhancements: (1) choked flow integration, (2) MAN mode actuator dynamics.
+
 
