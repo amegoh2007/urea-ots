@@ -4213,7 +4213,13 @@ def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None, h_kjkg=None):
     """Uniform process-stream object. Derives BOTH mol % and mass % from the same
     per-component kmol/h vector, so the two bases can never drift.  Component
     flow vectors remain at calculation precision; rounded totals are display
-    values. Unknown rho/enthalpy stay None (no fabricated properties)."""
+    values. Unknown rho/enthalpy stay None (no fabricated properties).
+
+    AUDIT THERMO-2: Stream enthalpy fields are declared but not populated.
+    Section-level energy balances close correctly (see Unit 328, <1 kW residual),
+    but per-stream enthalpy requires reference-state conventions and component-specific
+    heat capacities not yet implemented. Setting fields to None explicitly documents
+    the limitation rather than silently returning placeholder values."""
     n = {k: comp_kmolh.get(k, 0.0) for k in MW_COMP}
     m = {k: n[k] * MW_COMP[k] for k in MW_COMP}
     n_tot = sum(n.values()); m_tot = sum(m.values())
@@ -4225,9 +4231,8 @@ def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None, h_kjkg=None):
         "MW": round(m_tot / n_tot, 3) if n_tot else 0.0,
         "rho": (round(rho, 1) if rho else None),
         "vol_m3h": (round(m_tot / rho, 2) if rho else None),
-        "enthalpy_kJkg": (round(h_kjkg, 3) if h_kjkg is not None else None),
-        "enthalpy_flow_kW": (round(m_tot * h_kjkg / 3600.0, 3)
-                              if h_kjkg is not None else None),
+        "enthalpy_kJkg": None,        # Not implemented — see docstring AUDIT THERMO-2
+        "enthalpy_flow_kW": None,     # Not implemented — see docstring AUDIT THERMO-2
         "component_kmolh": dict(n),
         "component_kgh": dict(m),
         "mol_pct":  {k: round(n[k] / n_tot * 100.0, 3) if n_tot else 0.0 for k in MW_COMP},
@@ -5852,7 +5857,11 @@ def step_sim(dt: float) -> dict:
     tic07_op  = _ctrl_ipd(s.TIC_323007, s.r323_c003_T, dt)                        # steam-P demand (bar a)
     pic02_pv  = clamp(s.PIC_329202["op"] / 100.0 * s.steam.P_LP, 0.0, s.steam.P_LP)  # live LP-header chest P
     pic02_op  = _ctrl_ipd(s.PIC_329202, pic02_pv, dt, cas_sp=tic07_op)            # steam valve stroke (%)
-    p_chest_e002 = steam_chest_pressure(pic02_op, s.steam.P_LP)
+    # AUDIT THERMO-3: Apply transport lag to steam header pressure before thermal calc.
+    # Same rationale as 324E001 — steam header responds in ~1 s, but column liquid inventory
+    # (323C003 holdup ~1800 kg, residence time 86-100 s measured) should not start moving in 1 s.
+    p_lp_lagged_c003 = _lag1(s.tlag, "323C003_P_LP_thermal", s.steam.P_LP, R323_C003_P_TAU_S, dt)
+    p_chest_e002 = steam_chest_pressure(pic02_op, p_lp_lagged_c003)
     # AUDIT F-10 — a CONDENSING-STEAM chest can only ADD heat.  Un-floored, shutting PV-329202
     # clamps p_chest to 0.02 bar a (tsat ~17.5 C) and UA·(tsat − T) becomes a large NEGATIVE duty,
     # i.e. the heater turns into a refrigerator and drags the column to ~14 C.  Physically the
@@ -6757,7 +6766,13 @@ def step_sim(dt: float) -> dict:
     tic1_op    = _ctrl_ipd(s.TIC_324001, s.r324_e001_T, dt)                   # steam chest-P demand (bar a)
     pic203_pv  = clamp(s.PIC_329203["op"]/100.0*s.steam.P_LP, 0.0, s.steam.P_LP)
     pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
-    p_chest_e001 = steam_chest_pressure(pic203_op, s.steam.P_LP)
+    # AUDIT THERMO-3: Apply transport lag to steam header pressure before thermal calc.
+    # The shared steam header (s.steam.P_LP) responds in ~1 s to header-wide load changes,
+    # but the 180 s-residence liquid inventory in 324E001 should not begin responding in 1 s.
+    # Lag the steam-side pressure seen by the thermal calculation to prevent instantaneous
+    # liquid-temperature response via the steam path while the material path correctly lags 28-72 s.
+    p_lp_lagged = _lag1(s.tlag, "324E001_P_LP_thermal", s.steam.P_LP, R324_F001_M_TAU_S, dt)
+    p_chest_e001 = steam_chest_pressure(pic203_op, p_lp_lagged)
     Q_e001_kw  = max(R324_E001_UA_KW*(tsat_steam(p_chest_e001) - s.r324_e001_T), 0.0)
     # AUDIT F-4 — evaporation is DUTY-LIMITED, and the melt strength FOLLOWS it (was pinned at
     # R324_W_EV1 by construction, so no operator action could dilute the product).  q1_avail is

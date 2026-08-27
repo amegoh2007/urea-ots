@@ -166,7 +166,9 @@ Four pressure levels modelled as lumped-capacitance headers:
 
 ## 5. Thermodynamic & Property Models
 
-### 5.1 Extended UNIQUAC (NH₃-CO₂-H₂O Electrolyte System)
+### 5.1 Extended UNIQUAC (NH₃-CO₂-H₂O Electrolyte System) — Research Module
+
+**Status:** VALIDATED BUT NOT INTEGRATED
 
 `props_nh3co2h2o.py` — Full implementation of the Thomsen-Rasmussen / Darde Extended UNIQUAC model:
 
@@ -177,10 +179,11 @@ Four pressure levels modelled as lumped-capacitance headers:
 - Reaction enthalpies and excess enthalpies
 - Valid 0–150 °C, 1–100 bar, up to 100 molal NH₃
 
-Wired into the live engine through `vle_nh3co2h2o.py`, which turns it into the bubble-point service
-for the 323C003 rectifying column and the 323F004 flash tank (both previously ran on a pure-water
-saturation line with a frozen offset) and supplies the 328D003 ammonia-water vapour pressure. See
-`docs/Urea OTS — As-Built Mathematical Reference.md` for the validation against the PFD anchors.
+`vle_nh3co2h2o.py` — VLE wrapper for bubble-point calculations
+
+**Current Runtime Behavior:** Neither module is imported by `main.py`. The 323C003 rectifying column, 323F004 flash tank, and 328 LP recovery sections use **IAPWS-IF97 pure-water saturation temperature plus a frozen design offset** for VLE calculations. This design-anchored approach provides adequate fidelity for operator training scenarios.
+
+**Integration Status:** Full Extended UNIQUAC integration remains a planned enhancement for rigorous high-pressure synthesis VLE modeling. The research modules are validated and ready for integration when required.
 
 ### 5.2 Neutral UNIQUAC (H₂O-Urea for Unit 324)
 

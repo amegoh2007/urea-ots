@@ -1,110 +1,67 @@
 # Handoff: Open Gaps
 
-## COMPREHENSIVE PLANT-WIDE AUDIT — COMPLETED 2026-08-20
+## THERMODYNAMIC & MESH AUDIT — COMPLETED 2026-08-27
 
-**Status:** ✓ AUDIT COMPLETE
+**Status:** ✓ COMPLIANT (corrective actions documented)
 
-A full Principal Process Simulation Architect audit has been conducted covering:
-- **Phase 1:** Unit-by-unit thermodynamic model verification (3 fluid packages validated)
-- **Phase 2:** MESH equation & conservation law validation (32 units, <1e-6 closure)
-- **Phase 3:** Flowsheet topology and ripple-effect integrity (recycle convergence verified)
-- **Phase 4:** Control system architecture (46 PID controllers, all modes validated)
+**Report:** `THERMODYNAMIC_MESH_AUDIT_REPORT.md`
 
-**Report Location:** `COMPREHENSIVE_AUDIT_REPORT.md` (850+ lines)
+Plant-wide thermodynamic model assignment, MESH equation closure, and ripple-effect propagation audited against the live running engine. All findings verified by executing `backend/main.py` and reading source — nothing inferred from module docstrings.
 
-**Key Findings:**
-- **Zero critical issues** identified
-- Thermodynamic models correctly assigned by section operating regime
-- Mass/energy balances close to machine precision
-- Feed perturbation (+5% step) propagates correctly through all 6 sections
-- Bumpless transfer, anti-windup, fail-safe actions all verified
-- Simulator certified **FIT FOR PURPOSE** as operator training system
+**Core Physics: COMPLIANT**
+- Component balances close to machine precision (<1e-16)
+- Energy balances close within 1 kW tolerance
+- Recycle tears converge to 1e-15 without iterative solve
+- Composition constraints (Σxᵢ = 1) hold at floating-point epsilon under extreme off-design
+- Reaction kinetics respond correctly to T/N/C/H/C gradients, ceiling guard enforces X ≤ X_inf exactly
+- +5% CO₂ feed step propagates through all 6 sections with correct sign and magnitude
 
-**Recommendations:**
-1. ✓ Production deployment approved for training use
-2. Low-priority: experimental validation of Unit 324 vacuum VLE (currently design-anchored extrapolation)
-3. Document OTS vs plant DCS tuning divergence (33/46 controllers re-tuned for discrete-time stability)
+**Corrective Actions Required:**
 
----
+1. **Documentation reconciliation (highest priority, no code risk)**
+   - `project.md` §5.1 claims Extended UNIQUAC electrolyte model (`props_nh3co2h2o.py`, `vle_nh3co2h2o.py`) supplies 323C003, 323F004, 328D003 bubble points
+   - **Reality:** Neither module is imported at runtime; all ionic-section VLE uses IAPWS-IF97 pure-water tsat + frozen design offset
+   - Action: Reclassify Extended UNIQUAC as validated-but-unintegrated research module; document as-built method
 
-## COMPREHENSIVE CONSTRAINT & BOUNDARY AUDIT — COMPLETED 2026-08-20
+2. **Stream enthalpy population**
+   - All 55 streams carry `enthalpy_kJkg` and `enthalpy_flow_kW` keys, all are `None`
+   - Blocks per-stream enthalpy balance (explicitly requested in audit Phase 2)
+   - Section-level energy closure unaffected and does close
 
-**Status:** ✓ AUDIT COMPLETE
+3. **Steam-coupled liquid temperature lag**
+   - 324E001 liquid temperature (TT-324001) begins moving in 1 s after CO₂ step
+   - Arrives via shared steam header (pressure transient), not via material path (28 s dead time)
+   - 180 s-residence liquid inventory should not respond in 1 s
+   - Fix: route through existing `_delay(...)` mechanism
 
-A rigorous Principal Process Control & DCS Architect audit was conducted covering:
-- **Phase 1:** Controller algorithmic constraints (SP/OP limits, rate-of-change)
-- **Phase 2:** Valve physical & aerodynamic constraints (actuator delays, choked flow)
-- **Phase 3:** Override control & safety interlocks (ESD, bad-PV detection)
-- **Phase 4:** Diagnostic reporting with violation severity classification
+4. **Minor cleanups**
+   - Remove dead `EmpiricalThermo.bubble_p` placeholder (no caller, cannot be mistaken for live fluid package)
+   - Fix CO₂ pressure assertion in `audit_model_compliance.py` (feed line legitimately behind PIC-322203)
 
-**Report Location:** `CONSTRAINT_AUDIT_REPORT.md` (430+ lines)
-
-**Test Coverage:**
-- Phase 1: 7 algorithmic tests (ALL PASS)
-- Phase 2: 6 physical constraint tests (3 PASS, 3 LIMITATION documented)
-- Phase 3: 5 interlock/safety tests (ALL PASS)
-
-**Findings:**
-- **Overall Assessment:** COMPLIANT with industrial DCS standards
-- **Zero critical violations** identified
-- 4 medium-to-low severity enhancements recommended
-
-**Violations & Recommendations:**
-1. **MEDIUM:** MAN mode bypasses slew rate -- implement separate ValveActuator class
-2. **MEDIUM:** Choked flow model built (ISA 75.01.01) but not integrated into main.py runtime
-3. **LOW:** Valve mechanical stiction not modeled -- add Kano stiction model
-4. **LOW:** Explicit selector blocks not implemented -- current mode-switching adequate
-
-**Constraints Verified CORRECT:**
-- ✓ SP clamping at [sp_lo, sp_hi]
-- ✓ OP saturation at [op_lo, op_hi] with clamp flags
-- ✓ Rate-of-change limits in AUTO/CAS/OOS modes
-- ✓ Bad PV detection → fail-freeze
-- ✓ Bumpless transfer on mode switching
-- ✓ Anti-windup protection (velocity I-PD)
-- ✓ Fail-safe actions (OOS mode strokes to FC/FO/FL)
+**Enhancement Opportunities (optional):**
+- Integrate Extended UNIQUAC electrolyte model for rigorous HP synthesis VLE
+- Integrate choked flow model (`consequence.py` ISA 75.01.01 — built but not wired to main.py)
+- Experimental validation of Unit 324 vacuum VLE (0.02–1.0 bar, 35–1750× below published 35 bar floor)
+- Extend stream coverage beyond 55/163 PFD streams as scenarios require
 
 ---
 
-## FIC-328402 Valve Hunting - RESOLVED
+**Prior Closed Issues (Retained for Context):**
+- FIC-328402 valve hunting resolved (commit f6c9df9, gain 0.75→0.06)
+- FFIC-329401 ratio implementation verified correct
+- HV-329605/329606 propagation verified
+- Scenario coverage 85–90% (Scenarios.md/2/3)
+- UI page 321-1 migration complete (17 indicators, 2 hand switches, 5 nav links)
+  - Backend verification: PDY-321204 ✓, TI-321020 ✓, FQI-321401 ✗, FFIC-321404A/B ✗
 
-**Status:** FIXED in commit f6c9df9
-
-**Root Cause:** Controller gain was set to `Kc = 0.75 * RHO_744_KGM3 = 751.86`, which is 12.5× too aggressive. When operator changed setpoint by 5 m³/h, the proportional term alone produced 3,759% output change, instantly saturating the valve and causing violent oscillation (0-100% at high frequency).
-
-**Fix Applied:** Restored base gain from 0.75 to 0.06 per the documented stability analysis at line 4916. New `Kc = 0.06 * RHO_744_KGM3 = 60.15` produces 301% output change for 5 m³/h error, which is within integrator wind-up protection range and documented as stable (M=37.8, loop coefficient 0.26).
-
-**Verification:** The comment at line 4916 explicitly documents that Kc=0.06 is stable and Kc=1.2 is "VIOLENTLY unstable". Commit 1228433 (plant-wide PID retune) incorrectly changed 0.06→0.75.
-
-## FFIC-329401 Ratio Implementation - VERIFIED CORRECT
-
-**Status:** CORRECT, no action needed
-
-**Verification Summary:**
-- Design constant calculation (line 1355-1356) matches runtime calculation (line 6423-6424) with bit-exact float operation order
-- Units properly convert to T/m³ basis: (kg/h steam / 1000) / (kg/h feed / rho) = T/h / m³/h = T/m³
-- At design point: 6.495 T/h / 31.40 m³/h = 0.20685 T/m³ (matches DCS display)
-- Cascade logic properly multiplies FIC-328402 volumetric flow by ratio to produce kg/h steam demand for FIC-329401 slave
-- Division-by-zero protection via `max(..., 1e-6)` in denominator
-
-Previous AUDIT markers remain:
-- G14: Ratio uses previous-tick values (m931_prev, m744_prev) for tear-stream consistency
-- G15: Lag tau changed from 5.0 to 0.0 to eliminate double-lag (flows already carry 5s lags from _fic_flow)
-- G16: FIC-328402 gain restored from 0.75 to 0.06
-
-## Scenario Verification Status
-
-**HV-329605 and HV-329606 Propagation:** VERIFIED CORRECT (from previous session)
-- HV-329605 affects PT-323204, PT-324201, PIC-324202 ✓
-- HV-329606 affects PIC-324203, PT-324204 ✓
-
-**Scenario Files Coverage:** VERIFIED 85-90% (from previous session)
-- Scenarios.md, Scenarios2.md, Scenarios3.md dynamics implemented
-- Remaining gaps in documentation, not simulation code
 
 ---
 
-**Last Updated:** 2026-08-20 (session constraint-boundary-audit)
-**Next Session:** All major audits complete. Priority enhancements: (1) choked flow integration, (2) MAN mode actuator dynamics.
+**Last Updated:** 2026-08-27 (thermodynamic & MESH audit)
+**Next Session:** Address corrective actions in priority order:
+1. Documentation reconciliation (project.md §5.1, clarify Extended UNIQUAC status)
+2. Stream enthalpy population (serialize computed values or drop schema fields)
+3. Apply transport lag on steam-coupled liquid temperature path
+
 
 
