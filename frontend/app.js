@@ -337,7 +337,15 @@ function openTrend(tag){
 const COMP_LBL = {CO2:'CO₂',CH4:'CH₄',H2:'H₂',H2O:'H₂O',N2:'N₂',
                   NH3:'NH₃',O2:'O₂',Urea:'Urea',Biuret:'Biuret'};
 const fStrm = (v,d)=> (v==null ? '—' : (+v).toFixed(d));
-function renderStream(s){
+function renderStream(s, compositionOnly = false){
+  if (compositionOnly) {
+    const rows = [['Composition', 'mol %  |  mass %']];
+    Object.keys(COMP_LBL).forEach(k=>{
+      const mo = (s.mol_pct&&s.mol_pct[k])||0, ma = (s.mass_pct&&s.mass_pct[k])||0;
+      if(mo>0 || ma>0) rows.push([COMP_LBL[k], fStrm(mo,3)+'  |  '+fStrm(ma,3)]);
+    });
+    return rows;
+  }
   const rows = [
     ['Route', s.src+' → '+s.dst], ['Phase', s.phase],
     ['Temperature', fStrm(s.T_C,1)+' °C'], ['Pressure', fStrm(s.P_bara,1)+' bar a'],
@@ -345,6 +353,7 @@ function renderStream(s){
     ['Molar flow', fStrm(s.mol_kmolh,1)+' kmol/h'], ['Avg MW', fStrm(s.MW,2)+' kg/kmol'],
     ['Specific enthalpy', s.enthalpy_kJkg!=null ? fStrm(s.enthalpy_kJkg,2)+' kJ/kg' : '— (not modelled)'],
     ['Enthalpy flow', s.enthalpy_flow_kW!=null ? fStrm(s.enthalpy_flow_kW,2)+' kW' : '— (not modelled)'],
+    ['Enthalpy basis', s.enthalpy_basis ? (s.enthalpy_basis.startsWith('H0') ? 'H0 (ideal solution)' : s.enthalpy_basis.startsWith('H1') ? 'H1 (with mixing)' : 'H2 (plant reconciled)') : '—'],
     ['Density', s.rho!=null ? fStrm(s.rho,1)+' kg/m³' : '—'],
     ['Volum. flow', s.vol_m3h!=null ? fStrm(s.vol_m3h,1)+' m³/h' : '—'],
     ['', ''], ['Composition', 'mol %  |  mass %'],
@@ -355,11 +364,11 @@ function renderStream(s){
   });
   return rows;
 }
-function openStreamPopup(id){
+function openStreamPopup(id, compositionOnly = false){
   const s = (lastState.STREAMS||{})[id]; if(!s) return;
   document.getElementById('stream-title').textContent = s.name;
   document.getElementById('stream-table').innerHTML =
-    renderStream(s).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+    renderStream(s, compositionOnly).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
   document.getElementById('streamModal').classList.add('show');
 }
 document.getElementById('s-close').onclick = ()=> document.getElementById('streamModal').classList.remove('show');
@@ -443,6 +452,7 @@ function render322(s){
   setPI('HIC_322602', e.HIC_322602, '%',     false);
   const hv=document.getElementById('hv-op'); if(hv) hv.textContent = fmt(e.HIC_322602)+' %';
   if(window.OTS_FACE && window.OTS_FACE.hicSync) window.OTS_FACE.hicSync();   // keep the open HV faceplate's field live (any hand valve)
+  if(window.OTS_FACE && window.OTS_FACE.hsSync) window.OTS_FACE.hsSync();     // keep the open HS faceplate's status live
   const xb=document.getElementById('xv-322901b');
   if(xb) xb.classList.toggle('closed', !s.XV_322901);   // bowtie: green=open, red=closed (CSS)
 }
@@ -492,6 +502,33 @@ function render322(s){
                    const v=gp(window.OTS_LAST||{}, cur.bind); if(v!=null) inp.value=fmt(v); } });   // per-tick live field
   if(box) box.addEventListener('click', ()=>open(null));
   const pibox=document.querySelector('.pi[data-tag="HIC_322602"]'); if(pibox) pibox.addEventListener('click', ()=>open(null));
+  if(cl&&m) cl.onclick=()=> m.classList.remove('show');
+  if(m) m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
+})();
+
+// ---------- Hand Switch faceplate (HS-321901, HS-322901) — opens/closes XV on command ----------
+(function(){
+  const m=document.getElementById('hsModal'); if(!m) return;
+  const xv=document.getElementById('hs-xv'), status=document.getElementById('hs-status'),
+        btn=document.getElementById('hs-on-btn'), cl=document.getElementById('hs-close'),
+        ttl=document.getElementById('hs-title');
+  if(!btn) return;
+  let cur=null;   // overlay currently shown
+  const gp=(o,p)=> p.split('.').reduce((a,k)=> (a==null?a:a[k]), o);
+  const open=(o)=>{ cur=o||null;
+    if(ttl && cur) ttl.textContent = cur.tag;
+    if(xv && cur && cur.xv) xv.value = cur.xv.replace('_','-');
+    const isOpen = (cur&&cur.xv)? gp(window.OTS_LAST||{}, cur.xv) : null;
+    if(status) status.value = (isOpen ? 'OPEN' : 'CLOSED');
+    if(btn) btn.textContent = (isOpen ? 'CLOSE' : 'OPEN');
+    if(m) m.classList.add('show');
+  };
+  btn.onclick=()=>{ if(cur&&cur.cmd) send({type:'xv_toggle', id:cur.cmd}); };
+  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { hs: open,
+    hsSync: ()=>{ if(!m||!m.classList.contains('show')||!cur||!cur.xv) return;
+                  const isOpen=gp(window.OTS_LAST||{}, cur.xv);
+                  if(status) status.value=(isOpen?'OPEN':'CLOSED');
+                  if(btn) btn.textContent=(isOpen?'CLOSE':'OPEN'); } });
   if(cl&&m) cl.onclick=()=> m.classList.remove('show');
   if(m) m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();

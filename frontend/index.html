@@ -33,8 +33,8 @@
   .ov{position:absolute;transform:translate(-50%,-50%);z-index:5;cursor:pointer;}
   .ov.pump{width:54px;height:54px;}
   .ov.avalve{width:34px;height:34px;}
-  .ov.ind{min-width:30px;height:18px;padding:0 4px;background:#04110d;border:1px solid #e8f4f0;color:#d6f3e4;font:bold 12px var(--val-font);font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;white-space:nowrap;border-radius:2px;}
-  .ov.ind .ou{color:#82b3a3;font-weight:normal;margin-left:3px;font-size:10px;}
+  .ov.ind{min-width:30px;height:18px;padding:0 4px;background:#04110d;border:1px solid #e8f4f0;color:#d6f3e4;font:bold 14px var(--val-font);font-variant-numeric:tabular-nums;display:flex;align-items:center;justify-content:center;white-space:nowrap;border-radius:2px;}
+  .ov.ind .ou{color:#82b3a3;font-weight:normal;margin-left:3px;font-size:12px;}
   .ov.ind .mt{font-style:normal;font-weight:700;margin-left:3px;font-size:8px;line-height:1;vertical-align:top;opacity:.9;}
   .ov.ind .mt.m-A{color:#5fe08f;} .ov.ind .mt.m-E{color:#7fd0d8;} .ov.ind .mt.m-M{color:#e0b85f;} .ov.ind .mt.m-O{color:#e06f6f;}
   .ov.ind.empty{min-width:34px;height:16px;background:rgba(8,16,14,.45);border:1px solid #ffffff;color:#eef;font:normal 9px var(--val-font);font-variant-numeric:tabular-nums;letter-spacing:-.3px;}
@@ -699,6 +699,14 @@
   <div class="btns"><button id="ctl-close">Close</button><button class="primary" id="ctl-set-btn">SET</button></div>
 </div></div>
 
+<!-- Hand Switch faceplate (HS-321901, HS-322901) -->
+<div class="modal" id="hsModal"><div class="card">
+  <h3 id="hs-title">HS-321901</h3>
+  <div class="row"><label>Valve</label><input id="hs-xv" type="text" readonly></div>
+  <div class="row"><label>Status</label><input id="hs-status" type="text" readonly></div>
+  <div class="btns"><button id="hs-close">Close</button><button class="primary" id="hs-on-btn">OPEN</button></div>
+</div></div>
+
 <!-- SIC-321950 faceplate (REST /api/ctrl/SIC_321950 + controllers WS block) -->
 <div class="modal" id="f50">
   <div class="card">
@@ -845,7 +853,7 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=2"></script>
 <script src="lv324501_route.js"></script>
 <script src="overlays.js"></script>
 <script src="co2_compressor.js"></script>

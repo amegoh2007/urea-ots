@@ -23,18 +23,13 @@ Plant-wide thermodynamic model assignment, MESH equation closure, and ripple-eff
    - **Reality:** Neither module is imported at runtime; all ionic-section VLE uses IAPWS-IF97 pure-water tsat + frozen design offset
    - Action: Reclassify Extended UNIQUAC as validated-but-unintegrated research module; document as-built method
 
-2. **Stream enthalpy population**
-   - All 55 streams carry `enthalpy_kJkg` and `enthalpy_flow_kW` keys, all are `None`
-   - Blocks per-stream enthalpy balance (explicitly requested in audit Phase 2)
-   - Section-level energy closure unaffected and does close
-
-3. **Steam-coupled liquid temperature lag**
+2. **Steam-coupled liquid temperature lag**
    - 324E001 liquid temperature (TT-324001) begins moving in 1 s after CO₂ step
    - Arrives via shared steam header (pressure transient), not via material path (28 s dead time)
    - 180 s-residence liquid inventory should not respond in 1 s
    - Fix: route through existing `_delay(...)` mechanism
 
-4. **Minor cleanups**
+3. **Minor cleanups**
    - Remove dead `EmpiricalThermo.bubble_p` placeholder (no caller, cannot be mistaken for live fluid package)
    - Fix CO₂ pressure assertion in `audit_model_compliance.py` (feed line legitimately behind PIC-322203)
 
@@ -47,6 +42,7 @@ Plant-wide thermodynamic model assignment, MESH equation closure, and ripple-eff
 ---
 
 **Prior Closed Issues (Retained for Context):**
+- **Stream enthalpy population (CLOSED 2026-08-28):** All 55 streams now publish H0-tier enthalpy (formation + sensible on elements-at-298.15 K datum, ideal solution) via `gap_g6_h0_enthalpy.py`. Enthalpy basis declared per stream; audit enthalpy check now passes. Per-stream energy balance unblocked.
 - FIC-328402 valve hunting resolved (commit f6c9df9, gain 0.75→0.06)
 - FFIC-329401 ratio implementation verified correct
 - HV-329605/329606 propagation verified
@@ -57,11 +53,11 @@ Plant-wide thermodynamic model assignment, MESH equation closure, and ripple-eff
 
 ---
 
-**Last Updated:** 2026-08-27 (thermodynamic & MESH audit)
-**Next Session:** Address corrective actions in priority order:
+**Last Updated:** 2026-08-28 (stream enthalpy population closed)
+**Next Session:** Address remaining corrective actions:
 1. Documentation reconciliation (project.md §5.1, clarify Extended UNIQUAC status)
-2. Stream enthalpy population (serialize computed values or drop schema fields)
-3. Apply transport lag on steam-coupled liquid temperature path
+2. Apply transport lag on steam-coupled liquid temperature path
+3. Minor cleanups (dead bubble_p placeholder, CO₂ pressure assertion)
 
 
 

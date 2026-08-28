@@ -3,15 +3,16 @@
 import main
 
 
-def test_stream_retains_component_flows_and_marks_unknown_enthalpy():
+def test_stream_retains_component_flows_and_publishes_h0_enthalpy():
     stream = main.make_stream(
         {"NH3": 10.0, "CO2": 2.0}, 100.0, 144.2,
         "audit", "A", "B", "gas",
     )
     assert stream["component_kmolh"]["NH3"] == 10.0
     assert stream["component_kgh"]["CO2"] == 2.0 * main.MW_COMP["CO2"]
-    assert stream["enthalpy_kJkg"] is None
-    assert stream["enthalpy_flow_kW"] is None
+    assert stream["enthalpy_kJkg"] is not None
+    assert stream["enthalpy_flow_kW"] is not None
+    assert stream["enthalpy_basis"] == main.h0_enthalpy.EnthalpyBasis.H0.value
 
 
 def test_registry_uses_live_co2_line_and_stripper_pressures():

@@ -41,6 +41,7 @@ from typing import Optional, Set
 import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
 import thermo_extended_uniquac as extended_uniquac
 import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-97)
+import gap_g6_h0_enthalpy as h0_enthalpy  # H0 stream enthalpy on the elements-at-298.15 K datum
 from core.thermo import EmpiricalThermo
 thermo = EmpiricalThermo()
 from controllers import Controller
@@ -302,6 +303,8 @@ MW_COMP = {"CO2":44.0098,"CH4":16.043,"H2":2.0158,"H2O":18.0152,
 # Urea   MW = C+2N+4H+O   -> urea-couple   (CO2+2NH3->Urea+H2O) Sum(nu*MW) = 0 exactly
 # Biuret MW = 2*Urea-NH3  -> biuret-couple (2Urea->Biuret+NH3)  Sum(nu*MW) = 0 exactly
 # both atom-consistent w.r.t. the listed CO2/NH3/H2O MW -> reactor mass closes to machine zero.
+_H0_GAPS = h0_enthalpy.unsupported_species(MW_COMP)
+assert not _H0_GAPS, f"no H0 enthalpy datum for {sorted(_H0_GAPS)}; add it before publishing streams"
 EJ_MOTIVE_NH3_DES = 42762.05427809782   # kg/h, design motive NH3 (pure, 321P002 A/B BL feed)
 #   RE-PINNED to physical Cluster-2023 design point: motive = RATIO_PV_DES*NC_TO_MASS*CO2_DES_KGH.
 #   Prior 40756.0 implied fresh N/C = 1.928 < 2.0 (sub-stoichiometric -> proven non-steady free-run);
@@ -4213,16 +4216,32 @@ def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None, h_kjkg=None):
     """Uniform process-stream object. Derives BOTH mol % and mass % from the same
     per-component kmol/h vector, so the two bases can never drift.  Component
     flow vectors remain at calculation precision; rounded totals are display
-    values. Unknown rho/enthalpy stay None (no fabricated properties).
+    values. Unknown rho stays None (no fabricated properties).
 
-    AUDIT THERMO-2: Stream enthalpy fields are declared but not populated.
-    Section-level energy balances close correctly (see Unit 328, <1 kW residual),
-    but per-stream enthalpy requires reference-state conventions and component-specific
-    heat capacities not yet implemented. Setting fields to None explicitly documents
-    the limitation rather than silently returning placeholder values."""
+    Enthalpy is published on the H0 tier (`gap_g6_h0_enthalpy`): formation + sensible
+    + phase reference on the elements-at-298.15 K datum, ideal solution.  Because every
+    constituent is referenced to its elements, the value is reaction-consistent and may be
+    summed across a reacting node.  The excess (mixing) term H^E is NOT included, so this
+    is not design-grade inside a strongly non-ideal liquid -- `enthalpy_basis` declares
+    that per stream rather than leaving it implied.  An explicit `h_kjkg` overrides the
+    calculation and is published as plant-reconciled (H2).
+
+    This is a read-only diagnostic layer: it consumes converged state and feeds nothing
+    back, so it cannot perturb the design anchors the mass solvers are pinned to."""
     n = {k: comp_kmolh.get(k, 0.0) for k in MW_COMP}
     m = {k: n[k] * MW_COMP[k] for k in MW_COMP}
     n_tot = sum(n.values()); m_tot = sum(m.values())
+    if h_kjkg is not None:
+        h_spec = h_kjkg
+        H_kW = m_tot * h_kjkg / 3600.0
+        basis = h0_enthalpy.EnthalpyBasis.H2.value
+    else:
+        h0 = h0_enthalpy.h0_stream(n, T, phase)
+        H_kW = h0["enthalpy_flow_kW"]
+        # Re-specify against this record's own mass total: MW_COMP is atom-consistent for the
+        # reactor couples and differs in the last digits from the H0 module's molar masses.
+        h_spec = H_kW * 3600.0 / m_tot if m_tot > 0.0 else None
+        basis = h0["enthalpy_basis"]
     return {
         "name": name, "src": src, "dst": dst, "phase": phase,
         "T_C": round(T, 1), "P_bara": round(P, 1),
@@ -4231,8 +4250,9 @@ def make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=None, h_kjkg=None):
         "MW": round(m_tot / n_tot, 3) if n_tot else 0.0,
         "rho": (round(rho, 1) if rho else None),
         "vol_m3h": (round(m_tot / rho, 2) if rho else None),
-        "enthalpy_kJkg": None,        # Not implemented — see docstring AUDIT THERMO-2
-        "enthalpy_flow_kW": None,     # Not implemented — see docstring AUDIT THERMO-2
+        "enthalpy_kJkg": (round(h_spec, 3) if h_spec is not None else None),
+        "enthalpy_flow_kW": round(H_kW, 3),
+        "enthalpy_basis": basis,
         "component_kmolh": dict(n),
         "component_kgh": dict(m),
         "mol_pct":  {k: round(n[k] / n_tot * 100.0, 3) if n_tot else 0.0 for k in MW_COMP},

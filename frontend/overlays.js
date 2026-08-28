@@ -27,34 +27,38 @@
   const OV = {
     'screen-321-1': [
       // ---- indicators (all bound: active unit) ----
-      { k: 'tt1',  t: 'ind', x: 397,  y: 181, tag: 'TT-321001', bind: 'TI_top1',     u: 'C',     dec: 1 },
-      { k: 'tt2',  t: 'ind', x: 637,  y: 181, tag: 'TT-321002', bind: 'TI_top2',     u: 'C',     dec: 1 },
-      { k: 'py2',  t: 'ind', x: 807,  y: 122, tag: 'PY-321202', bind: 'PY_321202',   u: 'BAR G', dec: 1 },
-      { k: 'ipy',  t: 'ind', x: 807,  y: 181, tag: 'IPY-321201',bind: 'PY_321201',   u: 'BAR G', dec: 1 },
-      { k: 'pd3',  t: 'ind', x: 880,  y: 228, tag: 'PDY-321203',bind: 'PDY_321203',  u: 'BAR G', dec: 1 },
-      { k: 'pd4',  t: 'ind', x: 1050, y: 183, tag: 'PDY-321204',bind: 'PDY_321204',  u: 'BAR G', dec: 1 },
-      { k: 't20',  t: 'ind', x: 1129, y: 254, tag: 'TT-321020', bind: 'TI_321020',   u: 'C',     dec: 1 },
-      { k: 'ft',   t: 'ind', x: 288,  y: 244, tag: 'FT-321401', bind: 'FI_321401',   u: 'T/H',   dec: 2 },
-      { k: 'fqi',  t: 'ind', x: 286,  y: 289, tag: 'FQI-321401',bind: 'totalizer',   u: 'T',     dec: 2 },
-      { k: 'pt1',  t: 'ind', x: 732,  y: 328, tag: 'PT-321201', bind: 'PI_321201',   u: 'BAR G', dec: 1 },
-      { k: 'pt2',  t: 'ind', x: 951,  y: 328, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
-      { k: 'i61',  t: 'ind', x: 897,  y: 486, tag: 'IT-321961', bind: 'pumpA.current',u: 'A',    dec: 1 },
-      { k: 'i62',  t: 'ind', x: 1108, y: 486, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
-      { k: 's50',  t: 'ind', x: 876,  y: 544, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
-      { k: 's51',  t: 'ind', x: 1088, y: 544, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
-      { k: 'nca',  t: 'ind', x: 288,  y: 538, tag: 'N/C Ratio 321P002A', bind: 'ratio.NC_A', u: '', dec: 3 },
-      { k: 'ncb',  t: 'ind', x: 288,  y: 606, tag: 'N/C Ratio 321P002B', bind: 'ratio.NC_B', u: '', dec: 3 },
-      { k: 'lsl',  t: 'ind', x: 513,  y: 264, tag: 'LSL-321501', bind: 'LI_321501',  u: '%',     dec: 1 },
-      { k: 'ft3',  t: 'ind', x: 93,   y: 452, tag: 'FT-322403', bind: 'CO2_FEED.FT_322403', u: 'NM3/H', dec: 0 },   // CO2 feed 320K002 -> XV-322902 -> 322E001
-      // ---- pumps ----
-      { k: 'pa',  t: 'pump', x: 861,  y: 445, bind: 'pumpA', id: 'A', tag: '321P002A' },
-      { k: 'pb',  t: 'pump', x: 1087, y: 445, bind: 'pumpB', id: 'B', tag: '321P002B' },
-      // ---- XVs ----
-      { k: 'xva', t: 'xv',   x: 629,  y: 230, bind: 'XV_321901', cmd: '321901', tag: 'XV-321901' },
-      { k: 'xvb', t: 'xv',   x: 1198, y: 337, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
-      // 21.4 interlock override pushbutton (beside XV-322901): opens the NH3 shut-off XV while the
-      //   loss-of-CO2 21.4 interlock is latched.  Lamp lit = interlock latched (override armed).
-      { k: 'ovrd322901', t: 'ovrd', x: 1198, y: 382, cmd: '322901', latch: '21_4', xv: 'XV_322901', tag: 'XV-322901 INTERLOCK OVERRIDE' },
+      { k: 'tt1',  t: 'ind', x: 242,  y: 225, tag: 'TT-321001', bind: 'TI_top1',     u: 'C',     dec: 1 },
+      { k: 'tt2',  t: 'ind', x: 465,  y: 217, tag: 'TT-321002', bind: 'TI_top2',     u: 'C',     dec: 1 },
+      { k: 'py2',  t: 'ind', x: 623,  y: 133, tag: 'PY-321202', bind: 'PY_321202',   u: 'BAR G', dec: 1 },
+      { k: 'py1',  t: 'ind', x: 628,  y: 202, tag: 'PY-321201', bind: 'PY_321201',   u: 'BAR G', dec: 1 },
+      { k: 'pd3',  t: 'ind', x: 694,  y: 246, tag: 'PDY-321203',bind: 'PDY_321203',  u: 'BAR G', dec: 1 },
+      { k: 'pd4',  t: 'ind', x: 972,  y: 247, tag: 'PDY-321204',bind: 'PDY_321204',  u: 'BAR G', dec: 1 },
+      { k: 'tt20', t: 'ind', x: 1011, y: 310, tag: 'TT-321020', bind: 'TI_321020',   u: 'C',     dec: 1 },
+      { k: 'ft',   t: 'ind', x: 211,  y: 353, tag: 'FT-321401', bind: 'FI_321401',   u: 'T/H',   dec: 2 },
+      { k: 'pt1',  t: 'ind', x: 582,  y: 373, tag: 'PT-321201', bind: 'PI_321201',   u: 'BAR G', dec: 1 },
+      { k: 'pt2',  t: 'ind', x: 794,  y: 396, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
+      { k: 'fqi',  t: 'ind', x: 210,  y: 424, tag: 'FQI-321401' },   // Totalizer - backend binding TBD
+      { k: 'ffa',  t: 'ind', x: 159,  y: 547, tag: 'FFIC-321404A' },  // Ratio controller A - backend binding TBD
+      { k: 'ffb',  t: 'ind', x: 158,  y: 593, tag: 'FFIC-321404B' },  // Ratio controller B - backend binding TBD
+      { k: 'i61',  t: 'ind', x: 619,  y: 592, tag: 'IT-321961', bind: 'pumpA.current',u: 'A',    dec: 1 },
+      { k: 'i62',  t: 'ind', x: 841,  y: 604, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
+      { k: 's50',  t: 'ind', x: 570,  y: 642, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
+      { k: 's51',  t: 'ind', x: 770,  y: 648, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
+      // ---- pumps (dimensions from PowerPoint: Picture 26 & Picture 66) ----
+      { k: 'pa',  t: 'pump', x: 621,  y: 521, w: 75, h: 65, bind: 'pumpA', id: 'A', tag: '321P002A' },
+      { k: 'pb',  t: 'pump', x: 839,  y: 516, w: 75, h: 65, bind: 'pumpB', id: 'B', tag: '321P002B' },
+      // ---- XVs (dimensions from PowerPoint: Picture 155 & Picture 157) ----
+      { k: 'xva', t: 'xv',   x: 457,  y: 324, w: 68, h: 31, bind: 'XV_321901', cmd: '321901', tag: 'XV-321901' },
+      { k: 'xvb', t: 'xv',   x: 1129, y: 359, w: 68, h: 31, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
+      // ---- Hand Switches (HS) for XV control - GREEN CLICKABLE SQUARES ----
+      { k: 'hs321901', t: 'hs', x: 523,  y: 281, xv: 'XV_321901', cmd: '321901', tag: 'HS-321901' },
+      { k: 'hs322901', t: 'hs', x: 1129, y: 418, xv: 'XV_322901', cmd: '322901', tag: 'HS-322901' },
+      // ---- Navigation links (rectangles to other UI pages) ----
+      { k: 'nav-fic402', t: 'nav', x: 555,  y: 280, w: 80, h: 24, tag: 'FIC-328402 → 328-1', goto: 'screen-328-1' },
+      { k: 'nav-fic401', t: 'nav', x: 1167, y: 416, w: 80, h: 24, tag: 'FIC-329401 → 329-1', goto: 'screen-329-1' },
+      { k: 'nav-322f001',t: 'nav', x: 1284, y: 359, w: 80, h: 24, tag: '322F001 → 322-2',    goto: 'screen-322-2' },
+      { k: 'nav-bl',     t: 'nav', x: 67,   y: 268, w: 60, h: 24, tag: 'BL → (external)',   goto: 'screen-321-1' },  // BL = Battery Limits - no screen yet
+      { k: 'nav-ft403',  t: 'nav', x: 67,   y: 427, w: 80, h: 24, tag: 'FT-322402 → 322-1', goto: 'screen-322-1' },
     ],
     'screen-322-2': [
       // ---- indicators: ALL tags positioned; only 3 bound, rest = white-frame empty slots ----
@@ -76,16 +80,6 @@
       { k: 'ti25',  t: 'ind', x: 988, y: 402, tag: 'TI-329125',  bind: 'SCRUB_322E003.ccw.TT_329125',    u: 'C', dec: 1 },
       { k: 'h602',  t: 'ind', x: 103, y: 531, tag: 'HIC-322602',bind: 'EJ_322F001.HIC_322602', u: '%',     dec: 1, face: 'hic' },
       { k: 't21',   t: 'ind', x: 148, y: 652, tag: 'TI-321020', bind: 'TI_321020',  u: 'C',     dec: 1 },
-      // pumps (state-only: no backend toggle handler yet -> local toggle)
-      { k: 'p2a', t: 'pump', x: 558, y: 43,  tag: '329P002A' },
-      { k: 'p2b', t: 'pump', x: 558, y: 84,  tag: '329P002B' },
-      { k: 'p6a', t: 'pump', x: 956, y: 246, tag: '329P006A' },
-      { k: 'p6b', t: 'pump', x: 956, y: 323, tag: '329P006B' },
-      { k: 'p4a', t: 'pump', x: 795, y: 447, tag: '329P004A' },
-      { k: 'p4b', t: 'pump', x: 795, y: 507, tag: '329P004B', def: false },
-      // XVs
-      { k: 'xv3', t: 'xv',   x: 226, y: 466, tag: 'XV-322903' },
-      { k: 'xv1', t: 'xv',   x: 214, y: 593, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
       // HV-322602 opening (driven by HIC-322602) — placed below h602 per updated 322-2 tagged
       { k: 'hv602', t: 'ind', x: 128, y: 578, tag: 'HV-322602', bind: 'EJ_322F001.HIC_322602', u: '%', dec: 1, face: 'hic' },
       // ---- stream-inspector hotspots (click = composition/properties popup; drag in edit mode to align) ----
@@ -99,6 +93,9 @@
       { k: 'nav-p002', t: 'nav', x: 6, y: 622, w: 98, h: 24, tag: '321P002A/B → 321-1', goto: 'screen-321-1' },
     ],
     'screen-322-1': [
+      // ===== COMPOSITION INDICATORS (AE tags: click to show live composition faceplate) =====
+      { k: 'ae801', t: 'ae', x: 910,  y: 376, tag: 'AE-322801', stream: 'REACT_OVERFLOW', note: 'Solution composition: 322R001 → HV-322605' },
+      { k: 'ae802', t: 'ae', x: 1078, y: 518, tag: 'AE-322802', stream: 'STRIP_BOT',      note: 'Solution composition: 322E001 → LV-322501' },
       // ===== STREAM-INSPECTOR HOTSPOTS (clickable process lines; drag in edit mode to align) =====
       { k: 'strm-co2',   t: 'strm', stream: 'CO2_FEED',     tag: 'CO2 FEED GAS',          x: 360, y: 600, w: 160, h: 20 },
       { k: 'strm-nh3',   t: 'strm', stream: 'NH3_FEED',     tag: 'NH3 EX 309E005',        x: 360, y: 418, w: 160, h: 18 },
@@ -119,13 +116,9 @@
       { k: 'fy403',  t: 'ind',    x: 289,  y: 520, tag: 'FY-322403',  bind: 'CO2_FEED.FY_322403',  u: 'T/H',   dec: 2 },
       { k: 'ft403',  t: 'ind',    x: 289,  y: 561, tag: 'FT-322403',  bind: 'CO2_FEED.FT_322403',  u: 'NM3/H', dec: 0 },
       { k: 'ti017',  t: 'ind',    x: 308,  y: 628, tag: 'TI-322017',  bind: 'CO2_FEED.TI_322017',  u: 'C',     dec: 1 },
-      { k: 'xv902',  t: 'xv',     x: 830,  y: 590, tag: 'XV-322902',  bind: 'CO2_FEED.XV_322902',  cmd: '322902' },
       { k: 'load',   t: 'ind',    x: 1231, y: 698, tag: 'LOAD',       bind: 'CO2_FEED.Load',       u: '%',     dec: 1 },
       // NH3 feed (modelled in 321) — boundary tag
       { k: 'ft401',  t: 'ind',    x: 284,  y: 423, tag: 'FT-321401',  bind: 'FI_321401',           u: 'T/H',   dec: 2 },
-      // ---- pumps (321P002A/B feed station — modelled in 321) ----
-      { k: 'pa', t: 'pump', x: 58, y: 57,  bind: 'pumpA', id: 'A', tag: '321P002A' },
-      { k: 'pb', t: 'pump', x: 58, y: 121, bind: 'pumpB', id: 'B', tag: '321P002B' },
       // ---- pump speed / ratio controllers (modelled in 321) ----
       { k: 's950b', t: 'ind', x: 491, y: 443, tag: 'SIC-321950',    bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
       { k: 's951b', t: 'ind', x: 497, y: 492, tag: 'SIC-321951',    bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
@@ -208,8 +201,6 @@
       { k: 'lic502',  t: 'ind',    x: 744, y: 625, tag: 'LIC-329502', bind: 'STEAM_SYSTEM.LIC_329502.pv', u: '%', dec: 1,
         mode: 'STEAM_SYSTEM.LIC_329502.mode', note: 'AUTO holds 329D005 level via LV-329502 drain to 329D009; MAN sets LV-329502 opening directly' },
       { k: 'lv502',   t: 'avalve', x: 731, y: 697, tag: 'LV-329502',  bind: 'STEAM_SYSTEM.LIC_329502.op', u: '%', dec: 1 },
-      { k: 'u001m01', t: 'pump', x: 1262, y: 570, tag: '329U001-M01' },   // O2 scavenger dosing (unmodelled -> local toggle)
-      { k: 'u001m02', t: 'pump', x: 1262, y: 651, tag: '329U001-M02' },
       // ===== screen-nav hotspots: boundary exchangers with live 322-1 home screen =====
       { k: 'nav-e002a', t: 'nav', x: 48, y: 158, w: 80, h: 24, tag: '322E002 -> 322-1', goto: 'screen-322-1' },
       { k: 'nav-e002b', t: 'nav', x: 68, y: 317, w: 80, h: 24, tag: '322E002 -> 322-1', goto: 'screen-322-1' },
@@ -244,12 +235,6 @@
       { k: 'tt103', t: 'ind', x: 768, y: 684, tag: 'TT-323103', bind: 'RECIRC_323.D002.T_C',      u: 'C', dec: 1 },
       { k: 'ti008', t: 'ind', x: 700, y: 684, tag: 'TI-323008', bind: 'RECIRC_323.D002.TI_323008', u: 'C', dec: 1, note: 'Comp-I bulk temperature (TAL: a falling tank walks the 80 % liquor toward crystallisation and blocks the 323P003 suction)' },
       { k: 'lt504', t: 'ind', x: 822, y: 650, tag: 'LI-323504', bind: 'RECIRC_323.D002.LI_323504', u: '%', dec: 1, note: 'passive compartment II — indication and alarms only, no control action; normally 0 %' },
-      // Field tie-in spool between Comp I and Comp II.  A hand valve, not a DCS device, so it has no
-      // licensor loop number.  CLOSED by default: the two compartments are independent and anything
-      // that spilled over the baffle into Comp II is stranded.  OPEN: connected vessels — the levels
-      // equalise and 323P003 draws the pooled inventory.  Opening it against a dry Comp II spreads
-      // the head over 380 m3 instead of 80 and collapses LIC-323507 toward the cavitation limit.
-      { k: 'tie02', t: 'xv', x: 815, y: 702, tag: 'HV-323D002 TIE-IN', bind: 'RECIRC_323.D002.HV_tie', cmd: '323D002TIE' },
       { k: 'lic07', t: 'ind', x: 1090, y: 644, tag: 'LIC-323507', bind: 'RECIRC_323.D002.LIC_323507.pv', mode: 'RECIRC_323.D002.LIC_323507.mode', u: '%', dec: 1, note: 'master: active compartment I level cascades FIC-324401 product flow' },
       { k: 'fic01', t: 'ind', x: 1274, y: 658, tag: 'FIC-324401', bind: 'RECIRC_323.D002.FIC_324401.pv', mode: 'RECIRC_323.D002.FIC_324401.mode', u: 'T/H', dec: 2, cas: true, note: 'slave: CAS follows LIC-323507; product to 324 evap via 323P003 A/B' },
       { k: 'pic203',  t: 'ind', x: 604,  y: 101, tag: 'PIC-323203', bind: 'LPCC_3232.E011.PIC_323203.pv', u: 'BAR A', dec: 2,
@@ -508,14 +493,10 @@
   }
 
   function svgPump() {
-    return '<svg viewBox="0 0 56 56" style="width:100%;height:100%;display:block;">' +
-      '<circle cx="28" cy="32" r="22" class="body"/>' +
-      '<polygon points="18,20 18,44 42,32" class="tri"/></svg>';
+    return '<img src="img/pump-off.png" style="display:block;">';
   }
   function svgXV() {
-    return '<svg class="sym" viewBox="0 0 34 24" style="width:100%;height:100%;display:block;">' +
-      '<polygon points="2,2 17,12 2,22" fill="#0c0c0c" stroke="#22ff22" stroke-width="2"/>' +
-      '<polygon points="32,2 17,12 32,22" fill="#0c0c0c" stroke="#22ff22" stroke-width="2"/></svg>';
+    return '<img src="img/xv-close.png" style="display:block;">';
   }
 
   function boolState(sid, o) {
@@ -566,13 +547,24 @@
     const el = elMap[sid + '|' + o.k]; if (!el) return;
     o = eff(o);                        // inherit bind/unit/dec from any screen sharing this tag
     if (o.t === 'nav') return;                          // transparent screen-nav hotspot, no value
+    if (o.t === 'ae') {                                 // composition indicator (AE-* tag)
+      el.classList.add('ae-indicator');
+      el.dataset.tip = o.tag + ' — ' + (o.note || 'Click to view composition');
+      return;
+    }
     if (o.t === 'pump') {
       const on = pumpOn(sid, o);
       el.classList.toggle('on', on);
+      const imgSrc = on ? 'img/pump-on.png' : 'img/pump-off.png';
+      const img = el.querySelector('img');
+      if (img && img.src.indexOf(imgSrc) < 0) img.src = imgSrc;
       el.dataset.tip = o.tag + ' — ' + (on ? 'ON' : 'OFF');
     } else if (o.t === 'xv') {
       const open = xvOpen(sid, o);
       el.classList.toggle('closed', !open);
+      const imgSrc = open ? 'img/xv-open.png' : 'img/xv-close.png';
+      const img = el.querySelector('img');
+      if (img && img.src.indexOf(imgSrc) < 0) img.src = imgSrc;
       el.dataset.tip = o.tag + ' — ' + (open ? 'OPEN' : 'CLOSED');
     } else if (o.t === 'ovrd') {                         // 21.x interlock override pushbutton
       const armed = !!gp(lastS, 'trip_latched.' + (o.latch || '21_4'));
@@ -601,11 +593,16 @@
       if (o.bind && o.id) { if (window.otsSend) otsSend({ type: 'pump_toggle', id: o.id }); return; }
     } else if (o.t === 'xv') {
       if (o.cmd) { if (window.otsSend) otsSend({ type: 'xv_toggle', id: o.cmd }); return; }
+    } else if (o.t === 'hs') {                    // hand switch: opens faceplate to control XV
+      if (window.OTS_FACE && window.OTS_FACE.hs) { window.OTS_FACE.hs(o); return; }
     } else if (o.t === 'ovrd') {                  // manual override: toggle the XV (open while interlock latched)
       if (o.cmd && window.otsSend) otsSend({ type: 'xv_toggle', id: o.cmd });
       return;
     } else if (o.t === 'nav') {
       if (o.goto && window.otsSwitchScreen) window.otsSwitchScreen(o.goto);
+      return;
+    } else if (o.t === 'ae') {                    // composition indicator: opens composition faceplate (composition only, no properties)
+      if (o.stream && window.openStreamPopup) window.openStreamPopup(o.stream, true);
       return;
     } else if (o.t === 'strm') {
       if (o.stream && window.openStreamPopup) window.openStreamPopup(o.stream);
@@ -689,7 +686,7 @@
     for (const key in elMap) if (key.indexOf(sid + '|') === 0) delete elMap[key];
     cfg(sid).forEach(o => {
       const el = document.createElement('div');
-      el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'nav' ? 'nav' : o.t === 'strm' ? 'strm' : o.t === 'ovrd' ? 'ovrd' : 'ind');
+      el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'vessel' ? 'vessel' : o.t === 'nav' ? 'nav' : o.t === 'strm' ? 'strm' : o.t === 'ae' ? 'ae' : o.t === 'ovrd' ? 'ovrd' : o.t === 'hs' ? 'hs' : 'ind');
       if (o.t === 'ind' || o.t === 'avalve') {                                 // avalve = modulating PV opening %, rendered as a numeric indicator (bug 3: opening was never shown)
         const eo = eff(o);
         if (!eo.bind) el.classList.add('empty');
@@ -702,15 +699,43 @@
         el.style.width = (o.w || 120) + 'px';
         el.style.height = (o.h || 16) + 'px';
         el.dataset.stream = o.stream;
+      } else if (o.t === 'ae') {                                   // composition indicator (AE-* tag)
+        el.innerHTML = '<b>' + o.tag + '</b>';
+        el.style.padding = '4px 8px';
+        el.style.background = '#0c1a28';
+        el.style.border = '1px solid #2f5a78';
+        el.style.borderRadius = '3px';
+        el.style.color = '#8fd0ff';
+        el.style.font = 'bold 10px Consolas,monospace';
+        el.style.cursor = 'pointer';
+        el.style.whiteSpace = 'nowrap';
+        el.style.userSelect = 'none';
+        el.dataset.stream = o.stream;
+      } else if (o.t === 'hs') {
+        el.innerHTML = '<b>OPEN</b>';
       }
       el.dataset.tip = o.tag;
       el.title = o.tag;
       // Only bound indicators/valve openings are draggable: an unbound white frame has no
       // packet path, so there is nothing to trend.
       if (TRENDABLE[o.t] && (eff(o).bind || o.bind)) el.draggable = true;
-      if (o.t === 'pump') el.innerHTML = svgPump();
-      else if (o.t === 'xv') el.innerHTML = svgXV();
-      else if (o.t === 'ovrd') el.innerHTML = '<span class="ovl"></span><b>OVRD</b>';
+      if (o.t === 'pump') {
+        el.innerHTML = svgPump();
+        if (o.w && o.h) el.querySelector('img').style.cssText = `width:${o.w}px;height:${o.h}px;display:block;`;
+      } else if (o.t === 'xv') {
+        el.innerHTML = svgXV();
+        if (o.w && o.h) el.querySelector('img').style.cssText = `width:${o.w}px;height:${o.h}px;display:block;`;
+      } else if (o.t === 'vessel') {
+        if (o.img) {
+          el.innerHTML = `<img src="img/${o.img}" style="width:${o.w}px;height:${o.h}px;display:block;">`;
+        } else if (o.w && o.h) {
+          el.style.width = o.w + 'px';
+          el.style.height = o.h + 'px';
+          el.style.border = '2px solid #4a6b2f';
+          el.style.background = 'rgba(26, 40, 8, 0.3)';
+          el.style.borderRadius = '4px';
+        }
+      } else if (o.t === 'ovrd') el.innerHTML = '<span class="ovl"></span><b>OVRD</b>';
       const p = pos[sid + '|' + o.k] || { x: o.x, y: o.y };
       place(el, p.x, p.y);
       attach(el, sid, o);
@@ -738,6 +763,9 @@
       '.ov.strm{background:transparent;border:1px solid transparent;border-radius:3px;}' +
       '.ov.strm:hover{border-color:rgba(127,208,216,.85);background:rgba(80,160,220,.14);}' +
       'body.ov-editing .ov.strm{border-color:rgba(255,160,60,.7);background:rgba(255,160,60,.10);}' +
+      '.ov.ae{background:#0c1a28;border:1px solid #2f5a78;border-radius:3px;color:#8fd0ff;font:bold 10px Consolas,monospace;padding:4px 8px;cursor:pointer;white-space:nowrap;user-select:none;}' +
+      '.ov.ae:hover{background:#1a2e42;border-color:#4aa587;color:#aff0ff;}' +
+      'body.ov-editing .ov.ae{border-color:rgba(143,208,255,.8);background:rgba(143,208,255,.12);}' +
       '.ov.ovrd{display:flex;align-items:center;gap:5px;padding:3px 7px;background:#1a1208;border:1px solid #6b5a2f;border-radius:3px;color:#cdbb78;font:bold 10px Consolas,monospace;letter-spacing:.6px;cursor:pointer;white-space:nowrap;user-select:none;}' +
       '.ov.ovrd .ovl{width:13px;height:9px;border:1px solid #6b5a2f;background:#3a3320;flex:none;}' +
       '.ov.ovrd:hover{border-color:#ffd000;color:#ffe9a0;}' +
@@ -746,6 +774,9 @@
       '.ov.ovrd.armed .ovl{background:#ffd000;border-color:#ffd000;box-shadow:0 0 5px #ffd000;animation:ovrdblink 1s steps(1) infinite;}' +
       '.ov.ovrd.on .ovl{background:#22ff22;border-color:#22ff22;}' +
       '@keyframes ovrdblink{50%{opacity:.35;}}' +
+      '.ov.hs{padding:4px 10px;background:#1a2808;border:1px solid #4a6b2f;border-radius:4px;color:#a0e060;font:bold 11px Arial;cursor:pointer;white-space:nowrap;user-select:none;}' +
+      '.ov.hs:hover{background:#2a3818;border-color:#6a8b4f;color:#c0ff80;}' +
+      '.ov.hs:active{background:#0aa64d;color:#fff;border-color:#22ff22;}' +
       '#sim-toggle{position:fixed;left:12px;bottom:12px;z-index:9000;display:flex;align-items:center;gap:8px;font:600 12px "Segoe UI",system-ui;padding:7px 13px;background:#13202c;color:#cfe;border:1px solid #2f4858;border-radius:6px;cursor:pointer;user-select:none;}' +
       '#sim-toggle:hover{background:#1d3242;border-color:#4aa587;}' +
       '#sim-toggle .dot{width:9px;height:9px;border-radius:50%;background:#3a6b4e;box-shadow:0 0 5px #3a6b4e;flex:none;}' +
