@@ -89,30 +89,43 @@ isolates LV-322501 at load, it would settle this properly — the ramp regressio
 now fall together when it happens, so the node is consistent, but whether the overhead *should*
 fall is still the open question there.
 
-## 6. PT-329206 retagged to PT-329207 — one HMI artefact left
+## 6. PT-329206 retagged to PT-329207 — closed
 
 Every 329206 tag in the simulation is now 329207: `PT-329206` on screen-322-1, `PI-329206` on
 screen-329-1, and the backend `PIC_329206` faceplate (which published the same loop a second time
 in barg off the same `P_LP` / `master207_sp` / `pic207_mode`, and is now merged into `PIC_329207`
 as `pv_barg` / `sp_barg`).
 
-Note this departs from two reference documents — `329-1 mapping and description.md` ("2 pressure
-indicators PI-329206 and PI-329207") and `Mapping of the steam system.md` ("PT-329206 and
-PT-329207 are on LP steam header") — and from `Urea_NormalOp_29-06-2025_Trends.md`, which logs
-PT-329206 over 1921 samples. The rename was an explicit instruction; if the references are right
-the second transmitter needs its 329206 tag back.
+The field references list two transmitters on the 4-bar header — `329-1 mapping and
+description.md` ("2 pressure indicators PI-329206 and PI-329207"), `Mapping of the steam
+system.md`, and `Urea_NormalOp_29-06-2025_Trends.md` which logs PT-329206 over 1921 samples. The
+OTS does not need both: two indicators showing the same parameter add nothing to train on. Do not
+"restore" PT-329206 on the strength of those documents — the single tag is the intended state.
 
-Two consequences to reconcile:
+`backend/reports/dcs_anchor_dynamics_2025-06-28.md` still says PT-329206 deliberately: it records
+what the DCS workbook contained, not simulation code.
 
-- **Screen 329-1 has a blank box.** The background is a tagged HMI screenshot with two indicator
-  boxes; the one at x 625 printed `PI-329206` and now has no overlay, so the printed label shows
-  with no live value. Fixing it needs the screenshot re-captured or the box re-purposed.
-- **`BOUND_TAG_FLOOR` in `test_trend_coverage.py`.** Merging two tags into one dropped the bound
+Two follow-ons, neither a defect:
+
+- **Screen 329-1 box at x 625.** The background is a tagged HMI screenshot; that box printed
+  `PI-329206` and now has no overlay, so the printed label shows with no live value. Cosmetic —
+  clears whenever the screen is re-captured.
+- **`BOUND_TAG_FLOOR` in `test_trend_coverage.py`.** Collapsing two tags to one dropped the bound
   count 213 → 212 by intent. The floor (217) is left untouched because that test is already red
   for unrelated reasons; reconcile both together rather than lowering it now.
 
-`backend/reports/dcs_anchor_dynamics_2025-06-28.md` still says PT-329206 — deliberately. It is a
-record of what the DCS workbook contained, not simulation code.
+### Related, and a real gap: field tags aliased to one modelled value
+
+Sweeping `overlays.js` for indicators sharing a packet path turns up 12. Most are legitimate —
+a controller and its valve (`HIC-329601`/`HV-329601`, `HIC-322602`/`HV-322602`,
+`HIC-323605`/`HV-323605`, `HIC-329602`/`HV-329602`), a controller and the transmitter feeding it
+(`LIC-323507`/`LT-323507`), or one parameter shown on two different screens
+(`PI-329201`/`PT-329201`, `TI-321020`/`TT-321020`, and now `PI-329207`/`PT-329207`).
+
+Four are not, and are worth a look: `TT-328011`/`TT-328012`, `TT-323009`/`TT-323C005`,
+`TT-323001`/`TT-323004` and `TT-323005`/`TT-323014` are pairs of DISTINCT field thermocouples at
+different points, both drawing the same modelled temperature. They will always read identically,
+so any scenario that should separate them cannot. That is a modelling gap, not an HMI choice.
 
 ## 7. Enhancement opportunities (optional)
 
