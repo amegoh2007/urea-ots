@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-02 (design-hold drift closed; 323 recirculation gas envelope unified)
+**Last updated:** 2026-09-02 (design-hold drift closed; 323 gas envelope unified; PT-329206 retagged 329207)
 
 ---
 
@@ -89,7 +89,32 @@ isolates LV-322501 at load, it would settle this properly — the ramp regressio
 now fall together when it happens, so the node is consistent, but whether the overhead *should*
 fall is still the open question there.
 
-## 6. Enhancement opportunities (optional)
+## 6. PT-329206 retagged to PT-329207 — one HMI artefact left
+
+Every 329206 tag in the simulation is now 329207: `PT-329206` on screen-322-1, `PI-329206` on
+screen-329-1, and the backend `PIC_329206` faceplate (which published the same loop a second time
+in barg off the same `P_LP` / `master207_sp` / `pic207_mode`, and is now merged into `PIC_329207`
+as `pv_barg` / `sp_barg`).
+
+Note this departs from two reference documents — `329-1 mapping and description.md` ("2 pressure
+indicators PI-329206 and PI-329207") and `Mapping of the steam system.md` ("PT-329206 and
+PT-329207 are on LP steam header") — and from `Urea_NormalOp_29-06-2025_Trends.md`, which logs
+PT-329206 over 1921 samples. The rename was an explicit instruction; if the references are right
+the second transmitter needs its 329206 tag back.
+
+Two consequences to reconcile:
+
+- **Screen 329-1 has a blank box.** The background is a tagged HMI screenshot with two indicator
+  boxes; the one at x 625 printed `PI-329206` and now has no overlay, so the printed label shows
+  with no live value. Fixing it needs the screenshot re-captured or the box re-purposed.
+- **`BOUND_TAG_FLOOR` in `test_trend_coverage.py`.** Merging two tags into one dropped the bound
+  count 213 → 212 by intent. The floor (217) is left untouched because that test is already red
+  for unrelated reasons; reconcile both together rather than lowering it now.
+
+`backend/reports/dcs_anchor_dynamics_2025-06-28.md` still says PT-329206 — deliberately. It is a
+record of what the DCS workbook contained, not simulation code.
+
+## 7. Enhancement opportunities (optional)
 
 - Integrate the Extended UNIQUAC electrolyte model for rigorous HP synthesis VLE.
 - Wire the choked-flow model (`consequence.py`, ISA 75.01.01) into `main.py`.

@@ -8303,17 +8303,17 @@ def step_sim(dt: float) -> dict:
                 "op":   round(s.steam.valve_admit9_pct - s.steam.valve_letdown_pct, 1),  # net split % (+205A admit / -205B let-down)
                 "mode": s.steam.pic205_mode,
             },
-            "PIC_329206": {                      # LP steam header master controller (4 barg == 5.013 bar a)
-                "pv":   round(s.steam.P_LP - 1.01325, 2),            # barg
-                "sp":   round(s.steam.master207_sp - 1.01325, 2),     # barg (4.0 barg)
-                "op":   round(s.steam.m_pic * 3.6, 2),             # net vent(+)/make-up(-) t/h
-                "mode": s.steam.pic207_mode,
-            },
-            "PIC_329207": {                      # 4-bar header (leg-B alias; PV=LP header P)
-                "pv":   round(s.steam.P_LP, 2),                     # bar a
-                "sp":   round(s.steam.pic207_sp, 2),
-                "op":   round(s.steam.m_pic * 3.6, 2),             # net vent(+)/make-up(-) t/h
-                "mode": s.steam.pic207_mode,
+            # The LP header carries two pressure transmitters in the field.  Both are tagged 329207
+            # here, so the former PIC_329206 faceplate -- the same loop published a second time in
+            # barg off the same P_LP, master207_sp and pic207_mode -- is merged into this one.  Its
+            # barg reading is kept alongside the bar-a one rather than dropped.
+            "PIC_329207": {                      # 4-bar header master (leg-B alias; PV=LP header P)
+                "pv":     round(s.steam.P_LP, 2),                   # bar a
+                "sp":     round(s.steam.pic207_sp, 2),
+                "op":     round(s.steam.m_pic * 3.6, 2),           # net vent(+)/make-up(-) t/h
+                "mode":   s.steam.pic207_mode,
+                "pv_barg": round(s.steam.P_LP - 1.01325, 2),        # 4.0 barg at design
+                "sp_barg": round(s.steam.master207_sp - 1.01325, 2),
             },
             "MASTER_SP_329207": {                # 4-bar header MASTER SP faceplate (ON/OFF cascade)
                 "on": s.steam.master207_on,

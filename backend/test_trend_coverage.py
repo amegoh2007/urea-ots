@@ -15,6 +15,9 @@ FRONTEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "front
 
 # Bound-tag count recorded when the trend system was built (2026-08-07). This is a FLOOR:
 # binding more tags is progress and must not break the suite; losing one is a regression.
+# 2026-09-02: PI-329206 was merged into PI-329207 (both LP-header transmitters now carry the
+# 329207 tag), so one tag left the map by intent, not by a lost bind.  The floor is untouched
+# because it is already red for unrelated reasons -- reconcile both together, not separately.
 BOUND_TAG_FLOOR = 217
 
 

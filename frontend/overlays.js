@@ -142,7 +142,7 @@
       { k: 'tt008',  t: 'ind', x: 543,  y: 297, tag: 'TT-322008', bind: 'REACT_322R001.TT_322008', u: 'C', dec: 1 },
       { k: 'tt010',  t: 'ind', x: 597,  y: 335, tag: 'TT-322010', bind: 'HPCC_322E002.TT_322010', u: 'C', dec: 1 },   // 322E002 liquid product temp -> 322R001
       { k: 'h605',   t: 'ind', x: 830,  y: 325, tag: 'HIC-322605', bind: 'REACT_322R001.HIC_322605', u: '%', dec: 1, face: 'hic' },
-      { k: 'pt9206', t: 'ind', x: 1242, y: 145, tag: 'PT-329206', bind: 'STEAM_SYSTEM.LP.P_bara', u: 'BAR A', dec: 2 },   // LP header P (same node as PI-329206)
+      { k: 'pt9207', t: 'ind', x: 1242, y: 145, tag: 'PT-329207', bind: 'STEAM_SYSTEM.LP.P_bara', u: 'BAR A', dec: 2 },   // LP header P (same node as PI-329207 on 329-1)
       { k: 'tt9001', t: 'ind', x: 1048, y: 259, tag: 'TT-329001', bind: 'HPCC_322E002.TT_329001', u: 'C', dec: 1 },   // 322D001 A/B condensate -> 322E002 shell (BFW feed)
       { k: 'py9207', t: 'ind', x: 1094, y: 208, tag: 'PY-329207B' },
       { k: 'tt014',  t: 'ind', x: 638,  y: 398, tag: 'TT-322014', bind: 'STRIP_322E001.TT_322014', u: 'C', dec: 1 },
@@ -177,10 +177,11 @@
       { k: 'lic503', t: 'ind',    x: 1002, y: 505, tag: 'LIC-329503', bind: 'STEAM_SYSTEM.LIC_329503.pv', u: '%', dec: 1,
         mode: 'STEAM_SYSTEM.LIC_329503.mode', note: 'AUTO holds 329D009 level via LV-329503 drain to 322D001A/B; MAN sets LV-329503 opening directly' },
       { k: 'lv503',  t: 'avalve', x: 1002, y: 581, tag: 'LV-329503',  bind: 'STEAM_SYSTEM.LIC_329503.op', u: '%', dec: 1 },
-      // ===== 322D001A/B LP drums + 4-bar header pressure indicators (PI-329206 / PI-329207) =====
+      // ===== 322D001A/B LP drums + 4-bar header pressure indicator (PI-329207) =====
+      // The header carries two transmitters in the field; both are tagged 329207 here, so the
+      // second box (x 625) is left to its printed label rather than drawn twice with one tag.
       { k: 'tt001',  t: 'ind',    x: 614, y: 271, tag: 'TT-329001',  bind: 'STEAM_SYSTEM.LP.TI_sat',  u: 'C',     dec: 1 },   // temp inside 322D001A/B
-      { k: 'pi206',  t: 'ind',    x: 625, y: 179, tag: 'PI-329206',  bind: 'STEAM_SYSTEM.LP.P_bara',  u: 'BAR A', dec: 2 },
-      { k: 'pi207',  t: 'ind',    x: 753, y: 179, tag: 'PI-329207',  bind: 'STEAM_SYSTEM.LP.P_bara',  u: 'BAR A', dec: 2 },   // 2nd header P indicator
+      { k: 'pi207',  t: 'ind',    x: 753, y: 179, tag: 'PI-329207',  bind: 'STEAM_SYSTEM.LP.P_bara',  u: 'BAR A', dec: 2 },   // 4-bar header P
       { k: 'lic504', t: 'ind',    x: 394,  y: 222, tag: 'LIC-329504', bind: 'STEAM_SYSTEM.LIC_329504.pv', u: '%', dec: 1,
         mode: 'STEAM_SYSTEM.LIC_329504.mode', note: 'reverse-acting: AUTO holds 322D001A/B level via LV-329504 make-up from 329P001A/B pumps; MAN sets LV-329504 opening directly' },
       { k: 'lv504',  t: 'avalve', x: 194,  y: 294, tag: 'LV-329504',  bind: 'STEAM_SYSTEM.LIC_329504.op', u: '%', dec: 1 },

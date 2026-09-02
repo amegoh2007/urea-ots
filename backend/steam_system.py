@@ -91,7 +91,7 @@ P_LP_MIN_BARA = 3.5
 # ---------------------------------------------------------------- LP 4-bar header pressure PIC (PI vent/make-up)
 #   Lumped stand-in for the master-SP trio PIC-329207A (vent) / B (turbine 320MT02) / C (BL admit):
 #   a PI vent(+)/make-up(-) flow that drives the header to setpoint.
-P_LP_SP_BARA = 5.01325  # 4.0 barg == 5.01325 bar a (PIC-329206 / PIC-329207 master SP)
+P_LP_SP_BARA = 5.01325  # 4.0 barg == 5.01325 bar a (PIC-329207 master SP)
 K_PIC_LP     = 8.0      # proportional vent/make-up gain   [ (kg/s)/bar ]
 KI_PIC_LP    = 0.4      # integral vent/make-up gain        [ (kg/s)/(bar.s) ]
 M_PIC_CLAMP  = 10.0     # anti-windup clamp on the integral contribution [ kg/s ]
