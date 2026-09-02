@@ -425,6 +425,80 @@ and a `vapour_collapse` term carrying bar/h-per-K gains on the live header satur
 That work was reverted at 2ce4869 and is not in the build; residual 1 above is the same defect it
 diagnosed, closed here without the extra gains.
 
+## PT-323201 / PIC-323202: One Gas Node, No Valve
+
+Stream 305 runs from the 323C003 overhead straight into 323E003; there is no valve on it. The
+323E003/323D001 datasheet says the same thing in words -- PIC-323202 "maintains the tank, and by
+extension the entire recirculation stage, at a setpoint of 3.2 bar a" -- and the PFD tabulates the
+two ends of that node: stream 305 at 4.1 bar a leaving the column, streams 308/310/321 at 3.2 bar a
+in the tank. The rectifier vapour space, the condenser shell and the level tank therefore hold ONE
+gas inventory at ONE pressure, and the two transmitters are two ends of it.
+
+### The envelope balance
+
+```text
+generated  = m_flash_gas + m_pool_vap + m_797            (301 + 302 + inert recycle)
+T_dew      = 74 + [ Tsat(P_d001) - Tsat(3.2) ]           frozen-offset dew point
+condensed  = min( M_cond,des * (T_dew - T_tw,mean) / (74 - 60),  generated )
+vented     = m_321,des * (op/op_des) * sqrt((P_d001 - P_e011) / (3.2 - 1.13))
+dP_d001/dt = (generated - condensed - vented) / C_gas,   C_gas = 11.10 * 2.99 / 3.2 = 10.37 kg/bar
+P_c003     = sqrt(P_d001^2 + (Q_load / C)^2)             C = Q_in,des / sqrt(4.1^2 - 3.2^2)
+```
+
+At design: generated == M305_des + M797, condensed == M_cond,des (dew point on its anchor, tempered
+water at its 60 C mean), vented == M321_des, and those three sum to zero by the definition of
+`R3232_E003_M_COND_DES` -- the node holds 3.2 bar a and the column 4.1, bit-exactly.
+
+Three things had to be true at once and none of them were:
+
+| # | what was wrong | what it did |
+|---|---|---|
+| 1 | the tank pressure was integrated from a fixed vent split of stream 305 (`gen321 - m_321`), not from the envelope | it tracked the column OUTLET, so when the 323E002 heater cut, the tank fell while the column rose |
+| 2 | PV-323202 had no valve law -- flow was `(op/op_des)` alone | no restoring path: at 50 % stroke it pinned 323D001 to its 0.1 bar floor while 323C003 read 2.73 bar a, a 2.6 bar drop across a plain line |
+| 3 | the startup-trend residual was added to PT-323201 as a bar offset, outside the line law | the head implied -100 % to +101 % of the flow actually passing; at 30 % opening it drove the column BELOW the tank it feeds |
+
+Condensation now rides the **dew point** rather than a fixed split. That is where the node gets its
+restoring path -- more gas, higher pressure, higher dew point, bigger driving force to the tempered
+water, more condensed -- and it is also what makes TIC-323013 the fine trim on PIC-323202 that the
+datasheet describes. Same frozen-offset idiom as `T_bub` at 323C003 and 323F004: the liquor is not
+water, so only the slope comes from the steam table and the design point is the anchor.
+
+### The 0.100 bar/% "field gain" was the startup ramp
+
+Defect 3's residual came from reading the 2025-06-28 startup trend as 0.100 bar of PT-323201 per
+point of LV-322501 opening. Regressing that trend's own 721 rows:
+
+| window | slope | r |
+|---|---|---|
+| whole startup, LV 0.00-45.40 % | +0.0980 bar/% | +0.983 |
+| near design, LV 35-50 %, n = 373 | **-0.0099 bar/%** | **-0.072** |
+
+Over the ramp LV-322501 and PT-323201 rise together because the whole recirculation section is
+filling and coming up to load -- the regression captures the ramp, not the lever. At load the field
+data shows no dependence at all, because 323E003 absorbs the extra gas for a few hundredths of a bar.
+That is exactly what the closed balance produces: **0.0222 bar/%** at design, the hydraulic slope,
+which is also what the model asserted before the residual was ever introduced. So the residual is
+gone; the envelope balance is the whole model.
+
+### Verification
+
+Line-law closure, `Q_line = C*sqrt(P_c003^2 - P_d001^2)` against the actual gas load, swept on all
+three levers:
+
+| | before | after |
+|---|---|---|
+| LV-322501 30-60 % | -100 % … +101 % | 0.0 % |
+| PV-323202 10-80 % | 0.0-0.3 % | 0.0 % |
+| PV-329202 40-98 % | -0.5 % … 0 % | 0.0 % |
+| gap PT-323201 - PIC-323202 | -0.003 … +2.63 bar | +0.52 … +0.98 bar, monotone in flow |
+| Pearson r on the pair | 0.877 | 0.984 |
+
+Every lever now moves both pressures the same way, including LV-322501 above design where the
+323E002 heater cut used to send them in opposite directions. The residual r < 1 is not decoupling:
+`P_c003^2 - P_d001^2 = (Q/C)^2` is exactly linear in the squares and non-linear in the pressures
+whenever the load moves, which is what a line does. Design hold over 3000 s is unchanged: PT-329201
+140.700, PT-323201 4.100, v305 24.56, v701 4.43, evap 12.01, TT-323005 106.00, TT-324001 130.0.
+
 ## Scenario Coverage and Startup Fixed Point
 
 `backend/scenario_coverage.py` is the executable traceability contract for all 48 actionable

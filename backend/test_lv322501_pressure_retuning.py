@@ -66,21 +66,38 @@ def test_c003_both_paths_additive_at_design():
     assert p_both > p_e002_only
 
 
-def test_c003_local_lv_sensitivity_matches_startup_band():
-    """Combined (flash-path hydraulic + field-gain) sensitivity must sit inside
-    the startup-trend band of 0.10–0.13 bar per % LV opening at design."""
+def test_c003_local_lv_sensitivity_is_the_hydraulic_slope():
+    """0.0222 bar per % LV opening at design -- the flash path through the line law, nothing else.
+
+    This used to assert 0.1222 and cite a 0.10-0.13 "startup-trend band".  Regressing the
+    2025-06-28 trend's own 721 rows says that band is the RAMP, not a process gain:
+
+        whole startup, LV 0.00-45.40 %      slope +0.0980 bar/%,  r = +0.983
+        near design,   LV 35-50 %, n = 373  slope -0.0099 bar/%,  r = -0.072
+
+    Over the ramp LV-322501 and PT-323201 rise together because the whole recirculation section
+    is filling; at load the field data shows no dependence at all.  The extra 0.100 bar/% was
+    carried as a pressure offset outside the line law, which is what let PT-323201 and
+    PIC-323202 -- one gas node, no valve on stream 305 -- drift apart by up to 2.6 bar.
+    """
     opening_step = 1.0e-3          # % LV opening step
     ratio_step   = opening_step / 46.1  # normalised at design 46.1 %
     p_hi = c003_pressure_target_bara(1.0 + ratio_step, 1.0, 3.2)
     p_lo = c003_pressure_target_bara(1.0 - ratio_step, 1.0, 3.2)
     slope = (p_hi - p_lo) / (2.0 * opening_step)
-    assert slope == pytest.approx(0.122171340, rel=1.0e-5)
-    assert 0.10 <= slope <= 0.13
+    assert slope == pytest.approx(0.022171340, rel=1.0e-5)
+    assert 0.0 < slope < 0.05
 
 
 def test_c003_target_never_falls_below_downstream_pressure():
-    assert c003_pressure_target_bara(0.0, 1.0, 3.2) == pytest.approx(3.2)
-    assert c003_pressure_target_bara(0.0, 0.0, 3.2) == pytest.approx(3.2)
+    """Zero total load returns the node exactly; any load sits strictly above it.
+
+    With the flash path shut the 323E002 heater is still charging the column, so the head is
+    still a real friction head (3.332 bar a) -- it is not floored onto the node.  Only a
+    genuinely empty column collapses to it.
+    """
+    assert c003_pressure_target_bara(0.0, 1.0, 3.2) > 3.2
+    assert c003_pressure_target_bara(0.0, 0.0, 3.2) == pytest.approx(3.2, abs=1e-12)
 
 
 def test_c003_flash_path_zero_e002_still_works():
@@ -176,10 +193,17 @@ def _run_lv_case(opening_pct: float) -> LvCase:
 
 
 def test_lv_opening_materially_separates_pt323201():
-    """Opening LV-322501 (more flash gas) must raise 323C003 pressure by > 2.5 bar."""
+    """Opening LV-322501 must move PT-323201 materially, and 323D001 with it.
+
+    The > 2.5 bar this used to demand came from the additive field residual, which the trend
+    regression in test_c003_local_lv_sensitivity_is_the_hydraulic_slope retires.  On the closed
+    envelope balance a 30 -> 60 % stroke is worth ~0.8 bar, and -- the point of the gate -- the
+    tank moves the SAME way, because there is no valve between them.
+    """
     closed = _run_lv_case(30.0)
     opened = _run_lv_case(60.0)
-    assert opened.pt323201_bara - closed.pt323201_bara > 2.5
+    assert opened.pt323201_bara - closed.pt323201_bara > 0.5
+    assert opened.pic323203_pv_bara > closed.pic323203_pv_bara
 
 
 def test_lv_opening_materially_separates_pic323203():

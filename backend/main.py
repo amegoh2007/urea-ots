@@ -1387,7 +1387,12 @@ R3232_E003_T = 74.0 ; R3232_TW_T = 60.0 ; R3232_E003_T305 = 119.0
 R3232_TW_SUP_T = 55.0 ; R3232_TW_RET_T = 65.0               # TIC-323013 SP (1102) ; TT-323015 (1103)
 R3232_TV13_DES_PCT = 50.0 ; R3232_TW_TAU_S = 25.0           # TV-323013A design stroke ; supply-T lag (s)
 R3232_E003_T744 = R3232_E003_T - 30.0                       # 44 °C wash to Comp II
-R3232_D001_P_BARA = 3.2 ; R3232_D001_P_KP = 0.30
+R3232_D001_P_BARA = 3.2                                     # bar a, PIC-323202 SP / design node
+# 323C003 -> 323E003 is a PLAIN GAS LINE: no valve between the rectifier overhead and the LP
+# carbamate condenser, so PT-323201 (R323_C003_P_BARA, 4.1) and the PIC-323202 transmitter here
+# (3.2) are the two ends of ONE gas node and the 0.9 bar between them is friction, carried by the
+# compressible line law in c003_pressure_target_bara().  The node itself is integrated from the
+# whole-envelope gas balance below.
 R3232_E003_PV_OP_DES = 25.0                                 # PV-323202 vent stroke
 R3232_D001_M_FULL = 11.10 * 1218.0                          # 13519.8 kg (V·ρ)
 R3232_D001_LVL_SP = 50.0
@@ -1395,6 +1400,39 @@ R3232_D001_M_DES  = R3232_D001_M_FULL * (R3232_D001_LVL_SP/100.0)         # 6759
 R3232_E003_Q_DES_KW = 14000.0                               # tempered-water duty (LPCC datasheet)
 R3232_E003_UA_KW    = R3232_E003_Q_DES_KW / (R3232_E003_T - R3232_TW_T)   # 1000 kW/K vs T_tw
 R3232_E003_M_COND_DES = R3232_E003_M305_DES + R3232_E003_M797_DES - R3232_E003_M321_DES  # 24998.4
+# --- 323C003 + 323E003 + 323D001: ONE gas envelope ---------------------------------------------
+# Stream 305 has no valve on it, so the rectifier vapour space, the condenser shell and the level
+# tank hold one gas inventory at one pressure, and PT-323201 / PIC-323202 are two ends of it.  The
+# tank state below is therefore integrated from the WHOLE envelope balance -- generated, condensed,
+# vented -- not from a fixed vent split of stream 305, and PT-323201 rides above it through the
+# friction head in c003_pressure_target_bara().  Both then move with the same inventory, always.
+#   generated  streams 301 + 302 (the two column sources) + the 797 inert recycle
+#   condensed  the design condensed fraction, scaled by the live tempered-water duty: the condenser
+#              is what actually removes gas, so its duty has to be able to move the node pressure
+#   vented     PV-323202 through its own differential
+R3232_ENV_GAS_IN_DES_KGH = R3232_E003_M305_DES + R3232_E003_M797_DES        # 26321.2 kg/h
+# Gas capacitance from the documented 323D001 volume (datasheet: ID 2178 mm, T-T 2350 mm, nominal
+# 11.10 m3) at the PFD stream-332 gas density (2.99 kg/m3, 3.2 bar a / 74 C).  Ideal gas at fixed
+# temperature gives dM/dP = M/P.  The 323C003 vapour space and the 323E003 shell add to this, but
+# their FREE volumes are not published, so the tank alone is the documented lower bound.
+R3232_ENV_GAS_V_M3       = 11.10
+R3232_ENV_GAS_RHO_DES    = 2.99
+R3232_ENV_GAS_C_KG_BAR   = R3232_ENV_GAS_V_M3 * R3232_ENV_GAS_RHO_DES / R3232_D001_P_BARA  # 10.37
+# Condensation capacity rides the DEW POINT, which is where the node pressure gets its restoring
+# path: more gas -> higher pressure -> higher dew point -> bigger driving force to the tempered
+# water -> more condensed.  Same frozen-offset idiom as T_bub at 323C003/323F004: the liquor is
+# not water, so only the SLOPE comes from the steam table and the design point is the anchor.
+# Capacity is also what makes TIC-323013 a fine-trim on PIC-323202, as the datasheet describes.
+_R3232_TSAT_E003_DES = tsat_steam(R3232_D001_P_BARA)      # C, design-node water saturation
+# NOTHING empirical is added on top of this balance, and the 2025-06-28 startup trend is why.  That
+# trend was read as 0.100 bar of PT-323201 per point of LV-322501 opening and carried as a pressure
+# offset on the column.  Regressing the trend's own 721 rows says it is not a process gain at all:
+#     whole startup, LV 0.00-45.40 %   ->  slope +0.0980 bar/%,  r = +0.983
+#     near design,   LV 35-50 %, n=373 ->  slope -0.0099 bar/%,  r = -0.072
+# Over the ramp both signals rise together because the entire recirculation section is filling and
+# coming up to load; the correlation is the ramp, not the lever.  At load the field data shows no
+# dependence at all -- 323E003 absorbs the extra gas for a few hundredths of a bar, which is what
+# the balance above produces (0.022 bar/% at design, the hydraulic slope).
 # λ_cond back-solve: Σṁ_in·cp·(T_in−74) + ṁ_cond·λ − Q_cw = 0
 R3232_E003_SENS = ((R3232_E003_M305_DES *(R3232_E003_T305    - R3232_E003_T)
                     + R3232_E003_M718B_DES*(R3232_E011_T      - R3232_E003_T)
@@ -6161,9 +6199,7 @@ def step_sim(dt: float) -> dict:
     # later, preserving the explicit tear.
     r_flash_c003 = m_flash_gas / max(R323_M_FLASH_GAS_DES_KGH, 1e-6)
     r_e002_c003  = m_pool_vap  / max(R323_M_POOL_VAP_DES_KGH,  1e-6)
-    r_lv_c003    = drain_kgh / STRIP_BOT_DES_KGH
-    p_c003_tgt = c003_pressure_target_bara(r_flash_c003, r_e002_c003, s.r3232_d001_P,
-                                           r_lv_c003)
+    p_c003_tgt = c003_pressure_target_bara(r_flash_c003, r_e002_c003, s.r3232_d001_P)
     s.r323_c003_P = clamp(
         s.r323_c003_P + (p_c003_tgt - s.r323_c003_P) / R323_C003_P_TAU_S * dt,
         1.0,
@@ -6883,8 +6919,17 @@ def step_sim(dt: float) -> dict:
     Te003    = s.r3232_e003_T
     in_e003  = m_305 + m718B_prev + m_776 + R3232_M797_DES
     pic202_op= _ctrl_ipd(s.PIC_323202, s.r3232_d001_P, dt)
-    m_321    = R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)   # vent -> 323E011
-    gen321   = R3232_E003_PHI321 * (m_305 + R3232_M797_DES)
+    # PV-323202 vents 323D001 into 323E011, so its flow rides the ACTUAL differential across it,
+    # not the stroke alone.  Without the sqrt term the vent was a pure feed-forward on opening:
+    # the gas-inventory accumulator below had no restoring path, so any stroke off design
+    # integrated the tank pressure to a rail (PV-323202 at 50 % drove it to the 0.1 bar floor
+    # while 323C003 still read 2.73 bar a).  With it the vent self-limits and the node settles.
+    # Design: op == op_des and P_d001 - P_e011 == 3.2 - 1.13 -> sqrt(1) -> m_321 == 1323 kg/h.
+    # `s.r3232_e011_P` is the beginning-of-substep 323E011 pressure (Stage 9 advances it below),
+    # the same explicit-tear convention the rest of the train uses.
+    dP_v202  = max(s.r3232_d001_P - s.r3232_e011_P, 0.0)
+    m_321    = (R3232_E003_M321_DES * (pic202_op / R3232_E003_PV_OP_DES)
+                * math.sqrt(dP_v202 / (R3232_D001_P_BARA - R3232_E011_P_BARA)))   # vent -> 323E011
     lvl_d001_323 = s.r3232_d001_M / R3232_D001_M_DES * R3232_D001_LVL_SP
     lic502_op= _ctrl_ipd(s.LIC_323502, lvl_d001_323, dt)                 # master
     rpm_pv   = _lag1(s.tlag, "S_323901", s.SIC_323901["op"], 3.0, dt)
@@ -6910,7 +6955,19 @@ def step_sim(dt: float) -> dict:
                  + m_776    *(R328_D001_T  - Te003)
                  + R3232_M797_DES*(R3232_M797_T - Te003))/3600.0*R3232_CP)
     P_e003   = sens_e003 + m_cond/3600.0*R3232_E003_LAMC - Q_e003
-    s.r3232_d001_P = max(s.r3232_d001_P + R3232_D001_P_KP*(gen321 - m_321)/3600.0*dt, 0.1)
+    # --- unified 323C003 + 323E003 + 323D001 gas-inventory ODE:  in - condensed - vented ---
+    # The node this integrates IS what PIC-323202 measures, and PT-323201 sits above it through
+    # the friction head, so the two cannot separate.  At design: generation == M305_DES + M797,
+    # condensation == M_COND_DES (duty ratio 1.0), vent == M321_DES, and those sum to zero by
+    # the definition of M_COND_DES -- the node holds 3.2 bar a and the column 4.1 bit-exactly.
+    m_env_in   = m_flash_gas + m_pool_vap + R3232_M797_DES          # 301 + 302 + 797
+    T_dew_env  = R3232_E003_T + (tsat_steam(s.r3232_d001_P) - _R3232_TSAT_E003_DES)
+    m_env_cond = min(R3232_E003_M_COND_DES
+                     * max(T_dew_env - 0.5*(T_tw_sup + T_tw_ret), 0.0)
+                     / (R3232_E003_T - R3232_TW_T),
+                     m_env_in)                                       # cannot condense what is not there
+    dM_env     = m_env_in - m_env_cond - m_321                       # kg/h accumulating as gas
+    s.r3232_d001_P = max(s.r3232_d001_P + dM_env / R3232_ENV_GAS_C_KG_BAR / 3600.0 * dt, 0.1)
     s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
     if s.r3232_d001_M <= 1.0 and m_308 > (in_e003 - m_321):
         m_308 = max(in_e003 - m_321, 0.0)

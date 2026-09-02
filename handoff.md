@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-02 (design-hold drift closed)
+**Last updated:** 2026-09-02 (design-hold drift closed; 323 recirculation gas envelope unified)
 
 ---
 
@@ -69,7 +69,27 @@ is anchored on the lumped design cp (2.5). PT-323201 therefore settles at 4.1000
 bit-exact 4.1; closing it means re-pinning `R323_Q305_DES_KW` on the live cp, which ripples into
 `R323_LAMBDA_305` and the whole 323 design.
 
-## 5. Enhancement opportunities (optional)
+## 5. PT-323201 / PIC-323202 node — closed
+
+Stream 305 has no valve on it, so 323C003 + 323E003 + 323D001 are one gas envelope. That envelope
+now has a single gas-inventory ODE (generated − condensed − vented) and the column rides above the
+node through the line-law head. Line-law closure is exact (0.0 %) on every lever, the gap is always
+a real friction head (0.52–0.98 bar), and both pressures move together everywhere — including
+LV-322501 above design, where they used to diverge. See the As-Built reference for the equations,
+the three defects and the verification table.
+
+**Consequence worth knowing about.** Closing it retired the 0.100 bar/% LV-322501 "field gain".
+Regressing the 2025-06-28 trend's own 721 rows shows that number is the startup ramp, not a process
+gain: whole startup (LV 0.00–45.40 %) slope +0.0980 bar/%, r = +0.983; near design (LV 35–50 %,
+n = 373) slope −0.0099 bar/%, r = −0.072. PT-323201's design sensitivity to the LV stroke is now
+0.0222 bar/%, the hydraulic slope. If there is a controlled step test in the DCS archive that
+isolates LV-322501 at load, it would settle this properly — the ramp regression cannot.
+
+**Still open from §4:** the 323E002 heater collapse on a large LV-322501 opening. Both pressures
+now fall together when it happens, so the node is consistent, but whether the overhead *should*
+fall is still the open question there.
+
+## 6. Enhancement opportunities (optional)
 
 - Integrate the Extended UNIQUAC electrolyte model for rigorous HP synthesis VLE.
 - Wire the choked-flow model (`consequence.py`, ISA 75.01.01) into `main.py`.

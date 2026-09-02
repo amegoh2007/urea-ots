@@ -24,33 +24,36 @@ def test_each_gas_load_driver_is_monotonic():
     assert c003_pressure_target_bara(1.0, 0.9, 3.2) < design
 
 
-def test_vendor_maximum_flow_equivalent_is_4_66822_bara():
+def test_vendor_maximum_flow_equivalent_is_4_20472_bara():
     """LV-322501 datasheet maximum flow (126.10 against the 114.58 m3/h normal).
 
-    Was 4.208380 bar a before the startup-trend retuning added the field residual; the value
-    moves with that gain, not with the two-path split (the heater ratio is still taken at
-    design here).  test_lv322501_pressure_retuning.py owns the gain itself.
+    4.208380 before the startup-trend retuning, 4.668215 with that residual as a bar offset,
+    4.719504 with it as equivalent load.  Now 4.204720: the residual is gone (the trend band was
+    the startup ramp, not a process gain -- see test_lv322501_pressure_retuning.py), so this is
+    the pure line-law head.  It differs from the original 4.208380 only because the gas-load
+    coefficient is now anchored on 301 + 302 = 7940.4 m3/h rather than on stream 305's 7677.1.
     """
     vendor_flow_ratio = 126.10 / 114.58
     assert 46.1 * vendor_flow_ratio == pytest.approx(50.734945, abs=1e-6)
     p_max = c003_pressure_target_bara(vendor_flow_ratio, 1.0, 3.2)
-    assert p_max == pytest.approx(4.668215121, abs=1e-9)
+    assert p_max == pytest.approx(4.204720619, abs=1e-9)
 
 
-def test_local_lv_gain_matches_the_retuned_startup_band():
-    """0.1222 bar per point of LV-322501 opening at design.
+def test_local_lv_gain_is_the_hydraulic_slope():
+    """0.02217 bar per point of LV-322501 opening at design -- the flash path, nothing else.
 
-    0.022931746 here was the HYDRAULIC-ONLY slope, i.e. the model before the 2025-06-28
-    startup-trend residual was added.  The field trend puts the gain inside 0.10-0.13 bar/%,
-    five times the hydraulic term alone; test_lv322501_pressure_retuning.py owns that band.
+    0.022931746 was this same hydraulic slope against the old stream-305 coefficient; the two-path
+    split re-anchored it on 301 + 302.  The 0.1222 that sat here in between came from the
+    startup-trend residual, which the trend regression in test_lv322501_pressure_retuning.py
+    retires as a ramp correlation rather than a process gain.
     """
     opening_step = 1.0e-3
     ratio_step = opening_step / 46.1
     p_high = c003_pressure_target_bara(1.0 + ratio_step, 1.0, 3.2)
     p_low = c003_pressure_target_bara(1.0 - ratio_step, 1.0, 3.2)
     slope = (p_high - p_low) / (2.0 * opening_step)
-    assert slope == pytest.approx(0.122171340, rel=1e-5)
-    assert 0.10 <= slope <= 0.13
+    assert slope == pytest.approx(0.022171340, rel=1e-5)
+    assert 0.0 < slope < 0.05
 
 
 def test_zero_total_gas_load_equals_downstream_pressure():
@@ -107,8 +110,7 @@ def test_runtime_normalizes_design_lv_flow_to_one(monkeypatch):
     main.state = main.State()
     main.step_sim(0.1)
     assert captured
-    flash_ratio, e002_ratio, _p_down, lv_open_ratio = captured[0]
-    assert lv_open_ratio == pytest.approx(1.0, abs=1e-12)
+    flash_ratio, e002_ratio, _p_down = captured[0]
     assert flash_ratio == pytest.approx(1.0, rel=5e-3)
     assert e002_ratio == pytest.approx(1.0, rel=5e-3)
 
@@ -153,10 +155,10 @@ def test_zero_reboiler_overhead_still_uses_prompt_flash_load(monkeypatch):
     packet = main.step_sim(0.1)
 
     assert packet["RECIRC_323"]["C003"]["v305_th"] > 0.0
-    flash_ratio, e002_ratio, p_down, lv_open_ratio = captured[0]
+    flash_ratio, e002_ratio, p_down = captured[0]
     assert e002_ratio == pytest.approx(0.0, abs=1e-12)   # heater source gone
     assert flash_ratio > 0.9                             # flash source still charging
-    target = real_target(flash_ratio, e002_ratio, p_down, lv_open_ratio)
+    target = real_target(flash_ratio, e002_ratio, p_down)
     expected = pressure_before + (target - pressure_before) / main.R323_C003_P_TAU_S * 0.1
     assert state.r323_c003_P == pytest.approx(expected, abs=2e-5)
 
