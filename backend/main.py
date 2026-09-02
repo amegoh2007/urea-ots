@@ -48,7 +48,7 @@ thermo = EmpiricalThermo()
 from controllers import Controller
 import steam_system
 from steam_system import SteamState, step_steam  # MP/LP steam-header dynamics (quarantined)
-from c003_pressure_coupling import c003_pressure_target_bara
+from c003_pressure_coupling import c003_pressure_target_bara, e011_vent_generation_kgh
 from historian import Historian  # background trend recorder (plant-time sampled)
 
 from contextlib import asynccontextmanager
@@ -851,7 +851,15 @@ def aqueous_cp(anchor: float, T_des_C: float, T_C: float) -> float:
     """
     return anchor + (cp_water_kjkgk(T_C) - cp_water_kjkgk(T_des_C))
 
-R323_P_STEAM_SUP = 4.4            # bar a, LP steam header feeding 323E002/323E010
+# LP steam header feeding the 323E002 / 323E010 / 324E001 chests.  This MUST be the header the
+# engine actually runs, `steam_system.P_LP_BARA` = 5.01325 bar a (4.0 barg, the 322D001A/B LP-drum
+# design pressure).  The former 4.4 bar a literal predates that header and left every chest design
+# pin below computed against a pressure the live model never sees: the seeded valve strokes then
+# admitted OP_DES/100 * 5.01325 instead of the datasheet chest pressure -- 4.494 bar a into 323E002
+# against its 3.96 design, i.e. tsat 147.9 C instead of 143.3 C and a 9127 kW duty at the DESIGN SEED
+# against the 5858 kW datasheet.  The chest pressures are the physical anchors (equipment DDS), so
+# each design STROKE is now derived from them and the live header, not the other way round.
+R323_P_STEAM_SUP = steam_system.P_LP_BARA   # bar a, live LP header (4.0 barg == 5.01325 bar a)
 
 # --- Stage 1: Rectifying Column 323C003 + Recirc Heater 323E002 (4.1 bar a, hold 135 C)
 R323_FEED_DES_KGH   = STRIP_BOT_DES_KGH        # 130482 kg/h, live = drain_kgh
@@ -862,8 +870,9 @@ R323_C003_T313_C    = 121.0                     # C, column-bottom sump liquid (
 R323_PHI_V305       = 24582.0 / 130582.0        # 0.188249 vapor split -> LPCC (stream 305)
 R323_305_T_C        = 119.0                     # C, top vapor to 323E003 LPCC
 R323_E002_Q_DES_KW  = 5858.0                    # kW, design heater duty (PDS: Q=5858, A=535)
-R323_E002_OP_DES    = 90.0                      # %, PV-329202 design stroke
-R323_E002_PCHEST_DES = R323_E002_OP_DES / 100.0 * R323_P_STEAM_SUP   # 3.96 bar a
+R323_E002_PCHEST_DES = 3.96                     # bar a, 323E002 shell-side design steam (DDS N1:
+                                                #   9850 kg/h sat. LP at 3.9 bar a / 145 C)
+R323_E002_OP_DES    = R323_E002_PCHEST_DES / R323_P_STEAM_SUP * 100.0   # 78.99 %, PV-329202 design stroke
 R323_C003_M_TAU_S   = 120.0                     # s, liquid residence -> holdup sizing
 R323_C003_LVL_SP    = 60.0                      # %, LIC-323501 level setpoint
 R323_LV501_OP_DES   = 50.0                      # %, LV-323501 design stroke
@@ -906,8 +915,9 @@ R323_M331_DES       = 3270.0                    # kg/h, PFD stream 331 (44.37 % 
 R323_M331_T_C       = 40.0                      # C,    PFD stream 331 -- a COLD side feed
 R323_PHI_VEVAP      = 8750.0 / 101570.0         # 0.086147 water boiled off stream 319 itself
 R323_EVAP_LAMBDA    = 2280.0                    # kJ/kg, water latent @ 0.46 bar a
-R323_E010_OP_DES    = 40.0                      # %, PV-329208 design stroke
-R323_E010_PCHEST_DES = R323_E010_OP_DES / 100.0 * R323_P_STEAM_SUP   # 1.76 bar a
+R323_E010_PCHEST_DES = 1.76                     # bar a, 323E010 shell-side design steam (tsat 116.1 C
+                                                #   against the 99 C / 0.46 bar a pre-evaporator boil)
+R323_E010_OP_DES    = R323_E010_PCHEST_DES / R323_P_STEAM_SUP * 100.0   # 35.11 %, PV-329208 design stroke
 R323_F010_M_TAU_S   = 240.0                     # s, liquid residence
 R323_F010_LVL_SP    = 60.0                      # %
 
@@ -990,6 +1000,16 @@ _R323_TSAT_F004_DES = tsat_steam(R323_F004_P_BARA)                    # °C, des
 # Held at its design value (the same frozen-activity assumption 323F004 already makes) and carried
 # on the live water saturation slope.
 _R323_TSAT_C003_DES = tsat_steam(R323_C003_P_BARA)                    # °C, design column-bottom Tsat
+# --- 323C003 gas-source design rates, for the PT-323201 two-path pressure coupling ---
+# The column is charged by TWO physically distinct carbamate-gas streams, tabulated
+# separately on the PFD:  stream 301, the prompt flash released across LV-322501, and
+# stream 302, the gas evolved in the 323E002 rectifying heater.  Their design rates are the
+# design overhead apportioned by the duty that raises each one, so they sum to R323_M305_DES
+# exactly and the design ratios below are both exactly 1.0.
+_R323_Q_FLASH_DES_KW = (R323_FEED_DES_KGH / 3600.0 * R323_CP_SOLN
+                        * (STRIP_T_BOTTOM_DES_C - STRIP_T_DOWN_DES_C))   # kW, letdown flash
+R323_M_FLASH_GAS_DES_KGH = R323_M305_DES * (_R323_Q_FLASH_DES_KW / R323_Q305_DES_KW)
+R323_M_POOL_VAP_DES_KGH  = R323_M305_DES * (R323_E002_Q_DES_KW / R323_Q305_DES_KW)
 
 # --- Design liquid holdups (kg) and level spans from residence times ---
 R323_C003_M_DES  = R323_M314_DES/3600.0 * R323_C003_M_TAU_S               # kg at design
@@ -1611,8 +1631,9 @@ R324_COND_DES  = R323_MEVAP_DES + R324_V1_DES + R324_V2_DES    # kg/h (12013.3 +
 R324_F001_P_BARA = 0.33                           # bar a separator vacuum boundary (HARD)
 R324_E001_T_SP_C = 130.0                          # C melt boundary (HARD)
 R324_LAM_V1      = 2174.0                          # kJ/kg water latent @130 C
-R324_E001_OP_DES = 90.0                           # % PIC-329203 design steam-valve stroke
-R324_E001_PCHEST_DES = R324_E001_OP_DES/100.0 * R323_P_STEAM_SUP   # bar a steam-chest press.
+R324_E001_PCHEST_DES = 3.96                       # bar a steam-chest press. (324E001 DDS N2: sat. LP,
+                                                  #   between the 3.7 bar a/144 C and 4.1 bar a/146 C rows)
+R324_E001_OP_DES = R324_E001_PCHEST_DES / R323_P_STEAM_SUP * 100.0   # 78.99 % PIC-329203 design stroke
 # Q_E001 = feed sensible (99->130) + latent(V1) ; kW
 R324_CP_FEED1 = urea_soln_cp(R324_W_IN,  R324_FEED_T_C)      # 80 % urea @ 99 C -> 2.5 BIT-EXACTLY
 R324_CP_HOLD1 = urea_soln_cp(R324_W_EV1, R324_E001_T_SP_C)   # 94.31 % @ 130 C  -> ~2.19
@@ -3227,6 +3248,14 @@ REACT_OFFGAS_T_C   = 183.0       # TT-322009 gas-line temp -> 322E003
 REACT_P_BARA       = 144.9       # reactor operating pressure (bar a)
 REACT_OFFGAS_P_BARA = 141.3      # off-gas line pressure -> 322E003 (bar a)
 REACT_OVERFLOW_RHO = 990.0       # urea solution density (kg/m³)
+# The SAME correlation evaluated at the design stream-207 state (34.6 % urea, 183 C).  This -- not the
+# raw PFD anchor -- is the datum the Darcy-Weisbach dP to the stripper is normalised by, so the ratio
+# is exactly 1.0 at design.  urea_soln_rho() is a departure model about one global C10 reference,
+# so it returns its `anchor` argument ONLY at that reference, which stream 207 is far from.
+_REACT_OVF_M_DES_KGH   = sum(STRIP_FEED207_KMOLH.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+_REACT_OVF_W_UREA_DES  = STRIP_FEED207_KMOLH["Urea"] * MW_COMP["Urea"] / _REACT_OVF_M_DES_KGH
+REACT_OVERFLOW_RHO_DES_LIVE = urea_soln_rho(_REACT_OVF_W_UREA_DES, STRIP_FEED207_T_C,
+                                            REACT_OVERFLOW_RHO)
 REACT_OFFGAS_RHO   = 113.30      # off-gas density (kg/m³)
 # --- TT-322005/6/7/8 axial temperature profile (residence-time model, datasheet N6 A/B/C/D) ---
 # Liquid plug-flow rises from bottom T.L (+0); thermowell elevations (mm) traced from nozzles
@@ -3451,6 +3480,30 @@ SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant
 SYN_P_TAU_FILL_MIN  = 57.8       # min, cold-start (empty-loop) pressurisation tau (06-03 Section 1.2 FOPTD)
 SYN_P_MIN_BARA      = 120.0      # bar a, PT clamp floor
 SYN_P_MAX_BARA      = HPCC_P_DES_BARA  # 144.2 bar a, PT ceiling = feed-supply head (CO2/HPCC/ejector all 144.2); loop cannot exceed feed delivery P
+# --- PT-329201 lumped HP-loop mass accumulator: design boundary closure ------------------------
+# The loop-pressure ODE at the foot of step_sim() integrates (in - out) over the loop's mass
+# capacity.  Its five boundary terms are the model's OWN reconciled design flows, and two of them
+# were deliberately moved off their PFD rows: the ejector motive NH3 was re-pinned 40756 ->
+# 42762.05 kg/h (Path-B tear closure, to restore fresh N/C = 2.0) and the 322E003 vent vector was
+# re-solved to close the SCRUBBER's component balance, which took its total mass from the PFD's
+# 1708 kg/h to 5901.4 kg/h.  On the PFD rows the loop closes to 1 kg/h in 132 289
+# (54618 + 40756 + 36915 in == 130582 + 1708 out); on the reconciled pins it leaves a CONSTANT
+# -2168.1 kg/h that the ODE was integrating as though it were real accumulation.  That is the
+# whole of the design-hold drift: PT-329201 bled ~0.30 bar per 600 s, LV-322501's letdown head
+# fell with it (drain ~ sqrt(P_syn - P_down)), and the entire 323/324 train walked off its
+# anchors -- v305 24.56 -> 24.45 t/h, v701 4.43 -> 4.41, evap 12.01 -> 11.79, TT-323005 106.0 ->
+# 105.96, PT-323201 4.10 -> 4.07 over 3000 s, with 323F001/324E001 urea % ramping behind them.
+# The residual is credited back in proportion to the live loop-mass fraction -- the same inventory
+# gate the stripper forward-push (pb_push) already uses and for the same reason: the reconciliation
+# tears ride the CIRCULATING inventory, so a design-full loop holds PT-329201 EXACTLY while an
+# empty loop integrates the raw balance and zero feeds still create nothing (G4 null-feed rule).
+SCRUB_OFFGAS_KGH_DES   = sum(SCRUB_OFFGAS_KMOLH_DES[k] * MW_COMP[k] for k in MW_COMP)   # 5901.4 kg/h
+SYN_LOOP_IN_DES_KGH    = EJ_MOTIVE_NH3_DES + CO2_DES_KGH + R3232_E003_M308_DES      # 134215.2 kg/h
+SYN_LOOP_OUT_DES_KGH   = STRIP_BOT_DES_KGH + SCRUB_OFFGAS_KGH_DES                   # 136383.4 kg/h
+SYN_LOOP_RESID_DES_KGH = SYN_LOOP_IN_DES_KGH - SYN_LOOP_OUT_DES_KGH                 #  -2168.1 kg/h
+SYN_LOOP_C_KG_PER_BAR  = 1500.0  # kg/bar, lumped HP-loop mass capacity (reactor + stripper + HPCC +
+#   scrubber vapour space and dissolved-gas compressibility); sets the emergent cold-start
+#   pressurisation rate together with k_loop_fill.
 SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) / 3600.0  # ≈5329 kW
 # 322E003 shell-side effective conductance (ε-NTU). Back-calibrated so the design
 # carbamate-condensation duty pins BOTH the design overflow temp and CCW outlet EXACTLY:
@@ -5455,7 +5508,15 @@ def step_sim(dt: float) -> dict:
     m_strip_des  = max(sum(STRIP_FEED207_KMOLH.get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
     w_urea_strip = (s.react_overflow_kmolh.get("Urea", 0.0) * MW_COMP["Urea"]) / m_strip_live
     rho_live_strip = urea_soln_rho(w_urea_strip, T_feed_live, REACT_OVERFLOW_RHO)
-    dP_strip_live = dP_des_strip * (REACT_OVERFLOW_RHO / max(rho_live_strip, 1e-6)) * (m_strip_live / m_strip_des)**2
+    # Normalise by the density the SAME correlation returns at the DESIGN overflow, not by the raw
+    # PFD anchor.  urea_soln_rho() is a departure model about one global C10 reference (w,T), so it
+    # only returns its `anchor` argument at that reference -- and stream 207 (34.6 % urea, 183 C)
+    # is nowhere near it.  Dividing the anchor by the live value therefore gave 1.186 instead of 1.0
+    # at design: dP_strip read 3.91 bar instead of 3.30, the stripper ran at 144.61 bar a instead of
+    # its 144.0 design, and duty_raw/STRIP_DUTY_RAW_DES_KW -- which the MP header draw is scaled by
+    # -- came out 0.9927 rather than the 1.0 the comment there asserts, opening 329D005 by
+    # +0.155 kg/s at the design seed.  The off-design slope is untouched; only the datum moves.
+    dP_strip_live = dP_des_strip * (REACT_OVERFLOW_RHO_DES_LIVE / max(rho_live_strip, 1e-6)) * (m_strip_live / m_strip_des)**2
     
     P_strip_live = (s.p_syn_bara + dP_strip_live if _STEAM_READY else STRIP_P_DES_BARA)
     strip = stripper_322e001(F_CO2_syn_th, T_steam_live, P_strip_live,
@@ -5798,7 +5859,11 @@ def step_sim(dt: float) -> dict:
     # L = NLL -> phi_out = phi_fwd -> dL = 0 (NLL is now an exact fixed point; bit-exact design).
     _hpcc_liq_des = HPCC_LIQ_DES_LIVE or HPCC_LIQ_DES_KGH      # live settled ref once pinned
     phi_in_hpcc  = (hpcc["liq_kgh"] / _hpcc_liq_des) if _hpcc_liq_des else phi_fwd
-    phi_out_hpcc = phi_fwd
+    # The gravity-head term the paragraph above specifies -- phi_out = phi_fwd*(L/NLL) -- had been
+    # dropped, leaving phi_out level-INDEPENDENT and the level a pure integrator again: any residual
+    # phi_in != 1 wound LT-322E002 to a rail at a constant rate instead of settling at L_eq.  At
+    # design L == NLL so the ratio is a literal 1.0 and the design point stays bit-exact.
+    phi_out_hpcc = phi_fwd * (s.hpcc_level_pct / HPCC_LEVEL_NLL_PCT)
     if s.hpcc_level_pct <= 0.0 and phi_out_hpcc > phi_in_hpcc:
         phi_out_hpcc = phi_in_hpcc
     dL_hpcc      = k_loop_fill * (phi_in_hpcc - phi_out_hpcc) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
@@ -6041,6 +6106,7 @@ def step_sim(dt: float) -> dict:
     s._debug_m_feed_323 = m_feed_323
     s._debug_m_305 = m_305
     s._debug_m_flash = m_flash_gas
+    s._debug_m_pool  = m_pool_vap
     q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                  # total available latent kW
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
@@ -6079,11 +6145,25 @@ def step_sim(dt: float) -> dict:
     xi_c003    = sol_biuret_xi("C003", M_c003_pre, s.w_c003, s.r323_c003_T)
     s.w_c003   = sol_advance(s.w_c003, M_c003_pre, s.r323_c003_M, m_feed_323, w_feed_323,
                              m_305, y_305, m_314, xi_c003, dt)
-    # PT-323201 reduced-order gas-load coupling. `s.r3232_d001_P` is the beginning-of-substep
-    # E003/D001 pressure; that state is advanced later, preserving the explicit tear.
-    r_lv_c003 = drain_kgh / STRIP_BOT_DES_KGH
-    r_305_c003 = m_305 / R323_M305_DES
-    p_c003_tgt = c003_pressure_target_bara(r_lv_c003, r_305_c003, s.r3232_d001_P)
+    # PT-323201 two-path gas-load coupling.  The column is charged by TWO independent
+    # carbamate-gas sources, and each gets its own ratio so neither is inferred from the other:
+    #   stream 301  opening LV-322501 -> hotter//more bottoms flashing at 4.1 bar a -> more
+    #               m_flash_gas.  Normalised by R323_M_FLASH_GAS_DES_KGH.
+    #   stream 302  more 323E002 duty (PV-329202 -> chest pressure -> tsat) -> more gas evolved
+    #               in the heater and returned below the bed -> more m_pool_vap.  Normalised by
+    #               R323_M_POOL_VAP_DES_KGH.
+    # m_305 is the column OUTLET (301 + 302 less what condenses on the bed), so driving an inlet
+    # term with it would make the total feed back on itself.
+    # The empirical field residual rides the VALVE ratio, which is exactly 1.0 at design, rather
+    # than m_flash_gas: the latter carries a small steady-state offset from its live temperature
+    # terms, and the 4.61 bar/ratio field gain would amplify that into a design-point error.
+    # `s.r3232_d001_P` is the beginning-of-substep E003/D001 pressure; that state is advanced
+    # later, preserving the explicit tear.
+    r_flash_c003 = m_flash_gas / max(R323_M_FLASH_GAS_DES_KGH, 1e-6)
+    r_e002_c003  = m_pool_vap  / max(R323_M_POOL_VAP_DES_KGH,  1e-6)
+    r_lv_c003    = drain_kgh / STRIP_BOT_DES_KGH
+    p_c003_tgt = c003_pressure_target_bara(r_flash_c003, r_e002_c003, s.r3232_d001_P,
+                                           r_lv_c003)
     s.r323_c003_P = clamp(
         s.r323_c003_P + (p_c003_tgt - s.r323_c003_P) / R323_C003_P_TAU_S * dt,
         1.0,
@@ -6845,7 +6925,12 @@ def step_sim(dt: float) -> dict:
     pic203_op= _ctrl_ipd(s.PIC_323203, s.r3232_e011_P, dt)
     dP_v011  = max(s.r3232_e011_P - 1.0, 0.001)   # C005 is approx 1.0 bar (atmospheric vent node)
     m_v011   = R3232_E011_MV_DES * (pic203_op / R3232_E011_PV_OP_DES) * math.sqrt(dP_v011 / (R3232_E011_P_BARA - 1.0))
-    gen_v011 = R3232_E011_PHIV * in_e011
+    # 323E011's cooling surface is fixed, so its condensation rate saturates: only gas ABOVE
+    # that capacity has to leave through PIC-323203.  A fixed vent fraction of the inlet made a
+    # falling gas load still generate vent gas, which the condenser would in fact have absorbed.
+    # m_402 is the stream-791 ammonia-water LIQUID feed, so it is excluded: it is absorbent, not
+    # gas load.  At design 7563 - 1534 = 6029 kg/h of gas -> 440 kg/h vented (PFD stream 702).
+    gen_v011 = e011_vent_generation_kgh(max(in_e011 - m_402, 0.0))
     # 323D011 level tank: condensed liquid (in_e011 - m_v011) + the FIC-323401 flush 401 (PFD stream
     # 734) fall in; the 323P008 lean-carbamate pumps draw out through LV-323503 on the common
     # discharge header, which then splits into the 718A and 718B legs (PFD 3562 / 3562 off 718 7123).
@@ -7483,13 +7568,22 @@ def step_sim(dt: float) -> dict:
     _tear_tol = 1.0e-6
     _tear_norm = max(_tear_resid.values(), default=0.0)
 
-    # Dynamic Pressure Anchor (Mass Balance ODE)
-    # Loop mass capacity ~ 1500 kg/bar. 
-    C_loop = 1500.0  
+    # Dynamic Pressure Anchor (Mass Balance ODE) -- PT-329201 lumped HP-loop inventory.
+    #   IN : fresh NH3 through the 321P002 A/B triplex pumps (ejector motive), fresh CO2 through
+    #        322K001, and the 323P001 LP-carbamate recycle washed into 322E003.
+    #   OUT: the LV-322501 bottoms letdown to 323C003 and the HV-322604 inert vent to 328.
+    # The design residual SYN_LOOP_RESID_DES_KGH is the constant offset the model's own Path-B
+    # reconciliations leave in this five-term boundary (see its definition); crediting it through the
+    # live loop-mass fraction makes dP/dt EXACTLY zero at the design seed -- so PT-329201 holds 140.7
+    # bar a and LV-322501's letdown head, which every 323/324 anchor rides on, stops bleeding -- while
+    # leaving the raw balance intact on an empty loop (m_loop_frac -> 0), where zero feeds must still
+    # create nothing.  m_loop_frac is clamped to 1.0, so surplus inventory cannot over-credit either.
+    C_loop = SYN_LOOP_C_KG_PER_BAR
     m_in_loop = (F_pump_total_th * 1000.0) + F_CO2_feed_kgh + m_308
     m_out_loop = drain_kgh + hv604["mass_kgh"]
-    
-    s.p_syn_bara = clamp(s.p_syn_bara + (m_in_loop - m_out_loop) / C_loop * (dt / 3600.0),
+    m_net_loop = (m_in_loop - m_out_loop) - m_loop_frac * SYN_LOOP_RESID_DES_KGH
+
+    s.p_syn_bara = clamp(s.p_syn_bara + m_net_loop / C_loop * (dt / 3600.0),
                          10.0, 180.0)
                          
     return {
@@ -9217,6 +9311,24 @@ def _pin_hpcc_ua():
     res = step_sim(0.1)
     rr = res["sm_diagnostics"]["hv604"]
     _caphv["m"] = rr["mass_kgh"]; _caphv["T"] = rr["T_out"]
+    # ISSUE-c/e: pin the LT-322E002 inventory anchor on this SAME final MAN-seed step.  It belongs at
+    # the runtime design seed for the reason the reactor and GCB refs do, and only here is every other
+    # constant (reactor tear, HPCC_UA, steam sizing) already in force, so the captured liquid make is
+    # exactly what `State(); step_sim()` produces.  Taken off the phase-1 CAS warm-up settle instead, it
+    # sat above that value, phi_in started near 0.97 rather than 1.0, and -- with the gravity-head term
+    # restored to phi_out -- LT-322E002 would still settle a full 3 % below NLL instead of holding it.
+    HPCC_LIQ_DES_LIVE = res["sm_diagnostics"]["hpcc"]["liq_kgh"]
+    # Same correction for the 4-bar header anchor.  M_USERS_LP / M_504_DES were sized off the phase-3
+    # settle duty, so at the runtime seed the 322D001A/B balance opened by -0.123 kg/s (29.652 raised
+    # against 29.774 booked) and P_LP integrated away from 4.0 barg -- which moves tsat in EVERY LP
+    # chest (323E002, 323E010, 324E001) and walks the whole evaporation train.  Re-pin on this same
+    # MAN-seed step: generation == users + turbine exactly, so residual_lp_vapor == 0 at design.
+    #   q_steam_kw, NOT duty_kw: the header sees the steam actually RAISED (duty less the extra
+    #   sensible heat leaving in the product above the T_prod pin), which is what step_sim books.
+    _m_hpcc_seed = res["sm_diagnostics"]["hpcc"]["q_steam_kw"] / HPCC_LATENT_4BAR   # kg/s LP raised at the seed
+    M_HPCC_DES_LIVE = _m_hpcc_seed
+    _ss.M_USERS_LP  = max(_m_hpcc_seed - _ss.M_TURBINE_DES, 0.0)
+    _ss.M_504_DES   = max(_m_hpcc_seed - _ss.M_503_DES, 0.0)
     _gcb_m = _caphv["m"]; _gcb_T = _caphv["T"]
     # SAME stage-7 sensible-heat kernel, evaluated at the pinned design off-gas and Tc001 == A328_C001_T:
     _sens_pin = ((A328_M755_DES*(A328_M755_T - A328_C001_T)

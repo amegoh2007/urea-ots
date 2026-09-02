@@ -357,53 +357,73 @@ physical inventory twice.
 
 ## PT-329201 Synthesis-Loop Pressure
 
-The loop pressure is a gas-inventory balance over the HP envelope. Liquid wash no longer enters the gas equation directly; its effect arrives through absorbed or retained vapour:
+The loop pressure is a lumped mass balance over the HP envelope: reactor 322R001, stripper
+322E001, HP carbamate condenser 322E002, HP scrubber 322E003 and ejector 322F001. Five streams
+cross that boundary.
 
 ```text
-gas_space_frac = clamp((1 - L_react) / (1 - L_react,design), 0.05, 1.5)
-C_loop         = 1500 kg/bar * gas_space_frac
-dP/dt          = [ (Δm_NH3 + Δm_CO2 + m_scrubber,retained)
-                   - (Δm_bottoms + m_blowthrough)
-                   - vapour_collapse ] / C_loop
-vapour_collapse = max(m_absorbed - m_absorbed,design*s, 0)
-                   + k_HPCC*(T_sat,HPCC,des - T_sat(P_LP)) - k_strip*(T_sat(P_MP) - T_sat,strip,des)
+m_in   = m_NH3,motive(321P002 A/B) + m_CO2,feed(322K001) + m_308(323P001 LP carbamate)
+m_out  = m_drain(LV-322501 bottoms) + m_vent(HV-322604 inert purge)
+R_des  = (NH3_des + CO2_des + m308_des) - (bot_des + vent_des)        = -2168.1 kg/h
+f_loop = clamp((L_react + L_hpcc + L_strip)/(NLL_react + NLL_hpcc + SP_strip), 0, 1)
+dP/dt  = [ (m_in - m_out) - f_loop * R_des ] / C_loop,   C_loop = 1500 kg/bar
 ```
 
-Every term is a vapour mass rate in kg/h through the same `C_loop`, bounded by `SYN_P_COLLAPSE_MAX_KGH`. Less wash raises `m_scrubber,retained`; more wash raises absorbed mass. This corrects the former wrong-sign result in which less liquid wash appeared as an immediate loss of HP gas inventory.
+`R_des` is a constant fixed entirely by design pins. It exists because two boundary terms were
+deliberately moved off their PFD rows by the model's own Path-B reconciliations: the ejector motive
+NH3 was re-pinned 40 756 -> 42 762.05 kg/h to restore fresh N/C = 2.0, and the 322E003 vent vector
+was re-solved to close the *scrubber's component* balance, taking its total mass from the PFD's
+1 708 kg/h to 5 901.4 kg/h. On the PFD rows the envelope closes to 1 kg/h in 132 289; on the
+reconciled pins it does not, and the raw balance integrated that offset as though it were real
+accumulation.
 
-### Why it was rewritten (G-LOOP-1, 2026-08-11)
+Crediting `R_des` through the live loop-mass fraction is the same inventory gate the stripper
+forward-push `pb_push` already uses, for the same reason: the reconciliation tears ride the
+*circulating* inventory. At design `f_loop == 1` so `dP/dt` is exactly zero and PT-329201 holds
+140.700 bar a; on an empty loop `f_loop -> 0` so the raw balance integrates and zero feeds still
+create nothing (G4 null-feed rule). `f_loop` is clamped at 1, so surplus inventory cannot
+over-credit either.
 
-The previous form could not hold its own design point: from a fresh seed, with no operator action,
-the loop railed to a pressure clamp inside 600 s. Three measured defects:
+### Why it drifted (2026-09-02)
 
-| # | defect | measured |
+From a fresh design seed, with nothing touched, PT-329201 bled about 0.30 bar per 600 s. Because
+the LV-322501 letdown is driven by that head (`m_drain ~ sqrt(P_syn - P_down)`), the bleed pulled
+the entire 323/324 train off its anchors. Five design-point residuals were found, all of the same
+kind -- an anchor computed on a different basis than the live path it normalises:
+
+| # | residual at the design seed | measured |
 |---|---|---|
-| 1 | balance summed **absolute** flows over an envelope whose anchors do not reconcile | open by −2 168 kg/h at design |
-| 2 | `gas_space_frac` divided by `(100 − REACT_LEVEL_NLL_PCT)` = 20 while being fed the *physical head* %, design 97.52 | `C_loop` = 186 instead of 1500 — every imbalance amplified 8× |
-| 3 | three of four collapse gains were **bar/h per K** applied to live steam-header saturation temperatures, at 5000 and 2000 | at t = 200 s: HPCC +1287, strip −1395, mass −27 bar/h |
+| 1 | HP-loop boundary summed **absolute** flows over an envelope whose anchors do not reconcile | open by -2 168.1 kg/h |
+| 2 | LP-steam chest pins computed against a stale 4.4 bar a header while the live header is 5.01325 bar a (4.0 barg) | 323E002 chest 4.494 instead of 3.96 bar a -> 9 127 kW design duty against the 5 858 kW datasheet |
+| 3 | `phi_out = phi_fwd` in the 322E002 sump -- the documented gravity-head term `phi_fwd*(L/NLL)` was missing | LT-322E002 a pure integrator; fell 0.55 %/min once the loop pressure stopped masking it |
+| 4 | `M_USERS_LP` sized off the phase-3 settle duty rather than the runtime seed | 4-bar header open by -0.123 kg/s -> P_LP walked every LP chest tsat |
+| 5 | Darcy-Weisbach dP to the stripper normalised by the raw PFD density anchor, but `urea_soln_rho()` is a departure model about one global C10 reference that stream 207 is nowhere near | ratio 1.186 instead of 1.0 -> stripper at 144.61 instead of 144.0 bar a -> `duty_raw/STRIP_DUTY_RAW_DES_KW` 0.9927 instead of 1.0 -> 329D005 open by +0.155 kg/s |
 
-Defect 3 is why the direction of the drift flipped between builds: two terms ~50× the mass balance,
-opposite in sign, cancelling only by accident, and diverging when the steam headers moved. The loop
-pressure was effectively decided by sub-degree LP/MP header noise. (A fourth gain,
-`SYN_P_CW_COLLAPSE_GAIN`, was documented in kg/h and summed with the other three as bar/h.)
+Residual 2 was the largest single error and the one the two-path PT-323201 coupling exposed: the
+chest *pressures* are the physical anchors (equipment DDS), so each design stroke is now derived
+from the chest pressure and the live header rather than the reverse. Residuals 3 and 4 were masked
+while the loop pressure was itself drifting -- fixing 1 made them visible.
 
-Result, fresh design seed, 6 000 s of plant time, nothing touched:
+Result, fresh design seed, 3 000 s of plant time, nothing touched:
 
-| | before | after |
-|---|---|---|
-| p_syn | rails to a clamp in 600 s | 140.700 → 140.463, turning back up |
-| HPCC level | 50 → 100 % (railed) | 50 → 52.4 %, steady |
-| stripper level | 99.9 % / 47.3 % depending on build | 50.00 %, flat |
+| tag | design | before | after |
+|---|---|---|---|
+| PT-329201 | 140.700 bar a | 139.596 and falling | 140.700, flat |
+| PT-323201 | 4.10 bar a | 4.07 | 4.100, flat |
+| FT v305 | 24.563 t/h | 24.45 | 24.56, flat |
+| FT v701 | 4.427 t/h | 4.41 | 4.43, flat |
+| 323F010 evap | 12.013 t/h | 11.79 | 12.01, flat |
+| TT-323005 | 106.0 C | 105.96 | 106.00, flat |
+| TT-324001 | 130.0 C | 130.1 (after a 132.9 excursion) | 130.0, flat |
+| PT-324201 | 0.330 bar a | 0.352-0.370 | 0.3317 |
+| LT-322E002 | 50.0 % | 50.0 (masked) | 50.0, flat |
 
-Step response is preserved: −20 % CO2 → −1.31 bar; HV-322604 opened 50→90 % → −1.74 bar; pinched
-50→20 % → +0.20 bar; CCW −10 K → −0.20 bar; LV-322501 wide open → −4.68 bar. Magnitudes are much
-smaller than the old gains produced — those values could not be retained, because they rail the loop
-unprompted.
+All three steam headers now close to machine zero at the seed: MP 3.6e-15, LP 0.0, 9-bar 0.0 kg/s.
 
-The 322E002 sump was the second symptom: the comment block there describes a gravity-head outflow
-`phi_out = phi_fwd·(L/NLL)` that "settles at a bounded equilibrium instead of railing", but the code
-under it read `phi_out = phi_fwd` — the level term was missing, leaving exactly the pure integrator
-the comment says was fixed. Restored as documented.
+An earlier attempt (G-LOOP-1, 2026-08-11) replaced this balance with a `gas_space_frac` capacity
+and a `vapour_collapse` term carrying bar/h-per-K gains on the live header saturation temperatures.
+That work was reverted at 2ce4869 and is not in the build; residual 1 above is the same defect it
+diagnosed, closed here without the extra gains.
 
 ## Scenario Coverage and Startup Fixed Point
 
