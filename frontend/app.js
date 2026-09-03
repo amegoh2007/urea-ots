@@ -12,6 +12,7 @@ function connect(){
     const s = JSON.parse(e.data);
     lastState = s;
     Health.onPacket(s);           // read _health + refresh watchdog BEFORE rendering
+    ResetBtn.onPacket(s);         // confirm a pending reset actually took (t_sim dropped to ~0)
     render(s);
     render322(s);
     if(window.refreshF50) window.refreshF50(s);
@@ -114,9 +115,49 @@ const Health = (function(){
   };
 })();
 setInterval(()=>Health._tick(), 1000);
+
+// ---------- Reset button (verifies the backend actually reset) ----------
+// The button does NOT claim success on click: it sends reset_sim, then watches the plant
+// clock. Only once a packet arrives with t_sim collapsed back toward 0 does it show "RESET ✓".
+// If no such packet lands within the timeout, it shows "NO RESPONSE" -- the honest signal that
+// the running backend ignored the command (e.g. a server started before the reset handler
+// existed and never restarted). This is exactly the case that made a stale server look reset.
+const ResetBtn = (function(){
+  let pending = null;   // { prevTsim, deadline }
+  const btn = ()=>document.getElementById('sys-reset');
+  const txt = ()=>document.getElementById('sys-reset-txt');
+  function set(cls, label){ const b=btn(), t=txt(); if(!b||!t) return;
+    b.classList.remove('flash','nak'); if(cls) b.classList.add(cls); t.textContent=label; }
+  function idleSoon(ms){ setTimeout(()=>{ if(!pending) set('', 'RESET'); }, ms); }
+  return {
+    fire(){
+      if(!confirm('Reset the simulation?\n\nThe plant clock and all counters/totalizers return to zero and the run restarts from the fresh seed.')) return;
+      const prev = (lastState && typeof lastState.t_sim==='number') ? lastState.t_sim : Infinity;
+      pending = { prevTsim: prev, deadline: Date.now()+4000 };
+      send({type:'reset_sim'});
+      set('', 'RESETTING…');
+    },
+    onPacket(s){
+      if(!pending || !s || typeof s.t_sim!=='number') return;
+      // reset took if the clock fell far below where it was (or is essentially zero)
+      if(s.t_sim < 5 || s.t_sim < pending.prevTsim*0.5){
+        pending = null; set('flash', 'RESET ✓'); idleSoon(1400);
+      }
+    },
+    _tick(){
+      if(pending && Date.now() > pending.deadline){
+        pending = null; set('nak', 'NO RESPONSE'); idleSoon(3000);
+      }
+    }
+  };
+})();
+setInterval(()=>ResetBtn._tick(), 500);
+
 document.addEventListener('DOMContentLoaded', ()=>{
   const on=(id,fn)=>{ const el=document.getElementById(id); if(el) el.addEventListener('click',fn); };
   on('sys-led', ()=>document.getElementById('fault-overlay').classList.add('show'));
+  on('sys-trend', ()=>{ if(window.TrendWindow) window.TrendWindow.open(); });
+  on('sys-reset', ()=>ResetBtn.fire());
   on('fault-dismiss', ()=>Health.dismiss());
   on('fault-reload', ()=>location.reload());
   on('fault-tb-toggle', ()=>{
@@ -139,7 +180,45 @@ function fmt(v){
   if(Math.abs(v)>=1000) return Number(v).toFixed(2);
   return Number(v).toFixed(1);
 }
+// ---------- Faceplate value fields: click to expand to 3 decimal places ----------
+// A faceplate rounds for readability (fmt -> 1 or 2 dp), which is right for a glance and wrong
+// when an operator is checking whether a value has actually moved.  Clicking a value field
+// swaps it to the shared 3-decimal form and back.  The expansion is per FIELD and survives the
+// live re-fill each tick, so an expanded PV keeps tracking at 3 dp instead of snapping back.
+const FPX = new Set();                                   // ids of fields currently expanded
+function fpxDisplay(v){                                  // 3-dp form, shared with the registry
+  return (window.IndicatorFaceplate ? window.IndicatorFaceplate.display(v)
+                                    : (v==null||isNaN(v) ? '—' : Number(v).toFixed(3)));
+}
+function fpxBind(el){                                    // make one read-only field expandable
+  if(!el || el.dataset.fpxBound) return;
+  el.dataset.fpxBound = '1';
+  el.classList.add('fpx');
+  el.title = 'click to expand to 3 decimal places';
+  el.addEventListener('click', ()=>{
+    if(FPX.has(el.id)) FPX.delete(el.id); else FPX.add(el.id);
+    fpxPaint(el);
+  });
+}
+function fpxPaint(el){
+  if(!el) return;
+  const raw = el.dataset.fpxRaw;
+  const expanded = FPX.has(el.id);
+  el.classList.toggle('expanded', expanded);
+  if(raw == null){ return; }
+  const n = parseFloat(raw);
+  el.value = (expanded && raw !== '' && !isNaN(n)) ? fpxDisplay(n) + (el.dataset.fpxSuf||'') : raw;
+}
+function fpxSet(el, text, numeric, suffix){              // write a value through the expander
+  if(!el) return;
+  el.dataset.fpxRaw = (text == null) ? '' : String(text);
+  el.dataset.fpxSuf = suffix || '';
+  if(numeric != null && !isNaN(numeric)) el.dataset.fpxNum = String(numeric);
+  fpxBind(el);
+  fpxPaint(el);
+}
 function setPI(tag,val,unit,alarm){
+  if(window.IndicatorFaceplate) window.IndicatorFaceplate.publish(tag, val, unit || '');
   document.querySelectorAll(`.pi[data-tag="${tag}"]`).forEach(el=>{
     const u = unit || (el.querySelector('.u')?.textContent||'');
     el.innerHTML = `${fmt(val)} <span class="u">${u}</span>`;
@@ -222,10 +301,15 @@ function render(s){
 }
 
 // ---------- Click handlers (toggle style) ----------
-document.getElementById('pa-btn').onclick  = ()=> send({type:'pump_toggle',id:'A'});
-document.getElementById('pb-btn').onclick  = ()=> send({type:'pump_toggle',id:'B'});
-document.getElementById('pa-icon').onclick = ()=> send({type:'pump_toggle',id:'A'});
-document.getElementById('pb-icon').onclick = ()=> send({type:'pump_toggle',id:'B'});
+// The 321P002 A/B button and icon on the home screen go to the SAME pump faceplate the overlay
+// pumps use -- a click anywhere on a pump opens the faceplate, it never commands the machine.
+const PUMP_FP = { A: {id:'A', bind:'pumpA', tag:'321P002A'},
+                  B: {id:'B', bind:'pumpB', tag:'321P002B'} };
+const openPumpFace = id => { if(window.OTS_FACE && window.OTS_FACE.pump) window.OTS_FACE.pump(PUMP_FP[id]); };
+document.getElementById('pa-btn').onclick  = ()=> openPumpFace('A');
+document.getElementById('pb-btn').onclick  = ()=> openPumpFace('B');
+document.getElementById('pa-icon').onclick = ()=> openPumpFace('A');
+document.getElementById('pb-icon').onclick = ()=> openPumpFace('B');
 document.getElementById('xv-321901').onclick = ()=> send({type:'xv_toggle',id:'321901'});
 document.getElementById('xv-322901').onclick = ()=> send({type:'xv_toggle',id:'322901'});
 document.getElementById('extOverride').onclick = ()=> send({type:'ext_override',value:!lastState.ext_override});
@@ -296,7 +380,15 @@ function openTrend(tag){
 const COMP_LBL = {CO2:'CO₂',CH4:'CH₄',H2:'H₂',H2O:'H₂O',N2:'N₂',
                   NH3:'NH₃',O2:'O₂',Urea:'Urea',Biuret:'Biuret'};
 const fStrm = (v,d)=> (v==null ? '—' : (+v).toFixed(d));
-function renderStream(s){
+function renderStream(s, compositionOnly = false){
+  if (compositionOnly) {
+    const rows = [['Composition', 'mol %  |  mass %']];
+    Object.keys(COMP_LBL).forEach(k=>{
+      const mo = (s.mol_pct&&s.mol_pct[k])||0, ma = (s.mass_pct&&s.mass_pct[k])||0;
+      if(mo>0 || ma>0) rows.push([COMP_LBL[k], fStrm(mo,3)+'  |  '+fStrm(ma,3)]);
+    });
+    return rows;
+  }
   const rows = [
     ['Route', s.src+' → '+s.dst], ['Phase', s.phase],
     ['Temperature', fStrm(s.T_C,1)+' °C'], ['Pressure', fStrm(s.P_bara,1)+' bar a'],
@@ -304,6 +396,7 @@ function renderStream(s){
     ['Molar flow', fStrm(s.mol_kmolh,1)+' kmol/h'], ['Avg MW', fStrm(s.MW,2)+' kg/kmol'],
     ['Specific enthalpy', s.enthalpy_kJkg!=null ? fStrm(s.enthalpy_kJkg,2)+' kJ/kg' : '— (not modelled)'],
     ['Enthalpy flow', s.enthalpy_flow_kW!=null ? fStrm(s.enthalpy_flow_kW,2)+' kW' : '— (not modelled)'],
+    ['Enthalpy basis', s.enthalpy_basis ? (s.enthalpy_basis.startsWith('H0') ? 'H0 (ideal solution)' : s.enthalpy_basis.startsWith('H1') ? 'H1 (with mixing)' : 'H2 (plant reconciled)') : '—'],
     ['Density', s.rho!=null ? fStrm(s.rho,1)+' kg/m³' : '—'],
     ['Volum. flow', s.vol_m3h!=null ? fStrm(s.vol_m3h,1)+' m³/h' : '—'],
     ['', ''], ['Composition', 'mol %  |  mass %'],
@@ -314,11 +407,11 @@ function renderStream(s){
   });
   return rows;
 }
-function openStreamPopup(id){
+function openStreamPopup(id, compositionOnly = false){
   const s = (lastState.STREAMS||{})[id]; if(!s) return;
   document.getElementById('stream-title').textContent = s.name;
   document.getElementById('stream-table').innerHTML =
-    renderStream(s).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
+    renderStream(s, compositionOnly).map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td></tr>`).join('');
   document.getElementById('streamModal').classList.add('show');
 }
 document.getElementById('s-close').onclick = ()=> document.getElementById('streamModal').classList.remove('show');
@@ -402,6 +495,9 @@ function render322(s){
   setPI('HIC_322602', e.HIC_322602, '%',     false);
   const hv=document.getElementById('hv-op'); if(hv) hv.textContent = fmt(e.HIC_322602)+' %';
   if(window.OTS_FACE && window.OTS_FACE.hicSync) window.OTS_FACE.hicSync();   // keep the open HV faceplate's field live (any hand valve)
+  if(window.OTS_FACE && window.OTS_FACE.hsSync) window.OTS_FACE.hsSync();     // keep the open HS faceplate's status live
+  if(window.OTS_FACE && window.OTS_FACE.pumpSync) window.OTS_FACE.pumpSync(); // keep the open pump faceplate's START/STOP enabling live
+  if(window.OTS_FACE && window.OTS_FACE.indicatorSync) window.OTS_FACE.indicatorSync();  // keep the open indicator faceplate's value live
   const xb=document.getElementById('xv-322901b');
   if(xb) xb.classList.toggle('closed', !s.XV_322901);   // bowtie: green=open, red=closed (CSS)
 }
@@ -455,6 +551,79 @@ function render322(s){
   if(m) m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
 
+// ---------- Pump faceplate — START / STOP, one live button ------------------------------------
+// No pump anywhere in the OTS starts or stops on a click: a click opens this, and the command is
+// issued from here.  Exactly one of the two buttons is ever live -- START while the pump is
+// stopped, STOP while it runs -- and the other is colourless and dead, so the operator cannot
+// command the state the plant is already in.  The buttons send an EXPLICIT on/off rather than a
+// toggle, so a faceplate rendered a tick behind the engine cannot invert the intent.
+(function(){
+  const m=document.getElementById('pumpModal'); if(!m) return;
+  const ttl=document.getElementById('pump-title'), tagf=document.getElementById('pump-tag'),
+        status=document.getElementById('pump-status'), ilk=document.getElementById('pump-ilk'),
+        bStart=document.getElementById('pump-start-btn'), bStop=document.getElementById('pump-stop-btn'),
+        cl=document.getElementById('pump-close');
+  if(!bStart||!bStop) return;
+  let cur=null;                                   // {id, bind, tag} of the pump being commanded
+  const gp=(o,p)=> p.split('.').reduce((a,k)=> (a==null?a:a[k]), o);
+  const isOn=()=>{ if(!cur||!cur.bind) return false;
+                   const p=gp(window.OTS_LAST||{}, cur.bind); return !!(p&&p.on); };
+  // 321P002 A/B restart gating, mirroring handle_cmd: a latch whose live cause has recovered is
+  // auto-acknowledged by the START click itself; a latch over a still-live cause blocks it.
+  const interlock=()=>{
+    if(!cur || (cur.id!=='A' && cur.id!=='B')) return '';          // 329P006 A/B carry no latch
+    const S=window.OTS_LAST||{}, L=S.trip_latched||{}, T=S.trips||{};
+    const keys=['21_2','21_4','22_2', cur.id==='A'?'21_8':'21_10'];
+    const live=keys.filter(k=>L[k]&&T[k]), held=keys.filter(k=>L[k]&&!T[k]);
+    if(live.length) return 'TRIP '+live.join(', ').replace(/_/g,'.')+' ACTIVE';
+    if(held.length) return 'TRIP '+held.join(', ').replace(/_/g,'.')+' LATCHED (clears on START)';
+    return 'CLEAR';
+  };
+  const paint=()=>{ const on=isOn();
+    if(status) status.value = on ? 'RUNNING' : 'STOPPED';
+    if(ilk)    ilk.value    = interlock() || 'n/a';
+    bStart.disabled = on;   bStart.classList.toggle('primary', !on);
+    bStop.disabled  = !on;  bStop.classList.toggle('primary',  on);
+  };
+  const open=(o)=>{ cur=o||null;
+    if(ttl && cur)  ttl.textContent = cur.tag || cur.id || 'PUMP';
+    if(tagf && cur) tagf.value = cur.tag || cur.id || '';
+    paint(); m.classList.add('show'); };
+  bStart.onclick=()=>{ if(bStart.disabled||!cur) return; send({type:'pump_toggle', id:cur.id, on:true}); };
+  bStop .onclick=()=>{ if(bStop.disabled ||!cur) return; send({type:'pump_toggle', id:cur.id, on:false}); };
+  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { pump: open,
+    pumpSync: ()=>{ if(m.classList.contains('show') && cur) paint(); } });
+  if(cl) cl.onclick=()=> m.classList.remove('show');
+  m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
+})();
+
+// ---------- Hand Switch faceplate (HS-321901, HS-322901) — opens/closes XV on command ----------
+(function(){
+  const m=document.getElementById('hsModal'); if(!m) return;
+  const xv=document.getElementById('hs-xv'), status=document.getElementById('hs-status'),
+        btn=document.getElementById('hs-on-btn'), cl=document.getElementById('hs-close'),
+        ttl=document.getElementById('hs-title');
+  if(!btn) return;
+  let cur=null;   // overlay currently shown
+  const gp=(o,p)=> p.split('.').reduce((a,k)=> (a==null?a:a[k]), o);
+  const open=(o)=>{ cur=o||null;
+    if(ttl && cur) ttl.textContent = cur.tag;
+    if(xv && cur && cur.xv) xv.value = cur.xv.replace('_','-');
+    const isOpen = (cur&&cur.xv)? gp(window.OTS_LAST||{}, cur.xv) : null;
+    if(status) status.value = (isOpen ? 'OPEN' : 'CLOSED');
+    if(btn) btn.textContent = (isOpen ? 'CLOSE' : 'OPEN');
+    if(m) m.classList.add('show');
+  };
+  btn.onclick=()=>{ if(cur&&cur.cmd) send({type:'xv_toggle', id:cur.cmd}); };
+  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { hs: open,
+    hsSync: ()=>{ if(!m||!m.classList.contains('show')||!cur||!cur.xv) return;
+                  const isOpen=gp(window.OTS_LAST||{}, cur.xv);
+                  if(status) status.value=(isOpen?'OPEN':'CLOSED');
+                  if(btn) btn.textContent=(isOpen?'CLOSE':'OPEN'); } });
+  if(cl&&m) cl.onclick=()=> m.classList.remove('show');
+  if(m) m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
+})();
+
 // ---------- PIC-322203 CO2 feed line pressure -> PV-322203 (faceplate) ----------
 (function(){
   const m=document.getElementById('picModal'); if(!m) return;
@@ -472,7 +641,8 @@ function render322(s){
   mMan.onclick=()=>setMode('MAN');
   mAuto.onclick=()=>{ if(mode!=='AUTO' && pv && pv.value!=='') sp.value = parseFloat(pv.value); setMode('AUTO'); };  // bumpless: SP<-PV on MAN->AUTO (mirrors backend snap)
   const open=()=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{};
-    if(pv) pv.value = c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '';   // display barg = bara - 1 atm
+    if(pv) fpxSet(pv, c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '',
+                  c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : null);   // barg = bara - 1 atm; click -> 3 dp
     if(sp) sp.value = c.PIC_sp!=null ? (c.PIC_sp - 1.01325) : (c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '');
     if(op) op.value = c.PIC_op!=null ? c.PIC_op : '';
     setMode(c.PIC_mode||'AUTO'); m.classList.add('show'); };
@@ -560,7 +730,8 @@ function render322(s){
     cur=o; ttl.textContent=o.tag;
     if(bCas) bCas.style.display = o.cas ? '' : 'none';   // CAS button only for cascade slaves (o.cas)
     const v = o.bind ? gp(window.OTS_LAST||{}, o.bind) : null;
-    pv.value = (v==null||v==='') ? '—' : (v + (o.u?(' '+o.u):''));
+    fpxSet(pv, (v==null||v==='') ? '—' : (v + (o.u?(' '+o.u):'')),
+           (v==null||v==='') ? null : parseFloat(v), o.u?(' '+o.u):'');   // click the PV -> 3 dp
     curPV = (v==null||v==='') ? null : parseFloat(v);
     // authoritative telemetry: modelled loops expose a sibling {pv,sp,op,mode} block (bind ends in .pv)
     const blk = (o.bind && o.bind.endsWith('.pv')) ? gp(window.OTS_LAST||{}, o.bind.slice(0,-3)) : null;
@@ -604,6 +775,38 @@ function render322(s){
   };
   btn.onclick=apply;
   window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { ctl: open });   // overlay *IC-3* left-click -> generic faceplate
+  if(cl) cl.onclick=()=> m.classList.remove('show');
+  m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
+})();
+
+// ---------- Indicator faceplate (any indicator / valve opening with no dedicated loop) ----------
+// Every bound value on a screen is now readable: overlays route an indicator, a bargraph, a
+// valve-opening or a hand-switch button here whenever it has no loop faceplate of its own, so a
+// left-click always opens something instead of silently doing nothing.  Read-only by design --
+// these tags have no operator handle; the value, its unit and where it comes from are the content.
+// Clicking the value expands it to 3 decimal places (fpxBind), which is the point of opening it.
+(function(){
+  const m=document.getElementById('indicatorModal'); if(!m) return;
+  const ttl=document.getElementById('ind-title'), val=document.getElementById('ind-val'),
+        unit=document.getElementById('ind-unit'), src=document.getElementById('ind-src'),
+        cl=document.getElementById('ind-close');
+  const gp=(o,p)=> p.split('.').reduce((a,k)=> (a==null?a:a[k]), o);
+  let cur=null;
+  const paint=()=>{
+    if(!cur) return;
+    let v = cur.bind ? gp(window.OTS_LAST||{}, cur.bind) : null;
+    let u = cur.u || '';
+    if(u==='BAR A' && typeof v==='number'){ v = v - 1.01325; u = 'BARG'; }   // Domain 1a: PT/PIC read gauge
+    if(window.IndicatorFaceplate) window.IndicatorFaceplate.publish(cur.tag, v, u);
+    const shown = (v==null||v==='') ? '—'
+                : (typeof v==='number' ? fmt(v) : String(v));
+    fpxSet(val, shown, typeof v==='number' ? v : null);
+    if(unit) unit.value = u || '—';
+    if(src)  src.value  = cur.bind || 'unbound';
+  };
+  const open=(o)=>{ cur=o||null; if(ttl&&cur) ttl.textContent=cur.tag||''; paint(); m.classList.add('show'); };
+  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { indicator: open,
+    indicatorSync: ()=>{ if(m.classList.contains('show')) paint(); } });
   if(cl) cl.onclick=()=> m.classList.remove('show');
   m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
@@ -658,7 +861,9 @@ connect();
 // ---------- SIC_321951 faceplate: REST /api/ctrl write + controllers WS read ----------
 // Single source of truth = backend. Buttons POST commands; WS controllers block renders state.
 // Gating mirrors backend transition rules: SP editable AUTO-only, MV editable MAN-only,
-// N/C bias editable CAS-only, nothing editable OOS.
+// nothing editable OOS.  In CAS the speed SP is written by FFIC-321404B every tick, so the
+// operator's handle there is that master's OWN setpoint -- the loop N/C target -- which is
+// editable here and on the FFIC-321404B indicator (whose overlay opens this same faceplate).
 (function(){
   const TAG = 'SIC_321951';
   const URL = '/api/ctrl/' + TAG;
@@ -667,9 +872,11 @@ connect();
   if(!modal) return;
 
   // mode -> which REST verb the SET button issues (null = SET disabled)
-  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:'set_bias', OOS:null };
-  // mode -> which input element backs the active verb
-  const INPUT = { set_op:'f51-mv', set_sp:'f51-sp', set_bias:'f51-bias' };
+  // mode -> which REST verb the SET button issues.  CAS is deliberately absent: in CAS the
+  // controller does not own its setpoint, so SET writes the MASTER's setpoint instead (ratio_set
+  // over the WS, the same command the home-screen N/C field uses) -- see onSet below.
+  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:null, OOS:null };
+  const INPUT = { set_op:'f51-mv', set_sp:'f51-sp' };
   let curMode = 'MAN';
 
   const cdata = s => (s && s.controllers && s.controllers[TAG]) || null;
@@ -685,10 +892,16 @@ connect();
     curMode = mode;
     f('f51-sp').disabled   = (mode !== 'AUTO');   // SP: AUTO only
     f('f51-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
-    f('f51-bias').disabled = (mode !== 'CAS');    // N/C bias: CAS only
-    f('f51-set').disabled  = (VERB[mode] == null);
-    ['MAN','AUTO','CAS','OOS'].forEach(m =>
-      f('f51-' + m.toLowerCase()).classList.toggle('active', m === mode));
+    f('f51-fsp').disabled  = (mode !== 'CAS');    // FFIC-321404B SP: it drives the pump only in CAS
+    f('f51-set').disabled  = (VERB[mode] == null && mode !== 'CAS');
+    // A stopped pump is held in MAN by the engine until it is started, so offer only MAN here --
+    // otherwise the operator picks CAS, the next tick reverts it, and the faceplate looks broken.
+    const running = !!(lastState && lastState.pumpB && lastState.pumpB.on);
+    ['MAN','AUTO','CAS','OOS'].forEach(m => {
+      const b = f('f51-' + m.toLowerCase());
+      b.classList.toggle('active', m === mode);
+      b.disabled = (!running && m !== 'MAN');
+    });
     const mt = f('f51-mode');
     mt.textContent = mode;
     mt.className = 'f51mode ' + mode.toLowerCase();
@@ -697,12 +910,22 @@ connect();
   // write field values from a controller packet, respecting focus (don't clobber typing)
   function fillFields(d){
     const ae = document.activeElement;
-    f('f51-pv').value = fmt(d.pv);                                  // PV: always read-only/live
+    fpxSet(f('f51-pv'), fmt(d.pv), d.pv);                            // PV: read-only/live; click -> 3 dp
+    // FFIC-321404B -- the ratio master that writes this pump's speed SP while the SIC is in CAS.
+    // BOTH FFICs read the same numbers, because there is one ratio loop: `ratio_SP` sets a single
+    // NH3 mass demand that `open_cas` then splits across the running pumps.  The per-pump shares
+    // (ratio.NC_A/NC_B) are what each pump HAPPENS to be contributing -- 0.000 for a stopped
+    // standby -- not a setpoint either controller works to, so they are not the FFIC PV.
+    {
+      const r = (lastState && lastState.ratio) || {};
+      if(ae !== f('f51-fsp') && r.SP!=null) f('f51-fsp').value = Number(r.SP).toFixed(3);
+      fpxSet(f('f51-fpv'), r.PV!=null ? Number(r.PV).toFixed(3) : '—', r.PV);
+    }
     if(ae !== f('f51-mv'))   f('f51-mv').value   = fmt(d.mv);
     if(ae !== f('f51-sp'))   f('f51-sp').value   = fmt(d.sp);
-    if(ae !== f('f51-bias')) f('f51-bias').value = fmt(d.bias);
     const st = d.status || {};
     const flags = [];
+    if(!(lastState && lastState.pumpB && lastState.pumpB.on)) flags.push('PUMP STOPPED — MAN');
     if(st.pv_bad)      flags.push('PV BAD');
     if(st.mv_hi_clamp) flags.push('MV @ HI');
     if(st.mv_lo_clamp) flags.push('MV @ LO');
@@ -768,13 +991,22 @@ connect();
   });
 
   // SET -> POST the active mode's value
-  f('f51-set').onclick = async () => {
+  async function onSet(){
+    if(curMode === 'CAS'){                       // CAS: the handle is the master's setpoint
+      const v = parseFloat(f('f51-fsp').value);
+      if(isNaN(v)){ setMsg('enter a numeric N/C setpoint', false); return; }
+      send({ type:'ratio_set', sp:v });          // same command as the home-screen N/C field
+      setMsg('FFIC-321404B SP sent', true);
+      return;
+    }
     const verb = VERB[curMode];
     if(!verb) return;
     const v = parseFloat(f(INPUT[verb]).value);
     if(isNaN(v)){ setMsg('enter a numeric value', false); return; }
     await post({ [verb]: v });
-  };
+  }
+  f('f51-set').onclick = onSet;
+  f('f51-fsp').addEventListener('change', ()=>{ if(curMode === 'CAS') onSet(); });
 
   // Enter-to-SET handled globally for all faceplates (see FACEPLATE_MODALS handler).
 
@@ -784,7 +1016,9 @@ connect();
 // ---------- SIC_321950 faceplate: REST /api/ctrl write + controllers WS read ----------
 // Single source of truth = backend. Buttons POST commands; WS controllers block renders state.
 // Gating mirrors backend transition rules: SP editable AUTO-only, MV editable MAN-only,
-// N/C bias editable CAS-only, nothing editable OOS.
+// nothing editable OOS.  In CAS the speed SP is written by FFIC-321404A every tick, so the
+// operator's handle there is that master's OWN setpoint -- the loop N/C target -- which is
+// editable here and on the FFIC-321404A indicator (whose overlay opens this same faceplate).
 (function(){
   const TAG = 'SIC_321950';
   const URL = '/api/ctrl/' + TAG;
@@ -792,8 +1026,11 @@ connect();
   const modal = f('f50');
   if(!modal) return;
 
-  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:'set_bias', OOS:null };
-  const INPUT = { set_op:'f50-mv', set_sp:'f50-sp', set_bias:'f50-bias' };
+  // mode -> which REST verb the SET button issues.  CAS is deliberately absent: in CAS the
+  // controller does not own its setpoint, so SET writes the MASTER's setpoint instead (ratio_set
+  // over the WS, the same command the home-screen N/C field uses) -- see onSet below.
+  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:null, OOS:null };
+  const INPUT = { set_op:'f50-mv', set_sp:'f50-sp' };
   let curMode = 'MAN';
 
   const cdata = s => (s && s.controllers && s.controllers[TAG]) || null;
@@ -808,10 +1045,16 @@ connect();
     curMode = mode;
     f('f50-sp').disabled   = (mode !== 'AUTO');   // SP: AUTO only
     f('f50-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
-    f('f50-bias').disabled = (mode !== 'CAS');    // N/C bias: CAS only
-    f('f50-set').disabled  = (VERB[mode] == null);
-    ['MAN','AUTO','CAS','OOS'].forEach(m =>
-      f('f50-' + m.toLowerCase()).classList.toggle('active', m === mode));
+    f('f50-fsp').disabled  = (mode !== 'CAS');    // FFIC-321404A SP: it drives the pump only in CAS
+    f('f50-set').disabled  = (VERB[mode] == null && mode !== 'CAS');
+    // A stopped pump is held in MAN by the engine until it is started, so offer only MAN here --
+    // otherwise the operator picks CAS, the next tick reverts it, and the faceplate looks broken.
+    const running = !!(lastState && lastState.pumpA && lastState.pumpA.on);
+    ['MAN','AUTO','CAS','OOS'].forEach(m => {
+      const b = f('f50-' + m.toLowerCase());
+      b.classList.toggle('active', m === mode);
+      b.disabled = (!running && m !== 'MAN');
+    });
     const mt = f('f50-mode');
     mt.textContent = mode;
     mt.className = 'f50mode ' + mode.toLowerCase();
@@ -819,12 +1062,22 @@ connect();
 
   function fillFields(d){
     const ae = document.activeElement;
-    f('f50-pv').value = fmt(d.pv);                                  // PV: always read-only/live
+    fpxSet(f('f50-pv'), fmt(d.pv), d.pv);                            // PV: read-only/live; click -> 3 dp
+    // FFIC-321404A -- the ratio master that writes this pump's speed SP while the SIC is in CAS.
+    // BOTH FFICs read the same numbers, because there is one ratio loop: `ratio_SP` sets a single
+    // NH3 mass demand that `open_cas` then splits across the running pumps.  The per-pump shares
+    // (ratio.NC_A/NC_B) are what each pump HAPPENS to be contributing -- 0.000 for a stopped
+    // standby -- not a setpoint either controller works to, so they are not the FFIC PV.
+    {
+      const r = (lastState && lastState.ratio) || {};
+      if(ae !== f('f50-fsp') && r.SP!=null) f('f50-fsp').value = Number(r.SP).toFixed(3);
+      fpxSet(f('f50-fpv'), r.PV!=null ? Number(r.PV).toFixed(3) : '—', r.PV);
+    }
     if(ae !== f('f50-mv'))   f('f50-mv').value   = fmt(d.mv);
     if(ae !== f('f50-sp'))   f('f50-sp').value   = fmt(d.sp);
-    if(ae !== f('f50-bias')) f('f50-bias').value = fmt(d.bias);
     const st = d.status || {};
     const flags = [];
+    if(!(lastState && lastState.pumpA && lastState.pumpA.on)) flags.push('PUMP STOPPED — MAN');
     if(st.pv_bad)      flags.push('PV BAD');
     if(st.mv_hi_clamp) flags.push('MV @ HI');
     if(st.mv_lo_clamp) flags.push('MV @ LO');
@@ -889,13 +1142,22 @@ connect();
   });
 
   // SET -> POST the active mode's value
-  f('f50-set').onclick = async () => {
+  async function onSet(){
+    if(curMode === 'CAS'){                       // CAS: the handle is the master's setpoint
+      const v = parseFloat(f('f50-fsp').value);
+      if(isNaN(v)){ setMsg('enter a numeric N/C setpoint', false); return; }
+      send({ type:'ratio_set', sp:v });          // same command as the home-screen N/C field
+      setMsg('FFIC-321404A SP sent', true);
+      return;
+    }
     const verb = VERB[curMode];
     if(!verb) return;
     const v = parseFloat(f(INPUT[verb]).value);
     if(isNaN(v)){ setMsg('enter a numeric value', false); return; }
     await post({ [verb]: v });
-  };
+  }
+  f('f50-set').onclick = onSet;
+  f('f50-fsp').addEventListener('change', ()=>{ if(curMode === 'CAS') onSet(); });
 
   // Enter-to-SET handled globally for all faceplates (see FACEPLATE_MODALS handler).
 

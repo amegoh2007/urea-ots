@@ -54,7 +54,7 @@ H_LP = H_G_LP
 P_SUP_BARA = 25.0   # BL 25-bar supply header (stream 901 from 320E006), held boundary
 P_HP_BARA  = 19.7   # 329D005 HP saturator design (== STRIP_STEAM_P_BARA)  -> P_MP field
 P_MP_BARA  = 9.0    # 329D009 MP drum design (Tsat ~= 175 C per mapping -> 9 bar a)
-P_LP_BARA  = 4.4    # 322D001A/B LP drums design (== HPCC_STEAM_P_BARA)
+P_LP_BARA  = 5.01325  # 4.0 barg == 5.01325 bar a (322D001A/B LP drums design pressure)
 P_TURBINE_OUT_BARA = 3.9  # PFD stream 932 downstream pressure at turbine 320MT02
 
 # ---------------------------------------------------------------- valve flow coeffs [ (kg/s)/sqrt(bar) ]
@@ -90,10 +90,8 @@ P_LP_MIN_BARA = 3.5
 
 # ---------------------------------------------------------------- LP 4-bar header pressure PIC (PI vent/make-up)
 #   Lumped stand-in for the master-SP trio PIC-329207A (vent) / B (turbine 320MT02) / C (BL admit):
-#   a PI vent(+)/make-up(-) flow that drives the header to setpoint.  Proportional term is zero and
-#   the integral starts at zero at the design pressure, so the calibrated design balance -- and the
-#   Tsat(P_LP)=146.3 coupling to the HPCC -- is bit-for-bit unchanged.
-P_LP_SP_BARA = 4.4    # == P_LP_BARA / HPCC_STEAM_P_BARA design (bar a); eB==0 at P_LP=4.4 -> design-neutral. (Was 5.01325 after the c503701 PID retune -- a 4-barg->bar-a slip that drove the header to ~5.0 and pegged the PIC-329207 trio off its 4.4 pin.)
+#   a PI vent(+)/make-up(-) flow that drives the header to setpoint.
+P_LP_SP_BARA = 5.01325  # 4.0 barg == 5.01325 bar a (PIC-329207 master SP)
 K_PIC_LP     = 8.0      # proportional vent/make-up gain   [ (kg/s)/bar ]
 KI_PIC_LP    = 0.4      # integral vent/make-up gain        [ (kg/s)/(bar.s) ]
 M_PIC_CLAMP  = 10.0     # anti-windup clamp on the integral contribution [ kg/s ]

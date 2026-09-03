@@ -32,10 +32,24 @@ if errorlevel 1 (
     exit /b 1
 )
 
-REM 3- start backend (keep window open for logs)
+REM 3- clean start: stop any backend left running from a previous launch, so this run
+REM    begins at the fresh design seed instead of reconnecting to the still-live plant
+REM    (valves/totalizers at their last positions).  Kill the titled backend window --
+REM    its python child dies with /T -- then sweep any python still LISTENING on 8000 in
+REM    case a prior one was orphaned without its window.  First launch: nothing to kill,
+REM    the errors are swallowed.  The launcher's own window ("Urea Simulation Launcher",
+REM    line 2) has a different title, so it is never a target.
+echo Stopping any previous backend for a clean start...
+taskkill /F /T /FI "WINDOWTITLE eq Urea Simulation Backend*" >nul 2>&1
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8000" ^| findstr "LISTENING"') do taskkill /F /PID %%p >nul 2>&1
+REM    let Windows reclaim the listening socket before the new uvicorn binds 8000; a lost
+REM    race here fails the bind and silently kills the fresh backend (blank page on open).
+timeout /t 1 /nobreak >nul
+
+REM 4- start backend (keep window open for logs)
 start "Urea Simulation Backend" cmd /k ""%PY%" main.py"
 
-REM 4- wait until uvicorn actually answers on port 8000 (poll, do NOT blind-wait).
+REM 5- wait until uvicorn actually answers on port 8000 (poll, do NOT blind-wait).
 REM    Fixed sleeps race the Python cold-start and open Chrome on a dead port -> blank page.
 echo Waiting for backend on http://127.0.0.1:8000 ...
 set /a _tries=0
@@ -50,7 +64,7 @@ goto wait
 echo WARNING: backend did not respond after 60s; opening browser anyway.
 :ready
 
-REM 5- open Chrome at the UI (fallback to default browser if Chrome missing)
+REM 6- open Chrome at the UI (fallback to default browser if Chrome missing)
 set "CHROME=%ProgramFiles%\Google\Chrome\Application\chrome.exe"
 if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"
 if exist "%CHROME%" (

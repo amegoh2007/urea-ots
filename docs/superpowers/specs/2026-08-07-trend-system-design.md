@@ -197,10 +197,20 @@ desktop clock · span segmented control `1m 5m 30m 1h 2h 4h 8h` (default **1h**)
 
 **Plot.** One `<canvas>`, Chart.js line, 10 datasets, `parsing: false`, `animation: false`,
 `pointRadius: 0`, `spanGaps: false`. Every pen is normalised to a shared 0-100 grid via
-`(v - lo) / (hi - lo) * 100`. The Y axis tick callback relabels to the **selected** pen's engineering
-units, so the selected pen reads directly while the rest stay comparable in shape. The X axis carries
-two tick rows: plant clock primary, desktop clock beneath (Chart.js second linear x-axis at
-`position: 'bottom'`, sharing the same data range).
+`(v - lo) / (hi - lo) * 100`. The Y axis tick callback relabels to the pen named by `axisPen`, so that
+pen reads directly while the rest stay comparable in shape. The X axis carries two tick rows: plant
+clock primary, desktop clock beneath (Chart.js second linear x-axis at `position: 'bottom'`, sharing
+the same data range).
+
+**Pen highlight (multi, tickbox-driven).** A tickbox column (`.c-hl`) after `#` marks pens for
+highlight, and **more than one may be marked at once**. Marks live in a Set `highlights`; `setHighlight
+(i, on)` / `toggleHighlight(i)` add/remove `i` and `redraw` then, for each dataset, thickens it
+(`borderWidth 3.2` vs `1.4`), keeps full colour, and draws it last (`order 1`, since Chart.js draws
+higher order on top) when `highlights.has(i)`, while unmarked pens fade to 25 % alpha (`PENS[i] +
+'40'`); with no marks all pens stay full strength. The most recently marked pen becomes `axisPen`, so
+the Y axis follows it; unmarking it falls back to the last remaining mark (or the percent grid).
+Clicking anywhere on a filled row toggles its mark too. Adding a pen leaves it unmarked. Persisted as
+`hl` (array) + `axis` in `ots_trend_v1`; a legacy single `sel` migrates into `highlights`.
 
 **Control strip (added after review).** A row between the plot and the pen table carrying `◀ ▶`
 scroll arrows, a `LIVE`/`HISTORY` state chip, the CURRENT plant + desktop clock, and the RULER
@@ -229,10 +239,11 @@ scrolls, and auto-clears once it leaves the span rather than stranding a column 
 against an invisible line. Rulers are drawn as a Chart.js plugin rather than a DOM overlay
 specifically so the PNG export captures them with no extra code. An 11th ruler is refused.
 
-**Pen table**, 10 rows under a sticky header: `# · colour chip · TAG · live value · MIN · MAX · AVG ·
-RANGE · R1..Rn · unit · LOW · HIGH · X`. MIN/MAX/AVG cover the visible window; RANGE shows the pen's
-current scale read-only. Empty rows read `-- drop indicator here --`. Clicking a row selects that pen
-and the Y axis follows. Fixed 10-colour palette chosen for contrast against `#0a1416`, none relying
+**Pen table**, 10 rows under a sticky header: `# · ✓ · colour chip · TAG · live value · MIN · MAX ·
+AVG · RANGE · R1..Rn · unit · LOW · HIGH · X`. **✓** is the highlight tickbox (see Pen highlight).
+MIN/MAX/AVG cover the visible window; RANGE shows the pen's current scale read-only. Empty rows read
+`-- drop indicator here --`. Ticking a row (or clicking anywhere on it) marks that pen and the Y axis
+follows the newest mark. Fixed 10-colour palette chosen for contrast against `#0a1416`, none relying
 on red/green discrimination alone.
 
 **Editable display range (added after review).** LOW and HIGH are per-pen number inputs, so an

@@ -15,6 +15,21 @@ FRONTEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "front
 
 # Bound-tag count recorded when the trend system was built (2026-08-07). This is a FLOOR:
 # binding more tags is progress and must not break the suite; losing one is a regression.
+# 2026-09-02: PI-329206 was merged into PI-329207 (both LP-header transmitters now carry the
+# 329207 tag), so one tag left the map by intent, not by a lost bind.  The floor is untouched
+# because it is already red for unrelated reasons -- reconcile both together, not separately.
+#
+# 2026-09-02, UI-page migration (321-1 / 322-1 / 322-2 re-seeded from the slide deck): 212 -> 209.
+# Fully accounted for, no bind was lost by accident:
+#   - N/C 321P002A/B  -> FFIC-321404A/B   same binds (ratio.NC_A/B), the tag the slides print
+#   - TI-322002/322017/329125 -> TT-*     same binds, the tag the slides print
+#   - PI-329201, TI-321020, TI-322009     renamed onto PT-329201 / TT-321020 / TT-322009, all
+#                                         three of which were already in the map -> net -3
+#   - MASTER-SP gained (STEAM_SYSTEM.MASTER_SP_329207.sp)
+#   - HIC-322203 dropped: the 322-1 drawing does not carry that tag.  The updated slide draws an
+#     HS-322203 hand-switch button instead, so CO2_FEED.HIC_322203 is back in the map under the
+#     HS-322203 tag (t:'btn' -> 210) and the forced-minimum faceplate is reachable from both that
+#     button and PV-322203 (face:'hic2').  Nothing is lost; only the tag name changed.
 BOUND_TAG_FLOOR = 217
 
 
@@ -43,7 +58,7 @@ def bind_map(entries):
     """tag -> bind, mirroring buildBindMap(): first bound occurrence across all screens."""
     m = {}
     for e in entries:
-        if e["t"] in ("ind", "avalve") and e["bind"] and e["tag"] not in m:
+        if e["t"] in ("ind", "avalve", "btn") and e["bind"] and e["tag"] not in m:
             m[e["tag"]] = e["bind"]
     return m
 

@@ -123,12 +123,35 @@ Left-click any `*IC-3xxxx` indicator opens a faceplate (regex `CTRL_RE = /[A-Z]I
 | Loop | Target | Fields | Modes |
 |---|---|---|---|
 | Generic `#ctlModal` | any `*IC-3*` PV | PV (ro), SP, Output % | MAN / AUTO / CAS |
+| **Indicator `#indicatorModal`** | any other bound value | Value (ro), Units, Source | read-only — **fallback for every value** |
 | **All hand-valve `HIC/HV-3xxxx`** | its HV opening | Opening % | MANUAL only — **one shared faceplate** |
 | `PIC-322203` | PV-322203 | PV (ro), SP, Output % | MAN / AUTO |
 | `HIC-322203` | PV-322203 | Min Opening % | forced-minimum |
-| `SIC-321950/951` | 321P002A/B speed | PV(ro), SP, MV, N/C bias | MAN / AUTO / CAS / OOS (REST `/api/ctrl/*`) |
+| `SIC-321950/951` | 321P002A/B speed | PV(ro), SP, MV, FFIC-321404A/B SP + PV | MAN / AUTO / CAS / OOS (REST `/api/ctrl/*`) |
 
 **Hand-valve faceplate — one modal, all HVs (mandatory):** every hand valve (`HIC/HV-322602`, `-322605`, `-322604`, and any future HV) opens the single opening-only `#hicModal` (`app.js` `openHicFace`). Do NOT clone a per-valve modal. Each valve's send-command is looked up in the `CMD{tag→{t,f}}` table (e.g. `HIC-322605`→`{t:'hic605_set',f:'op'}`); the title, physics `NOTE`, and current opening are swapped per `cur.tag`; default fallback = `HV-322602`. To add a hand valve: give its overlay `face:'hic'` + a `CMD` row — no new modal.
+
+**A slave in CAS shows its MASTER's setpoint, not a bias.** A controller in CAS does not own its
+setpoint — the master rewrites it every tick — so the operator's only handle there is the master's
+own setpoint, and that is what the slave's faceplate must expose. `SIC-321950/951` carry
+`FFIC-321404A/B SP` (the loop N/C target, `ratio.SP`, written with `ratio_set`) editable in CAS
+only, plus its PV. Because the `FFIC-321404A/B` indicators are wired
+`fp:'SIC_321950'`/`'SIC_321951'`, clicking either the FFIC or the SIC lands on the same field — one
+setpoint, two ways in. Do NOT put a CAS-bias field on a slave faceplate: it reads as the controlled
+variable, sits at 0.0 by design, and is not the handle the operator needs.
+
+**Both FFICs read the same numbers.** There is one ratio loop: `ratio_SP` sets a single NH3 mass
+demand and `open_cas` splits it across the running pumps, so `FFIC-321404A` and `FFIC-321404B` bind
+`ratio.PV` — not `ratio.NC_A`/`NC_B`. Those per-pump shares are what each pump *happens* to be
+contributing (0.000 for a stopped standby), not a target either controller works to; publishing one
+as an FFIC PV makes a healthy loop look failed.
+
+**A stopped pump's controller is forced to MAN.** `step_sim` holds `SIC-321950/951` in MAN (output
+0) while its pump is off: an AUTO or CAS controller on a dead machine winds against a PV that cannot
+move, and the cascade would be commanding speed to something that is not turning. The faceplate
+greys AUTO/CAS/OOS while stopped and shows `PUMP STOPPED — MAN` on the status line, so the operator
+is never offered a mode the engine will revert next tick. Applies to any speed controller on a
+startable machine.
 
 **Mode-button + live mode-tag color convention (mandatory):**
 * MAN → red `#ff3030` · AUTO → green `#22ff22` · CAS → yellow `#ffd000` · OOS → orange `#ff8a3d`.
@@ -136,6 +159,19 @@ Left-click any `*IC-3xxxx` indicator opens a faceplate (regex `CTRL_RE = /[A-Z]I
 * Faceplate rows: `<div class="row"><label>…</label><input …></div>`, `step="0.1"`, `min=0 max=100` for %; readonly PV uses `[readonly]` (cyan `#7fd6ff`).
 * Each numeric loop carries a one-line physics note (`font-size:11px`, `#cfeff1`) stating cause→effect (e.g. "↑ PV-322203 opening ⇒ ↓ CO2 feed flow").
 * **Trend:** right-click any bound indicator → trend context menu (§13). **Stream:** left-click stream line → `#streamModal` composition table.
+
+**Every value opens a faceplate (mandatory).** A left-click on an indicator, a controller, a
+bargraph, a slide-drawn button or a valve-opening must open *something*; a bound value that does
+nothing on click is a defect. The route is: the overlay's own `face` → `CTRL_RE` generic
+`#ctlModal` → read-only `#indicatorModal`. Tags with no operator handle land on the last one,
+which shows the value, its unit and the packet path it came from.
+
+**Click-to-expand (mandatory on read-only value fields).** Faceplates round for readability
+(`fmt` → 1–2 dp), which hides whether a value has actually moved. Clicking a read-only value field
+swaps it to 3 decimal places and back (`fpxBind`/`fpxSet` in `app.js`, formatting shared with
+`indicator_faceplate.js` so the terminal and the faceplate agree). Expansion is per field, is
+remembered across the live re-fill each tick, and is marked amber (`.fpx.expanded`). Editable
+fields (SP / MV / OP) are deliberately excluded — re-formatting under the cursor breaks typing.
 
 ---
 
@@ -148,6 +184,10 @@ in the main app. The main DCS app runs `trend.js` in LAUNCHER role: right-click 
 drag, below) opens/focuses the popup and hands the tag across via a `localStorage` queue
 (`ots_trend_pending`) plus a `BroadcastChannel('ots_trend')`. Tag→path resolution in the popup uses
 the `ots_ov_binds` mirror overlays.js writes (the popup never runs overlays.js).
+
+The **`TRENDS`** button in `#sys-tools` (fixed top-right, beside `RESET`, so it shows on every
+screen) opens/focuses the popup with no tag attached (`TrendWindow.open()`) — the screen-independent
+way in when you have no indicator to right-click or drag.
 
 **Cross-window drag:** an HTML5 drag payload cannot cross window boundaries, so on `dragend` the
 launcher tests the pointer's screen coordinates against the popup's screen rect and enqueues the tag
@@ -166,14 +206,19 @@ if it landed there. Right-click `Trend ↗` is the always-available path.
   exceeds the current bracket (and contracts as old peaks scroll out). The declared engineering
   range (`rng:[lo,hi]` on the OV entry → unit-default table) only seeds lo/hi until the first
   samples arrive. **Digital on/off pens** (no unit) stay pinned to 0–1 so their stepped trace keeps
-  full-scale height. The Y axis relabels to the **selected** pen's units; labels outside 0–100 %
-  are suppressed.
-* **Pen table:** `# · colour · TAG · VALUE · MIN · MAX · AVG · RANGE · R1..Rn · UNIT · LOW · HIGH · x`,
-  with a sticky header row. **RANGE** is a read-only display of the pen's current scale
-  (`lo – hi`, with an `A` badge and grey italic when auto-scaled). Ruler columns appear only for
-  placed rulers. Click a row to select it.
-  Empty rows are drop targets. Booleans render as 0/1
-  stepped pens.
+  full-scale height. The Y axis relabels to the **most recently highlighted** pen's units (`axisPen`);
+  labels outside 0–100 % are suppressed.
+* **Pen table:** `# · ✓ · colour · TAG · VALUE · MIN · MAX · AVG · RANGE · R1..Rn · UNIT · LOW · HIGH · x`,
+  with a sticky header row. **✓** is a highlight tickbox (see below). **RANGE** is a read-only display
+  of the pen's current scale (`lo – hi`, with an `A` badge and grey italic when auto-scaled). Ruler
+  columns appear only for placed rulers. Empty rows are drop targets. Booleans render as 0/1 stepped pens.
+* **Pen highlight (tickbox column → emphasise trends):** the **✓** column after `#` marks a pen for
+  highlight. **Multiple pens can be marked at once**: every marked line thickens (3.2 px vs 1.4), keeps
+  full colour, and is drawn on top, while the unmarked pens fade to 25 % alpha; marked rows are outlined.
+  Clicking anywhere on a filled row toggles its mark too (same as the tickbox). No marks = all pens at
+  full strength. The most recently marked pen drives the Y-axis engineering scale (`axisPen`). State is
+  `highlights` (a Set) + `axisPen`, persisted as `hl`/`axis` in `ots_trend_v1` (old single-pen `sel`
+  migrates in).
 * **Control strip (`#tw-bar`, between plot and pen table):** `◀ ▶` scroll arrows · `LIVE`/`HISTORY`
   state · **CURRENT** plant + desktop clock · **RULER** plant + desktop time with `✕` to clear.
 * **Scrolling:** the arrows pan a quarter span per press (`PAN_FRACTION`) and re-backfill from the

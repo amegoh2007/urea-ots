@@ -30,6 +30,7 @@ const I = trend._internals;
 
 function reset() {
   for (let i = 0; i < I.SLOTS; i++) I.slots[i] = null;
+  I.getHighlights().forEach(i => I.setHighlight(i, false));   // clear marks + axis between tests
 }
 
 // ===== clocks =====
@@ -213,6 +214,69 @@ test('auto range expands when a new value exceeds the current bracket', () => {
   I.slots[0].pts.push({ t: 3, v: 500 });          // a spike beyond the old range
   I.rescale(I.slots[0]);
   assert.ok(I.slots[0].hi > hi1 && I.slots[0].hi > 500, 'range must grow to hold the new peak');
+});
+
+// ===== pen highlight (tickbox column -> emphasise trends above, multi-select) =====
+
+test('adding a pen does not auto-highlight it', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  assert.deepEqual(I.getHighlights(), [], 'a fresh pen starts unmarked; the operator ticks it');
+});
+
+test('ticking a row highlights that pen', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  assert.equal(I.toggleHighlight(0), true, 'ticking marks the pen');
+  assert.deepEqual(I.getHighlights(), [0]);
+});
+
+test('multiple pens can be highlighted at once', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);
+  trend.addTag('N/C Ratio', 2);
+  I.setHighlight(0, true);
+  I.setHighlight(2, true);
+  assert.deepEqual(I.getHighlights().sort((a, b) => a - b), [0, 2], 'both marks coexist; pen 1 stays unmarked');
+});
+
+test('unticking removes just that pen from the highlight set', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);
+  I.setHighlight(0, true); I.setHighlight(1, true);
+  I.setHighlight(0, false);
+  assert.deepEqual(I.getHighlights(), [1]);
+});
+
+test('ticking an empty row does nothing', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  I.toggleHighlight(5);                          // slot 5 is empty
+  assert.deepEqual(I.getHighlights(), []);
+});
+
+test('the most recently ticked pen drives the Y axis', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);
+  I.setHighlight(0, true);
+  assert.equal(I.getAxisPen(), 0);
+  I.setHighlight(1, true);
+  assert.equal(I.getAxisPen(), 1, 'the newest mark takes the axis');
+  I.setHighlight(1, false);
+  assert.equal(I.getAxisPen(), 0, 'axis falls back to the remaining marked pen');
+});
+
+test('removing a highlighted pen unmarks it and frees the axis', () => {
+  reset();
+  trend.addTag('TT-321001', 0);
+  trend.addTag('PT-321201', 1);
+  I.setHighlight(0, true); I.setHighlight(1, true);
+  trend.removeSlot(1);
+  assert.deepEqual(I.getHighlights(), [0], 'removed pen drops out of the highlight set');
+  assert.equal(I.getAxisPen(), 0, 'axis moves to the surviving marked pen');
 });
 
 // ===== editable display range =====
@@ -638,4 +702,47 @@ test('the seven required spans are offered, defaulting to 1 hour', () => {
 test('there are ten distinct pen colours for ten slots', () => {
   assert.equal(I.PENS.length, 10);
   assert.equal(new Set(I.PENS).size, 10);
+});
+
+// ===== custom span parser =====
+
+test('parseSpan converts s/m/h suffixes to seconds', () => {
+  assert.equal(I.parseSpan('30s'), 30);
+  assert.equal(I.parseSpan('10m'), 600);
+  assert.equal(I.parseSpan('3h'), 10800);
+  assert.equal(I.parseSpan('1h'), 3600);
+  assert.equal(I.parseSpan('90s'), 90);
+});
+
+test('parseSpan defaults to seconds when no unit is given', () => {
+  assert.equal(I.parseSpan('300'), 300);
+});
+
+test('parseSpan accepts fractional values', () => {
+  assert.equal(I.parseSpan('1.5h'), 5400);
+  assert.equal(I.parseSpan('0.5m'), 30);
+});
+
+test('parseSpan is case-insensitive for the unit', () => {
+  assert.equal(I.parseSpan('2H'), 7200);
+  assert.equal(I.parseSpan('5M'), 300);
+  assert.equal(I.parseSpan('60S'), 60);
+});
+
+test('parseSpan rejects values below 5 seconds', () => {
+  assert.equal(I.parseSpan('4'), null);
+  assert.equal(I.parseSpan('4s'), null);
+  assert.equal(I.parseSpan('0m'), null);
+});
+
+test('parseSpan rejects values above 24 hours', () => {
+  assert.equal(I.parseSpan('25h'), null);
+  assert.equal(I.parseSpan('86401s'), null);
+});
+
+test('parseSpan rejects malformed strings', () => {
+  assert.equal(I.parseSpan(''), null);
+  assert.equal(I.parseSpan('abc'), null);
+  assert.equal(I.parseSpan('10x'), null);
+  assert.equal(I.parseSpan('1h30m'), null);
 });

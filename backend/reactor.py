@@ -343,10 +343,8 @@ def outlet_line_outflow_kgph(level_m: float, m_fwd_ref_kgph: float, level_des_m:
     open drains the holdup: m_in -> 0 while m_out = m_dot_des·φ_fwd·(θ/θ_des)·(L/L_des) stays positive
     (NH3 pumps keep φ_fwd alive), so d(m_liq)/dt < 0 down to L = 0.
     """
-    if level_m <= 0.0 or level_des_m <= 0.0:
-        return 0.0
     theta_ratio = max(theta_pct, 0.0) / max(theta_des_pct, 1.0e-6)
-    return m_fwd_ref_kgph * theta_ratio * (level_m / level_des_m)
+    return m_fwd_ref_kgph * theta_ratio
 
 
 def outlet_line_dmdt_kgph(m_in_kgph: float, level_m: float, m_fwd_ref_kgph: float,

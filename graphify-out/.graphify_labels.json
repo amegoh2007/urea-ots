@@ -1,0 +1,16 @@
+{
+  "0": "app.js",
+  "1": "overlays.js",
+  "2": "editor.js",
+  "3": "indicator_dynamics.js",
+  "4": "redraw",
+  "5": "builder.js",
+  "6": "trend.js",
+  "7": "co2_compressor.js",
+  "8": "test_indicator_faceplate.js",
+  "9": "buildWindow",
+  "10": "popupInit",
+  "11": "backfill",
+  "12": "commitRange",
+  "13": "lv324501_route.js"
+}

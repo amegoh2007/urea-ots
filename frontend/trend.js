@@ -96,7 +96,8 @@
   const slots = [];                    // {tag, entry, pts:[{t,v}], colour, lo, hi, auto}
   for (let i = 0; i < SLOTS; i++) slots.push(null);
   let span = DEFAULT_SPAN;
-  let selected = 0;
+  let highlights = new Set();        // slot indices whose trend is highlighted (checkbox-marked); empty = all full strength
+  let axisPen = -1;                  // slot index whose engineering range labels the Y axis (last marked); -1 = percent grid
   let chart = null, win = null, lastPacket = null;
   let rulers = [];                     // absolute plant seconds; up to RULERS_MAX, coloured by index
   let dragRuler = -1, dragMoved = false; // index of the ruler being dragged; whether the pointer moved
@@ -112,7 +113,7 @@
   }
   function save() {
     const st = saved();
-    st.span = span; st.sel = selected;
+    st.span = span; st.hl = [...highlights]; st.axis = axisPen;
     st.tags = slots.map(s => s && s.tag);
     st.ranges = slots.map(s => (s && !s.auto) ? [s.lo, s.hi] : null);
     st.open = true;
@@ -317,7 +318,7 @@
             ticks: { color: '#d6f3e4', font: { size: 10 }, stepSize: 20,
                      callback: pct => {
                        if (pct < -0.001 || pct > 100.001) return '';
-                       const s = slots[selected];
+                       const s = slots[axisPen];
                        if (!s) return pct + '%';
                        const v = s.lo + (pct / 100) * (s.hi - s.lo);
                        return v.toFixed(s.entry.dec);
@@ -348,7 +349,12 @@
         pts.push({ x: p.t - ve, y: norm(slot, p.v) });
       }
       ds.data = pts;
-      ds.borderWidth = (i === selected) ? 2.4 : 1.4;
+      // Highlight every checkbox-marked pen: thicken it, keep full colour, and draw it last (on top);
+      // fade the unmarked pens so the marked trends stand out. No marks = all pens keep full strength.
+      const hi = highlights.has(i), fade = highlights.size > 0 && !hi;
+      ds.borderWidth = hi ? 3.2 : 1.4;
+      ds.borderColor = fade ? (PENS[i] + '40') : PENS[i];   // +40 = 25% alpha (8-digit hex)
+      ds.order = hi ? 1 : 0;                                 // Chart.js draws higher order last -> marked pens on top
     }
     chart.update('none');
     renderRows();
@@ -406,10 +412,11 @@
     }
     for (let i = 0; i < SLOTS; i++) {
       const tr = tb.children[i], slot = slots[i];
-      tr.className = (i === selected ? 'sel ' : '') + (slot ? 'full' : 'empty');
+      tr.className = (highlights.has(i) ? 'sel ' : '') + (slot ? 'full' : 'empty');
       const q = sel => tr.querySelector(sel);
       const loI = q('.c-lo input'), hiI = q('.c-hi input');
       q('.c-n').textContent = i + 1;
+      const cb = q('.c-hl input'); cb.checked = highlights.has(i); cb.disabled = !slot;
       q('.c-k i').style.background = PENS[i];
       const rc = tr.querySelectorAll('.c-r');
       if (!slot) {
@@ -473,7 +480,7 @@
     const e = Registry.entry(tag);
     if (!e) { flash(index, 'NOT BOUND'); return false; }
     const existing = slots.findIndex(s => s && s.tag === tag);
-    if (existing >= 0 && (index == null || index === existing)) { selected = existing; dirty = true; scheduleRedraw(); return true; }
+    if (existing >= 0 && (index == null || index === existing)) { dirty = true; scheduleRedraw(); return true; }
     let i = index;
     if (i == null) i = slots.findIndex(s => !s);
     if (i == null || i < 0) { flash(null, 'SLOTS FULL'); return false; }
@@ -484,21 +491,57 @@
     const digital = e.unit === '';
     slots[i] = { tag: tag, entry: e, pts: [], colour: PENS[i],
                  lo: rng ? rng[0] : 0, hi: rng ? rng[1] : 1, auto: !digital };
-    selected = i;
     backfill(slots[i]).then(() => { dirty = true; scheduleRedraw(); });
     dirty = true; scheduleRedraw(); save();
     return true;
   }
-  function removeSlot(i) { slots[i] = null; dirty = true; scheduleRedraw(); save(); }
+  function removeSlot(i) {
+    slots[i] = null;
+    highlights.delete(i);
+    if (axisPen === i) axisPen = highlights.size ? [...highlights][highlights.size - 1] : -1;
+    dirty = true; scheduleRedraw(); save();
+  }
+  // Highlight control: mark/unmark a pen's trend via its row tickbox. Multiple pens can be marked at
+  // once; every marked trend is thickened and drawn on top while the unmarked pens fade. The most
+  // recently marked pen also drives the Y-axis engineering scale (axisPen).
+  function setHighlight(i, on) {
+    if (i == null || i < 0 || i >= SLOTS) return false;
+    if (!slots[i]) on = false;
+    if (on) { highlights.add(i); axisPen = i; }
+    else {
+      highlights.delete(i);
+      if (axisPen === i) axisPen = highlights.size ? [...highlights][highlights.size - 1] : -1;
+    }
+    dirty = true; redraw(); save();
+    return highlights.has(i);
+  }
+  function toggleHighlight(i) { return setHighlight(i, !highlights.has(i)); }
   function flash(index, msg) {
     if (!win) return;
     const el = win.querySelector('#tw-flash');
     el.textContent = msg; el.style.opacity = '1';
     setTimeout(() => { el.style.opacity = '0'; }, 1400);
   }
+  // Parse a user-typed span string: "30s" → 30, "10m" → 600, "3h" → 10800.
+  // Returns null if unparseable or out of the 5 s – 24 h range.
+  function parseSpan(str) {
+    const m = (str || '').trim().match(/^(\d+(?:\.\d+)?)\s*([smh]?)$/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    const unit = (m[2] || 's').toLowerCase();
+    const s = unit === 'h' ? n * 3600 : unit === 'm' ? n * 60 : n;
+    return (isFinite(s) && s >= 5 && s <= 86400) ? Math.round(s) : null;
+  }
+  function applyCustomSpan(inp) {
+    const s = parseSpan(inp.value);
+    if (s == null) { flash(null, 'BAD SPAN (e.g. 30s 10m 3h)'); inp.classList.remove('on'); return; }
+    setSpan(s);
+  }
   function setSpan(s) {
     span = s;
     win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === s));
+    const ci = win.querySelector('#tw-spans .cust-inp');
+    if (ci) ci.classList.toggle('on', !SPANS.some(x => x.s === s) && parseSpan(ci.value) === s);
     Promise.all(slots.filter(Boolean).map(backfill)).then(() => { dirty = true; redraw(); });
     save();
   }
@@ -602,10 +645,15 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
   border-radius:3px;padding:1px 5px;}
 .rchip b{cursor:pointer;margin-left:3px;opacity:.8;}
 .rchip b:hover{opacity:1;}
-#tw-spans{margin-left:auto;display:flex;gap:2px;}
+#tw-spans{margin-left:auto;display:flex;gap:2px;align-items:center;}
 #tw-spans button{font:bold 11px Arial;background:#1b2a30;color:#9bbabb;border:1px solid #2a4a44;
   padding:3px 7px;cursor:pointer;border-radius:3px;}
 #tw-spans button.on{background:#0aa64d;border-color:#22ff22;color:#fff;}
+#tw-spans .cust-inp{width:56px;font:bold 11px Arial;background:#1b2a30;color:#9bbabb;
+  border:1px solid #2a4a44;padding:3px 5px;border-radius:3px;text-align:center;}
+#tw-spans .cust-inp:focus{outline:none;border-color:#7fd0d8;color:#d6f3e4;}
+#tw-spans .cust-inp.on{background:#0aa64d;border-color:#22ff22;color:#fff;}
+#tw-spans .cust-inp::placeholder{color:#3d5a56;font-weight:normal;font-style:italic;}
 #tw-save{font:bold 11px Arial;background:#1b2a30;color:#7fd0d8;border:1px solid #4aa587;
   padding:3px 9px;cursor:pointer;border-radius:3px;}
 #tw-save:hover{background:#22424a;}
@@ -623,6 +671,9 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
 #tw-table th{position:sticky;top:0;background:#0f1a24;color:#82b3a3;text-align:left;
   font:bold 10px "Segoe UI",system-ui;letter-spacing:.5px;padding:3px 6px;border-bottom:1px solid #2a4a44;}
 #tw-table td.c-n{width:22px;color:#82b3a3;}
+#tw-table td.c-hl{width:20px;text-align:center;}
+#tw-table td.c-hl input{cursor:pointer;margin:0;vertical-align:middle;accent-color:#4aa587;}
+#tw-table th.h-hl{width:20px;text-align:center;color:#4aa587;}
 #tw-table td.c-k{width:16px;}
 #tw-table td.c-k i{display:block;width:11px;height:9px;}
 #tw-table td.c-v{text-align:right;width:78px;color:#fff;font-weight:bold;}
@@ -678,7 +729,7 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
         '<div class="twb" id="tw-rulers"><label>RULERS</label><span id="tw-rulers-list"></span></div>' +
       '</div>' +
       '<div id="tw-table"><table>' +
-        '<thead><tr id="tw-head-row"><th></th><th></th><th>TAG</th><th>VALUE</th>' +
+        '<thead><tr id="tw-head-row"><th></th><th class="h-hl" title="Tick to highlight this trend">&#10003;</th><th></th><th>TAG</th><th>VALUE</th>' +
         '<th class="h-min">MIN</th><th class="h-max">MAX</th><th class="h-avg">AVG</th>' +
         '<th class="h-rng">RANGE</th>' +
         rth + '<th>UNIT</th><th>LOW</th><th>HIGH</th><th></th></tr></thead>' +
@@ -692,11 +743,22 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       b.onclick = () => setSpan(x.s);
       sp.appendChild(b);
     });
+    const custInp = document.createElement('input');
+    custInp.type = 'text';
+    custInp.className = 'cust-inp';
+    custInp.placeholder = 'e.g. 30s';
+    custInp.title = 'Custom span — type a value like 30s, 10m, 3h, then press Enter';
+    custInp.addEventListener('keydown', ev => {
+      if (ev.key === 'Enter') { ev.preventDefault(); ev.stopPropagation(); applyCustomSpan(custInp); custInp.blur(); }
+    });
+    custInp.addEventListener('mousedown', ev => ev.stopPropagation());
+    sp.appendChild(custInp);
 
     const tb = win.querySelector('#tw-rows');
     for (let i = 0; i < SLOTS; i++) {
       const tr = document.createElement('tr');
-      tr.innerHTML = '<td class="c-n"></td><td class="c-k"><i></i></td><td class="c-t"></td>' +
+      tr.innerHTML = '<td class="c-n"></td><td class="c-hl"><input type="checkbox" title="Highlight this trend"></td>' +
+        '<td class="c-k"><i></i></td><td class="c-t"></td>' +
         '<td class="c-v"></td><td class="c-min"></td><td class="c-max"></td><td class="c-avg"></td>' +
         '<td class="c-rng"></td>' +
         rtd + '<td class="c-u"></td>' +
@@ -704,10 +766,11 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
         '<td class="c-hi"><input type="number" step="any" disabled title="Display HIGH — blank to auto-scale"></td>' +
         '<td class="c-x"></td>';
       tr.onclick = ev => {
-        if (ev.target.tagName === 'INPUT') { selected = i; dirty = true; redraw(); return; }
+        if (ev.target.tagName === 'INPUT') return;   // the tickbox + LOW/HIGH fields own their own clicks
         if (ev.target.classList.contains('c-x')) { if (slots[i]) removeSlot(i); return; }
-        selected = i; dirty = true; redraw(); save();
+        toggleHighlight(i);   // clicking anywhere on the row marks/unmarks its trend (same as the tickbox)
       };
+      tr.querySelector('.c-hl input').addEventListener('change', ev => setHighlight(i, ev.target.checked));
       [['lo', '.c-lo input'], ['hi', '.c-hi input']].forEach(([which, sel]) => {
         const inp = tr.querySelector(sel);
         inp.addEventListener('change', () => commitRange(i, which, inp));
@@ -791,6 +854,8 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
     win.style.display = 'block';
     if (!chart) buildChart();
     win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === span));
+    const _ci = win.querySelector('#tw-spans .cust-inp');
+    if (_ci) _ci.classList.toggle('on', !SPANS.some(x => x.s === span) && parseSpan(_ci.value) === span);
     markHist();
     dirty = true; redraw();
   }
@@ -853,16 +918,27 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       document.body.classList.add('tw-popup');
       buildWindow(); buildChart();
       const st = saved();
-      if (typeof st.span === 'number' && SPANS.some(x => x.s === st.span)) span = st.span;
-      if (typeof st.sel === 'number') selected = clamp(st.sel, 0, SLOTS - 1);
+      if (typeof st.span === 'number' && st.span > 0) span = st.span;
+      if (Array.isArray(st.hl)) highlights = new Set(st.hl.filter(n => Number.isInteger(n) && n >= 0 && n < SLOTS));
+      else if (typeof st.sel === 'number' && st.sel >= 0) highlights.add(clamp(st.sel, 0, SLOTS - 1)); // migrate old single-select
+      if (typeof st.axis === 'number') axisPen = st.axis < 0 ? -1 : clamp(st.axis, 0, SLOTS - 1);
       if (Array.isArray(st.tags)) st.tags.forEach((tag, i) => {
         if (!tag) return;
         coreAddTag(tag, i);
         const r = st.ranges && st.ranges[i];
         if (slots[i] && Array.isArray(r) && r.length === 2 && r[1] > r[0]) { slots[i].lo = r[0]; slots[i].hi = r[1]; slots[i].auto = false; }
       });
+      highlights.forEach(n => { if (!slots[n]) highlights.delete(n); });   // drop marks for slots that did not restore
+      if (axisPen >= 0 && !slots[axisPen]) axisPen = highlights.size ? [...highlights][highlights.size - 1] : -1;
       win.style.display = 'block';
       win.querySelectorAll('#tw-spans button').forEach(b => b.classList.toggle('on', Number(b.dataset.span) === span));
+      if (!SPANS.some(x => x.s === span)) {
+        const ci2 = win.querySelector('#tw-spans .cust-inp');
+        if (ci2) {
+          ci2.value = span % 3600 === 0 ? (span / 3600) + 'h' : span % 60 === 0 ? (span / 60) + 'm' : span + 's';
+          ci2.classList.add('on');
+        }
+      }
       drainPending();
       connectWS();
       markHist(); redraw();
@@ -959,8 +1035,9 @@ body.tw-popup{margin:0;background:#0a1416;overflow:hidden;}
       _internals: { hms, deskClock, stamp, norm, rescale, wallAt, noteTime, Registry, commitRange, windowStats,
                     UNIT_RANGE, SPANS, SLOTS, PENS, RULER_COLORS, RULERS_MAX, slots,
                     setSpanValue: v => { span = v; }, getSpan: () => span, maxPanBack: maxPanBack,
-                    setNow: t => { nowSim = t; }, getSelected: () => selected, save: save, saved: saved,
-                    getRulers: () => rulers },
+                    setNow: t => { nowSim = t; }, getHighlights: () => [...highlights], getAxisPen: () => axisPen,
+                    setHighlight: setHighlight, toggleHighlight: toggleHighlight, save: save, saved: saved,
+                    getRulers: () => rulers, parseSpan: parseSpan },
     };
   }
 })();
