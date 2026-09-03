@@ -861,7 +861,9 @@ connect();
 // ---------- SIC_321951 faceplate: REST /api/ctrl write + controllers WS read ----------
 // Single source of truth = backend. Buttons POST commands; WS controllers block renders state.
 // Gating mirrors backend transition rules: SP editable AUTO-only, MV editable MAN-only,
-// N/C bias editable CAS-only, nothing editable OOS.
+// nothing editable OOS.  In CAS the speed SP is written by FFIC-321404B every tick, so the
+// operator's handle there is that master's OWN setpoint -- the loop N/C target -- which is
+// editable here and on the FFIC-321404B indicator (whose overlay opens this same faceplate).
 (function(){
   const TAG = 'SIC_321951';
   const URL = '/api/ctrl/' + TAG;
@@ -870,9 +872,11 @@ connect();
   if(!modal) return;
 
   // mode -> which REST verb the SET button issues (null = SET disabled)
-  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:'set_bias', OOS:null };
-  // mode -> which input element backs the active verb
-  const INPUT = { set_op:'f51-mv', set_sp:'f51-sp', set_bias:'f51-bias' };
+  // mode -> which REST verb the SET button issues.  CAS is deliberately absent: in CAS the
+  // controller does not own its setpoint, so SET writes the MASTER's setpoint instead (ratio_set
+  // over the WS, the same command the home-screen N/C field uses) -- see onSet below.
+  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:null, OOS:null };
+  const INPUT = { set_op:'f51-mv', set_sp:'f51-sp' };
   let curMode = 'MAN';
 
   const cdata = s => (s && s.controllers && s.controllers[TAG]) || null;
@@ -888,8 +892,8 @@ connect();
     curMode = mode;
     f('f51-sp').disabled   = (mode !== 'AUTO');   // SP: AUTO only
     f('f51-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
-    f('f51-bias').disabled = (mode !== 'CAS');    // CAS bias (SP offset): CAS only
-    f('f51-set').disabled  = (VERB[mode] == null);
+    f('f51-fsp').disabled  = (mode !== 'CAS');    // FFIC-321404B SP: it drives the pump only in CAS
+    f('f51-set').disabled  = (VERB[mode] == null && mode !== 'CAS');
     ['MAN','AUTO','CAS','OOS'].forEach(m =>
       f('f51-' + m.toLowerCase()).classList.toggle('active', m === mode));
     const mt = f('f51-mode');
@@ -901,18 +905,17 @@ connect();
   function fillFields(d){
     const ae = document.activeElement;
     fpxSet(f('f51-pv'), fmt(d.pv), d.pv);                            // PV: read-only/live; click -> 3 dp
-    // N/C readout.  The row below it is the CAS BIAS -- an operator offset on the cascade
-    // setpoint, correctly 0.0 at design -- which read as "the N/C" while it was labelled that
-    // way.  These two rows are the actual loop N/C the ratio master is holding (design 2.023),
-    // taken from the same `ratio` block the home screen shows.
+    // FFIC-321404B -- the ratio master that writes this pump's speed SP while the SIC is in CAS.
+    // SP is the loop N/C target (design 2.023), the same `ratio.SP` the home-screen field edits,
+    // so setting it here and setting it there are the same write.  PV is THIS pump's own N/C
+    // contribution (ratio.NC_B), 0.000 while the pump is a stopped standby.
     {
       const r = (lastState && lastState.ratio) || {};
-      fpxSet(f('f51-ncsp'), r.SP!=null ? Number(r.SP).toFixed(3) : '—', r.SP);
-      fpxSet(f('f51-ncpv'), r.PV!=null ? Number(r.PV).toFixed(3) : '—', r.PV);
+      if(ae !== f('f51-fsp') && r.SP!=null) f('f51-fsp').value = Number(r.SP).toFixed(3);
+      fpxSet(f('f51-fpv'), r.NC_B!=null ? Number(r.NC_B).toFixed(3) : '—', r.NC_B);
     }
     if(ae !== f('f51-mv'))   f('f51-mv').value   = fmt(d.mv);
     if(ae !== f('f51-sp'))   f('f51-sp').value   = fmt(d.sp);
-    if(ae !== f('f51-bias')) f('f51-bias').value = fmt(d.bias);
     const st = d.status || {};
     const flags = [];
     if(st.pv_bad)      flags.push('PV BAD');
@@ -980,13 +983,22 @@ connect();
   });
 
   // SET -> POST the active mode's value
-  f('f51-set').onclick = async () => {
+  async function onSet(){
+    if(curMode === 'CAS'){                       // CAS: the handle is the master's setpoint
+      const v = parseFloat(f('f51-fsp').value);
+      if(isNaN(v)){ setMsg('enter a numeric N/C setpoint', false); return; }
+      send({ type:'ratio_set', sp:v });          // same command as the home-screen N/C field
+      setMsg('FFIC-321404B SP sent', true);
+      return;
+    }
     const verb = VERB[curMode];
     if(!verb) return;
     const v = parseFloat(f(INPUT[verb]).value);
     if(isNaN(v)){ setMsg('enter a numeric value', false); return; }
     await post({ [verb]: v });
-  };
+  }
+  f('f51-set').onclick = onSet;
+  f('f51-fsp').addEventListener('change', ()=>{ if(curMode === 'CAS') onSet(); });
 
   // Enter-to-SET handled globally for all faceplates (see FACEPLATE_MODALS handler).
 
@@ -996,7 +1008,9 @@ connect();
 // ---------- SIC_321950 faceplate: REST /api/ctrl write + controllers WS read ----------
 // Single source of truth = backend. Buttons POST commands; WS controllers block renders state.
 // Gating mirrors backend transition rules: SP editable AUTO-only, MV editable MAN-only,
-// N/C bias editable CAS-only, nothing editable OOS.
+// nothing editable OOS.  In CAS the speed SP is written by FFIC-321404A every tick, so the
+// operator's handle there is that master's OWN setpoint -- the loop N/C target -- which is
+// editable here and on the FFIC-321404A indicator (whose overlay opens this same faceplate).
 (function(){
   const TAG = 'SIC_321950';
   const URL = '/api/ctrl/' + TAG;
@@ -1004,8 +1018,11 @@ connect();
   const modal = f('f50');
   if(!modal) return;
 
-  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:'set_bias', OOS:null };
-  const INPUT = { set_op:'f50-mv', set_sp:'f50-sp', set_bias:'f50-bias' };
+  // mode -> which REST verb the SET button issues.  CAS is deliberately absent: in CAS the
+  // controller does not own its setpoint, so SET writes the MASTER's setpoint instead (ratio_set
+  // over the WS, the same command the home-screen N/C field uses) -- see onSet below.
+  const VERB = { MAN:'set_op', AUTO:'set_sp', CAS:null, OOS:null };
+  const INPUT = { set_op:'f50-mv', set_sp:'f50-sp' };
   let curMode = 'MAN';
 
   const cdata = s => (s && s.controllers && s.controllers[TAG]) || null;
@@ -1020,8 +1037,8 @@ connect();
     curMode = mode;
     f('f50-sp').disabled   = (mode !== 'AUTO');   // SP: AUTO only
     f('f50-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
-    f('f50-bias').disabled = (mode !== 'CAS');    // CAS bias (SP offset): CAS only
-    f('f50-set').disabled  = (VERB[mode] == null);
+    f('f50-fsp').disabled  = (mode !== 'CAS');    // FFIC-321404A SP: it drives the pump only in CAS
+    f('f50-set').disabled  = (VERB[mode] == null && mode !== 'CAS');
     ['MAN','AUTO','CAS','OOS'].forEach(m =>
       f('f50-' + m.toLowerCase()).classList.toggle('active', m === mode));
     const mt = f('f50-mode');
@@ -1032,18 +1049,17 @@ connect();
   function fillFields(d){
     const ae = document.activeElement;
     fpxSet(f('f50-pv'), fmt(d.pv), d.pv);                            // PV: read-only/live; click -> 3 dp
-    // N/C readout.  The row below it is the CAS BIAS -- an operator offset on the cascade
-    // setpoint, correctly 0.0 at design -- which read as "the N/C" while it was labelled that
-    // way.  These two rows are the actual loop N/C the ratio master is holding (design 2.023),
-    // taken from the same `ratio` block the home screen shows.
+    // FFIC-321404A -- the ratio master that writes this pump's speed SP while the SIC is in CAS.
+    // SP is the loop N/C target (design 2.023), the same `ratio.SP` the home-screen field edits,
+    // so setting it here and setting it there are the same write.  PV is THIS pump's own N/C
+    // contribution (ratio.NC_A), 0.000 while the pump is a stopped standby.
     {
       const r = (lastState && lastState.ratio) || {};
-      fpxSet(f('f50-ncsp'), r.SP!=null ? Number(r.SP).toFixed(3) : '—', r.SP);
-      fpxSet(f('f50-ncpv'), r.PV!=null ? Number(r.PV).toFixed(3) : '—', r.PV);
+      if(ae !== f('f50-fsp') && r.SP!=null) f('f50-fsp').value = Number(r.SP).toFixed(3);
+      fpxSet(f('f50-fpv'), r.NC_A!=null ? Number(r.NC_A).toFixed(3) : '—', r.NC_A);
     }
     if(ae !== f('f50-mv'))   f('f50-mv').value   = fmt(d.mv);
     if(ae !== f('f50-sp'))   f('f50-sp').value   = fmt(d.sp);
-    if(ae !== f('f50-bias')) f('f50-bias').value = fmt(d.bias);
     const st = d.status || {};
     const flags = [];
     if(st.pv_bad)      flags.push('PV BAD');
@@ -1110,13 +1126,22 @@ connect();
   });
 
   // SET -> POST the active mode's value
-  f('f50-set').onclick = async () => {
+  async function onSet(){
+    if(curMode === 'CAS'){                       // CAS: the handle is the master's setpoint
+      const v = parseFloat(f('f50-fsp').value);
+      if(isNaN(v)){ setMsg('enter a numeric N/C setpoint', false); return; }
+      send({ type:'ratio_set', sp:v });          // same command as the home-screen N/C field
+      setMsg('FFIC-321404A SP sent', true);
+      return;
+    }
     const verb = VERB[curMode];
     if(!verb) return;
     const v = parseFloat(f(INPUT[verb]).value);
     if(isNaN(v)){ setMsg('enter a numeric value', false); return; }
     await post({ [verb]: v });
-  };
+  }
+  f('f50-set').onclick = onSet;
+  f('f50-fsp').addEventListener('change', ()=>{ if(curMode === 'CAS') onSet(); });
 
   // Enter-to-SET handled globally for all faceplates (see FACEPLATE_MODALS handler).
 
