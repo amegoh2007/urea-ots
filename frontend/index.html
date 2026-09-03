@@ -185,6 +185,8 @@
   }
   .modal .card input:disabled{opacity:0.3;background:#0a0a0a;color:#666;border-color:#3a3a3a;cursor:not-allowed;}
   .modal .card input[readonly]{background:#0a0a0a;color:#7fd6ff;}
+  .modal .card input.fpx{cursor:pointer;}
+  .modal .card input.fpx.expanded{color:#ffd27f;}
   .modal .btns{margin-top:12px;display:flex;gap:8px;justify-content:flex-end;}
   .modal button{
     background:#2a4046;color:#fff;border:1px solid #aaa;padding:4px 12px;cursor:pointer;font-size:12px;
@@ -706,6 +708,17 @@
   <div class="btns"><button id="ctl-close">Close</button><button class="primary" id="ctl-set-btn">SET</button></div>
 </div></div>
 
+<!-- Indicator faceplate: any indicator / controller / valve-opening value opens this when it
+     has no dedicated loop faceplate.  Click the VALUE to expand it to 3 decimal places. -->
+<div class="modal" id="indicatorModal"><div class="card">
+  <h3 id="ind-title">TAG</h3>
+  <div class="row"><label>Value</label><input id="ind-val" type="text" readonly class="fpx"></div>
+  <div class="row"><label>Units</label><input id="ind-unit" type="text" readonly></div>
+  <div class="row"><label>Source</label><input id="ind-src" type="text" readonly></div>
+  <div id="ind-note" style="font-size:11px;color:#cfeff1;margin:4px 0;">Click the value to show 3 decimal places.</div>
+  <div class="btns"><button id="ind-close">Close</button></div>
+</div></div>
+
 <!-- Hand Switch faceplate (HS-321901, HS-322901) -->
 <!-- Pump faceplate: every pump click opens this, no click starts or stops a pump directly -->
 <div class="modal" id="pumpModal"><div class="card">
@@ -732,7 +745,9 @@
     <div class="row"><label>PV (%)</label><input id="f50-pv" type="number" step="0.1" readonly></div>
     <div class="row"><label>SP (%)</label><input id="f50-sp" type="number" step="0.1"></div>
     <div class="row"><label>MV (%)</label><input id="f50-mv" type="number" step="0.1"></div>
-    <div class="row"><label>N/C bias (%)</label><input id="f50-bias" type="number" step="0.1"></div>
+    <div class="row"><label>N/C SP</label><input id="f50-ncsp" type="text" readonly class="fpx"></div>
+    <div class="row"><label>N/C PV</label><input id="f50-ncpv" type="text" readonly class="fpx"></div>
+    <div class="row"><label>CAS bias (%)</label><input id="f50-bias" type="number" step="0.1"></div>
     <div class="row"><label>Mode</label>
       <div class="mg50">
         <button data-mode="MAN"  id="f50-man">MAN</button>
@@ -757,7 +772,9 @@
     <div class="row"><label>PV (%)</label><input id="f51-pv" type="number" step="0.1" readonly></div>
     <div class="row"><label>SP (%)</label><input id="f51-sp" type="number" step="0.1"></div>
     <div class="row"><label>MV (%)</label><input id="f51-mv" type="number" step="0.1"></div>
-    <div class="row"><label>N/C bias (%)</label><input id="f51-bias" type="number" step="0.1"></div>
+    <div class="row"><label>N/C SP</label><input id="f51-ncsp" type="text" readonly class="fpx"></div>
+    <div class="row"><label>N/C PV</label><input id="f51-ncpv" type="text" readonly class="fpx"></div>
+    <div class="row"><label>CAS bias (%)</label><input id="f51-bias" type="number" step="0.1"></div>
     <div class="row"><label>Mode</label>
       <div class="mg51">
         <button data-mode="MAN"  id="f51-man">MAN</button>
@@ -871,6 +888,7 @@
   </div>
 </div>
 
+<script src="indicator_faceplate.js"></script>
 <script src="app.js?v=2"></script>
 <script src="lv324501_route.js"></script>
 <script src="overlays.js"></script>

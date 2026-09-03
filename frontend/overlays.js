@@ -663,6 +663,7 @@
       let v = gp(lastS, o.bind);
       let u = o.u;
       if (u === 'BAR A' && typeof v === 'number') { v = v - 1.01325; u = 'BARG'; }   // Domain 1a: all PT/PIC show gauge pressure (barg = bara - 1 atm)
+      if (window.IndicatorFaceplate) window.IndicatorFaceplate.publish(o.tag, v, u || '');   // shared post-dynamics registry (3-dp faceplate reads this)
       if (b) b.textContent = fmt(v, o.dec);
       if (sp) sp.textContent = u || '';
       if (mt) { const ml = modeLetter(o); mt.textContent = ml; mt.className = 'mt' + (ml ? ' m-' + ml : ''); }   // controller mode badge (A/M/E/O); '' for non-controllers
@@ -695,11 +696,13 @@
       return;
     } else if (o.t === 'btn') {                   // hand-switch button drawn on the slide (HS-322203)
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
-      if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); }
+      if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); return; }
+      if (window.OTS_FACE && window.OTS_FACE.indicator) { window.OTS_FACE.indicator(o); }
       return;
     } else if (o.t === 'bar') {                   // level bargraph: same faceplate route as its tag
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
-      if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); }
+      if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); return; }
+      if (window.OTS_FACE && window.OTS_FACE.indicator) { window.OTS_FACE.indicator(o); }
       return;
     } else if (o.t === 'avalve' && o.route) {
       const api = window.OTS_LV324501_ROUTE;
@@ -707,6 +710,8 @@
       return;
     } else if (o.t === 'avalve') {                // an auto-valve may carry a faceplate too (PV-322203 -> HIC-322203)
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
+      if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); return; }
+      if (window.OTS_FACE && window.OTS_FACE.indicator) { window.OTS_FACE.indicator(o); }   // opening value -> read-only faceplate
       return;
     } else if (o.t === 'ind') {
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
@@ -714,6 +719,7 @@
       if (o.fp === 'SIC_321951' && window.openF51) { window.openF51(); return; }   // SIC_321951 REST faceplate
       if (o.fp === 'MASTER_SP_329207' && window.OTS_FACE && window.OTS_FACE.msp) { window.OTS_FACE.msp(o); return; }   // 4-bar header MASTER SP cascade
       if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); return; }   // any *IC-3* -> generic faceplate
+      if (window.OTS_FACE && window.OTS_FACE.indicator) { window.OTS_FACE.indicator(o); }   // every other indicator -> read-only faceplate
       return;
     }
     const key = sid + '|' + o.k;                // unbound pump/xv -> local toggle

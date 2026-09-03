@@ -123,10 +123,11 @@ Left-click any `*IC-3xxxx` indicator opens a faceplate (regex `CTRL_RE = /[A-Z]I
 | Loop | Target | Fields | Modes |
 |---|---|---|---|
 | Generic `#ctlModal` | any `*IC-3*` PV | PV (ro), SP, Output % | MAN / AUTO / CAS |
+| **Indicator `#indicatorModal`** | any other bound value | Value (ro), Units, Source | read-only — **fallback for every value** |
 | **All hand-valve `HIC/HV-3xxxx`** | its HV opening | Opening % | MANUAL only — **one shared faceplate** |
 | `PIC-322203` | PV-322203 | PV (ro), SP, Output % | MAN / AUTO |
 | `HIC-322203` | PV-322203 | Min Opening % | forced-minimum |
-| `SIC-321950/951` | 321P002A/B speed | PV(ro), SP, MV, N/C bias | MAN / AUTO / CAS / OOS (REST `/api/ctrl/*`) |
+| `SIC-321950/951` | 321P002A/B speed | PV(ro), N/C SP + PV (ro), SP, MV, CAS bias | MAN / AUTO / CAS / OOS (REST `/api/ctrl/*`) |
 
 **Hand-valve faceplate — one modal, all HVs (mandatory):** every hand valve (`HIC/HV-322602`, `-322605`, `-322604`, and any future HV) opens the single opening-only `#hicModal` (`app.js` `openHicFace`). Do NOT clone a per-valve modal. Each valve's send-command is looked up in the `CMD{tag→{t,f}}` table (e.g. `HIC-322605`→`{t:'hic605_set',f:'op'}`); the title, physics `NOTE`, and current opening are swapped per `cur.tag`; default fallback = `HV-322602`. To add a hand valve: give its overlay `face:'hic'` + a `CMD` row — no new modal.
 
@@ -136,6 +137,19 @@ Left-click any `*IC-3xxxx` indicator opens a faceplate (regex `CTRL_RE = /[A-Z]I
 * Faceplate rows: `<div class="row"><label>…</label><input …></div>`, `step="0.1"`, `min=0 max=100` for %; readonly PV uses `[readonly]` (cyan `#7fd6ff`).
 * Each numeric loop carries a one-line physics note (`font-size:11px`, `#cfeff1`) stating cause→effect (e.g. "↑ PV-322203 opening ⇒ ↓ CO2 feed flow").
 * **Trend:** right-click any bound indicator → trend context menu (§13). **Stream:** left-click stream line → `#streamModal` composition table.
+
+**Every value opens a faceplate (mandatory).** A left-click on an indicator, a controller, a
+bargraph, a slide-drawn button or a valve-opening must open *something*; a bound value that does
+nothing on click is a defect. The route is: the overlay's own `face` → `CTRL_RE` generic
+`#ctlModal` → read-only `#indicatorModal`. Tags with no operator handle land on the last one,
+which shows the value, its unit and the packet path it came from.
+
+**Click-to-expand (mandatory on read-only value fields).** Faceplates round for readability
+(`fmt` → 1–2 dp), which hides whether a value has actually moved. Clicking a read-only value field
+swaps it to 3 decimal places and back (`fpxBind`/`fpxSet` in `app.js`, formatting shared with
+`indicator_faceplate.js` so the terminal and the faceplate agree). Expansion is per field, is
+remembered across the live re-fill each tick, and is marked amber (`.fpx.expanded`). Editable
+fields (SP / MV / OP) are deliberately excluded — re-formatting under the cursor breaks typing.
 
 ---
 

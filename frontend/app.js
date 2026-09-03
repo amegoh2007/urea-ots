@@ -180,7 +180,45 @@ function fmt(v){
   if(Math.abs(v)>=1000) return Number(v).toFixed(2);
   return Number(v).toFixed(1);
 }
+// ---------- Faceplate value fields: click to expand to 3 decimal places ----------
+// A faceplate rounds for readability (fmt -> 1 or 2 dp), which is right for a glance and wrong
+// when an operator is checking whether a value has actually moved.  Clicking a value field
+// swaps it to the shared 3-decimal form and back.  The expansion is per FIELD and survives the
+// live re-fill each tick, so an expanded PV keeps tracking at 3 dp instead of snapping back.
+const FPX = new Set();                                   // ids of fields currently expanded
+function fpxDisplay(v){                                  // 3-dp form, shared with the registry
+  return (window.IndicatorFaceplate ? window.IndicatorFaceplate.display(v)
+                                    : (v==null||isNaN(v) ? '—' : Number(v).toFixed(3)));
+}
+function fpxBind(el){                                    // make one read-only field expandable
+  if(!el || el.dataset.fpxBound) return;
+  el.dataset.fpxBound = '1';
+  el.classList.add('fpx');
+  el.title = 'click to expand to 3 decimal places';
+  el.addEventListener('click', ()=>{
+    if(FPX.has(el.id)) FPX.delete(el.id); else FPX.add(el.id);
+    fpxPaint(el);
+  });
+}
+function fpxPaint(el){
+  if(!el) return;
+  const raw = el.dataset.fpxRaw;
+  const expanded = FPX.has(el.id);
+  el.classList.toggle('expanded', expanded);
+  if(raw == null){ return; }
+  const n = parseFloat(raw);
+  el.value = (expanded && raw !== '' && !isNaN(n)) ? fpxDisplay(n) + (el.dataset.fpxSuf||'') : raw;
+}
+function fpxSet(el, text, numeric, suffix){              // write a value through the expander
+  if(!el) return;
+  el.dataset.fpxRaw = (text == null) ? '' : String(text);
+  el.dataset.fpxSuf = suffix || '';
+  if(numeric != null && !isNaN(numeric)) el.dataset.fpxNum = String(numeric);
+  fpxBind(el);
+  fpxPaint(el);
+}
 function setPI(tag,val,unit,alarm){
+  if(window.IndicatorFaceplate) window.IndicatorFaceplate.publish(tag, val, unit || '');
   document.querySelectorAll(`.pi[data-tag="${tag}"]`).forEach(el=>{
     const u = unit || (el.querySelector('.u')?.textContent||'');
     el.innerHTML = `${fmt(val)} <span class="u">${u}</span>`;
@@ -459,6 +497,7 @@ function render322(s){
   if(window.OTS_FACE && window.OTS_FACE.hicSync) window.OTS_FACE.hicSync();   // keep the open HV faceplate's field live (any hand valve)
   if(window.OTS_FACE && window.OTS_FACE.hsSync) window.OTS_FACE.hsSync();     // keep the open HS faceplate's status live
   if(window.OTS_FACE && window.OTS_FACE.pumpSync) window.OTS_FACE.pumpSync(); // keep the open pump faceplate's START/STOP enabling live
+  if(window.OTS_FACE && window.OTS_FACE.indicatorSync) window.OTS_FACE.indicatorSync();  // keep the open indicator faceplate's value live
   const xb=document.getElementById('xv-322901b');
   if(xb) xb.classList.toggle('closed', !s.XV_322901);   // bowtie: green=open, red=closed (CSS)
 }
@@ -602,7 +641,8 @@ function render322(s){
   mMan.onclick=()=>setMode('MAN');
   mAuto.onclick=()=>{ if(mode!=='AUTO' && pv && pv.value!=='') sp.value = parseFloat(pv.value); setMode('AUTO'); };  // bumpless: SP<-PV on MAN->AUTO (mirrors backend snap)
   const open=()=>{ const c=(window.OTS_LAST||{}).CO2_FEED||{};
-    if(pv) pv.value = c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '';   // display barg = bara - 1 atm
+    if(pv) fpxSet(pv, c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '',
+                  c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : null);   // barg = bara - 1 atm; click -> 3 dp
     if(sp) sp.value = c.PIC_sp!=null ? (c.PIC_sp - 1.01325) : (c.PIC_322203!=null ? (c.PIC_322203 - 1.01325) : '');
     if(op) op.value = c.PIC_op!=null ? c.PIC_op : '';
     setMode(c.PIC_mode||'AUTO'); m.classList.add('show'); };
@@ -690,7 +730,8 @@ function render322(s){
     cur=o; ttl.textContent=o.tag;
     if(bCas) bCas.style.display = o.cas ? '' : 'none';   // CAS button only for cascade slaves (o.cas)
     const v = o.bind ? gp(window.OTS_LAST||{}, o.bind) : null;
-    pv.value = (v==null||v==='') ? '—' : (v + (o.u?(' '+o.u):''));
+    fpxSet(pv, (v==null||v==='') ? '—' : (v + (o.u?(' '+o.u):'')),
+           (v==null||v==='') ? null : parseFloat(v), o.u?(' '+o.u):'');   // click the PV -> 3 dp
     curPV = (v==null||v==='') ? null : parseFloat(v);
     // authoritative telemetry: modelled loops expose a sibling {pv,sp,op,mode} block (bind ends in .pv)
     const blk = (o.bind && o.bind.endsWith('.pv')) ? gp(window.OTS_LAST||{}, o.bind.slice(0,-3)) : null;
@@ -734,6 +775,38 @@ function render322(s){
   };
   btn.onclick=apply;
   window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { ctl: open });   // overlay *IC-3* left-click -> generic faceplate
+  if(cl) cl.onclick=()=> m.classList.remove('show');
+  m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
+})();
+
+// ---------- Indicator faceplate (any indicator / valve opening with no dedicated loop) ----------
+// Every bound value on a screen is now readable: overlays route an indicator, a bargraph, a
+// valve-opening or a hand-switch button here whenever it has no loop faceplate of its own, so a
+// left-click always opens something instead of silently doing nothing.  Read-only by design --
+// these tags have no operator handle; the value, its unit and where it comes from are the content.
+// Clicking the value expands it to 3 decimal places (fpxBind), which is the point of opening it.
+(function(){
+  const m=document.getElementById('indicatorModal'); if(!m) return;
+  const ttl=document.getElementById('ind-title'), val=document.getElementById('ind-val'),
+        unit=document.getElementById('ind-unit'), src=document.getElementById('ind-src'),
+        cl=document.getElementById('ind-close');
+  const gp=(o,p)=> p.split('.').reduce((a,k)=> (a==null?a:a[k]), o);
+  let cur=null;
+  const paint=()=>{
+    if(!cur) return;
+    let v = cur.bind ? gp(window.OTS_LAST||{}, cur.bind) : null;
+    let u = cur.u || '';
+    if(u==='BAR A' && typeof v==='number'){ v = v - 1.01325; u = 'BARG'; }   // Domain 1a: PT/PIC read gauge
+    if(window.IndicatorFaceplate) window.IndicatorFaceplate.publish(cur.tag, v, u);
+    const shown = (v==null||v==='') ? '—'
+                : (typeof v==='number' ? fmt(v) : String(v));
+    fpxSet(val, shown, typeof v==='number' ? v : null);
+    if(unit) unit.value = u || '—';
+    if(src)  src.value  = cur.bind || 'unbound';
+  };
+  const open=(o)=>{ cur=o||null; if(ttl&&cur) ttl.textContent=cur.tag||''; paint(); m.classList.add('show'); };
+  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { indicator: open,
+    indicatorSync: ()=>{ if(m.classList.contains('show')) paint(); } });
   if(cl) cl.onclick=()=> m.classList.remove('show');
   m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
@@ -815,7 +888,7 @@ connect();
     curMode = mode;
     f('f51-sp').disabled   = (mode !== 'AUTO');   // SP: AUTO only
     f('f51-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
-    f('f51-bias').disabled = (mode !== 'CAS');    // N/C bias: CAS only
+    f('f51-bias').disabled = (mode !== 'CAS');    // CAS bias (SP offset): CAS only
     f('f51-set').disabled  = (VERB[mode] == null);
     ['MAN','AUTO','CAS','OOS'].forEach(m =>
       f('f51-' + m.toLowerCase()).classList.toggle('active', m === mode));
@@ -827,7 +900,16 @@ connect();
   // write field values from a controller packet, respecting focus (don't clobber typing)
   function fillFields(d){
     const ae = document.activeElement;
-    f('f51-pv').value = fmt(d.pv);                                  // PV: always read-only/live
+    fpxSet(f('f51-pv'), fmt(d.pv), d.pv);                            // PV: read-only/live; click -> 3 dp
+    // N/C readout.  The row below it is the CAS BIAS -- an operator offset on the cascade
+    // setpoint, correctly 0.0 at design -- which read as "the N/C" while it was labelled that
+    // way.  These two rows are the actual loop N/C the ratio master is holding (design 2.023),
+    // taken from the same `ratio` block the home screen shows.
+    {
+      const r = (lastState && lastState.ratio) || {};
+      fpxSet(f('f51-ncsp'), r.SP!=null ? Number(r.SP).toFixed(3) : '—', r.SP);
+      fpxSet(f('f51-ncpv'), r.PV!=null ? Number(r.PV).toFixed(3) : '—', r.PV);
+    }
     if(ae !== f('f51-mv'))   f('f51-mv').value   = fmt(d.mv);
     if(ae !== f('f51-sp'))   f('f51-sp').value   = fmt(d.sp);
     if(ae !== f('f51-bias')) f('f51-bias').value = fmt(d.bias);
@@ -938,7 +1020,7 @@ connect();
     curMode = mode;
     f('f50-sp').disabled   = (mode !== 'AUTO');   // SP: AUTO only
     f('f50-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
-    f('f50-bias').disabled = (mode !== 'CAS');    // N/C bias: CAS only
+    f('f50-bias').disabled = (mode !== 'CAS');    // CAS bias (SP offset): CAS only
     f('f50-set').disabled  = (VERB[mode] == null);
     ['MAN','AUTO','CAS','OOS'].forEach(m =>
       f('f50-' + m.toLowerCase()).classList.toggle('active', m === mode));
@@ -949,7 +1031,16 @@ connect();
 
   function fillFields(d){
     const ae = document.activeElement;
-    f('f50-pv').value = fmt(d.pv);                                  // PV: always read-only/live
+    fpxSet(f('f50-pv'), fmt(d.pv), d.pv);                            // PV: read-only/live; click -> 3 dp
+    // N/C readout.  The row below it is the CAS BIAS -- an operator offset on the cascade
+    // setpoint, correctly 0.0 at design -- which read as "the N/C" while it was labelled that
+    // way.  These two rows are the actual loop N/C the ratio master is holding (design 2.023),
+    // taken from the same `ratio` block the home screen shows.
+    {
+      const r = (lastState && lastState.ratio) || {};
+      fpxSet(f('f50-ncsp'), r.SP!=null ? Number(r.SP).toFixed(3) : '—', r.SP);
+      fpxSet(f('f50-ncpv'), r.PV!=null ? Number(r.PV).toFixed(3) : '—', r.PV);
+    }
     if(ae !== f('f50-mv'))   f('f50-mv').value   = fmt(d.mv);
     if(ae !== f('f50-sp'))   f('f50-sp').value   = fmt(d.sp);
     if(ae !== f('f50-bias')) f('f50-bias').value = fmt(d.bias);
