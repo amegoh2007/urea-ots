@@ -5598,6 +5598,17 @@ def step_sim(dt: float) -> dict:
 
     # Drive each pump's converter opening toward controller output
     for p, ctrl in [(s.pumpA, s.SIC_321950), (s.pumpB, s.SIC_321951)]:
+        # A STOPPED pump has no speed for its SIC to control: an AUTO or CAS controller sitting on a
+        #   dead machine winds its output against a PV that cannot move, and the FFIC cascade would
+        #   be commanding a speed to a pump that is not turning.  Hold the controller in MAN until
+        #   the pump is started; the operator picks AUTO/CAS again once it is running (the faceplate
+        #   greys those buttons while it is stopped, so the choice is never silently reverted).
+        #   set_mode("MAN") on a controller already in MAN is a plain assignment, so this is
+        #   idempotent -- and at the design seed pump A is the stopped standby ALREADY in MAN with
+        #   op == 0, so the branch never fires and the design fixed point is untouched.
+        if (not p["on"]) and ctrl.mode != "MAN":
+            ctrl.set_mode("MAN")                           # forced-manual on a stopped machine
+            ctrl.set_op(0.0)                               # ... and its output drops with it
         ctrl.step(p["open_act"], dt, cas_sp=open_cas)      # updates op + pv
         if (not p["on"]) or (not suct_open) or (not disch_open):
             target = 0.0

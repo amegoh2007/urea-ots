@@ -894,8 +894,14 @@ connect();
     f('f51-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
     f('f51-fsp').disabled  = (mode !== 'CAS');    // FFIC-321404B SP: it drives the pump only in CAS
     f('f51-set').disabled  = (VERB[mode] == null && mode !== 'CAS');
-    ['MAN','AUTO','CAS','OOS'].forEach(m =>
-      f('f51-' + m.toLowerCase()).classList.toggle('active', m === mode));
+    // A stopped pump is held in MAN by the engine until it is started, so offer only MAN here --
+    // otherwise the operator picks CAS, the next tick reverts it, and the faceplate looks broken.
+    const running = !!(lastState && lastState.pumpB && lastState.pumpB.on);
+    ['MAN','AUTO','CAS','OOS'].forEach(m => {
+      const b = f('f51-' + m.toLowerCase());
+      b.classList.toggle('active', m === mode);
+      b.disabled = (!running && m !== 'MAN');
+    });
     const mt = f('f51-mode');
     mt.textContent = mode;
     mt.className = 'f51mode ' + mode.toLowerCase();
@@ -906,18 +912,20 @@ connect();
     const ae = document.activeElement;
     fpxSet(f('f51-pv'), fmt(d.pv), d.pv);                            // PV: read-only/live; click -> 3 dp
     // FFIC-321404B -- the ratio master that writes this pump's speed SP while the SIC is in CAS.
-    // SP is the loop N/C target (design 2.023), the same `ratio.SP` the home-screen field edits,
-    // so setting it here and setting it there are the same write.  PV is THIS pump's own N/C
-    // contribution (ratio.NC_B), 0.000 while the pump is a stopped standby.
+    // BOTH FFICs read the same numbers, because there is one ratio loop: `ratio_SP` sets a single
+    // NH3 mass demand that `open_cas` then splits across the running pumps.  The per-pump shares
+    // (ratio.NC_A/NC_B) are what each pump HAPPENS to be contributing -- 0.000 for a stopped
+    // standby -- not a setpoint either controller works to, so they are not the FFIC PV.
     {
       const r = (lastState && lastState.ratio) || {};
       if(ae !== f('f51-fsp') && r.SP!=null) f('f51-fsp').value = Number(r.SP).toFixed(3);
-      fpxSet(f('f51-fpv'), r.NC_B!=null ? Number(r.NC_B).toFixed(3) : '—', r.NC_B);
+      fpxSet(f('f51-fpv'), r.PV!=null ? Number(r.PV).toFixed(3) : '—', r.PV);
     }
     if(ae !== f('f51-mv'))   f('f51-mv').value   = fmt(d.mv);
     if(ae !== f('f51-sp'))   f('f51-sp').value   = fmt(d.sp);
     const st = d.status || {};
     const flags = [];
+    if(!(lastState && lastState.pumpB && lastState.pumpB.on)) flags.push('PUMP STOPPED — MAN');
     if(st.pv_bad)      flags.push('PV BAD');
     if(st.mv_hi_clamp) flags.push('MV @ HI');
     if(st.mv_lo_clamp) flags.push('MV @ LO');
@@ -1039,8 +1047,14 @@ connect();
     f('f50-mv').disabled   = (mode !== 'MAN');    // MV: MAN only
     f('f50-fsp').disabled  = (mode !== 'CAS');    // FFIC-321404A SP: it drives the pump only in CAS
     f('f50-set').disabled  = (VERB[mode] == null && mode !== 'CAS');
-    ['MAN','AUTO','CAS','OOS'].forEach(m =>
-      f('f50-' + m.toLowerCase()).classList.toggle('active', m === mode));
+    // A stopped pump is held in MAN by the engine until it is started, so offer only MAN here --
+    // otherwise the operator picks CAS, the next tick reverts it, and the faceplate looks broken.
+    const running = !!(lastState && lastState.pumpA && lastState.pumpA.on);
+    ['MAN','AUTO','CAS','OOS'].forEach(m => {
+      const b = f('f50-' + m.toLowerCase());
+      b.classList.toggle('active', m === mode);
+      b.disabled = (!running && m !== 'MAN');
+    });
     const mt = f('f50-mode');
     mt.textContent = mode;
     mt.className = 'f50mode ' + mode.toLowerCase();
@@ -1050,18 +1064,20 @@ connect();
     const ae = document.activeElement;
     fpxSet(f('f50-pv'), fmt(d.pv), d.pv);                            // PV: read-only/live; click -> 3 dp
     // FFIC-321404A -- the ratio master that writes this pump's speed SP while the SIC is in CAS.
-    // SP is the loop N/C target (design 2.023), the same `ratio.SP` the home-screen field edits,
-    // so setting it here and setting it there are the same write.  PV is THIS pump's own N/C
-    // contribution (ratio.NC_A), 0.000 while the pump is a stopped standby.
+    // BOTH FFICs read the same numbers, because there is one ratio loop: `ratio_SP` sets a single
+    // NH3 mass demand that `open_cas` then splits across the running pumps.  The per-pump shares
+    // (ratio.NC_A/NC_B) are what each pump HAPPENS to be contributing -- 0.000 for a stopped
+    // standby -- not a setpoint either controller works to, so they are not the FFIC PV.
     {
       const r = (lastState && lastState.ratio) || {};
       if(ae !== f('f50-fsp') && r.SP!=null) f('f50-fsp').value = Number(r.SP).toFixed(3);
-      fpxSet(f('f50-fpv'), r.NC_A!=null ? Number(r.NC_A).toFixed(3) : '—', r.NC_A);
+      fpxSet(f('f50-fpv'), r.PV!=null ? Number(r.PV).toFixed(3) : '—', r.PV);
     }
     if(ae !== f('f50-mv'))   f('f50-mv').value   = fmt(d.mv);
     if(ae !== f('f50-sp'))   f('f50-sp').value   = fmt(d.sp);
     const st = d.status || {};
     const flags = [];
+    if(!(lastState && lastState.pumpA && lastState.pumpA.on)) flags.push('PUMP STOPPED — MAN');
     if(st.pv_bad)      flags.push('PV BAD');
     if(st.mv_hi_clamp) flags.push('MV @ HI');
     if(st.mv_lo_clamp) flags.push('MV @ LO');

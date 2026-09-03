@@ -60,8 +60,8 @@
       { k: 'fqi',  t: 'ind', x: 210,  y: 424, tag: 'FQI-321401' },   // Totalizer - backend binding TBD
       // Feed-ratio panel rows A/B: the per-pump NH3/CO2 molar ratio.  Left-click opens that
       // pump's speed faceplate, which is where the N/C bias is editable (CAS only).
-      { k: 'ffa',  t: 'ind', x: 159,  y: 547, tag: 'FFIC-321404A', bind: 'ratio.NC_A', u: 'N/C', dec: 3, fp: 'SIC_321950' },
-      { k: 'ffb',  t: 'ind', x: 158,  y: 593, tag: 'FFIC-321404B', bind: 'ratio.NC_B', u: 'N/C', dec: 3, fp: 'SIC_321951' },
+      { k: 'ffa',  t: 'ind', x: 159,  y: 547, tag: 'FFIC-321404A', bind: 'ratio.PV', u: 'N/C', dec: 3, fp: 'SIC_321950' },
+      { k: 'ffb',  t: 'ind', x: 158,  y: 593, tag: 'FFIC-321404B', bind: 'ratio.PV', u: 'N/C', dec: 3, fp: 'SIC_321951' },
       { k: 'i61',  t: 'ind', x: 619,  y: 592, tag: 'IT-321961', bind: 'pumpA.current',u: 'A',    dec: 1 },
       { k: 'i62',  t: 'ind', x: 841,  y: 604, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
       { k: 's50',  t: 'ind', x: 570,  y: 642, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
@@ -172,8 +172,8 @@
       { k: 'hs902', t: 'hs',     x: 734, y: 634, w: 26, h: 20, xv: 'CO2_FEED.XV_322902', cmd: '322902', tag: 'HS-322902' },
       { k: 'load',  t: 'ind',    x: 1201,y: 648, tag: 'LOAD', bind: 'CO2_FEED.Load', u: '%', dec: 1, fs: 14 },   // panel label is left-aligned; value takes the right half
       // ===== FEED-RATIO / PUMP-SPEED PANEL (mirrors the 321-1 panel; editable via faceplate) =====
-      { k: 'ffa',   t: 'ind', x: 402, y: 640, tag: 'FFIC-321404A', bind: 'ratio.NC_A', u: 'N/C', dec: 3, fp: 'SIC_321950' },
-      { k: 'ffb',   t: 'ind', x: 399, y: 660, tag: 'FFIC-321404B', bind: 'ratio.NC_B', u: 'N/C', dec: 3, fp: 'SIC_321951' },
+      { k: 'ffa',   t: 'ind', x: 402, y: 640, tag: 'FFIC-321404A', bind: 'ratio.PV', u: 'N/C', dec: 3, fp: 'SIC_321950' },
+      { k: 'ffb',   t: 'ind', x: 399, y: 660, tag: 'FFIC-321404B', bind: 'ratio.PV', u: 'N/C', dec: 3, fp: 'SIC_321951' },
       { k: 's50',   t: 'ind', x: 528, y: 640, tag: 'SIC-321950', bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
       { k: 's51',   t: 'ind', x: 528, y: 660, tag: 'SIC-321951', bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
       // ===== 329 STEAM BOUNDARY =====

@@ -135,11 +135,23 @@ Left-click any `*IC-3xxxx` indicator opens a faceplate (regex `CTRL_RE = /[A-Z]I
 setpoint — the master rewrites it every tick — so the operator's only handle there is the master's
 own setpoint, and that is what the slave's faceplate must expose. `SIC-321950/951` carry
 `FFIC-321404A/B SP` (the loop N/C target, `ratio.SP`, written with `ratio_set`) editable in CAS
-only, plus that pump's own N/C contribution (`ratio.NC_A`/`NC_B`) read-only. Because the
-`FFIC-321404A/B` indicators are wired `fp:'SIC_321950'`/`'SIC_321951'`, clicking either the FFIC or
-the SIC lands on the same field — one setpoint, two ways in. Do NOT put a CAS-bias field on a slave
-faceplate: it reads as the controlled variable, sits at 0.0 by design, and is not the handle the
-operator needs.
+only, plus its PV. Because the `FFIC-321404A/B` indicators are wired
+`fp:'SIC_321950'`/`'SIC_321951'`, clicking either the FFIC or the SIC lands on the same field — one
+setpoint, two ways in. Do NOT put a CAS-bias field on a slave faceplate: it reads as the controlled
+variable, sits at 0.0 by design, and is not the handle the operator needs.
+
+**Both FFICs read the same numbers.** There is one ratio loop: `ratio_SP` sets a single NH3 mass
+demand and `open_cas` splits it across the running pumps, so `FFIC-321404A` and `FFIC-321404B` bind
+`ratio.PV` — not `ratio.NC_A`/`NC_B`. Those per-pump shares are what each pump *happens* to be
+contributing (0.000 for a stopped standby), not a target either controller works to; publishing one
+as an FFIC PV makes a healthy loop look failed.
+
+**A stopped pump's controller is forced to MAN.** `step_sim` holds `SIC-321950/951` in MAN (output
+0) while its pump is off: an AUTO or CAS controller on a dead machine winds against a PV that cannot
+move, and the cascade would be commanding speed to something that is not turning. The faceplate
+greys AUTO/CAS/OOS while stopped and shows `PUMP STOPPED — MAN` on the status line, so the operator
+is never offered a mode the engine will revert next tick. Applies to any speed controller on a
+startable machine.
 
 **Mode-button + live mode-tag color convention (mandatory):**
 * MAN → red `#ff3030` · AUTO → green `#22ff22` · CAS → yellow `#ffd000` · OOS → orange `#ff8a3d`.
