@@ -425,6 +425,303 @@ and a `vapour_collapse` term carrying bar/h-per-K gains on the live header satur
 That work was reverted at 2ce4869 and is not in the build; residual 1 above is the same defect it
 diagnosed, closed here without the extra gains.
 
+## Loss of 322E003 Condensation: the CCW Consequence Chain
+
+Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.
+`scrub_322e003` computed its off-gas / overflow split from wash stoichiometry alone and never read
+`m_ccw_kgh`, so with the CCW at zero the module still condensed the design make. The only symptom
+was `TT-329125` running from its 95 C pin up to the 185 C process ceiling. The chain now runs end to
+end, in four links.
+
+### 1. The cooling-limited condensation gate
+
+`rho_cond` already existed and was already right — condensation capacity over vent demand — but it
+was computed *after* the scrubber call and fed only `nh3_slip`, whose second factor
+`max(n_top[NH3] - STRIP_TOP_NH3_DES, 0)` is identically zero at the design overhead. It is now
+hoisted above the call and passed in as `cool_frac`, which is what makes it a physical gate rather
+than a diagnostic:
+
+```text
+f_th      = (T_cond - T_ccw,in) / (T_cond - T_ccw,in,des)      (warmer supply -> less driving force)
+rho_cond  = (m_ccw/m_ccw,des) * f_th / (s*nu)                   nu = PT-329201 / PT_des
+cool_frac = 1  if rho_cond >= 1 - 1e-6  else clamp(rho_cond, 0, 1)
+```
+
+Below unity the fraction `(1 - cool_frac)` of what design would have condensed stays in the vapour
+phase. It is moved kmol for kmol from the bottom overflow back into the off-gas, so the node's
+closure residual is untouched, and only the *condensed* part can flash — the 323P001 wash liquid
+stays liquid, so the sump cannot be artificially dried out.
+
+The dead band exists because `rho_cond` is built from live controller PVs and TIC-329005 settles on
+80.00000005 C, not a bit-exact 80.0, leaving `rho_cond` at `1 - 5.3e-10`. That is the supply-T
+loop's own residual, four orders below any instrument resolution, and treating it as a real deficit
+would put a non-zero forcing term into the design fixed point.
+
+### 2. HV-322604 is not a relief path
+
+The gate hands the off-gas stream up to ~16.5 t/h of un-condensed vapour against the 5.9 t/h
+reconciled inert purge. The valve model scales what it is offered (`m = offered * valve_factor`),
+which is correct near design and wrong here: a DN-24 / Kvs 2.1 seat passes what its Kv, dP and
+upstream density allow, and offering it three times the gas does not make it pass three times the
+gas. Left uncapped it would simply vent the excess to 322C001, the boundary balance would close, and
+the excursion would vanish — the retained vapour *is* the event. `Valve322604` therefore carries a
+hydraulic ceiling:
+
+```text
+cap        = m_offgas,offered - m_uncond      (the purge the shell would have made at full CCW)
+pass_frac  = min(1, cap / m_offgas,offered)
+m_vent     = offered * valve_factor * pass_frac
+```
+
+Composition is untouched — the seat passes the live mixture, it does not fractionate. At design
+`m_uncond = 0`, so `cap` equals the offered mass to the last bit, `pass_frac` is exactly 1.0, and
+every downstream 328 anchor is unchanged.
+
+The field description of this valve makes the point more strongly than the ceiling does. The
+pressure ratio across it is ~4/140 = 0.028, far below the critical ~0.5, so the flow is **choked**:
+"once sonic velocity is reached, the mass flow rate becomes independent of downstream pressure
+fluctuations... material transfer is strictly a function of upstream pressure, valve opening area,
+and fluid density." A choked seat categorically cannot pass more because more was offered. The model
+still uses the sub-critical `sqrt(dP)` form (the ISA 75.01.01 choked model in `consequence.py` is
+written but not wired into `main.py` — see the handoff), so the ceiling is what carries that physics
+for now.
+
+The valve is also *not* under automatic pressure control: the reference calls it the "HP Scrubber
+Off-Gas Automatic Hand Valve... operated via the DCS as a remote-manual throttling or pressure
+control valve". Opening it on a rising synthesis pressure is the operator's move, which is why it is
+driven by HIC-322604 and exercised as an operator action in the test rather than by a controller.
+
+### 3. The retained vapour is an inventory, and the pressure ODE reads its rate
+
+The five-term boundary balance in the section above cannot see this event at all. 322E003 sits
+*inside* the HP envelope, so mass that fails to condense crosses no boundary: `(m_in - m_out)` holds
+its design value and `dP/dt` reads zero while the loop fills with vapour. What changes is the
+specific volume of the retained mass. A kilogram held as vapour at 140.7 bar a occupies 1/111.0 m3
+instead of the 1/1133 m3 it would occupy as carbamate liquid, and in an isochoric loop that
+frustrated expansion is pressure. Converting the volume demand back onto the mass basis `C_loop`
+already integrates:
+
+```text
+V_dot     = m_uncond * (1/rho_v - 1/rho_l)
+m_pseudo  = V_dot * rho_v = m_uncond * (1 - rho_v/rho_l) = m_uncond * 0.90203
+```
+
+Both densities are PFD rows, not calibration: stream 204 is the 322E003 off-gas at 140.7 bar a
+(111.0 kg/m3) and stream 206 the 322E003 overflow to 322F001 at the same pressure (1133 kg/m3) —
+the two phases the mass is choosing between.
+
+The state that carries this is an **inventory**, not a rate. The HP loop recirculates, so the
+backlog comes back past the shell at `M/tau` and the fraction `cool_frac` of it condenses on that
+pass. `tau` is `SYN_P_TAU_MIN` = 4 min, the loop's own declared vapour-inventory constant:
+
+```text
+dM/dt          = m_uncond - cool_frac * M / tau
+m_phase_shift  = 0.90203 * dM/dt
+dP/dt          = [ (m_in - m_out) - f_loop*R_des + m_phase_shift ] / C_loop
+```
+
+Forcing the ODE with the *net* rate makes the integral of the phase-shift term exactly
+`0.90203 * M / C_loop`, so it adds nothing permanent: restore the CCW, `cool_frac` returns to 1, the
+backlog condenses out over `tau`, and the pressure it was holding up comes back off. A partial
+deficit settles at `M* = (1-cf)/cf * make * tau`; a total loss (`cool_frac = 0`) condenses nothing on
+any pass and `M` ramps until the feed is cut.
+
+### 4. LT-329501 reads a two-phase column, not a mass
+
+`s.scrub_level_pct` is the true inventory from the sump mass ODE. It is what the condensation choke
+and the ejector suction head see, and during a CCW loss it *falls* — the drain to 322F001 keeps
+pulling while the condensate make collapses. LT-329501 is a DP cell and does not read mass; it reads
+the hydrostatic head `rho_mix * g * h` of whatever column stands between its taps. Off-gas that is
+no longer being condensed heats the pool, it flashes, `rho_mix = (1-alpha)*rho_l + alpha*rho_v`
+collapses with the void fraction, and the column swells upward to hold the same mass. Over a fast
+transient the swell beats the density loss, so the cell reads high while the vessel is draining:
+
+The reading is not only high, it is **unsteady**. Slugs and bubbles passing the taps make the head
+fluctuate, so the cell hunts — which is half of why operators mistrust it at exactly the moment it
+matters. Two incommensurate periods (17 s slug, 7.3 s bubble) off the plant clock keep that
+deterministic and reproducible rather than pseudo-random: a training simulator has to replay the
+same excursion the same way. Both terms carry the same void fraction:
+
+```text
+alpha      = 1 - cool_frac
+swell_pct  = SCRUB_SWELL_PCT_MAX * alpha                                SCRUB_SWELL_PCT_MAX = 18.0
+noise_pct  = SCRUB_SWELL_NOISE_PCT * alpha
+             * (sin(2*pi*t/17.0) + 0.6*sin(2*pi*t/7.3)) / 1.6           SCRUB_SWELL_NOISE_PCT = 2.0
+LT-329501  = clamp(L_true + swell_pct + noise_pct, 0, 100)              (published indication)
+```
+
+`LT_329501_true`, `LT_329501_swell` and `LT_329501_noise` are published alongside it so the split is
+inspectable. At design `cool_frac` is exactly 1, so `alpha` is exactly 0, both overlays vanish, and
+the indication *is* the true level.
+
+### Trip 22.2 — synthesis high-high
+
+A latching boolean state machine alongside 21.2 / 21.4 / 22.1. `SYN_P_TRIP_BARA = 155.0 bar a` is an
+**assumption, not a plant document** — no trip schedule in `References/` carries a synthesis
+high-high setpoint, and neither the 322E003 nor the 322R001 datasheet PDF yields machine-readable
+text. It sits ~10 % above the 140.7 design and above the 151.2 bar a PIC-322203 over-pressure SP, so
+the CO2-line relief still acts first. `SYN_P_TRIP_RESET_BARA = 148.0 bar a` is the hysteresis floor.
+
+```text
+latched:      trips[22_2] = P_syn >= 148.0     (reset-block band; the latch does not self-clear)
+not latched:  trips[22_2] = P_syn >= 155.0     (initiator -> latch)
+action while latched: XV-322902 shut, 321P002 A/B stopped, SIC-321950/951 -> MAN 0
+```
+
+Cutting XV-322902 and both HP-NH3 pumps takes `m_in` to zero, so the boundary balance goes sharply
+negative and the off-gas make collapses with `co2_scale`.
+
+### 5. What was blocking the last two links: the CO2 delivery ceiling
+
+With links 1–4 in place the excursion still could not reach the interlock, and the reason was not
+in this chain at all. `phi_HP`, the CO2 feed's delivery taper, is driven by the head the 320K002
+compressor can develop over the loop:
+
+```text
+P_line_ceil  = <compressor deliverable ceiling>
+P_line_float = min(P_syn + dP_HP_des, P_line_ceil)
+phi_HP       = min(1, sqrt(max(P_line - P_syn, 0) / dP_HP_des))
+```
+
+That ceiling was `SYN_P_MAX_BARA + DP_HP_DES` = 147.7 bar a — the HPCC's *normal-operating* PFD
+pressure used as a *machine* limit. Two things followed from it, and neither was intended:
+
+- the model's own CO2-line relief (PIC-322203, SP 151.2 bar a) could never open, because the line
+  it protects could never get there — a dead protection layer; and
+- a total loss of 322E003 condensation self-choked its own CO2 feed at 147.7 bar a. The scrubber's
+  condensable make scales with `co2_scale`, so killing the CO2 feed kills the very off-gas that is
+  building the pressure. The excursion stalled 7 bar below the high-high, **trip 21.4 (loss of CO2
+  feed)** latched instead, and the last two links of the chain were unreachable.
+
+The ceiling is now the loop's **mechanical design pressure** plus the design feed dP: a machine
+feeding a loop rated 160 bar g must be able to deliver against that rating — which is the entire
+reason the loop carries a high-high trip at 155.0 and a safety valve at 161.0. PIC-322203's setpoint
+was written as a *rule* ("one design feed-dP above the ceiling", so it never fires inside the band
+the compressor can legitimately deliver), not as the literal 151.2, so it moves with the ceiling and
+stays dormant as its author intended. Leaving the literal behind would have made an
+intentionally-dormant controller the plant's dominant protection: it opened at `P_syn` 147.7, dumped
+the CO2 feed to the vent, and arrested the excursion — protection by accident, from a setpoint
+written never to act.
+
+### 6. SV-32201 — the synthesis-loop safety valve
+
+The layer below the trip in protection order and above it in pressure, and the one whose lifting
+*is* the hazard: it discharges the loop's NH3/CO2 inventory to atmosphere.
+
+```text
+SYN_PSV_SET_BARA = 160.0 barg + 1.013 = 161.01 bar a     (322E003 / 322R001 mechanical design)
+m_psv = SYN_PSV_CAP_KGH * min((P_syn - P_set)/(0.10*P_set), 1)   linear to full lift at 10 % accumulation
+```
+
+It enters the pressure ODE as a real outflow and raises `SYN_PSV_LIFT` + `TOXIC_RELEASE`, with the
+relieved NH3 rate published (`SV_32201_nh3_kgh`, composition taken from the loop's own off-gas
+vector). In a correctly-layered plant it never opens, because the ESD at 155.0 cuts the feeds first
+— `test_ccw_loss_chain.py` asserts exactly that in Phase 2, and exercises the valve itself in
+Phase 4 by driving the pressure past it.
+
+### 7. The LP section: 322C001 is not sized for the HP loop
+
+HV-322604 at its design 50 % opening passes 5.9 t/h and retains the rest (link 2). Open it — which
+is what an operator watching the synthesis pressure climb will do — and its equal-percentage trim
+(R = 50) gives a factor of `50^0.5 * sqrt(dP/dP_des)` ≈ 7.5, so it dumps ~42 t/h of hot uncondensed
+NH3/CO2 into a column that runs at 3.9 bar a. PIC-322201 opens PV-322201 fully and still passes only
+`A328_VENT_DES * 100/67.8` ≈ 8.7 t/h. The rest pressurises the column:
+
+```text
+dP_c001/dt = A328_C001_P_KP * ((m_gcb - m_abs) - m_vent) / 3600
+SV-32253:  set 30 barg + 1.013 = 31.01 bar a (322C001 datasheet), DN 100 on nozzle N11,
+           linear to full capacity at 10 % accumulation; what it passes leaves with the vent
+```
+
+The 322C001 datasheet names this valve and names this upset — "a failure of the upstream HP Scrubber
+cooling system leading to a massive breakthrough of hot, unreacted ammonia and carbon dioxide". Two
+flags mark the two stages: `LP_ABSORBER_OVERLOAD` when the un-absorbed gas exceeds what PV-322201 can
+pass at full stroke, `LP_ABSORBER_RELIEF` when SV-32253 actually lifts. Everything the SV passes
+leaves through the atmospheric stack at the vent's live composition, so the published NH3 slip
+(`vent_nh3_kgh`) *is* the release rate.
+
+### Measured, from the design seed
+
+Both 329P006 pumps stopped, HV-322604 left at its design opening, `dt = 2 s`:
+
+| | design | measured |
+|---|---|---|
+| `cool_frac` | 1.0 | 0.0 |
+| uncondensed off-gas | 0 t/h | 16.453 t/h retained in the loop |
+| HV-322604 vent | 5.9 t/h | 5.9-6.1 t/h (seat-limited; it never carries the excess) |
+| TT-322002 overflow | 178.1 C | 185.0 C (the `SCRUB_T_PROC_C` condensation ceiling) |
+| LT-329501 indication | 50.0 % | spikes to 69.3 %, hunts, then falls with the drain |
+| LT-329501 true level | 50.0 % | 0.0 % (sump empty in ~900 s) |
+| indication minus true | 0.0 | 19.9 % peak (18.0 % swell + up to 2.0 % froth hunt) |
+| AT-322701 reactor N/C | 2.977 | 3.130 (+5.1 %) |
+| per-pass conversion | 54.454 % | 53.458 % |
+| PT-329201 | 140.700 bar a | ramps ~3.9 bar/h to 154.9 bar a |
+| trip 22.2 | clear | **latches at ~13 800 s (3 h 50 min)** |
+| after the ESD | — | CO2 feed 0, both HP-NH3 pumps stopped, PT falls 154.9 -> 127.3 bar a |
+| SV-32201 | shut | never lifts — the ESD acts 6 bar below it |
+
+Same loss with HV-322604 driven to 100 %:
+
+| | design | measured |
+|---|---|---|
+| HV-322604 vent | 5.8 t/h | 41.8 t/h into 322C001 |
+| 322C001 pressure | 3.90 bar a | 32.68 bar a in ~200 s |
+| SV-32253 | shut | lifts, 32.2 t/h |
+| atmospheric NH3 slip | 1 557 kg/h | 20 718 kg/h |
+| PT-329201 | — | 141.1 -> 137.1 bar a — venting *does* relieve the loop |
+
+That last row is the trade the scenario exists to teach: the operator can arrest the synthesis
+excursion with the inert vent, and the price is an order-of-magnitude ammonia release through the
+LP stack and a safety valve lifting on a column rated for a twentieth of the flow.
+
+**The 3 h 50 min to trip is the one number worth arguing with.** The ramp rate is
+`SYN_P_PHASE_GAIN * m_uncond / C_loop` less the boundary terms' pushback, and `C_loop` = 1500 kg/bar
+dominates it. That constant is calibrated to the *cold-start fill* dynamics (it sets the emergent
+FOPTD `tau` that the 2025-06-03 field trend anchors at 57.8 min) and is roughly 25x a vapour-space
+-only estimate for the loop (~75 m3 of vapour at `d(rho)/dP` ≈ 0.8 kg/m3/bar gives ~60 kg/bar). If
+the real excursion should be minutes rather than hours, `C_loop` is the single number to revisit —
+but it cannot be moved without re-deriving the cold-start anchor, so it is left alone and the
+emergent time is reported as it stands.
+
+### Consequence coverage
+
+Every consequence the scenario brief lists, where it lives, and what asserts it. Phase numbers are
+`test_ccw_loss_chain.py`.
+
+| consequence | where | asserted |
+|---|---|---|
+| Condensation reduces or stops | `scrub_322e003` cooling-limited gate (`cool_frac`) | Phase 2: `cool_frac -> 0` |
+| Synthesis pressure rises sharply | retained-vapour inventory + phase-shift term in the loop ODE | Phase 2: PT 140.7 -> 154.9 bar a |
+| Overflow temperature rises | epsilon-NTU bridge; `T_overflow` -> `SCRUB_T_PROC_C` with no heat sink | Phase 2: TT-322002 -> 185.0 C |
+| Actual sump level falls | 322E003 sump mass ODE (condensate make collapses, drain keeps pulling) | Phase 2: `LT_329501_true` 50 -> 0 % |
+| Level transmitter reads high and erratic | two-phase swell + froth-hunt overlay on the DP indication | Phase 2: spike to 69.3 %, peak gap 19.9 %, hunt > 0.5 % of span |
+| Inert vent opens, dumps to the LP section | HV-322604 equal-% capacity (`R^((theta-theta_des)/100) * sqrt(dP/dP_des)`) | Phase 3: 5.9 -> 41.8 t/h into 322C001 |
+| LP section overloads | 322C001 pressure ODE vs PV-322201 at full stroke; `LP_ABSORBER_OVERLOAD` | Phase 3: flag raised, column 3.9 -> 32.7 bar a |
+| Massive atmospheric ammonia slip | live vent composition `y_vent` x `vent_c001` (incl. what SV-32253 passes) | Phase 3: 1 557 -> 20 737 kg/h |
+| PSV lift / uncontrolled NH3 release | SV-32253 on 322C001 (31.01 bar a); SV-32201 on the loop (161.01 bar a) | Phase 3: SV-32253 lifts 32.2 t/h. Phase 4: SV-32201 lifts 99.0 t/h carrying 27 087 kg/h NH3, `TOXIC_RELEASE` raised |
+| Emergency plant trip on high-high | trip 22.2 latch -> XV-322902 shut, both 321P002 stopped, SIC-321950/951 MAN 0 | Phase 2: latches at 155.0 bar a. Phase 4: latch/hysteresis/reset |
+| Reactor / HPCC imbalance, N/C and conversion | hot overflow -> ejector -> HPCC -> reactor; AT-322701 and `X_conv` | Phase 2: N/C 2.977 -> 3.130, conversion 54.454 -> 53.458 % |
+
+Two of the brief's statements are **not** reproduced, and deliberately:
+
+- *"the pressure control valves cannot relieve fast enough, so the loop PSVs lift"* — in this model
+  they never need to, because the ESD at 155.0 bar a cuts both feeds 6 bar below SV-32201. That is
+  correct protection layering and Phase 2 asserts it. SV-32201 is exercised directly in Phase 4 by
+  driving the pressure past it, i.e. by assuming the ESD has failed.
+- *"quickly"* — see the note on `C_loop` above. The excursion takes 3 h 50 min to reach the trip at
+  full load, and the capacitance that sets that is calibrated to a different transient.
+
+### Activity-model domain guard
+
+
+The same collapse walks the 324 evaporator past the Extended-UNIQUAC validity window
+(372.15-473.15 K, 0.02-1.00 bar a), and `solve_urea_mass_fraction_fast` *raises* outside it, which
+killed the whole engine tick. `evap_w_eq` now saturates its arguments at the window edge — the
+standard treatment for a correlation outside its range, and the reason the returned equilibrium
+freezes at the nearest valid state instead of being extrapolated into nonsense — and
+`evap_thermo_diag` reports `OUTSIDE_MODEL_DOMAIN` in the telemetry rather than throwing from the
+diagnostics path. The design point sits inside the window, so every anchored value is untouched.
+
 ## PT-323201 / PIC-323202: One Gas Node, No Valve
 
 Stream 305 runs from the 323C003 overhead straight into 323E003; there is no valve on it. The
@@ -586,6 +883,149 @@ component, energy, pressure, or holdup equations and does not retune PID control
 times, exchanger thermal masses, hydraulic inventories, and existing backend controller-PV filters
 remain the owners of physical process dynamics; applying those same lags again inside the equipment
 balances would double-count inertia.
+
+## HMI Page Geometry and the Level Bargraph
+
+Screens 321-1, 322-1 and 322-2 are generated from the PowerPoint page drawings in
+`Urea Simulation Docs/Equipment Drawing/UI Pages`. Each background PNG is that slide with the
+overlay-supplied shapes deleted (indicator tag boxes, pump and XV icons, hand-switch buttons,
+level bargraphs) and exported at exactly 1366x720. Overlay coordinates are the deleted shapes'
+own centres, so an overlay always lands where its symbol was drawn. The slide canvas is
+12192000 x 6858000 EMU, giving
+
+```text
+x_stage = (x_emu + cx_emu/2) * 1366 / 12192000
+y_stage = (y_emu + cy_emu/2) *  720 /  6858000
+```
+
+The 16:9 slide is stretched, not letterboxed, onto the 1366x720 stage (`background-size:100% 100%`),
+which is why the two axes carry different scale factors. Nested group shapes are resolved through
+the group's `chOff`/`chExt` child-space transform before the mapping is applied.
+
+Icon overlays (pumps, XVs) also carry the slide's rotation. The slide is rendered rotate-then-
+stretch, so the overlay reproduces that order rather than rotating the already-stretched box:
+the image is drawn at its un-stretched size `(w/R, h)`, rotated, then scaled back in x by
+`R = (1366/12192000)/(720/6858000) = 1.06719`. For a 90-degree icon this yields an on-stage
+footprint of `cy*sx` by `cx*sy`, which is what PowerPoint exports; at 0 degrees it collapses to the
+plain `w` by `h` box. 322-2's XV-322901 is drawn at 90 degrees on the vertical leg and the two
+329P006 pumps at 180 degrees.
+
+`t: 'bar'` renders the vertical level bargraph drawn on 322R001, 322E001 and 322E003. It is a pure
+display of an already-published percentage - it introduces no state and no equation of its own:
+
+```text
+h_fill / h_box = clamp(PV, 0, 100) / 100
+```
+
+`PV` is the same packet leaf its paired numeric indicator reads (`REACT_322R001.LT_322504`,
+`STRIP_322E001.LIC_322501.pv`, `SCRUB_322E003.LT_329501`), so the bar and the number can never
+disagree, and both inherit the turbulent-level FOPDT constants tabulated above. An unresolved or
+non-numeric bind renders the empty white frame at zero fill rather than a misleading full bar.
+
+## 329P006 A/B: CCW Circulation Availability
+
+The 322E003 shell-side tempered-water loop has one motive source, the 329P006 A/B pumps. FV-329409
+is a throttle across the pump head, not a source, so the flow the loop actually delivers is the
+valve's characteristic gated by pump availability:
+
+```text
+frac_pump = 1  if (P329P006A or P329P006B) else 0
+F_ss      = F_des * (OP_FV329409 / OP_des) * frac_pump
+dF/dt     = (F_ss - F) / tau        tau = FIC_329409_TAU_S = 3 s
+```
+
+The two machines are duty/standby on a common header: either alone develops the full design head,
+so `frac_pump` is 1.0 for one **or** both and is deliberately not additive - two centrifugal pumps
+in parallel on this system curve do not double the flow. With neither running there is no head,
+`F_ss = 0`, and FIC-329409 decays to zero over the 3 s flow lag (the coast-down).
+
+Only the *thermal* half of the consequence chain was in the model when the pumps were wired in.
+`m_ccw -> 0` drives the single-stream effectiveness to unity, so the CCW leaves at the condensing
+temperature instead of its 95 C design pin, and the condensation capacity ratio collapses:
+
+```text
+C_ccw   = max(m_ccw*cp/3600, 1e-6)      eps = 1 - exp(-UA/C_ccw)  ->  1
+T_ccw,out -> T_overflow -> T_proc                (bounded at 185 C, not +inf)
+rho_cond  = (m_ccw/m_ccw,des) * f_th / (s*nu)  ->  0
+```
+
+The pressure half did not follow. `rho_cond` reached the pressure term only through
+`nh3_slip = max(1-rho_cond,0) * max(n_top[NH3] - STRIP_TOP_NH3_DES, 0)`, whose second factor is
+identically zero at the design overhead, so `rho_cond -> 0` multiplied by nothing and PT-329201 sat
+flat through the entire excursion. That is closed in *Loss of 322E003 Condensation: the CCW
+Consequence Chain* above: `rho_cond` now enters `scrub_322e003` as the condensation gate, the
+un-condensed make is retained rather than vented, and the phase-shift term integrates it into
+PT-329201. FIC-329409 in AUTO is reverse-acting and drives FV-329409 to 100 % chasing a flow no valve
+can produce - correct controller behaviour, and the reason a restart surges before settling.
+
+Neither pump carries a trip latch or a start interlock. Stopping both is a legitimate operator
+action and is one of the instructive ones, so nothing in `handle_cmd` blocks it.
+
+## XV-322903: 322E003 Sump-Overflow Isolation
+
+`XV-322903` is a block valve on the 322E003 sump overflow line, downstream of the LT-329501 level
+leg and upstream of the 322F001 ejector suction. It is not a throttle, so it enters
+`ejector_322f001` as a boolean gate on the entrainment rather than as an opening:
+
+```text
+m_suc = capacity                     (XV-322903 open)
+m_suc = 0                            (XV-322903 shut)
+```
+
+`capacity` is unchanged - the jet pump still develops its suction, there is simply nothing on the
+line to entrain. The consequence propagates through the sump inventory ODE that was already there:
+
+```text
+d(M_scrub)/dt = m_cond_in - m_suc
+```
+
+With the valve shut, `m_suc = 0` and the whole condensation make accumulates. Measured from the
+design seed: `LT-329501` rises 50.0 -> 62.5 % in 60 s of plant time, and `TT-322012` falls
+105.3 -> 79.3 C because the ejector discharge is then motive NH3 alone (~29 C) with none of the hot
+suction carbamate blended into it. The default is OPEN, so every design and reference call to
+`ejector_322f001` is bit-exact and the design hold is unaffected.
+
+The sump has no level controller, so re-opening the valve restores design entrainment but does not
+drain the accumulated inventory: at design, entrainment equals overflow and `dM/dt` returns to zero
+at the new level. That is the existing model's behaviour - the gravity-head multiplier
+(`scrub_level_frac`) is computed but deliberately not applied to `m_suc` - not a property of this
+valve.
+
+## Pump Faceplate: START / STOP, One Live Button
+
+No pump anywhere in the OTS starts or stops on a click. Every pump symbol -- the 321P002 A/B button
+and icon on 321-1, and the 329P006 A/B overlays on 322-1 -- opens the same faceplate, and the
+command is issued from there.
+
+Exactly one of the two buttons is ever live:
+
+```text
+pump STOPPED  ->  START green (.primary) and clickable, STOP transparent, dim and disabled
+pump RUNNING  ->  STOP  green (.primary) and clickable, START transparent, dim and disabled
+```
+
+The disabled half is a real `disabled` attribute, not a style: it cannot be clicked, and its
+handler returns early even if something dispatches one. So the operator can never command the state
+the plant is already in, and the faceplate cannot issue a command that contradicts what it displays.
+
+The buttons send an **explicit** `{"type":"pump_toggle","id":...,"on":true|false}` rather than a
+flip. `handle_cmd` treats a present `on` as START/STOP and an absent one as the legacy toggle, so
+every existing caller and probe is unchanged. The reason for the explicit form is that the faceplate
+renders from the last telemetry packet and is therefore up to one tick behind the engine: a toggle
+issued from a stale view can invert the operator's intent, an explicit command cannot.
+
+Interlock gating is untouched and is now *visible*. The faceplate's third line mirrors what
+`handle_cmd` will actually do with a START on 321P002 A/B:
+
+| trip state | line reads | what START does |
+|---|---|---|
+| no latch | `CLEAR` | starts |
+| latched, cause recovered | `TRIP 21.4 LATCHED (clears on START)` | auto-acknowledges the latch, then starts |
+| latched, cause still live | `TRIP 21.4 ACTIVE` | refused; the pump stays stopped and the latch holds |
+
+START stays green and clickable in all three cases -- availability follows the *pump state*, per
+spec -- and the interlock line is what tells the operator why a START did nothing. The 329P006 A/B
+CCW pumps carry no trip latch, so their line reads `n/a`.
 
 ## Assumptions and Limits
 

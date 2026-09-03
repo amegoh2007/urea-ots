@@ -119,11 +119,45 @@ def evap_w_eq(T_C: float, P_bara: float, w_des: float, T_des: float, P_des: floa
     zero and the liquid model reduces to binary UNIQUAC. The design HMB point
     is preserved exactly while its off-design slope comes from the model.
     """
-    w_model = extended_uniquac.solve_urea_mass_fraction_fast(T_C + 273.15, P_bara)
-    w_model_des = extended_uniquac.solve_urea_mass_fraction_fast(
-        T_des + 273.15, P_des
-    )
+    # The activity model carries a declared validity window and RAISES outside it.  During a severe
+    # upset the 324 evaporator state can be driven past that window (a total 322E003 CCW loss
+    # collapses the whole 322 -> 323 -> 324 chain, and the 324F001 temperature walks off), and an
+    # exception there kills the whole engine tick -- an OTS must degrade, not crash.  Saturating the
+    # arguments at the window edge is the standard treatment for a correlation outside its range:
+    # the returned equilibrium freezes at the nearest valid state instead of being extrapolated into
+    # nonsense.  The design point sits inside the window, so every anchored value is untouched.
+    _t_lo, _t_hi = extended_uniquac.VALID_TEMPERATURE_K
+    _p_lo, _p_hi = extended_uniquac.VALID_PRESSURE_BARA
+    # Inside the window the solve can STILL fail -- a (T,P) pair whose water-vapour equilibrium has no
+    # root in w in [0,1] is a valid state for the correlation to refuse.  That is also not a reason to
+    # stop the plant: the anchored form already carries the design HMB point, so the honest fallback
+    # is zero departure from it (w_des), which is what the model reduces to when it has nothing to add.
+    _t_lo, _t_hi = extended_uniquac.VALID_TEMPERATURE_K
+    _p_lo, _p_hi = extended_uniquac.VALID_PRESSURE_BARA
+    _tk = clamp(T_C + 273.15, _t_lo, _t_hi) if math.isfinite(T_C) else _t_lo
+    _pb = clamp(P_bara, _p_lo, _p_hi) if math.isfinite(P_bara) else _p_lo
+    try:
+        w_model = extended_uniquac.solve_urea_mass_fraction_fast(_tk, _pb)
+        w_model_des = extended_uniquac.solve_urea_mass_fraction_fast(
+            T_des + 273.15, P_des
+        )
+    except (extended_uniquac.UnsupportedThermodynamicDomain, ValueError):
+        return clamp(w_des, 1.0e-9, 1.0 - 1.0e-9)              # no departure the model can defend
     return clamp(w_des + (w_model - w_model_des), 1.0e-9, 1.0 - 1.0e-9)
+
+
+def evap_thermo_diag(T_C: float, P_bara: float, w_eq: float) -> tuple:
+    """(validity_status, P-x residual) for an evaporator stage, safe outside the model's window.
+
+    Companion to evap_w_eq: the same upset that pushes the stage past the activity model's declared
+    validity window would make validity_status()/px_equilibrium_residual() RAISE in the telemetry
+    path.  Report the excursion as a status instead of killing the tick -- the point of publishing
+    the status at all is to say when the solve is not validated."""
+    try:
+        return (extended_uniquac.validity_status(T_C + 273.15, P_bara),
+                extended_uniquac.px_equilibrium_residual(w_eq, T_C + 273.15, P_bara))
+    except (extended_uniquac.UnsupportedThermodynamicDomain, ValueError):
+        return ("OUTSIDE_MODEL_DOMAIN", None)
 
 
 # ===================================================================
@@ -1336,6 +1370,13 @@ A328_ABS_DES  = A328_M756_DES - A328_M755_DES - A328_CPL_DES # 130 NH3/CO2 absor
 A328_C001_T = 43.0 ; A328_M755_T = 40.0
 A328_C001_P_BARA = 3.9 ; A328_C001_P_KP = 0.02
 A328_PIC_OP_DES = 67.8                                      # PIC-322201 vent stroke
+# SV-32253 on nozzle N11 (DN 100) -- 322C001's mechanical over-pressure protection.  Set pressure =
+# the vessel design pressure from the 322C001 datasheet (30 bar g / 160 C design temperature); the
+# datasheet names this valve and names an HP-Scrubber cooling failure as the upset it protects
+# against.  Linear to full capacity at 10 % accumulation, DN 100 sized to pass the LP-section load.
+A328_C001_SV_SET_BARA   = 30.0 + P_ATM_BAR                  # 31.01 bar a, SV-32253 set pressure
+A328_C001_SV_ACCUM_BAR  = 0.10 * A328_C001_SV_SET_BARA      # bar, 10 % accumulation to full lift
+A328_C001_SV_CAP_KGH    = 60_000.0                          # kg/h at full lift (DN 100 orifice)
 A328_LIC_OP_DES = 50.0                                      # LIC-322502 -> LV-322502 stroke
 A328_C001_M_TAU_S = 600.0
 A328_C001_M_DES = A328_M756_DES/3600.0 * A328_C001_M_TAU_S  # 5559.7 kg
@@ -2480,7 +2521,7 @@ R324_FIC405_OP_DES = 50.0                            # % FIC-335405 slave design
 
 
 def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float,
-                    scrub_level_frac: float = 1.0) -> dict:
+                    scrub_level_frac: float = 1.0, xv903_open: bool = True) -> dict:
     """322F001 HP ejector: mix live motive NH3 with entrained 322E003 carbamate.
     Entrainment capacity is set by the HV-322602 spindle opening (HIC-322602).  Motive NH3
     is supplied by the 321P002 A/B POSITIVE-DISPLACEMENT (triplex) pumps -> motive MASS flow
@@ -2536,6 +2577,11 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     # < EJ_HYD_FRAC_MAX) the cap is inactive -> bit-exact.  On flood (frac->2.0) it caps the recirculation,
     # so the un-pumpable overflow backs up the 322E003 sump instead of self-amplifying the synthesis loop.
     m_suc    = capacity                        # actual entrainment = capacity (no head multiplier)
+    # XV-322903 (322E003 overflow -> ejector suction).  A block valve, not a throttle: shut, the
+    #   suction line carries nothing and the jet pump entrains nothing, whatever the spindle or the
+    #   sump head are doing.  Default OPEN keeps every design/reference call bit-exact.
+    if not xv903_open:
+        m_suc = 0.0
     suction  = {k: m_suc * EJ_CARB_FRAC[k] for k in MW_COMP}
     disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
     m_d   = sum(disch.values())
@@ -3395,6 +3441,7 @@ REACT_FWD_TAU_MIN  = 8.0         # τ_fwd: washout time constant (min) ≈ 322E0
 # AT-322701 analyzer: atom-count N/C molar ratio of 322R001 overflow (Σnᵢ·#Nᵢ)/(Σnᵢ·#Cᵢ)
 REACT_N_ATOMS = {"NH3": 1, "Urea": 2, "Biuret": 3, "N2": 2}
 REACT_C_ATOMS = {"CO2": 1, "Urea": 1, "Biuret": 2, "CH4": 1}
+REACT_NC_SPAN_MAX = 99.99        # -, AT-322701 over-range indication (analyzer span ceiling)
 # statics (display only): H 25000 mm, ID 2950 mm, 11 sieve trays, volume 191 m³
 
 # ----- 322E003 HP Scrubber (reactive falling-film absorber, pinned split-fraction) -----------
@@ -3518,6 +3565,65 @@ SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant
 SYN_P_TAU_FILL_MIN  = 57.8       # min, cold-start (empty-loop) pressurisation tau (06-03 Section 1.2 FOPTD)
 SYN_P_MIN_BARA      = 120.0      # bar a, PT clamp floor
 SYN_P_MAX_BARA      = HPCC_P_DES_BARA  # 144.2 bar a, PT ceiling = feed-supply head (CO2/HPCC/ejector all 144.2); loop cannot exceed feed delivery P
+# --- Loss-of-condensation consequence chain (322E003 shell-side cooling) -------------------------
+# ASSUMPTION, not a plant document: no trip schedule in References/ carries a synthesis high-high
+#   setpoint, and neither the 322E003 nor the 322R001 datasheet PDF yields machine-readable text.
+#   155.0 bar a (~154 barg) is the middle of the 150-160 bar band quoted for this service; it sits
+#   ~10 % above the 140.7 design and ABOVE the 151.2 bar a PIC-322203 over-pressure SP, so the
+#   CO2-line relief still acts first (correct protection layering).  One-line change when the trip
+#   schedule turns up.
+SYN_P_TRIP_BARA     = 155.0   # bar a, trip 22.2 synthesis high-high -> ESD (cuts CO2 + NH3 feed)
+SYN_P_TRIP_RESET_BARA = 148.0 # bar a, live condition clears below this (reset still needs the operator)
+# HP-loop mechanical design pressure and the last-resort relief that protects it.  160 bar g is the
+#   322E003 / 322R001 datasheet figure (quoted in References/Gaps Closure/CCW cutoff/).  SV-32201 is
+#   the synthesis-loop safety valve: it is the LAST layer, below the trip in protection order and
+#   above it in pressure, and lifting it is an UNCONTROLLED ATMOSPHERIC RELEASE OF AMMONIA -- the
+#   outcome trip 22.2 exists to prevent.  Set at the mechanical design pressure, conventional
+#   practice for a vessel PSV.  Capacity: a DN 100 orifice sized to pass the full synthesis
+#   inventory rate; modelled as a linear over-pressure characteristic reaching SYN_PSV_CAP_KGH at
+#   10 % accumulation, which is the ASME/API accumulation allowance for a single relieving device.
+SYN_P_MECH_DESIGN_BARG = 160.0                                # bar g, 322E003 / 322R001 datasheet
+SYN_PSV_SET_BARA    = SYN_P_MECH_DESIGN_BARG + P_ATM_BAR      # 161.01 bar a, SV-32201 set pressure
+SYN_PSV_ACCUM_BAR   = 0.10 * SYN_PSV_SET_BARA                 # bar, 10 % accumulation to full lift
+SYN_PSV_CAP_KGH     = 200_000.0                               # kg/h at full lift (> total loop feed)
+# Two-phase level swell on LT-329501.  A boiling carbamate sump froths, and a DP transmitter reads
+#   the aerated column as a taller liquid leg than the mass actually present -- the classic operator
+#   trap: the indication rises while the real inventory is draining.  Full scale at total loss of
+#   condensation; identically 0 while the shell is condensing normally, so design stays bit-exact.
+SCRUB_SWELL_PCT_MAX = 18.0    # % of span added to the INDICATION at cool_frac = 0
+# ...and the reading is not just high, it is UNSTEADY.  A DP cell straddling a boiling, frothing
+#   column sees the head fluctuate as slugs and bubbles pass its taps -- the reading hunts, which is
+#   half of why operators mistrust it at exactly the moment it matters.  Two incommensurate periods
+#   (17 s and 7.3 s, the slug and bubble scales) keep it deterministic and reproducible instead of
+#   pseudo-random: a training simulator must replay the same excursion the same way.  Scaled by the
+#   same void fraction as the swell, so it is identically 0 at cool_frac = 1 and design is bit-exact.
+SCRUB_SWELL_NOISE_PCT = 2.0   # +/- % of span on the INDICATION at cool_frac = 0
+SCRUB_SWELL_NOISE_T1_S = 17.0 # s, slug period
+SCRUB_SWELL_NOISE_T2_S = 7.3  # s, bubble period
+# Condensation-gate dead band.  rho_cond is built from live controller PVs, and TIC-329005 settles
+#   on 80.00000005 C rather than a bit-exact 80.0, which leaves rho_cond at 1 - 5.3e-10 at the
+#   design seed.  A capacity deficit that small is not a physical deficit -- it is the supply-T
+#   loop's own residual, four orders below any instrument resolution -- so anything within
+#   SCRUB_COOL_FRAC_EPS of unity is taken as full capacity.  This is what keeps the gate identically
+#   inert at design (uncondensed mass == 0 exactly -> the phase-shift and swell terms below vanish).
+SCRUB_COOL_FRAC_EPS = 1.0e-6  # -, cool_frac >= 1 - eps counts as full condensation capacity
+# --- Phase-shift vapour accumulation (loss of condensation -> PT-329201) -----------------------
+# A boundary mass balance cannot see this event.  322E003 sits INSIDE the synthesis loop, so
+#   off-gas that fails to condense does not cross any loop boundary -- (in - out) stays at its
+#   design value and dP/dt reads zero while the loop fills with vapour.  What actually changes is
+#   the SPECIFIC VOLUME of the retained mass: a kilogram held as vapour at 140.7 bar a occupies
+#   1/111.0 m3 instead of the 1/1133 m3 it would occupy as carbamate liquid.  In an isochoric loop
+#   that frustrated expansion is pressure.  Converting the volume demand back to the vapour-mass
+#   basis the ODE already integrates (C_loop is kg of loop vapour per bar):
+#       V_dot   = m_uncond*(1/rho_v - 1/rho_l)
+#       m_pseudo = V_dot*rho_v = m_uncond*(1 - rho_v/rho_l) = m_uncond*SYN_P_PHASE_GAIN
+#   Both densities are PFD rows, not calibration: stream 204 is the 322E003 off-gas (140.7 bar a,
+#   114 C) and stream 206 the 322E003 overflow to 322F001 (140.7 bar a, 165 C) -- the two phases the
+#   mass is choosing between, read at the same pressure.  m_uncond == 0 at design, so the term is
+#   identically absent there and PT-329201 holds 140.7 bar a bit-exact.
+SYN_P_PHASE_RHO_V   = 111.0   # kg/m3, 322E003 off-gas density (PFD stream 204 @ 140.7 bar a)
+SYN_P_PHASE_RHO_L   = 1133.0  # kg/m3, 322E003 overflow density (PFD stream 206 @ 140.7 bar a)
+SYN_P_PHASE_GAIN    = 1.0 - SYN_P_PHASE_RHO_V / SYN_P_PHASE_RHO_L   # 0.90203, vapour-hold-up fraction
 # --- PT-329201 lumped HP-loop mass accumulator: design boundary closure ------------------------
 # The loop-pressure ODE at the foot of step_sim() integrates (in - out) over the loop's mass
 # capacity.  Its five boundary terms are the model's OWN reconciled design flows, and two of them
@@ -3926,7 +4032,8 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
                   m_ccw_kgh: float, vent_ratio: float = 1.0, nc_act: float = None,
                   hic604_pct: float = None,
                   liq_carry_kmolh: dict = None, t_carry_c: float = None,
-                  choke_level_pct: float = None, spindle_phi: float = 1.0) -> dict:
+                  choke_level_pct: float = None, spindle_phi: float = 1.0,
+                  cool_frac: float = 1.0) -> dict:
     """322E003 HP scrubber — reduced calibrated split-fraction, pinned to the shared design HMB.
     Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
     wash (323P001 A/B design vector × s).  Both discharges PINNED (proven IDENTICAL):
@@ -3973,6 +4080,26 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
             feed[k]        += c                                               # enters the combined tube feed
             overflow[k]    += c                                               # leaves with the bottom liquid
             carry_mass_kgh += c * MW_COMP[k]
+    # --- COOLING-LIMITED CONDENSATION (loss of the 329P006 CCW loop) -------------------------------
+    # Carbamate formation is strongly exothermic, so the rate at which the shell can condense NH3+CO2
+    # into liquid is limited by the rate at which the CCW can carry that exotherm away.  cool_frac is
+    # the condensation-capacity ratio rho_cond (CCW flow x thermal driving force / vent load), which
+    # is EXACTLY 1.0 at design -- so the whole block below is identically zero there and every pinned
+    # split, TT and HMB stays bit-exact.
+    # Below 1.0 the shell cannot hold the temperature down, solubility collapses, and the fraction
+    # (1 - cool_frac) of what design would have condensed simply stays in the vapour phase.  It is
+    # moved back from the bottom liquid to the off-gas, which is mass-conserving by construction:
+    # every kmol taken off `overflow` is added to `offgas`, so `closure_resid` below is untouched.
+    cf = 1.0 if cool_frac >= 1.0 - SCRUB_COOL_FRAC_EPS else clamp(cool_frac, 0.0, 1.0)
+    uncond_kmolh = 0.0
+    uncond_kgh   = 0.0
+    if cf < 1.0:
+        for k in MW_COMP:
+            back = (1.0 - cf) * max(overflow[k] - carb[k], 0.0)   # only the CONDENSED part can flash back
+            overflow[k]   -= back                                  # ... the wash liquid itself stays liquid
+            offgas[k]     += back
+            uncond_kmolh  += back
+            uncond_kgh    += back * MW_COMP[k]
     closure_resid = sum(feed.values()) - sum(offgas.values()) - sum(overflow.values())
     co2_abs   = max(offgas_feed.get("CO2", 0.0) - offgas["CO2"], 0.0)          # kmol/h gas->carbamate (now wash-live)
     q_carb_kw = co2_abs * 1000.0 * SCRUB_DH_CARB_KJMOL / 3600.0                # full exotherm (diag)
@@ -4041,6 +4168,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
             "q_carb_kw": q_carb_kw, "q_ccw_kw": q_ccw_kw,
             "t_ccw_in": t_ccw_in, "t_ccw_out": t_ccw_out, "dT_ccw": dT_ccw,
             "m_ccw_kgh": m_ccw_kgh, "co2_scale": s, "vent_ratio": vent_ratio,
+            "cool_frac": cf, "uncond_kmolh": uncond_kmolh, "uncond_kgh": uncond_kgh,   # condensation-limit diag
             "eps_ht": eps_ht, "ua_eff_kwk": ua_eff_kwk,                        # ε-NTU bridge diag
             "T_offgas": t_offgas, "P_offgas": SCRUB_OFFGAS_P_BARA,
             "T_overflow": t_overflow, "P_overflow": SCRUB_OVERFLOW_P_BARA}
@@ -4058,7 +4186,8 @@ def _eq_pct(theta_pct: float, theta_des_pct: float, R: float = SCRUB_HV604_RANGE
     return R ** ((max(theta_pct, 0.0) - theta_des_pct) / 100.0)
 
 
-def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float) -> dict:
+def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float,
+              vent_cap_kgh: float = None) -> dict:
     """HV-322604 HP-scrubber off-gas valve — dynamic isenthalpic letdown 322E003 -> 322C001.
     Inert purge to the LP absorber.  Flow follows the valve hydraulic characteristic, driven by
     the live controller opening θ (HIC-322604) and √ΔP across the seat.  Datasheet trim is
@@ -4066,22 +4195,35 @@ def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float) -> dict:
         m_og = m_og_des·s · R^((θ−θ_des)/100) · √(max(P_up−P_down,0)/ΔP_des)   (θ_des = 50%, R = 50)
     The incoming `offgas` vector is already the design purge × s, so the valve factor scales it
     1:1 (composition held; θ=θ_des & P_up=design -> factor=1 -> bit-exact design HMB).  Dynamic
-    Joule-Thomson cooling on the ACTUAL pressure drop:  T_out = T_in − μ_JT·ΔP."""
+    Joule-Thomson cooling on the ACTUAL pressure drop:  T_out = T_in − μ_JT·ΔP.
+    vent_cap_kgh is the seat's hydraulic ceiling on the OFFERED off-gas MASS (see Valve322604): what
+    a DN-24 / Kvs 2.1 trim cannot pass is retained upstream, it does not vent.  None = no ceiling."""
     dP    = max(p_up - SCRUB_HV604_P_OUT, 0.0)
     valve = _eq_pct(hic_pct, SCRUB_HIC604_DES_PCT) * math.sqrt(dP / SCRUB_HV604_DP_DES)   # equal-% trim × √ΔP-ratio
-    comp  = {k: offgas.get(k, 0.0) * valve for k in MW_COMP}                      # throttled flow, comp held
+    off_kgh = sum(offgas.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+    pass_frac = 1.0 if (vent_cap_kgh is None or off_kgh <= 0.0) \
+        else min(1.0, max(vent_cap_kgh, 0.0) / off_kgh)                           # capacity ceiling
+    comp  = {k: offgas.get(k, 0.0) * valve * pass_frac for k in MW_COMP}          # throttled flow, comp held
     T_out = T_in - SCRUB_HV604_MU_JT * dP                                         # dynamic JT letdown
     m_kgh = sum(comp.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)                   # = m_og_des·s·valve
     return {"comp_kmolh": comp, "T_out": round(T_out, 1),
             "P_out": SCRUB_HV604_P_OUT, "P_in": round(p_up, 1), "open_pct": hic_pct,
-            "mass_kgh": m_kgh, "valve_frac": valve, "dP": round(dP, 1)}
+            "mass_kgh": m_kgh, "valve_frac": valve, "dP": round(dP, 1),
+            "pass_frac": pass_frac}
 
 
 def react_nc_ratio(comp_kmolh: dict) -> float:
-    """AT-322701: molar N/C ratio (Σ nᵢ·#Nᵢ)/(Σ nᵢ·#Cᵢ) of a stream on an atom basis."""
+    """AT-322701: molar N/C ratio (Σ nᵢ·#Nᵢ)/(Σ nᵢ·#Cᵢ) of a stream on an atom basis.
+
+    Saturated at the analyzer's over-range indication.  With the CO2 feed cut (trip 21.4 / 22.2, or
+    XV-322902 shut) the carbon in the loop asymptotes to zero while the NH3 does not, so the raw
+    ratio runs away without bound -- it read 6.1e9 on a post-trip loop.  A real on-line analyzer has
+    a span and pegs at it; publishing 1e9 instead teaches an operator nothing and poisons every
+    downstream correlation keyed on N/C.  Design N/C is ~3.0, four decades inside the cap, so this
+    never touches normal or moderately off-design operation."""
     n = sum(comp_kmolh.get(k, 0.0) * a for k, a in REACT_N_ATOMS.items())
     c = sum(comp_kmolh.get(k, 0.0) * a for k, a in REACT_C_ATOMS.items())
-    return (n / c) if c else 0.0
+    return min(n / c, REACT_NC_SPAN_MAX) if c else 0.0
 
 
 # Design AT-322701 (overflow N/C) reference for TT-322011 off-gas-temp slip model.  At design L_feed=L0 ->
@@ -4371,6 +4513,13 @@ def _cq_packet(mass_kgh: float, temperature_c: float, mass_fraction: dict,
     cp = float(cp_kj_kgk)
     if not math.isfinite(cp) or cp <= 0.0:
         cp = 0.1                                   # a packet must carry a positive heat capacity
+    # A packet must also carry a finite temperature: make_stream_packet RAISES otherwise, and a raise
+    # here kills the engine tick.  A non-finite T upstream is a real defect worth seeing, but the
+    # transport layer is a DIAGNOSTIC consumer -- it must not be the thing that takes the plant down.
+    # Deep in a collapse (a total 322E003 CCW loss runs the reactor N/C off scale and the 323 train
+    # with it) a stage temperature can go non-finite; drop the packet rather than throw.
+    if not math.isfinite(float(temperature_c)):
+        return consequence.ZERO_PACKET
     return consequence.make_stream_packet(sum(comp.values()), comp, temperature_c, cp)
 
 
@@ -4546,6 +4695,18 @@ class State:
         #   each tick from (condensation make − actual ejector entrainment); level = holdup/NLL_KG·NLL%.
         self.scrub_holdup_kg = SCRUB_HOLDUP_NLL_KG      # init at design NLL holdup -> 50 % (bit-exact)
         self.scrub_level_pct = SCRUB_LEVEL_NLL_PCT      # 322E003 sump level (LT-329501), design NLL
+        # XV-322903: isolation on the 322E003 sump OVERFLOW line, downstream of the LT-329501 level
+        #   leg and upstream of the 322F001 ejector suction.  Shutting it strands the overflow in
+        #   the sump: entrainment goes to zero, the ejector passes motive NH3 alone, and the
+        #   holdup ODE below (m_cond_in - suction_kgh) fills 322E003 until it floods.  Design OPEN.
+        self.XV_322903 = True
+        # 329P006 A/B tempered-water circulation pumps on the 322E003 shell-side CCW loop.
+        #   A is the running duty machine, B the installed standby.  They are the loop's only
+        #   motive source: FV-329409 is a throttle across the pump head, so with NEITHER pump
+        #   running there is no head and no CCW reaches the scrubber shell whatever the valve is
+        #   doing -- FIC-329409 reads 0 and the exotherm has nowhere to go (see ccw_pump_frac).
+        self.P329P006A = True
+        self.P329P006B = False
         # pumps: open_act = torque-converter valve opening %
         self.pumpA = {"on": False, "open_act": 0.0,  "speed_act": 0.0,   "current": 0.2,  "mode": "M", "fault": False}
         # pumpB MANUAL seed pinned at the ratio-cascade DESIGN opening (step_sim ~L1539-1544:
@@ -4595,11 +4756,18 @@ class State:
         # PIC-322203 CO2 line-pressure controller -> PV-322203 opening (direct-acting velocity I-PD).
         #   Bug-6 boot mode: AUTO (it is an automatic valve, not a hand valve), set as a DORMANT
         #   over-pressure relief.  The 320K002-float model (bugs 1/4) caps the CO2 line at the
-        #   deliverable ceiling P_line_ceil = SYN_P_MAX_BARA + DP_HP_DES (147.7 bar a); the line can
+        #   deliverable ceiling P_line_ceil = SYN_PSV_SET_BARA + DP_HP_DES (164.5 bar a); the line can
         #   never exceed it.  SP is set one design feed-dP ABOVE that ceiling --
-        #     sp = SYN_P_MAX_BARA + 2*(CO2_P_DES_BARA - SYN_P_DES_BARA) = 151.2 bar a --
+        #     sp = SYN_PSV_SET_BARA + 2*(CO2_P_DES_BARA - SYN_P_DES_BARA) = 168.0 bar a --
         #   so the relief opens only on genuine line over-pressure (line > floating ceiling + one
-        #   feed-dP), NOT on the normal floating band (P_line 144.2..147.7).  SP strictly above the
+        #   feed-dP), NOT on the normal floating band.  The SP is TIED to the ceiling, not a literal:
+        #   when the ceiling was re-anchored on the loop's 160 bar g mechanical rating this SP moved
+        #   with it, because the whole point of the rule is that the relief must not fire inside the
+        #   band the compressor can legitimately deliver.  [Leaving it at the old 151.2 literal made an
+        #   intentionally-dormant controller the plant's dominant protection: on a 322E003 CCW loss it
+        #   opened at P_syn 147.7, dumped the CO2 feed to the vent, starved the loop of the very
+        #   off-gas that was building the pressure, and arrested the excursion 4 bar below the 155.0
+        #   high-high -- protection by accident, from a setpoint written to never act.]  SP strictly above the
         #   ceiling keeps op clamped at 0 across the whole band (the velocity term's pv-sp stays
         #   negative): at sp == ceiling exactly, the ramp-up velocity transient cracked a hair of
         #   vent which the SIC-951 CASCADE then amplified into a synthesis-pressure lock (test_3
@@ -4608,7 +4776,7 @@ class State:
         #   preserving.  Operator still forces a minimum opening for carbamate-activation via the
         #   HIC-322203 hand station (max(HIC, PIC.op)).
         self.PIC_322203   = {"mode": "AUTO", "op": 0.0,
-                             "sp": SYN_P_MAX_BARA + 2.0 * (CO2_P_DES_BARA - SYN_P_DES_BARA),
+                             "sp": SYN_PSV_SET_BARA + 2.0 * (CO2_P_DES_BARA - SYN_P_DES_BARA),
                              "pv": CO2_P_DES_BARA, "pv_prev": CO2_P_DES_BARA}
         # HP Stripper 322E001 bottom-sump level (LT-322501) + LIC-322501 -> LV-322501.
         #   AUTO holds the design level (50 %) at the field-calibrated design opening (46.1 %);
@@ -4631,6 +4799,7 @@ class State:
         # PT-329201 synthesis-loop top pressure (DYNAMIC state, reverse Q->P accumulation):
         #   CCW condensation deficit lifts it; first-order relax to the forward stripper-set target.
         self.p_syn_bara  = SYN_P_DES_BARA                # init at design PT-329201 = 140.7 bar a
+        self.syn_vap_excess_kg = 0.0                     # kg, HP-loop vapour the 322E003 failed to condense
         # Section-322 tear display-lag store: {key: last published lagged value} for every downstream
         #   temperature / level / analyzer indicator (see _lag1).  Lazy-inits to design on first tick.
         self.tlag = {}
@@ -5168,13 +5337,20 @@ class State:
         # trips: live initiator conditions (instantaneous) + latched state (P1-2).
         #   A latch holds once set and can only be cleared by an operator trip_reset AND
         #   the live condition having recovered -> a tripped pump cannot self-restart.
-        self.trips        = {"21_2": False, "21_4": False, "21_8": False, "21_10": False, "22_1": False}
-        self.trip_latched = {"21_2": False, "21_4": False, "21_8": False, "21_10": False, "22_1": False}
+        self.trips        = {"21_2": False, "21_4": False, "21_8": False, "21_10": False,
+                             "22_1": False, "22_2": False}
+        self.trip_latched = {"21_2": False, "21_4": False, "21_8": False, "21_10": False,
+                             "22_1": False, "22_2": False}
         # L3 phase-boundary diagnostics (mushy-zone / solidification detection, Batch 2)
         self.flags = {"SCRUBBER_SOLIDIFICATION": False,
                       "STRIPPER_SOLIDIFICATION": False,
                       "CARBAMATE_DEPOSITION":    False,
-                      "RATIO_PV_BAD":            False}   # L3-3 N/C measurement-validity (Batch 3)
+                      "RATIO_PV_BAD":            False,   # L3-3 N/C measurement-validity (Batch 3)
+                      # Loss-of-condensation consequence chain (322E003 CCW):
+                      "SYN_PSV_LIFT":            False,   # SV-32201 open (loop above 161.0 bar a)
+                      "TOXIC_RELEASE":           False,   # NH3 to atmosphere through a safety valve
+                      "LP_ABSORBER_OVERLOAD":    False,   # 322C001 taking more than PIC-322201 can vent
+                      "LP_ABSORBER_RELIEF":      False}   # SV-32253 open (322C001 above 31.0 bar a)
 
 
 state = State()
@@ -5370,9 +5546,16 @@ def step_sim(dt: float) -> dict:
     # pressure (tear lag).  The CO2 line pressure (PIC-322203 PV) is modelled physically:
     #   * 320K002 is flow(load)-controlled, so it FLOATS its discharge to hold the design feed
     #     dP against synthesis backpressure -- there is ALWAYS a dP between the line and the
-    #     loop (bug 1) -- up to the compressor's deliverable ceiling P_line_ceil (= the max
-    #     synthesis pressure SYN_P_MAX it must still feed, plus the design feed dP; derived
-    #     from existing constants, no fabricated head).  Within the normal band dP_HP holds at
+    #     loop (bug 1) -- up to the compressor's deliverable ceiling P_line_ceil.  That ceiling
+    #     is the HP loop's MECHANICAL design pressure plus the design feed dP: a machine feeding
+    #     a loop rated 160 bar g must be able to deliver against that rating, which is the whole
+    #     reason the loop carries a high-high trip at 155.0 and SV-32201 at 161.0.  [It used to be
+    #     SYN_P_MAX_BARA + DP_HP_DES = 147.7, i.e. the HPCC's normal-operating PFD pressure used as
+    #     a machine limit.  That is a process design point, not a compressor curve, and it had two
+    #     observable consequences: the model's own 151.2 bar a PIC-322203 line relief could never
+    #     open (dead protection layer), and a total loss of 322E003 condensation self-choked its
+    #     own CO2 feed at 147.7 and could not reach the high-high trip -- so the last two links of
+    #     the loss-of-condensation chain were unreachable.]  Within the normal band dP_HP holds at
     #     ~design so phi_HP=1 and feed stays at load (correct: feed is NOT pressure-throttled
     #     by small excursions).  Only when P_syn nears/exceeds the ceiling does dP_HP shrink ->
     #     phi_HP tapers -> check valve shuts (feed 0).
@@ -5380,7 +5563,7 @@ def step_sim(dt: float) -> dict:
     #     raises g_vent, so f_to_HP -> 0: almost all CO2 leaves via the vent, not the HP loop
     #     even though it kept flowing before (bug 4).
     DP_HP_DES   = CO2_P_DES_BARA - SYN_P_DES_BARA            # 3.5 bar design feed dP
-    P_line_ceil = SYN_P_MAX_BARA + DP_HP_DES                 # compressor deliverable ceiling (feed dP held at max-P synthesis)
+    P_line_ceil = SYN_PSV_SET_BARA + DP_HP_DES               # compressor deliverable ceiling (feed dP held at the loop's mechanical rating)
     P_line_float = min(s.p_syn_bara + DP_HP_DES, P_line_ceil)  # discharge floats to hold the feed dP, capped at shutoff
     P_line_bara = P_line_float - CO2_PV_DP_GAIN * pv_open    # PV-322203 venting pulls the line down -> PIC-322203 PV (bar a)
     dP_HP   = max(P_line_bara - s.p_syn_bara, 0.0)           # drives CO2 INTO HP loop (>=0: check valve)
@@ -5491,7 +5674,8 @@ def step_sim(dt: float) -> dict:
     #   block, so it sees last-tick level).  frac=1 at NLL -> design entrainment; frac self-regulates
     #   the sump to L_eq=NLL*(overflow/capacity) -> stable at NLL on turndown, floods on a true stall.
     scrub_lvl_frac = s.scrub_level_pct / SCRUB_LEVEL_NLL_PCT
-    ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602, scrub_level_frac=scrub_lvl_frac)
+    ej = ejector_322f001(motive_nh3_kgh, TI_321020, s.HIC_322602, scrub_level_frac=scrub_lvl_frac,
+                         xv903_open=bool(s.XV_322903))
     # motive fraction (PD pump -> flow ~ speed) and ejector developed-head forward-flow fraction.
     # phi_fwd ~ phi_m^2 (affinity head curve): drives the HPCC->reactor liquid circulation and the
     # discharge-header pressure.  ==1 at design motive -> all hydraulic states hold design.
@@ -5912,12 +6096,17 @@ def step_sim(dt: float) -> dict:
     #   circulation + 329E004 tempered-water cooler) removes the carbamate-formation exotherm.
     fic = s.FIC_329409                           # CCW circulation flow controller (FV-329409)
     tic = s.TIC_329005                           # CCW supply-temperature controller (TV-329005)
+    # 329P006 A/B availability.  Duty/standby on a common header: either machine alone develops the
+    #   full design head, so the loop runs at the valve's flow with one OR both running and stops
+    #   dead with neither.  Running both in parallel on this system curve does not double the flow,
+    #   so the factor is deliberately 1.0, not additive.
+    ccw_pump_frac = 1.0 if (s.P329P006A or s.P329P006B) else 0.0
     fic["pv_bad"] = not _pv_ok(fic["sp"], fic["op"], fic["pv"])   # L3-9 freeze-last-good on bad PV
     if fic["pv_bad"]:                             # bad PV -> hold design CCW flow; op held last-good
         if not math.isfinite(fic["op"]):  fic["op"] = SCRUB_FV409_DES_PCT
-        fic["pv"] = SCRUB_CCW_KGH_DES / 1000.0    # coerce finite so no NaN enters m_ccw below
+        fic["pv"] = (SCRUB_CCW_KGH_DES / 1000.0) * ccw_pump_frac   # finite for m_ccw below; still 0 with no pump
     else:                                         # F4: first-order flow plant lag + AUTO velocity I-PD
-        flow_ss = (SCRUB_CCW_KGH_DES / 1000.0) * (fic["op"] / max(SCRUB_FV409_DES_PCT, 1e-6))
+        flow_ss = (SCRUB_CCW_KGH_DES / 1000.0) * (fic["op"] / max(SCRUB_FV409_DES_PCT, 1e-6)) * ccw_pump_frac
         pv_prev = fic["pv_prev"]                   # PV_{k-1} for the velocity proportional term
         fic["pv"] += (dt / FIC_329409_TAU_S) * (flow_ss - fic["pv"])   # lag PV toward valve-char SS
         if fic["mode"] == "AUTO":                  # REVERSE-acting: PV below SP -> open FV-329409
@@ -5951,20 +6140,25 @@ def step_sim(dt: float) -> dict:
     #   inert vent -> uncondensed inerts accumulate and integrate PT-329201 up.  Prior-step p_syn for ΔP.
     dP_vent   = max(s.p_syn_bara - SCRUB_HV604_P_OUT, 0.0)
     vent_frac = _eq_pct(s.HIC_322604, SCRUB_HIC604_DES_PCT) * math.sqrt(dP_vent / SCRUB_HV604_DP_DES)
+    # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
+    #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
+    #   Design: m_ccw=des, s=1, nu=1 -> rho=1 -> PT holds 140.7.
+    #   Thermal factor f_th = (T_cond − T_ccw_in)/(T_cond − T_ccw_in,des): a WARMER CCW supply
+    #   shrinks the condensation driving force -> capacity falls -> rho_cond drops -> PT-329201 rises.
+    #   f_th ≡ 1 at design T_ccw_in=80 C, so a pure CCW-flow move reduces to the prior calibration.
+    # HOISTED above the 322E003 call (it used to be computed after it and fed only the nh3_slip term,
+    #   which vanishes at the design overhead -- the whole reason a CCW loss moved nothing).  Every
+    #   input is already settled at this point: m_ccw_kgh and tic["pv"] from the two CCW controllers
+    #   above, co2_scale from the reactor, nu from the prior-step pressure state.  It now enters the
+    #   scrubber AS the cooling-limited condensation gate (cool_frac), which is the physical path.
+    f_th      = (SCRUB_OVERFLOW_T_C - tic["pv"]) / max(SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES, 1e-6)
+    rho_cond  = (m_ccw_kgh / SCRUB_CCW_KGH_DES) * max(f_th, 0.0) / max(react["co2_scale"] * nu, 1e-6)
     scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
                           vent_ratio=nu, nc_act=react_nc_ratio(react["overflow_kmolh"]),
                           hic604_pct=s.HIC_322604,
                           liq_carry_kmolh=react_carry_kmolh, t_carry_c=s.react_T_overflow,
-                          choke_level_pct=s.scrub_level_pct, spindle_phi=_phi_sp_theta)
-    # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
-    #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
-    #   Forward stripper push (top_ratio) sets the no-deficit target; first-order Euler accumulation
-    #   over tau (min -> s).  Design: m_ccw=des, s=1, nu=1, top_ratio=1 -> rho=1 -> PT holds 140.7.
-    #   Thermal factor f_th = (T_cond − T_ccw_in)/(T_cond − T_ccw_in,des): a WARMER CCW supply
-    #   shrinks the condensation driving force -> capacity falls -> rho_cond drops -> PT-329201 rises.
-    #   f_th ≡ 1 at design T_ccw_in=80 C, so a pure CCW-flow move reduces to the prior calibration.
-    f_th      = (SCRUB_OVERFLOW_T_C - tic["pv"]) / max(SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES, 1e-6)
-    rho_cond  = (m_ccw_kgh / SCRUB_CCW_KGH_DES) * max(f_th, 0.0) / max(react["co2_scale"] * nu, 1e-6)
+                          choke_level_pct=s.scrub_level_pct, spindle_phi=_phi_sp_theta,
+                          cool_frac=rho_cond)
     # PT-329201 vapour differentiation: NH3 + H2O overhead are CONDENSABLE solvents (absorbed into
     # carbamate/condensate, NOT pressure-building); only ACID CO2 unpaired by NH3 (free CO2 =
     # CO2 - NH3/2, from 2 NH3 + CO2 -> carbamate) plus NH3 that exceeds condensation capacity
@@ -6012,9 +6206,41 @@ def step_sim(dt: float) -> dict:
                               0.0, SCRUB_HOLDUP_MAX_KG)
     s.scrub_level_pct = clamp(s.scrub_holdup_kg / SCRUB_HOLDUP_NLL_KG * SCRUB_LEVEL_NLL_PCT,
                               0.0, 100.0)
+    # --- LT-329501 two-phase hydrodynamic swell (DP transmitter overlay) ---------------------------
+    #   s.scrub_level_pct above is the TRUE inventory from the mass ODE; it is what the condensation
+    #   choke and the ejector suction head read, and during a CCW loss it FALLS (the drain to 322F001
+    #   keeps pulling while the condensate make collapses).  LT-329501 is a DP cell, and it does not
+    #   read mass -- it reads the hydrostatic head rho_mix*g*h of whatever column stands between its
+    #   taps.  Heat the sump with off-gas that is no longer being condensed and the pool flashes:
+    #   rho_mix = (1-alpha)*rho_l + alpha*rho_v collapses with the void fraction, and the column
+    #   swells upward to hold the same mass.  Over a fast transient the swell (head up) beats the
+    #   density loss (head down), so the CELL READS HIGH while the vessel is actually draining --
+    #   the operator trap this scenario exists to teach.  Void fraction is keyed to the condensation
+    #   deficit (1 - cool_frac) and scaled by SCRUB_SWELL_PCT_MAX; at design cool_frac == 1 exactly,
+    #   so the overlay is identically 0 and the indication IS the true level (bit-exact).
+    _void_frac      = 1.0 - scrub["cool_frac"]
+    scrub_swell_pct = SCRUB_SWELL_PCT_MAX * _void_frac
+    #   ...and the froth makes it HUNT as well as read high (see SCRUB_SWELL_NOISE_PCT): two
+    #   incommensurate periods off the plant clock, scaled by the same void fraction, so the
+    #   indication is unsteady exactly when the column is boiling and dead steady at design.
+    scrub_swell_noise = SCRUB_SWELL_NOISE_PCT * _void_frac * (
+        math.sin(2.0 * math.pi * s.sim_t / SCRUB_SWELL_NOISE_T1_S)
+        + 0.6 * math.sin(2.0 * math.pi * s.sim_t / SCRUB_SWELL_NOISE_T2_S)) / 1.6
+    LT_329501_ind   = clamp(s.scrub_level_pct + scrub_swell_pct + scrub_swell_noise, 0.0, 100.0)
     _valve_og_in.comp = scrub["offgas_kmolh"]
     _valve_og_in.set_state(T=scrub["T_offgas"], P=scrub["P_offgas"])
     _valve_unit.hic_pct = s.HIC_322604
+    # HV-322604 hydraulic ceiling.  The condensation gate above hands the off-gas stream everything
+    #   the shell failed to condense -- ~16.5 t/h measured, against the 5.9 t/h reconciled inert purge
+    #   the DN-24 / Kvs 2.1 seat is sized for.  Without a ceiling the valve model ("pass what is
+    #   offered x valve factor") would
+    #   simply vent it to 322C001, the boundary balance would close, and the excursion would vanish --
+    #   the retained vapour IS the event.  Ceiling = the offered total less the uncondensed part, i.e.
+    #   the purge MASS the shell would have produced with full CCW; the deficit stays in the loop and
+    #   shows up in the pressure ODE as the phase-shift term.  At design uncond == 0 -> ceiling ==
+    #   offered -> pass fraction 1.0 -> vent flow and every downstream 328 anchor stay bit-exact.
+    _valve_unit.vent_cap_kgh = max(sum(scrub["offgas_kmolh"][k] * MW_COMP[k] for k in MW_COMP)
+                                   - scrub["uncond_kgh"], 0.0)
     _valve_unit.solve()
     hv604 = _valve_unit.diagnostics
     # L3-7 HV-322604 off-gas: external steam-tracing holds the 60 C baseline; flag only when extreme JT
@@ -6892,6 +7118,21 @@ def step_sim(dt: float) -> dict:
         abs_co2   = abs_c001 * A328_ABS_CO2_DES / A328_ABS_DES            # frozen carbamate split
         abs_nh3   = abs_c001 * A328_ABS_NH3_DES / A328_ABS_DES
         vent_c001 = A328_VENT_DES * (pic201_op / A328_PIC_OP_DES)
+        # SV-32253 (N11, DN 100) -- 322C001 mechanical relief.  The datasheet describes exactly this
+        # scenario: "a failure of the upstream HP Scrubber cooling system leading to a massive
+        # breakthrough of hot, unreacted ammonia and carbon dioxide".  PV-322201 is a DN-sized control
+        # valve on a 3.9 bar a column; it cannot pass the HP loop's inventory, so if HV-322604 dumps
+        # more than PIC-322201 can vent, the column pressurises until the SV lifts.  Set at the
+        # vessel's 30 bar g design pressure (322C001 datasheet), linear to full capacity at 10 %
+        # accumulation.  Whatever it passes leaves through the atmospheric stack with the vent, so it
+        # is added to vent_c001 and carries the same composition -- this IS the ammonia release.
+        sv253_over = max(s.a328_c001_P - A328_C001_SV_SET_BARA, 0.0)
+        m_sv253    = A328_C001_SV_CAP_KGH * min(sv253_over / A328_C001_SV_ACCUM_BAR, 1.0)
+        vent_c001 += m_sv253
+        s.flags["LP_ABSORBER_RELIEF"] = m_sv253 > 0.0
+        # Overload: the column is taking more un-absorbed gas than PIC-322201 can vent at full stroke.
+        # Pressure is then rising and everything above the absorption capacity slips to atmosphere.
+        s.flags["LP_ABSORBER_OVERLOAD"] = (gcb_m - abs_c001) > A328_VENT_DES * (100.0 / A328_PIC_OP_DES)
         s.a328_c001_P = max(s.a328_c001_P
                             + A328_C001_P_KP*((gcb_m - abs_c001) - vent_c001)/3600.0*dt, 0.1)
         # vent gas composition y (mass fractions over MW_COMP): un-absorbed off-gas -> 328V001/323C005/atm
@@ -7175,16 +7416,13 @@ def step_sim(dt: float) -> dict:
                       R324_W_EV1, R324_E001_T_SP_C, R324_F001_P_BARA)
     v1_m = clamp(feed1_m - urea1_in / max(w_eq1, 1e-6), 0.0, feed1_m)
     Q_e001_kw = max(R324_E001_UA_KW * (tsat_steam(p_chest_e001) - s.r324_e001_T), 0.0)
+    _e001_validity, _e001_px_resid = evap_thermo_diag(s.r324_e001_T, s.r324_f001_P, w_eq1)
     _DIAG["E001"] = {
         "weq": w_eq1, "v": v1_m, "Q": Q_e001_kw,
         "T": s.r324_e001_T, "feed": feed1_m, "urea_in": urea1_in,
         "thermo_model": extended_uniquac.MODEL_NAME,
-        "thermo_validity": extended_uniquac.validity_status(
-            s.r324_e001_T + 273.15, s.r324_f001_P
-        ),
-        "thermo_px_residual_bara": extended_uniquac.px_equilibrium_residual(
-            w_eq1, s.r324_e001_T + 273.15, s.r324_f001_P
-        ),
+        "thermo_validity": _e001_validity,
+        "thermo_px_residual_bara": _e001_px_resid,
         "iteration_count": t1_fp_iterations,
         "iteration_residual": t1_fp_residual,
         "converged": t1_fp_converged,
@@ -7293,16 +7531,13 @@ def step_sim(dt: float) -> dict:
     Q_e003_kw = max(R324_E003_UA_KW * (tsat_steam(p_chest_e003) - s.r324_e003_T), 0.0)
     # Reverse-pass utility handshake: actual 324E003 condensation demand reaches 329D009 next tick.
     s.steam.m_users9 = max(R324_9BAR_OTHER_DES + Q_e003_kw / R324_E003_LAM_STEAM, 0.0)
+    _e003_validity, _e003_px_resid = evap_thermo_diag(s.r324_e003_T, s.r324_f003_P, w_eq2)
     _DIAG["E003"] = {
         "weq": w_eq2, "v": v2_m, "Q": Q_e003_kw,
         "T": s.r324_e003_T, "feed": feed2_m, "urea_in": urea2_in,
         "thermo_model": extended_uniquac.MODEL_NAME,
-        "thermo_validity": extended_uniquac.validity_status(
-            s.r324_e003_T + 273.15, s.r324_f003_P
-        ),
-        "thermo_px_residual_bara": extended_uniquac.px_equilibrium_residual(
-            w_eq2, s.r324_e003_T + 273.15, s.r324_f003_P
-        ),
+        "thermo_validity": _e003_validity,
+        "thermo_px_residual_bara": _e003_px_resid,
         "iteration_count": t2_fp_iterations,
         "iteration_residual": t2_fp_residual,
         "converged": t2_fp_converged,
@@ -7455,6 +7690,31 @@ def step_sim(dt: float) -> dict:
         s.trip_latched["22_1"] = False
     if s.trip_latched["22_1"]:
         s.XV_322915 = True
+
+    # ----- Trip 22.2 (synthesis high-high pressure -> ESD) -----------------------------------------
+    #   The last link of the loss-of-condensation chain.  PIC-322203 relieves the CO2 LINE at 151.2
+    #   bar a and is the first protection layer; it cannot arrest a synthesis excursion, because the
+    #   vapour accumulating in the loop is not on the CO2 line.  Above SYN_P_TRIP_BARA the interlock
+    #   cuts the two motive forces still pushing mass into an over-pressured, non-condensing loop:
+    #   the CO2 feed (XV-322902 shut, the same path trip 21_4 watches from the other side) and both
+    #   HP-NH3 pumps with SIC-321950/951 driven to MAN 0.  With m_in -> 0 the boundary balance goes
+    #   sharply negative, the off-gas make collapses with co2_scale, and the excursion is capped.
+    #   LIVE condition uses the hysteresis band, not the trip point: once latched it stays latched
+    #   until the pressure falls below SYN_P_TRIP_RESET_BARA *and* the operator resets (trip_reset),
+    #   which is how a real logic solver behaves -- it does not self-clear on the way down.
+    #   At design PT-329201 = 140.7 bar a -> condition False -> latch clear -> zero action.
+    if s.trip_latched["22_2"]:
+        s.trips["22_2"] = s.p_syn_bara >= SYN_P_TRIP_RESET_BARA      # reset-block band while latched
+    else:
+        s.trips["22_2"] = s.p_syn_bara >= SYN_P_TRIP_BARA            # initiator
+        if s.trips["22_2"]:
+            s.trip_latched["22_2"] = True
+    if s.trip_latched["22_2"]:
+        s.XV_322902   = False        # CO2 feed isolation to 322E001 -> feed_factor 0
+        s.pumpA["on"] = False        # HP-NH3 321P002 A/B (ejector motive -> 0)
+        s.pumpB["on"] = False
+        s.SIC_321950.set_mode("MAN"); s.SIC_321950.set_op(0.0)
+        s.SIC_321951.set_mode("MAN"); s.SIC_321951.set_op(0.0)
 
     # Discharge header
     # Discharge header: affinity-law developed head droops with motive (pump-speed) fraction.
@@ -7635,10 +7895,55 @@ def step_sim(dt: float) -> dict:
     # bar a and LV-322501's letdown head, which every 323/324 anchor rides on, stops bleeding -- while
     # leaving the raw balance intact on an empty loop (m_loop_frac -> 0), where zero feeds must still
     # create nothing.  m_loop_frac is clamped to 1.0, so surplus inventory cannot over-credit either.
+    # PHASE-SHIFT vapour accumulation (322E003 loss of condensation).  The five boundary terms above
+    # cannot see this event -- the scrubber sits INSIDE the loop, so mass that fails to condense
+    # never crosses a boundary and (in - out) stays at its design value while the loop fills with
+    # vapour.  What changes is specific volume, and the state that carries it is an INVENTORY, not a
+    # rate: s.syn_vap_excess_kg is the mass the shell has failed to condense and the loop is still
+    # holding as vapour.  It is not lost -- the HP loop recirculates, so the backlog comes back past
+    # the shell at M/tau (tau = SYN_P_TAU_MIN, the loop's own declared vapour-inventory constant) and
+    # the fraction cool_frac of it condenses on that pass:
+    #     dM/dt = m_uncond - cool_frac*M/tau
+    # Deficit (cool_frac<1) -> M grows to (1-cf)/cf * make * tau; total loss (cool_frac=0) -> nothing
+    # condenses on any pass and M ramps without bound until the feed is cut.  Restore the CCW and
+    # cool_frac returns to 1, so the backlog condenses out with time constant tau and the pressure it
+    # was holding up comes back off.  The ODE is forced with the NET rate, so the integral of the
+    # phase-shift term is exactly SYN_P_PHASE_GAIN*M -- it adds nothing permanent.
+    # At design m_uncond == 0 and M == 0, so both terms are identically zero and dP/dt stays EXACTLY
+    # zero: PT-329201 holds 140.7 bar a bit-exact.
+    _tau_vap_s   = SYN_P_TAU_MIN * 60.0
+    m_recond_kgh = scrub["cool_frac"] * s.syn_vap_excess_kg / _tau_vap_s * 3600.0
+    m_vap_net    = scrub["uncond_kgh"] - m_recond_kgh
+    s.syn_vap_excess_kg = max(s.syn_vap_excess_kg + m_vap_net * (dt / 3600.0), 0.0)
     C_loop = SYN_LOOP_C_KG_PER_BAR
     m_in_loop = (F_pump_total_th * 1000.0) + F_CO2_feed_kgh + m_308
     m_out_loop = drain_kgh + hv604["mass_kgh"]
-    m_net_loop = (m_in_loop - m_out_loop) - m_loop_frac * SYN_LOOP_RESID_DES_KGH
+    m_phase_shift = SYN_P_PHASE_GAIN * m_vap_net
+    # SV-32201 synthesis-loop safety valve -- the LAST protection layer, and the one whose lifting is
+    # itself the hazard: it discharges the loop's NH3/CO2 inventory to atmosphere.  Set at the HP
+    # equipment's 160 bar g mechanical design, it sits ABOVE the 155.0 bar a high-high trip, so in a
+    # correctly-layered plant the ESD always acts first and this never opens.  If it does, the model
+    # says so loudly (SYN_PSV_LIFT + TOXIC_RELEASE flags, and the relieved NH3 rate is published).
+    # Linear over-pressure characteristic to full capacity at 10 % accumulation; 0 below the set
+    # pressure, so it is identically absent at design and everywhere in the normal band.
+    psv_over      = max(s.p_syn_bara - SYN_PSV_SET_BARA, 0.0)
+    m_psv_kgh     = SYN_PSV_CAP_KGH * min(psv_over / SYN_PSV_ACCUM_BAR, 1.0)
+    s.flags["SYN_PSV_LIFT"]  = m_psv_kgh > 0.0
+    s.flags["TOXIC_RELEASE"] = m_psv_kgh > 0.0
+    # Composition of what is relieved = the loop's own off-gas vector (the vapour space the PSV taps).
+    # Fall back to the design vector when the live off-gas has collapsed: a PSV taps an INVENTORY, and
+    # a loop whose feed has just been cut still holds an NH3-rich vapour space even though its off-gas
+    # FLOW has gone to zero.  Reading the fraction off a degenerate flow vector reported a 99 t/h
+    # relief carrying 0 kg/h of ammonia, which is exactly backwards for the hazard being modelled.
+    _og_kgh = sum(scrub["offgas_kmolh"][k] * MW_COMP[k] for k in MW_COMP)
+    if _og_kgh > 1.0:
+        _y_nh3 = scrub["offgas_kmolh"].get("NH3", 0.0) * MW_COMP["NH3"] / _og_kgh
+    else:
+        _y_nh3 = (SCRUB_OFFGAS_KMOLH_DES.get("NH3", 0.0) * MW_COMP["NH3"]
+                  / max(SCRUB_OFFGAS_KGH_DES, 1e-9))
+    psv_nh3_kgh = m_psv_kgh * _y_nh3
+    m_net_loop = ((m_in_loop - m_out_loop) - m_loop_frac * SYN_LOOP_RESID_DES_KGH
+                  + m_phase_shift - m_psv_kgh)
 
     s.p_syn_bara = clamp(s.p_syn_bara + m_net_loop / C_loop * (dt / 3600.0),
                          10.0, 180.0)
@@ -7743,6 +8048,7 @@ def step_sim(dt: float) -> dict:
             "motive_kgh":  round(motive_nh3_kgh, 1),
             "suction_kgh": round(ej["suction_kgh"], 1),
             "HIC_322602":  round(s.HIC_322602, 1),   # HV-322602 spindle opening (%)
+            "XV_322903":   bool(s.XV_322903),        # sump-overflow isolation, LT-329501 -> 322F001 (True=OPEN)
             "mu":          round(ej["mu"], 4),       # entrainment ratio m_suc/m_motive
             "TT_322012":   round(d_TT322012, 1),     # discharge temp (C) -> 322E002 HPCC (lagged)
             "PI_disch":    round(ej["P_bara"], 1),   # discharge pressure (bar a)
@@ -8054,6 +8360,9 @@ def step_sim(dt: float) -> dict:
                 "cpl_kgh":    round(s.cpl_flow_kgh, 1),                    # FT-322404: condensate 954 in (kg/h, operator-set)
                 "make_conc_pct": round(abs_c001 / max(m_756, 1e-6) * 100.0, 2),  # absorbed NH3/CO2 fraction of 756 draw (dilutes as CPL rises)
                 "XV_322915":  bool(s.XV_322915),                          # steam-flood trip valve (22.1)
+                "SV_32253_th":   round(locals().get("m_sv253", 0.0) / 1000.0, 3),   # SV-32253 mechanical relief (t/h)
+                "SV_32253_open": bool(s.flags.get("LP_ABSORBER_RELIEF")),           # 322C001 above 31.0 bar a
+                "overloaded":    bool(s.flags.get("LP_ABSORBER_OVERLOAD")),         # more un-absorbed gas than PV-322201 can pass
                 "PIC_322201": {"pv": round(s.PIC_322201["pv"], 2), "sp": round(s.PIC_322201["sp"], 2),
                                "op": round(s.PIC_322201["op"], 1), "mode": s.PIC_322201["mode"]},
                 "LIC_322502": {"pv": round(s.LIC_322502["pv"], 1), "sp": round(s.LIC_322502["sp"], 1),
@@ -8397,14 +8706,26 @@ def step_sim(dt: float) -> dict:
             "P_offgas":    round(scrub["P_offgas"], 1),      # off-gas line P (bar a)
             "P_overflow":  round(scrub["P_overflow"], 1),    # PT-329201 overflow line P (bar a)
             "TT_322002":   round(d_TT322002, 1),    # overflow temp -> 322F001 (C, lagged)
-            # Option 3: LT-329501 now reads the TRUE 322E003 sump inventory state (holdup ODE):
-            #     50% design NLL when cond==entrain; RISES on ejector stall as entrainment collapses.
-            "LT_329501":   round(s.scrub_level_pct, 1),  # 322E003 sump level (%, true dynamic inventory)
+            # Option 3: LT-329501 reads the 322E003 sump inventory state (holdup ODE) THROUGH the DP
+            #     cell: 50% design NLL when cond==entrain; RISES on ejector stall as entrainment
+            #     collapses.  On a condensation loss the published value carries the two-phase swell
+            #     overlay, so it reads HIGH while `LT_329501_true` falls -- see the overlay block.
+            "LT_329501":   round(LT_329501_ind, 1),      # 322E003 sump level (%, DP indication incl. swell)
+            "LT_329501_true": round(s.scrub_level_pct, 1),  # true inventory from the mass ODE (%, diag)
+            "LT_329501_swell": round(scrub_swell_pct, 1),   # two-phase swell added to the indication (% span)
+            "LT_329501_noise": round(scrub_swell_noise, 2), # froth hunt on the DP reading (+/- % span)
             "ccw": {                              # shell-side CCW loop (329P006 A/B pump + 329E004 cooler)
                 "TT_329125":  round(d_TT329125, 2),     # CCW return temp out of shell (C, lagged)
                 "TDY_329125": round(TDY_329125, 2),             # TT-329125 − TIC-329005 (cond. quality, C) — live PT-329201 cascade
                 "vent_ratio": round(scrub["vent_ratio"], 4),    # synthesis-vent load PT-329201/PT_des (= nu, prior-step state)
                 "rho_cond":   round(scrub["rho_cond"], 4),      # condensation capacity/demand (CCW flow / vent load); <1 -> PT-329201 rises
+                "cool_frac":  round(scrub["cool_frac"], 4),     # cooling-limited condensation gate (clamped rho_cond); 1.0 = full capacity
+                "uncond_th":  round(scrub["uncond_kgh"] / 1000.0, 3),   # off-gas the shell failed to condense (t/h)
+                "vap_excess_kg": round(s.syn_vap_excess_kg, 1),         # HP-loop vapour hold-up the shell has not condensed (kg)
+                "dP_phase":   round(m_phase_shift / SYN_LOOP_C_KG_PER_BAR, 4),  # phase-shift contribution to dPT-329201/dt (bar/h)
+                "SV_32201_th":     round(m_psv_kgh / 1000.0, 3),        # SV-32201 synthesis-loop relief (t/h) -- ATMOSPHERIC
+                "SV_32201_nh3_kgh": round(psv_nh3_kgh, 1),              # NH3 released to atmosphere through SV-32201 (kg/h)
+                "SV_32201_open":   bool(s.flags.get("SYN_PSV_LIFT")),   # loop above the 161.0 bar a set pressure
                 "co2_free":   round(scrub["co2_free"], 1),      # free acid CO2 overhead (pressure-building, kmol/h)
                 "pb_push":    round(scrub["pb_push"], 5),       # PT forward push = pressure-building overhead deviation (0 at design)
                 "PI_322E002": round(d_HPCC_P, 1),    # 322E002 HPCC bubble-point synthesis P (bar a, lagged)
@@ -8415,6 +8736,8 @@ def step_sim(dt: float) -> dict:
                                "op": round(fic["op"], 1), "mode": fic["mode"]},  # CCW flow (t/h) -> FV-329409
                 "TIC_329005": {"pv": round(tic["pv"], 1), "sp": round(tic["sp"], 1),
                                "op": round(tic["op"], 1), "mode": tic["mode"]},  # CCW supply T (C) -> TV-329005
+                "P329P006A":   {"on": bool(s.P329P006A)},       # tempered-water circ. pump A (running duty)
+                "P329P006B":   {"on": bool(s.P329P006B)},       # tempered-water circ. pump B (standby)
                 "P329P006_in":  round(SCRUB_CCW_P_OUT_BARA, 1), # 329P006 A/B suction P (CCW return)
                 "P329P006_out": round(SCRUB_CCW_P_IN_BARA, 1),  # 329P006 A/B discharge P (CCW supply)
                 "E004_duty_kW": round(q_e004_kw, 0),            # 329E004 tempered-water-cooler duty (kW)
@@ -8575,7 +8898,25 @@ def handle_cmd(cmd: dict):
     t = cmd.get("type")
 
     if t == "pump_toggle":
+        # {"type":"pump_toggle","id":...[, "on": true|false]}.  The optional `on` makes the command
+        #   an explicit START/STOP instead of a flip.  The pump faceplate sends it that way: its two
+        #   buttons each mean one thing, and a faceplate rendered a tick behind the engine must not
+        #   be able to invert the operator's intent.  Omitted, it toggles as before (legacy callers,
+        #   and every existing test/probe that sends a bare id).  Interlock gating below is
+        #   unchanged either way -- an explicit START is still refused by a live blocking latch.
         pid = cmd["id"]
+        want = cmd.get("on")
+        want = None if want is None else bool(want)
+        if pid in ("329P006A", "329P006B"):
+            # 329P006 A/B shell-side CCW circulation pumps.  No interlock and no trip latch: this is
+            #   a plain duty/standby swap, and stopping BOTH is a legitimate (and instructive) action
+            #   -- CCW flow collapses, FIC-329409 reads 0, the carbamate exotherm stops being removed
+            #   and PT-329201 climbs.  Nothing here blocks the operator from doing it.
+            if pid == "329P006A":
+                s.P329P006A = (not s.P329P006A) if want is None else want
+            else:
+                s.P329P006B = (not s.P329P006B) if want is None else want
+            return
         p   = s.pumpA if pid == "A" else s.pumpB
         latch_key = "21_8" if pid == "A" else "21_10"
         # P1-2: restart of a tripped pump.  Turning a pump OFF is always allowed; only the OFF->ON
@@ -8586,25 +8927,27 @@ def handle_cmd(cmd: dict):
         #   per spec.  A latch whose cause is STILL live (tank empty, CO2 lost) stays set and keeps
         #   the restart blocked.  (21_8/21_10 live-cond = pump_on AND fault; the pump is OFF here so
         #   the live cond is False -> the latch clears and the lube-oil fault is resolved on restart.)
-        if not p["on"]:
-            for k in ("21_2", "21_4", latch_key):
+        starting = (not p["on"]) if want is None else (want and not p["on"])
+        if starting:
+            for k in ("21_2", "21_4", "22_2", latch_key):
                 if s.trip_latched.get(k) and not s.trips.get(k, False):
                     s.trip_latched[k] = False
                     if k == "21_8":
                         s.pumpA["fault"] = False
                     elif k == "21_10":
                         s.pumpB["fault"] = False
-        if (not p["on"]) and (s.trip_latched["21_2"] or s.trip_latched["21_4"] or s.trip_latched[latch_key]):
+        if starting and (s.trip_latched["21_2"] or s.trip_latched["21_4"]
+                         or s.trip_latched["22_2"] or s.trip_latched[latch_key]):
             pass   # restart still blocked: a blocking interlock cause is unresolved
         else:
-            p["on"] = not p["on"]
+            p["on"] = (not p["on"]) if want is None else want
 
     elif t == "trip_reset":
         # Operator clear: only succeeds for trips whose LIVE condition has already recovered
         #   (a latch over a still-active condition cannot be cleared).  id = "21_2"|"21_8"|"21_10"
         #   or "ALL"/None for every trip.
         key  = cmd.get("id")
-        keys = ("21_2", "21_4", "21_8", "21_10") if key in (None, "ALL") else (key,)
+        keys = ("21_2", "21_4", "21_8", "21_10", "22_2") if key in (None, "ALL") else (key,)
         for k in keys:
             if k in s.trip_latched and not s.trips.get(k, False):
                 s.trip_latched[k] = False
@@ -8625,6 +8968,8 @@ def handle_cmd(cmd: dict):
             s.XV_322901 = not s.XV_322901
         elif cmd["id"] == "322902":
             s.XV_322902 = not s.XV_322902
+        elif cmd["id"] == "322903":
+            s.XV_322903 = not s.XV_322903
         elif cmd["id"] == "323D002TIE":
             # 323D002 Comp I <-> Comp II field tie-in spool.  A hand valve with no interlock: the
             # operator may open or close it at any time, and the consequence (a level that collapses
