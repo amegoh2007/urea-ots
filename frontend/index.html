@@ -190,6 +190,13 @@
     background:#2a4046;color:#fff;border:1px solid #aaa;padding:4px 12px;cursor:pointer;font-size:12px;
   }
   .modal button.primary{background:#0aa64d;}
+  /* A faceplate command button that is not available in the current state reads as colourless and
+     dead: no fill, dim text, no pointer.  START is live only while the pump is stopped and STOP only
+     while it runs, so the operator can never issue the command the plant is already in. */
+  .modal button:disabled{background:transparent;color:#777;border-color:#555;cursor:not-allowed;}
+  .modal button.primary:disabled{background:transparent;}
+  #pumpModal .btns button{min-width:84px;letter-spacing:1px;}
+  #pumpModal .row input{width:220px;}   /* the interlock line carries a sentence, not a number */
   .mode-group button{margin-right:4px;width:auto;}
   .mode-group button.active{background:#0aa64d;border-color:#22ff22;}
   #streamModal table{width:100%;border-collapse:collapse;font-family:Consolas,monospace;}
@@ -426,7 +433,7 @@
   </div><!-- /screen-321-1 -->
 
   <!-- ================= SCREEN 322-2 : HP-SCRUBBER (exact DCS replica) ================= -->
-  <div class="screen shot" id="screen-322-2" data-label="322-2 HP SCRUBBER">
+  <div class="screen shot" id="screen-322-2" data-label="322-2 UREA SYNTHESIS HP SCRUBBER">
     <div id="title">322-2 UREA SYNTHESIS HP-SCRUBBER</div>
 
     <!-- ============ STREAMS ============ -->
@@ -700,6 +707,17 @@
 </div></div>
 
 <!-- Hand Switch faceplate (HS-321901, HS-322901) -->
+<!-- Pump faceplate: every pump click opens this, no click starts or stops a pump directly -->
+<div class="modal" id="pumpModal"><div class="card">
+  <h3 id="pump-title">321P002A</h3>
+  <div class="row"><label>Pump</label><input id="pump-tag" type="text" readonly></div>
+  <div class="row"><label>Status</label><input id="pump-status" type="text" readonly></div>
+  <div class="row"><label>Interlock</label><input id="pump-ilk" type="text" readonly></div>
+  <div class="btns"><button id="pump-close">Close</button>
+    <button id="pump-stop-btn">STOP</button>
+    <button id="pump-start-btn">START</button></div>
+</div></div>
+
 <div class="modal" id="hsModal"><div class="card">
   <h3 id="hs-title">HS-321901</h3>
   <div class="row"><label>Valve</label><input id="hs-xv" type="text" readonly></div>

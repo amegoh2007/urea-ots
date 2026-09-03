@@ -263,10 +263,15 @@ function render(s){
 }
 
 // ---------- Click handlers (toggle style) ----------
-document.getElementById('pa-btn').onclick  = ()=> send({type:'pump_toggle',id:'A'});
-document.getElementById('pb-btn').onclick  = ()=> send({type:'pump_toggle',id:'B'});
-document.getElementById('pa-icon').onclick = ()=> send({type:'pump_toggle',id:'A'});
-document.getElementById('pb-icon').onclick = ()=> send({type:'pump_toggle',id:'B'});
+// The 321P002 A/B button and icon on the home screen go to the SAME pump faceplate the overlay
+// pumps use -- a click anywhere on a pump opens the faceplate, it never commands the machine.
+const PUMP_FP = { A: {id:'A', bind:'pumpA', tag:'321P002A'},
+                  B: {id:'B', bind:'pumpB', tag:'321P002B'} };
+const openPumpFace = id => { if(window.OTS_FACE && window.OTS_FACE.pump) window.OTS_FACE.pump(PUMP_FP[id]); };
+document.getElementById('pa-btn').onclick  = ()=> openPumpFace('A');
+document.getElementById('pb-btn').onclick  = ()=> openPumpFace('B');
+document.getElementById('pa-icon').onclick = ()=> openPumpFace('A');
+document.getElementById('pb-icon').onclick = ()=> openPumpFace('B');
 document.getElementById('xv-321901').onclick = ()=> send({type:'xv_toggle',id:'321901'});
 document.getElementById('xv-322901').onclick = ()=> send({type:'xv_toggle',id:'322901'});
 document.getElementById('extOverride').onclick = ()=> send({type:'ext_override',value:!lastState.ext_override});
@@ -453,6 +458,7 @@ function render322(s){
   const hv=document.getElementById('hv-op'); if(hv) hv.textContent = fmt(e.HIC_322602)+' %';
   if(window.OTS_FACE && window.OTS_FACE.hicSync) window.OTS_FACE.hicSync();   // keep the open HV faceplate's field live (any hand valve)
   if(window.OTS_FACE && window.OTS_FACE.hsSync) window.OTS_FACE.hsSync();     // keep the open HS faceplate's status live
+  if(window.OTS_FACE && window.OTS_FACE.pumpSync) window.OTS_FACE.pumpSync(); // keep the open pump faceplate's START/STOP enabling live
   const xb=document.getElementById('xv-322901b');
   if(xb) xb.classList.toggle('closed', !s.XV_322901);   // bowtie: green=open, red=closed (CSS)
 }
@@ -504,6 +510,52 @@ function render322(s){
   const pibox=document.querySelector('.pi[data-tag="HIC_322602"]'); if(pibox) pibox.addEventListener('click', ()=>open(null));
   if(cl&&m) cl.onclick=()=> m.classList.remove('show');
   if(m) m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
+})();
+
+// ---------- Pump faceplate — START / STOP, one live button ------------------------------------
+// No pump anywhere in the OTS starts or stops on a click: a click opens this, and the command is
+// issued from here.  Exactly one of the two buttons is ever live -- START while the pump is
+// stopped, STOP while it runs -- and the other is colourless and dead, so the operator cannot
+// command the state the plant is already in.  The buttons send an EXPLICIT on/off rather than a
+// toggle, so a faceplate rendered a tick behind the engine cannot invert the intent.
+(function(){
+  const m=document.getElementById('pumpModal'); if(!m) return;
+  const ttl=document.getElementById('pump-title'), tagf=document.getElementById('pump-tag'),
+        status=document.getElementById('pump-status'), ilk=document.getElementById('pump-ilk'),
+        bStart=document.getElementById('pump-start-btn'), bStop=document.getElementById('pump-stop-btn'),
+        cl=document.getElementById('pump-close');
+  if(!bStart||!bStop) return;
+  let cur=null;                                   // {id, bind, tag} of the pump being commanded
+  const gp=(o,p)=> p.split('.').reduce((a,k)=> (a==null?a:a[k]), o);
+  const isOn=()=>{ if(!cur||!cur.bind) return false;
+                   const p=gp(window.OTS_LAST||{}, cur.bind); return !!(p&&p.on); };
+  // 321P002 A/B restart gating, mirroring handle_cmd: a latch whose live cause has recovered is
+  // auto-acknowledged by the START click itself; a latch over a still-live cause blocks it.
+  const interlock=()=>{
+    if(!cur || (cur.id!=='A' && cur.id!=='B')) return '';          // 329P006 A/B carry no latch
+    const S=window.OTS_LAST||{}, L=S.trip_latched||{}, T=S.trips||{};
+    const keys=['21_2','21_4','22_2', cur.id==='A'?'21_8':'21_10'];
+    const live=keys.filter(k=>L[k]&&T[k]), held=keys.filter(k=>L[k]&&!T[k]);
+    if(live.length) return 'TRIP '+live.join(', ').replace(/_/g,'.')+' ACTIVE';
+    if(held.length) return 'TRIP '+held.join(', ').replace(/_/g,'.')+' LATCHED (clears on START)';
+    return 'CLEAR';
+  };
+  const paint=()=>{ const on=isOn();
+    if(status) status.value = on ? 'RUNNING' : 'STOPPED';
+    if(ilk)    ilk.value    = interlock() || 'n/a';
+    bStart.disabled = on;   bStart.classList.toggle('primary', !on);
+    bStop.disabled  = !on;  bStop.classList.toggle('primary',  on);
+  };
+  const open=(o)=>{ cur=o||null;
+    if(ttl && cur)  ttl.textContent = cur.tag || cur.id || 'PUMP';
+    if(tagf && cur) tagf.value = cur.tag || cur.id || '';
+    paint(); m.classList.add('show'); };
+  bStart.onclick=()=>{ if(bStart.disabled||!cur) return; send({type:'pump_toggle', id:cur.id, on:true}); };
+  bStop .onclick=()=>{ if(bStop.disabled ||!cur) return; send({type:'pump_toggle', id:cur.id, on:false}); };
+  window.OTS_FACE = Object.assign(window.OTS_FACE||{}, { pump: open,
+    pumpSync: ()=>{ if(m.classList.contains('show') && cur) paint(); } });
+  if(cl) cl.onclick=()=> m.classList.remove('show');
+  m.addEventListener('click', e=>{ if(e.target===m) m.classList.remove('show'); });
 })();
 
 // ---------- Hand Switch faceplate (HS-321901, HS-322901) — opens/closes XV on command ----------

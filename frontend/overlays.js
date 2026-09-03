@@ -18,13 +18,33 @@
 // awaiting binding when its upstream unit (322E003 scrubber, etc.) is modelled.
 (function () {
   const STAGE_W = 1366, STAGE_H = 720;
-  const LSK = 'ots_ov_pos_v4';   // v4 (G7): the 46 seed coords rewritten on 321-1/323-1 were being
-                                 // overridden by stale v3 drag positions on exactly the stations the
-                                 // rewrite realigned -- bump discards them so the corrected seeds show.
+  const LSK = 'ots_ov_pos_v5';   // v5: 321-1 / 322-1 / 322-2 were re-seeded from the 2026-08 slide
+                                 // deck, so every coord on those three moved.  v4 drag positions are
+                                 // carried across for the seven screens that did NOT change and dropped
+                                 // for the three that did -- a wholesale bump would have thrown away
+                                 // operator alignment on screens this migration never touched.
+  const REMAPPED = ['screen-321-1', 'screen-322-1', 'screen-322-2'];
+  function carryOver(newKey, oldKey) {
+    let cur = null;
+    try { cur = JSON.parse(localStorage.getItem(newKey) || 'null'); } catch (e) { cur = null; }
+    if (cur) return cur;
+    let prev = {};
+    try { prev = JSON.parse(localStorage.getItem(oldKey) || '{}') || {}; } catch (e) { prev = {}; }
+    const kept = {};
+    for (const k in prev) if (!REMAPPED.some(sid => k.indexOf(sid + '|') === 0 || k === sid)) kept[k] = prev[k];
+    localStorage.setItem(newKey, JSON.stringify(kept));
+    return kept;
+  }
 
   // bind = dot-path into the ws packet ('FI_321401', 'pumpA.current', 'SIC_321950.pv').
   // dec  = decimals. fp = controller id for left-click faceplate. No bind => empty slot.
   const OV = {
+    // ---------------------------------------------------------------------------------
+    //  Seed coordinates below are the shape centres of the 321-1 slide
+    //  (UI Pages/321-1.pptx), mapped 12192000x6858000 EMU -> 1366x720 stage.  The
+    //  background PNG is that same slide with these shapes deleted, so an overlay always
+    //  lands exactly where its symbol was drawn.
+    // ---------------------------------------------------------------------------------
     'screen-321-1': [
       // ---- indicators (all bound: active unit) ----
       { k: 'tt1',  t: 'ind', x: 242,  y: 225, tag: 'TT-321001', bind: 'TI_top1',     u: 'C',     dec: 1 },
@@ -32,130 +52,155 @@
       { k: 'py2',  t: 'ind', x: 623,  y: 133, tag: 'PY-321202', bind: 'PY_321202',   u: 'BAR G', dec: 1 },
       { k: 'py1',  t: 'ind', x: 628,  y: 202, tag: 'PY-321201', bind: 'PY_321201',   u: 'BAR G', dec: 1 },
       { k: 'pd3',  t: 'ind', x: 694,  y: 246, tag: 'PDY-321203',bind: 'PDY_321203',  u: 'BAR G', dec: 1 },
-      { k: 'pd4',  t: 'ind', x: 972,  y: 247, tag: 'PDY-321204',bind: 'PDY_321204',  u: 'BAR G', dec: 1 },
+      { k: 'pd4',  t: 'ind', x: 973,  y: 247, tag: 'PDY-321204',bind: 'PDY_321204',  u: 'BAR G', dec: 1 },
       { k: 'tt20', t: 'ind', x: 1011, y: 310, tag: 'TT-321020', bind: 'TI_321020',   u: 'C',     dec: 1 },
       { k: 'ft',   t: 'ind', x: 211,  y: 353, tag: 'FT-321401', bind: 'FI_321401',   u: 'T/H',   dec: 2 },
       { k: 'pt1',  t: 'ind', x: 582,  y: 373, tag: 'PT-321201', bind: 'PI_321201',   u: 'BAR G', dec: 1 },
       { k: 'pt2',  t: 'ind', x: 794,  y: 396, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
       { k: 'fqi',  t: 'ind', x: 210,  y: 424, tag: 'FQI-321401' },   // Totalizer - backend binding TBD
-      { k: 'ffa',  t: 'ind', x: 159,  y: 547, tag: 'FFIC-321404A' },  // Ratio controller A - backend binding TBD
-      { k: 'ffb',  t: 'ind', x: 158,  y: 593, tag: 'FFIC-321404B' },  // Ratio controller B - backend binding TBD
+      // Feed-ratio panel rows A/B: the per-pump NH3/CO2 molar ratio.  Left-click opens that
+      // pump's speed faceplate, which is where the N/C bias is editable (CAS only).
+      { k: 'ffa',  t: 'ind', x: 159,  y: 547, tag: 'FFIC-321404A', bind: 'ratio.NC_A', u: 'N/C', dec: 3, fp: 'SIC_321950' },
+      { k: 'ffb',  t: 'ind', x: 158,  y: 593, tag: 'FFIC-321404B', bind: 'ratio.NC_B', u: 'N/C', dec: 3, fp: 'SIC_321951' },
       { k: 'i61',  t: 'ind', x: 619,  y: 592, tag: 'IT-321961', bind: 'pumpA.current',u: 'A',    dec: 1 },
       { k: 'i62',  t: 'ind', x: 841,  y: 604, tag: 'IT-321962', bind: 'pumpB.current',u: 'A',    dec: 1 },
       { k: 's50',  t: 'ind', x: 570,  y: 642, tag: 'SIC-321950',bind: 'controllers.SIC_321950.pv',u: 'RPM',  dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
       { k: 's51',  t: 'ind', x: 770,  y: 648, tag: 'SIC-321951',bind: 'controllers.SIC_321951.pv',u: 'RPM',  dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
-      // ---- pumps (dimensions from PowerPoint: Picture 26 & Picture 66) ----
-      { k: 'pa',  t: 'pump', x: 621,  y: 521, w: 75, h: 65, bind: 'pumpA', id: 'A', tag: '321P002A' },
-      { k: 'pb',  t: 'pump', x: 839,  y: 516, w: 75, h: 65, bind: 'pumpB', id: 'B', tag: '321P002B' },
-      // ---- XVs (dimensions from PowerPoint: Picture 155 & Picture 157) ----
-      { k: 'xva', t: 'xv',   x: 457,  y: 324, w: 68, h: 31, bind: 'XV_321901', cmd: '321901', tag: 'XV-321901' },
-      { k: 'xvb', t: 'xv',   x: 1129, y: 359, w: 68, h: 31, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
-      // ---- Hand Switches (HS) for XV control - GREEN CLICKABLE SQUARES ----
-      { k: 'hs321901', t: 'hs', x: 523,  y: 281, xv: 'XV_321901', cmd: '321901', tag: 'HS-321901' },
-      { k: 'hs322901', t: 'hs', x: 1129, y: 418, xv: 'XV_322901', cmd: '322901', tag: 'HS-322901' },
-      // ---- Navigation links (rectangles to other UI pages) ----
-      { k: 'nav-fic402', t: 'nav', x: 555,  y: 280, w: 80, h: 24, tag: 'FIC-328402 → 328-1', goto: 'screen-328-1' },
-      { k: 'nav-fic401', t: 'nav', x: 1167, y: 416, w: 80, h: 24, tag: 'FIC-329401 → 329-1', goto: 'screen-329-1' },
-      { k: 'nav-322f001',t: 'nav', x: 1284, y: 359, w: 80, h: 24, tag: '322F001 → 322-2',    goto: 'screen-322-2' },
-      { k: 'nav-bl',     t: 'nav', x: 67,   y: 268, w: 60, h: 24, tag: 'BL → (external)',   goto: 'screen-321-1' },  // BL = Battery Limits - no screen yet
-      { k: 'nav-ft403',  t: 'nav', x: 67,   y: 427, w: 80, h: 24, tag: 'FT-322402 → 322-1', goto: 'screen-322-1' },
+      // ---- pumps (slide Picture 27 / 67) ----
+      { k: 'pa',  t: 'pump', x: 621.8,  y: 521.7, w: 75.86, h: 65.64, rot: 0,   bind: 'pumpA', id: 'A', tag: '321P002A' },
+      { k: 'pb',  t: 'pump', x: 839.9,  y: 516.8, w: 75.86, h: 65.64, rot: 0,   bind: 'pumpB', id: 'B', tag: '321P002B' },
+      // ---- XVs (slide Picture 156 / 158) ----
+      { k: 'xva', t: 'xv',   x: 457.5,  y: 324.9, w: 68.84, h: 32.00, rot: 0,   bind: 'XV_321901', cmd: '321901', tag: 'XV-321901' },
+      { k: 'xvb', t: 'xv',   x: 1129.1, y: 359.7, w: 68.84, h: 32.00, rot: 0,   bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
+      // ---- hand switches: the green square inside each "Open XV-..." panel (slide 165 / 167) ----
+      { k: 'hs321901', t: 'hs', x: 555,  y: 280, w: 26, h: 20, xv: 'XV_321901', cmd: '321901', tag: 'HS-321901' },
+      { k: 'hs322901', t: 'hs', x: 1167, y: 416, w: 26, h: 20, xv: 'XV_322901', cmd: '322901', tag: 'HS-322901' },
+      // ---- navigation links (slide comment "Link to page ...") ----
+      { k: 'nav-322f001',t: 'nav', x: 1277, y: 359, w: 103, h: 32, tag: '322F001 -> 322-2',   goto: 'screen-322-2' },
+      { k: 'nav-ft403',  t: 'nav', x: 70,   y: 426, w: 113, h: 38, tag: 'FT-322402 -> 322-1', goto: 'screen-322-1' },
+      { k: 'nav-bl',     t: 'nav', x: 61,   y: 265, w: 78,  h: 28, tag: 'BL -> (external)',   goto: 'screen-321-1' },  // BL = Battery Limits - no screen yet
     ],
+    // ---------------------------------------------------------------------------------
+    //  Seed coordinates are the shape centres of the 322-2 slide (UI Pages/322-2.pptx),
+    //  mapped 12192000x6858000 EMU -> 1366x720 stage.
+    // ---------------------------------------------------------------------------------
     'screen-322-2': [
-      // ---- indicators: ALL tags positioned; only 3 bound, rest = white-frame empty slots ----
-      { k: 'ti09',  t: 'ind', x: 225, y: 68,  tag: 'TI-322009',  bind: 'SCRUB_322E003.TT_322009',  u: 'C', dec: 1 },
-      { k: 'tt11',  t: 'ind', x: 390, y: 65,  tag: 'TT-322011',  bind: 'SCRUB_322E003.TT_322011',  u: 'C', dec: 1 },
-      { k: 'h604',  t: 'ind', x: 929, y: 63,  tag: 'HIC-322604', bind: 'SCRUB_322E003.HIC_322604', u: '%', dec: 1, face: 'hic' },
-      { k: 'hv604', t: 'ind', x: 928, y: 137, tag: 'HV-322604',  bind: 'SCRUB_322E003.HV_322604',  u: '%', dec: 1, face: 'hic' },
-      { k: 'ti12',  t: 'ind', x: 143, y: 152, tag: 'TT-322012', bind: 'EJ_322F001.TT_322012', u: 'C',     dec: 1 },
-      { k: 'pi2',   t: 'ind', x: 239, y: 151, tag: 'PI-329201', bind: 'EJ_322F001.PI_329201', u: 'BAR A', dec: 1 },
-      { k: 'i007',  t: 'ind', x: 995, y: 227, tag: 'IT-329007'  },
-      { k: 'ti02',  t: 'ind', x: 255, y: 243, tag: 'TI-322002', bind: 'EJ_322F001.TI_322002', u: 'C',     dec: 1 },
-      { k: 'tv05',  t: 'ind', x: 714, y: 253, tag: 'TV-329005',  bind: 'SCRUB_322E003.ccw.TIC_329005.op', u: '%',   dec: 1 },
-      { k: 'tic05', t: 'ind', x: 497, y: 277, tag: 'TIC-329005', bind: 'SCRUB_322E003.ccw.TIC_329005.pv', u: 'C',   dec: 1, mode: 'SCRUB_322E003.ccw.TIC_329005.mode' },
-      { k: 'lt01',  t: 'ind', x: 142, y: 306, tag: 'LT-329501',  bind: 'SCRUB_322E003.LT_329501',        u: '%',   dec: 1 },
-      { k: 'fic09', t: 'ind', x: 590, y: 334, tag: 'FIC-329409', bind: 'SCRUB_322E003.ccw.FIC_329409.pv', u: 'T/H', dec: 1, mode: 'SCRUB_322E003.ccw.FIC_329409.mode' },
-      { k: 'fv09',  t: 'ind', x: 714, y: 327, tag: 'FV-329409',  bind: 'SCRUB_322E003.ccw.FIC_329409.op', u: '%',   dec: 1 },
-      { k: 'tdy25', t: 'ind', x: 494, y: 344, tag: 'TDY-329125', bind: 'SCRUB_322E003.ccw.TDY_329125',   u: 'C',   dec: 1 },
-      { k: 'i008',  t: 'ind', x: 995, y: 351, tag: 'IT-329008'  },
-      { k: 'ti25',  t: 'ind', x: 988, y: 402, tag: 'TI-329125',  bind: 'SCRUB_322E003.ccw.TT_329125',    u: 'C', dec: 1 },
-      { k: 'h602',  t: 'ind', x: 103, y: 531, tag: 'HIC-322602',bind: 'EJ_322F001.HIC_322602', u: '%',     dec: 1, face: 'hic' },
-      { k: 't21',   t: 'ind', x: 148, y: 652, tag: 'TI-321020', bind: 'TI_321020',  u: 'C',     dec: 1 },
-      // HV-322602 opening (driven by HIC-322602) — placed below h602 per updated 322-2 tagged
-      { k: 'hv602', t: 'ind', x: 128, y: 578, tag: 'HV-322602', bind: 'EJ_322F001.HIC_322602', u: '%', dec: 1, face: 'hic' },
-      // ---- stream-inspector hotspots (click = composition/properties popup; drag in edit mode to align) ----
-      { k: 'strm-soffg', t: 'strm', stream: 'SCRUB_OFFGAS',    tag: 'SCRUBBER OFF-GAS → HV-322604', x: 560,  y: 60,  w: 230, h: 16 },
-      { k: 'strm-soglp', t: 'strm', stream: 'SCRUB_OFFGAS_LP', tag: 'OFF-GAS LP → 322C001',         x: 1005, y: 150, w: 150, h: 16 },
-      { k: 'strm-ccws',  t: 'strm', stream: 'CCW_SUPPLY',      tag: 'CCW SUPPLY → 322E003',         x: 840,  y: 285, w: 90,  h: 16 },
-      { k: 'strm-ccwr',  t: 'strm', stream: 'CCW_RETURN',      tag: 'CCW RETURN → 329P006 A/B',     x: 1010, y: 430, w: 80,  h: 16 },
-      // ---- screen-nav hotspots (Item 3): jump to equipment's home screen ----
-      { k: 'nav-r001', t: 'nav', x: 6, y: 104, w: 78, h: 24, tag: '322R001 → 322-1', goto: 'screen-322-1' },
-      { k: 'nav-e002', t: 'nav', x: 6, y: 164, w: 96, h: 26, tag: '322E002 → 322-1', goto: 'screen-322-1' },
-      { k: 'nav-p002', t: 'nav', x: 6, y: 622, w: 98, h: 24, tag: '321P002A/B → 321-1', goto: 'screen-321-1' },
+      // ===== 322E003 HP SCRUBBER =====
+      { k: 'tt11',   t: 'ind', x: 552,  y: 112, tag: 'TT-322011', bind: 'SCRUB_322E003.TT_322011', u: 'C', dec: 1 },
+      { k: 'h604',   t: 'ind', x: 1070, y: 78,  tag: 'HIC-322604', bind: 'SCRUB_322E003.HIC_322604', u: '%', dec: 1, face: 'hic' },
+      { k: 'hv604',  t: 'ind', x: 1068, y: 164, tag: 'HV-322604',  bind: 'SCRUB_322E003.HV_322604',  u: '%', dec: 1, face: 'hic' },
+      { k: 'lt9501', t: 'ind', x: 359,  y: 408, tag: 'LT-329501',  bind: 'SCRUB_322E003.LT_329501',  u: '%', dec: 1 },
+      { k: 'bar9501',t: 'bar', x: 422,  y: 411, w: 22, h: 79, tag: 'LT-329501', bind: 'SCRUB_322E003.LT_329501' },
+      { k: 'tt9',    t: 'ind', x: 245,  y: 216, tag: 'TT-322009', bind: 'REACT_322R001.TT_322009', u: 'C', dec: 1 },
+      // ===== 322F001 HP EJECTOR =====
+      { k: 'tt12',   t: 'ind', x: 210,  y: 270, tag: 'TT-322012', bind: 'EJ_322F001.TT_322012', u: 'C', dec: 1 },
+      { k: 'pt9201', t: 'ind', x: 392,  y: 332, tag: 'PT-329201', bind: 'EJ_322F001.PI_329201', u: 'BAR A', dec: 1 },
+      { k: 'tt2',    t: 'ind', x: 374,  y: 357, tag: 'TT-322002', bind: 'EJ_322F001.TI_322002', u: 'C', dec: 1 },
+      { k: 'h602',   t: 'ind', x: 214,  y: 452, tag: 'HIC-322602', bind: 'EJ_322F001.HIC_322602', u: '%', dec: 1, face: 'hic' },
+      { k: 'hv602',  t: 'ind', x: 212,  y: 481, tag: 'HV-322602',  bind: 'EJ_322F001.HIC_322602', u: '%', dec: 1, face: 'hic' },
+      { k: 'tt1020', t: 'ind', x: 174,  y: 625, tag: 'TT-321020',  bind: 'TI_321020', u: 'C', dec: 1 },
+      // ===== SHELL-SIDE CCW LOOP (329P006 A/B + 329E004 cooler) =====
+      { k: 'tic05',  t: 'ind', x: 666,  y: 404, tag: 'TIC-329005', bind: 'SCRUB_322E003.ccw.TIC_329005.pv', u: 'C', dec: 1, mode: 'SCRUB_322E003.ccw.TIC_329005.mode' },
+      { k: 'tv05',   t: 'ind', x: 831,  y: 350, tag: 'TV-329005',  bind: 'SCRUB_322E003.ccw.TIC_329005.op', u: '%', dec: 1 },
+      { k: 'tdy25',  t: 'ind', x: 609,  y: 470, tag: 'TDY-329125', bind: 'SCRUB_322E003.ccw.TDY_329125', u: 'C', dec: 1 },
+      { k: 'fic09',  t: 'ind', x: 682,  y: 465, tag: 'FIC-329409', bind: 'SCRUB_322E003.ccw.FIC_329409.pv', u: 'T/H', dec: 1, mode: 'SCRUB_322E003.ccw.FIC_329409.mode' },
+      { k: 'fv09',   t: 'ind', x: 834,  y: 446, tag: 'FV-329409',  bind: 'SCRUB_322E003.ccw.FIC_329409.op', u: '%', dec: 1 },
+      { k: 'tt25',   t: 'ind', x: 944,  y: 543, tag: 'TT-329125',  bind: 'SCRUB_322E003.ccw.TT_329125', u: 'C', dec: 1 },
+      // 329P006 A/B tempered-water circulation pumps -- A duty, B standby, both operator
+      // startable/stoppable.  They are the CCW loop's only motive source: stop both and
+      // FIC-329409 falls to 0, the shell-side exotherm stops being removed and PT-329201 climbs.
+      // The slide draws both rotated 180 deg (suction on the right).
+      { k: 'pca',    t: 'pump', x: 997.7,  y: 386.5, w: 43.72, h: 37.83, rot: 180, bind: 'SCRUB_322E003.ccw.P329P006A', id: '329P006A', tag: '329P006A' },
+      { k: 'pcb',    t: 'pump', x: 1001.9, y: 458.1, w: 43.72, h: 37.83, rot: 180, bind: 'SCRUB_322E003.ccw.P329P006B', id: '329P006B', tag: '329P006B' },
+      // ===== 322C001 / 323 BOUNDARY =====
+      { k: 'pic201', t: 'ind', x: 1240, y: 93,  tag: 'PIC-322201', bind: 'ABSORB_328.C001.PIC_322201.pv', u: 'BAR A', dec: 2, mode: 'ABSORB_328.C001.PIC_322201.mode' },
+      { k: 'tt3010', t: 'ind', x: 1237, y: 115, tag: 'TT-323010',  bind: 'RECIRC_323.F010.TT_323010', u: 'C', dec: 1 },
+      // ===== XVs + hand switches =====
+      { k: 'xv901',  t: 'xv', x: 278.3, y: 535.8, w: 41.57, h: 24.04, rot: 90, bind: 'XV_322901', cmd: '322901', tag: 'XV-322901' },
+      { k: 'xv903',  t: 'xv', x: 348.4, y: 467.6, w: 41.57, h: 24.04, rot: 0,  bind: 'EJ_322F001.XV_322903', cmd: '322903', tag: 'XV-322903' },
+      { k: 'hs903',  t: 'hs', x: 411, y: 522, w: 26, h: 20, xv: 'EJ_322F001.XV_322903', cmd: '322903', tag: 'HS-322903' },
+      // ===== STREAM-INSPECTOR HOTSPOTS =====
+      { k: 'strm-soffg', t: 'strm', stream: 'SCRUB_OFFGAS',    tag: 'SCRUBBER OFF-GAS -> HV-322604', x: 620,  y: 139, w: 250, h: 16 },
+      { k: 'strm-soglp', t: 'strm', stream: 'SCRUB_OFFGAS_LP', tag: 'OFF-GAS LP -> 322C001',         x: 1150, y: 139, w: 100, h: 16 },
+      { k: 'strm-ccws',  t: 'strm', stream: 'CCW_SUPPLY',      tag: 'CCW SUPPLY -> 322E003',         x: 800,  y: 426, w: 200, h: 14 },
+      { k: 'strm-ccwr',  t: 'strm', stream: 'CCW_RETURN',      tag: 'CCW RETURN -> 329P006 A/B',     x: 1000, y: 516, w: 200, h: 14 },
+      // ===== NAVIGATION (slide comment "Link to page ...") =====
+      { k: 'nav-r001', t: 'nav', x: 82,   y: 187, w: 92,  h: 21, tag: '322R001 -> 322-1',    goto: 'screen-322-1' },
+      { k: 'nav-e002', t: 'nav', x: 86,   y: 243, w: 92,  h: 21, tag: '322E002 -> 322-1',    goto: 'screen-322-1' },
+      { k: 'nav-p002', t: 'nav', x: 82,   y: 599, w: 100, h: 21, tag: '321P002A/B -> 321-1', goto: 'screen-321-1' },
+      { k: 'nav-c001', t: 'nav', x: 1235, y: 141, w: 92,  h: 21, tag: '322C001 -> 328-2',    goto: 'screen-328-2' },
+      { k: 'nav-p001', t: 'nav', x: 1235, y: 211, w: 98,  h: 21, tag: '323P001A/B -> 323-2', goto: 'screen-323-2' },
     ],
+    // ---------------------------------------------------------------------------------
+    //  Seed coordinates are the shape centres of the 322-1 slide (UI Pages/322-1.pptx),
+    //  mapped 12192000x6858000 EMU -> 1366x720 stage.
+    // ---------------------------------------------------------------------------------
     'screen-322-1': [
-      // ===== COMPOSITION INDICATORS (AE tags: click to show live composition faceplate) =====
-      { k: 'ae801', t: 'ae', x: 910,  y: 376, tag: 'AE-322801', stream: 'REACT_OVERFLOW', note: 'Solution composition: 322R001 → HV-322605' },
-      { k: 'ae802', t: 'ae', x: 1078, y: 518, tag: 'AE-322802', stream: 'STRIP_BOT',      note: 'Solution composition: 322E001 → LV-322501' },
-      // ===== STREAM-INSPECTOR HOTSPOTS (clickable process lines; drag in edit mode to align) =====
-      { k: 'strm-co2',   t: 'strm', stream: 'CO2_FEED',     tag: 'CO2 FEED GAS',          x: 360, y: 600, w: 160, h: 20 },
-      { k: 'strm-nh3',   t: 'strm', stream: 'NH3_FEED',     tag: 'NH3 EX 309E005',        x: 360, y: 418, w: 160, h: 18 },
-      { k: 'strm-disch', t: 'strm', stream: 'HP_DISCH',     tag: 'NH3 HP DISCHARGE',      x: 560, y: 300, w: 160, h: 18 },
-      { k: 'strm-carb',  t: 'strm', stream: 'CARB_RECYCLE', tag: 'CARBAMATE EX 322E003',  x: 560, y: 360, w: 160, h: 18 },
-      { k: 'strm-ejd',   t: 'strm', stream: 'EJ_DISCH',     tag: 'CARB. LIQ. → 322E002',  x: 760, y: 340, w: 160, h: 18 },
-      { k: 'strm-stop',  t: 'strm', stream: 'STRIP_TOP',    tag: 'STRIP TOP GAS',         x: 760, y: 200, w: 160, h: 18 },
-      { k: 'strm-sbot',  t: 'strm', stream: 'STRIP_BOT',    tag: 'STRIP BOTTOM SOLN',     x: 1012, y: 518, w: 40, h: 110 },
-      { k: 'strm-prod',  t: 'strm', stream: 'HPCC_PROD',    tag: 'HPCC PRODUCT → 322R001',x: 980, y: 300, w: 160, h: 18 },
-      { k: 'strm-stm',   t: 'strm', stream: 'HPCC_STEAM',   tag: 'LP STEAM 4.4 BARA',     x: 980, y: 180, w: 160, h: 18 },
-      { k: 'strm-cond',  t: 'strm', stream: 'HPCC_COND',    tag: 'BFW/COND → 322E002',    x: 980, y: 420, w: 160, h: 18 },
-      { k: 'strm-rov',   t: 'strm', stream: 'REACT_OVERFLOW', tag: 'OVERFLOW → 322E001',    x: 650, y: 376, w: 220, h: 20 },
-      { k: 'strm-rog',   t: 'strm', stream: 'REACT_OFFGAS',   tag: 'REACTOR GAS → 322E003', x: 840, y: 84, w: 240, h: 20 },
-      // ===== CO2 FEED LINE (Item 5) — bound to backend CO2_FEED packet =====
-      { k: 'hic203', t: 'ind',    x: 100,  y: 472, tag: 'HIC-322203', bind: 'CO2_FEED.HIC_322203', u: '%',     dec: 1, face: 'hic2' },
-      { k: 'pv203',  t: 'avalve', x: 197,  y: 486, tag: 'PV-322203',  bind: 'CO2_FEED.PV_322203',  u: '%',     dec: 1 },
-      { k: 'pic203', t: 'ind',    x: 128,  y: 525, tag: 'PIC-322203', bind: 'CO2_FEED.PIC_322203', u: 'BAR A', dec: 1, face: 'pic', mode: 'CO2_FEED.PIC_mode' },
-      { k: 'fy403',  t: 'ind',    x: 289,  y: 520, tag: 'FY-322403',  bind: 'CO2_FEED.FY_322403',  u: 'T/H',   dec: 2 },
-      { k: 'ft403',  t: 'ind',    x: 289,  y: 561, tag: 'FT-322403',  bind: 'CO2_FEED.FT_322403',  u: 'NM3/H', dec: 0 },
-      { k: 'ti017',  t: 'ind',    x: 308,  y: 628, tag: 'TI-322017',  bind: 'CO2_FEED.TI_322017',  u: 'C',     dec: 1 },
-      { k: 'load',   t: 'ind',    x: 1231, y: 698, tag: 'LOAD',       bind: 'CO2_FEED.Load',       u: '%',     dec: 1 },
-      // NH3 feed (modelled in 321) — boundary tag
-      { k: 'ft401',  t: 'ind',    x: 284,  y: 423, tag: 'FT-321401',  bind: 'FI_321401',           u: 'T/H',   dec: 2 },
-      // ---- pump speed / ratio controllers (modelled in 321) ----
-      { k: 's950b', t: 'ind', x: 491, y: 443, tag: 'SIC-321950',    bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
-      { k: 's951b', t: 'ind', x: 497, y: 492, tag: 'SIC-321951',    bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
-      { k: 'nca2',  t: 'ind', x: 419, y: 448, tag: 'N/C 321P002A',  bind: 'ratio.NC_A', u: '', dec: 3 },
-      { k: 'ncb2',  t: 'ind', x: 414, y: 497, tag: 'N/C 321P002B',  bind: 'ratio.NC_B', u: '', dec: 3 },
-      // ---- screen-nav hotspots (Item 3) ----
-      { k: 'nav-321',  t: 'nav', x: 494,  y: 534, w: 70, h: 24, tag: '321-1',             goto: 'screen-321-1' },
-      { k: 'nav-e003', t: 'nav', x: 1271, y: 78,  w: 80, h: 22, tag: '322E003 → 322-2', goto: 'screen-322-2' },
-      { k: 'nav-f001', t: 'nav', x: 1283, y: 113, w: 80, h: 22, tag: '322F001 → 322-2', goto: 'screen-322-2' },
-      // ---- white-frame (unbound: downstream 322 reactor/scrubber/condenser, bind when modelled) ----
-      { k: 'at701',  t: 'ind', x: 209,  y: 285, tag: 'AT-322701', bind: 'REACT_322R001.AT_322701', u: 'N/C', dec: 3 },
-      { k: 'lt504',  t: 'ind', x: 354,  y: 326, tag: 'LT-322504', bind: 'REACT_322R001.LT_322504', u: '%', dec: 1 },
-      { k: 'pt9201', t: 'ind', x: 740,  y: 42,  tag: 'PT-329201', bind: 'EJ_322F001.PI_329201', u: 'BAR A', dec: 1 },   // same loop 329201 as 322-2 PI-329201 (322E003 overflow P); PT=field xmtr, PI=indicator, one backend key
-      { k: 'tt009',  t: 'ind', x: 595,  y: 105, tag: 'TT-322009', bind: 'REACT_322R001.TT_322009', u: 'C', dec: 1 },
-      { k: 'tt005',  t: 'ind', x: 543,  y: 145, tag: 'TT-322005', bind: 'REACT_322R001.TT_322005', u: 'C', dec: 1 },
-      { k: 'tt012b', t: 'ind', x: 735,  y: 145, tag: 'TT-322012', bind: 'HPCC_322E002.TT_322012', u: 'C', dec: 1 },   // 322F001 ejector-disch liquid feed -> 322E002
-      { k: 'tt013',  t: 'ind', x: 864,  y: 143, tag: 'TT-322013', bind: 'STRIP_322E001.TT_322013', u: 'C', dec: 1 },
-      { k: 'tt006',  t: 'ind', x: 543,  y: 195, tag: 'TT-322006', bind: 'REACT_322R001.TT_322006', u: 'C', dec: 1 },
-      { k: 'ft9407', t: 'ind', x: 807,  y: 212, tag: 'FT-329407', bind: 'STEAM_SYSTEM.FT_329407_th', u: 'T/H', dec: 2 },   // excess 4-bar steam via PV-329207B (320MT02)
-      { k: 'tt007',  t: 'ind', x: 543,  y: 247, tag: 'TT-322007', bind: 'REACT_322R001.TT_322007', u: 'C', dec: 1 },
-      { k: 'tt008',  t: 'ind', x: 543,  y: 297, tag: 'TT-322008', bind: 'REACT_322R001.TT_322008', u: 'C', dec: 1 },
-      { k: 'tt010',  t: 'ind', x: 597,  y: 335, tag: 'TT-322010', bind: 'HPCC_322E002.TT_322010', u: 'C', dec: 1 },   // 322E002 liquid product temp -> 322R001
-      { k: 'h605',   t: 'ind', x: 830,  y: 325, tag: 'HIC-322605', bind: 'REACT_322R001.HIC_322605', u: '%', dec: 1, face: 'hic' },
-      { k: 'pt9207', t: 'ind', x: 1242, y: 145, tag: 'PT-329207', bind: 'STEAM_SYSTEM.LP.P_bara', u: 'BAR A', dec: 2 },   // LP header P (same node as PI-329207 on 329-1)
-      { k: 'tt9001', t: 'ind', x: 1048, y: 259, tag: 'TT-329001', bind: 'HPCC_322E002.TT_329001', u: 'C', dec: 1 },   // 322D001 A/B condensate -> 322E002 shell (BFW feed)
-      { k: 'py9207', t: 'ind', x: 1094, y: 208, tag: 'PY-329207B' },
-      { k: 'tt014',  t: 'ind', x: 638,  y: 398, tag: 'TT-322014', bind: 'STRIP_322E001.TT_322014', u: 'C', dec: 1 },
-      { k: 'hv605',  t: 'ind', x: 823,  y: 392, tag: 'HV-322605', bind: 'REACT_322R001.HV_322605', u: '%', dec: 1, face: 'hic' },
-      { k: 'lic501', t: 'ind', x: 861,  y: 471, tag: 'LIC-322501', bind: 'STRIP_322E001.LIC_322501.pv', u: '%', dec: 1, mode: 'STRIP_322E001.LIC_322501.mode' },
-      { k: 'pic9204',t: 'ind', x: 1113, y: 380, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.PIC_329204.pv', u: 'BAR A', dec: 2,
-        mode: 'STEAM_SYSTEM.PIC_329204.mode', note: 'AUTO holds 329D005 at SP via PV-329204; MAN sets PV-329204 opening directly' },   // 329D005 = 322E001 shell P
-      { k: 'hic9601',t: 'ind', x: 1127, y: 489, tag: 'HIC-329601', bind: 'STEAM_SYSTEM.HP_VENT.pct', u: '%', dec: 1, face: 'hic' },
-      { k: 'ft9403', t: 'ind', x: 1127, y: 520, tag: 'FT-329403', bind: 'STEAM_SYSTEM.FT_329403_th', u: 'T/H', dec: 2 },   // total steam supply: 911+902+903+963
-      { k: 'lv501',  t: 'ind', x: 1110, y: 612, tag: 'LV-322501', bind: 'STRIP_322E001.LV_322501', u: '%', dec: 1 },
-      { k: 'tt004',  t: 'ind', x: 1037, y: 619, tag: 'TT-322004', bind: 'STRIP_322E001.TT_322004', u: 'C', dec: 1 },
-      { k: 'pt3201', t: 'ind', x: 1187, y: 617, tag: 'PT-323201', bind: 'RECIRC_323.C003.P_bara', u: 'BAR A', dec: 2,
-        note: 'rect col 323C003 pressure; rises with top-vapour 305 as LV-322501 opens (K_P = 1.20 bar a per unit fractional gas-phase excess)' },
+      // ===== 322R001 REACTOR =====
+      { k: 'tt9',   t: 'ind', x: 405,  y: 114, tag: 'TT-322009', bind: 'REACT_322R001.TT_322009', u: 'C', dec: 1 },
+      { k: 'tt5',   t: 'ind', x: 387,  y: 200, tag: 'TT-322005', bind: 'REACT_322R001.TT_322005', u: 'C', dec: 1 },
+      { k: 'tt6',   t: 'ind', x: 387,  y: 247, tag: 'TT-322006', bind: 'REACT_322R001.TT_322006', u: 'C', dec: 1 },
+      { k: 'tt7',   t: 'ind', x: 387,  y: 293, tag: 'TT-322007', bind: 'REACT_322R001.TT_322007', u: 'C', dec: 1 },
+      { k: 'tt8',   t: 'ind', x: 387,  y: 347, tag: 'TT-322008', bind: 'REACT_322R001.TT_322008', u: 'C', dec: 1 },
+      { k: 'lt504', t: 'ind', x: 171,  y: 247, tag: 'LT-322504', bind: 'REACT_322R001.LT_322504', u: '%', dec: 1 },
+      { k: 'bar504',t: 'bar', x: 243,  y: 285, w: 12, h: 125, tag: 'LT-322504', bind: 'REACT_322R001.LT_322504' },
+      { k: 'at701', t: 'ind', x: 226,  y: 424, tag: 'AT-322701', bind: 'REACT_322R001.AT_322701', u: 'N/C', dec: 3 },
+      { k: 'ae801', t: 'ae',  x: 217,  y: 453, tag: 'AE-322801', stream: 'REACT_OVERFLOW', note: 'Solution composition: 322R001 -> HV-322605' },
+      { k: 'h605',  t: 'ind', x: 711,  y: 446, tag: 'HIC-322605', bind: 'REACT_322R001.HIC_322605', u: '%', dec: 1, face: 'hic' },
+      { k: 'hv605', t: 'ind', x: 710,  y: 503, tag: 'HV-322605',  bind: 'REACT_322R001.HV_322605',  u: '%', dec: 1, face: 'hic' },
+      // ===== 322E002 HP CARBAMATE CONDENSER =====
+      { k: 'tt12',  t: 'ind', x: 634,  y: 210, tag: 'TT-322012', bind: 'EJ_322F001.TT_322012',   u: 'C', dec: 1 },
+      { k: 'tt10',  t: 'ind', x: 444,  y: 442, tag: 'TT-322010', bind: 'HPCC_322E002.TT_322010', u: 'C', dec: 1 },
+      { k: 'tt2900',t: 'ind', x: 755,  y: 355, tag: 'TT-329001', bind: 'HPCC_322E002.TT_329001', u: 'C', dec: 1 },
+      // ===== 322E001 HP STRIPPER =====
+      { k: 'tt13',  t: 'ind', x: 1018, y: 258, tag: 'TT-322013', bind: 'STRIP_322E001.TT_322013', u: 'C', dec: 1 },
+      { k: 'tt14',  t: 'ind', x: 455,  y: 508, tag: 'TT-322014', bind: 'STRIP_322E001.TT_322014', u: 'C', dec: 1 },
+      { k: 'tt4',   t: 'ind', x: 905,  y: 559, tag: 'TT-322004', bind: 'STRIP_322E001.TT_322004', u: 'C', dec: 1 },
+      { k: 'lic501',t: 'ind', x: 864,  y: 478, tag: 'LIC-322501', bind: 'STRIP_322E001.LIC_322501.pv', u: '%', dec: 1, mode: 'STRIP_322E001.LIC_322501.mode' },
+      { k: 'bar501',t: 'bar', x: 976,  y: 474, w: 12, h: 68, tag: 'LIC-322501', bind: 'STRIP_322E001.LIC_322501.pv' },
+      { k: 'lv501', t: 'ind', x: 1051, y: 590, tag: 'LV-322501', bind: 'STRIP_322E001.LV_322501', u: '%', dec: 1 },
+      { k: 'ae802', t: 'ae',  x: 986,  y: 602, tag: 'AE-322802', stream: 'STRIP_BOT', note: 'Solution composition: 322E001 -> LV-322501' },
+      { k: 'pt3201',t: 'ind', x: 1115, y: 599, tag: 'PT-323201', bind: 'RECIRC_323.C003.P_bara', u: 'BAR A', dec: 2 },
+      // ===== CO2 FEED LINE (320K002 -> XV-322902 -> 322E001) =====
+      { k: 'pic203',t: 'ind',    x: 118, y: 561, tag: 'PIC-322203', bind: 'CO2_FEED.PIC_322203', u: 'BAR A', dec: 1, face: 'pic', mode: 'CO2_FEED.PIC_mode' },
+      { k: 'pv203', t: 'avalve', x: 242, y: 522, tag: 'PV-322203',  bind: 'CO2_FEED.PV_322203',  u: '%',     dec: 1, face: 'hic2' },   // left-click = HIC-322203 forced-minimum faceplate
+      { k: 'hs203', t: 'btn',    x: 141, y: 498, w: 74, h: 19, tag: 'HS-322203', face: 'hic2', bind: 'CO2_FEED.HIC_322203', u: '%', dec: 1 },   // slide-drawn button -> HIC-322203 station (bind is for the trend pen only; the button draws no value)
+      { k: 'fy403', t: 'ind',    x: 362, y: 523, tag: 'FY-322403',  bind: 'CO2_FEED.FY_322403',  u: 'T/H',   dec: 2 },
+      { k: 'ft403', t: 'ind',    x: 363, y: 559, tag: 'FT-322403',  bind: 'CO2_FEED.FT_322403',  u: 'NM3/H', dec: 0 },
+      { k: 'tt17',  t: 'ind',    x: 290, y: 597, tag: 'TT-322017',  bind: 'CO2_FEED.TI_322017',  u: 'C',     dec: 1 },
+      { k: 'xv902', t: 'xv',     x: 700.1, y: 578.3, w: 44.58, h: 20.72, rot: 0, bind: 'CO2_FEED.XV_322902', cmd: '322902', tag: 'XV-322902' },
+      { k: 'hs902', t: 'hs',     x: 734, y: 634, w: 26, h: 20, xv: 'CO2_FEED.XV_322902', cmd: '322902', tag: 'HS-322902' },
+      { k: 'load',  t: 'ind',    x: 1201,y: 648, tag: 'LOAD', bind: 'CO2_FEED.Load', u: '%', dec: 1, fs: 14 },   // panel label is left-aligned; value takes the right half
+      // ===== FEED-RATIO / PUMP-SPEED PANEL (mirrors the 321-1 panel; editable via faceplate) =====
+      { k: 'ffa',   t: 'ind', x: 402, y: 640, tag: 'FFIC-321404A', bind: 'ratio.NC_A', u: 'N/C', dec: 3, fp: 'SIC_321950' },
+      { k: 'ffb',   t: 'ind', x: 399, y: 660, tag: 'FFIC-321404B', bind: 'ratio.NC_B', u: 'N/C', dec: 3, fp: 'SIC_321951' },
+      { k: 's50',   t: 'ind', x: 528, y: 640, tag: 'SIC-321950', bind: 'controllers.SIC_321950.pv', u: 'RPM', dec: 1, fp: 'SIC_321950', mode: 'controllers.SIC_321950.mode' },
+      { k: 's51',   t: 'ind', x: 528, y: 660, tag: 'SIC-321951', bind: 'controllers.SIC_321951.pv', u: 'RPM', dec: 1, fp: 'SIC_321951', mode: 'controllers.SIC_321951.mode' },
+      // ===== 329 STEAM BOUNDARY =====
+      { k: 'pt9201',t: 'ind', x: 1125, y: 45,  tag: 'PT-329201', bind: 'EJ_322F001.PI_329201', u: 'BAR A', dec: 1, fs: 18 },
+      { k: 'msp',   t: 'ind', x: 1146, y: 236, tag: 'MASTER-SP', bind: 'STEAM_SYSTEM.MASTER_SP_329207.sp', u: 'BAR A', dec: 2, fp: 'MASTER_SP_329207' },
+      { k: 'pt9207',t: 'ind', x: 1148, y: 256, tag: 'PT-329207', bind: 'STEAM_SYSTEM.LP.P_bara', u: 'BAR A', dec: 2 },
+      { k: 'pic204',t: 'ind', x: 1080, y: 400, tag: 'PIC-329204', bind: 'STEAM_SYSTEM.PIC_329204.pv', u: 'BAR A', dec: 2, mode: 'STEAM_SYSTEM.PIC_329204.mode' },
+      { k: 'h9601', t: 'ind', x: 1126, y: 448, tag: 'HIC-329601', bind: 'STEAM_SYSTEM.HP_VENT.pct', u: '%', dec: 1, face: 'hic' },
+      { k: 'ft9403',t: 'ind', x: 1130, y: 471, tag: 'FT-329403',  bind: 'STEAM_SYSTEM.FT_329403_th', u: 'T/H', dec: 2 },
+      // ===== STREAM-INSPECTOR HOTSPOTS (each sits on the drawn line its tags measure) =====
+      { k: 'strm-rog',   t: 'strm', stream: 'REACT_OFFGAS',   tag: 'REACTOR GAS -> 322E003',  x: 850,  y: 93,  w: 280, h: 16 },
+      { k: 'strm-ejd',   t: 'strm', stream: 'EJ_DISCH',       tag: 'CARB. LIQ. -> 322E002',   x: 900,  y: 193, w: 280, h: 16 },
+      { k: 'strm-stm',   t: 'strm', stream: 'HPCC_STEAM',     tag: 'LP STEAM -> 322D001',     x: 900,  y: 294, w: 200, h: 14 },
+      { k: 'strm-cond',  t: 'strm', stream: 'HPCC_COND',      tag: 'BFW/COND -> 322E002',     x: 900,  y: 329, w: 200, h: 14 },
+      { k: 'strm-stop',  t: 'strm', stream: 'STRIP_TOP',      tag: 'STRIP TOP GAS',           x: 960,  y: 320, w: 14,  h: 120 },
+      { k: 'strm-rov',   t: 'strm', stream: 'REACT_OVERFLOW', tag: 'OVERFLOW -> 322E001',     x: 560,  y: 483, w: 200, h: 16 },
+      { k: 'strm-co2',   t: 'strm', stream: 'CO2_FEED',       tag: 'CO2 FEED GAS',            x: 500,  y: 578, w: 280, h: 16 },
+      { k: 'strm-sbot',  t: 'strm', stream: 'STRIP_BOT',      tag: 'STRIP BOTTOM SOLN',       x: 1150, y: 574, w: 110, h: 16 },
+      // ===== NAVIGATION (slide comment "Link to page ...") =====
+      { k: 'nav-e003',  t: 'nav', x: 1220, y: 95,  w: 92,  h: 21, tag: '322E003 -> 322-2',  goto: 'screen-322-2' },
+      { k: 'nav-f001',  t: 'nav', x: 1220, y: 195, w: 92,  h: 21, tag: '322F001 -> 322-2',  goto: 'screen-322-2' },
+      { k: 'nav-msp',   t: 'nav', x: 1229, y: 249, w: 74,  h: 41, tag: 'MASTER SP -> 329-1', goto: 'screen-329-1' },
+      { k: 'nav-d001a', t: 'nav', x: 1224, y: 293, w: 92,  h: 21, tag: '322D001 -> 329-1',  goto: 'screen-329-1' },
+      { k: 'nav-d001b', t: 'nav', x: 1224, y: 330, w: 92,  h: 21, tag: '322D001 -> 329-1',  goto: 'screen-329-1' },
+      { k: 'nav-vent',  t: 'nav', x: 1231, y: 449, w: 101, h: 21, tag: 'VENT VALVE -> 329-1', goto: 'screen-329-1' },
+      { k: 'nav-extr',  t: 'nav', x: 1231, y: 472, w: 101, h: 21, tag: 'EXTR STEAM -> 329-1', goto: 'screen-329-1' },
+      { k: 'nav-c003',  t: 'nav', x: 1220, y: 572, w: 92,  h: 21, tag: '323C003 -> 323-1',  goto: 'screen-323-1' },
     ],
     'screen-329-1': [
       // Positions rescanned from tagged 329-1 shot (value-box centres, transform x*1.2936 / y*1.4343).
@@ -460,12 +505,12 @@
   };
 
   let pos = {};
-  try { pos = JSON.parse(localStorage.getItem(LSK) || '{}'); } catch (e) { pos = {}; }
+  try { pos = carryOver(LSK, 'ots_ov_pos_v4') || {}; } catch (e) { pos = {}; }
 
   // ---- user tag overrides (add/edit/delete) persisted separately from positions ----
-  const MK = 'ots_ov_tags_v3';        // per screen: { add:[ {k,t,x,y,tag,bind,u,dec,cmd,id} ], edit:{ k:{...} }, del:[k] }
-  let ovr = {};
-  try { ovr = JSON.parse(localStorage.getItem(MK) || '{}'); } catch (e) { ovr = {}; }
+  const MK = 'ots_ov_tags_v4';        // per screen: { add:[ {k,t,x,y,tag,bind,u,dec,cmd,id} ], edit:{ k:{...} }, del:[k] }
+  let ovr = {};                       // v4: same carry-over rule as LSK -- the three re-seeded screens
+  try { ovr = carryOver(MK, 'ots_ov_tags_v3') || {}; } catch (e) { ovr = {}; }   // start clean, the rest keep their edits
   const smap = sid => (ovr[sid] || (ovr[sid] = { add: [], edit: {}, del: [] }));
   const saveTags = () => localStorage.setItem(MK, JSON.stringify(ovr));
   // effective config = seed (minus deletes, with field edits) ++ user-added tags
@@ -491,6 +536,30 @@
   function modeLetter(o) {                       // o.mode = dot-path to mode field; HIC* = operator hand station (always M)
     if (o.mode) { const m = gp(lastS, o.mode); return m ? (MODE_LETTER[m] || '') : ''; }
     return /^HIC-/.test(o.tag || '') ? 'M' : '';
+  }
+
+  // Stage aspect ratio: the 16:9 slide canvas is stretched, not letterboxed, onto 1366x720
+  // (background-size:100% 100%), so x and y carry different scale factors.
+  //     SLIDE_RX = (1366/12192000) / (720/6858000) = 1.06719
+  const SLIDE_RX = (1366 / 12192000) / (720 / 6858000);
+
+  // Place a pump/XV icon so it lands exactly on the symbol the slide drew there.
+  //   o.w / o.h are the icon's on-stage box AFTER that anisotropic stretch.  The slide render
+  //   is rotate-THEN-stretch, so the same order is reproduced here: draw the image at its
+  //   un-stretched size (o.w/SLIDE_RX by o.h), rotate it, then scale X back up.  This is exact
+  //   for any angle -- at rot 0 it collapses to the plain o.w x o.h box.
+  //   The .ov box is sized to that same un-stretched rectangle.  It used to keep the fixed
+  //   54x54 / 34x34 CSS default while the <img> inside carried the real size; because .ov is
+  //   centred with translate(-50%,-50%) but the image is laid out from its top-left, every icon
+  //   sat half the size difference off its symbol (the 321-1 pumps by 11 x 6 px, the XVs by 17).
+  function sizeIcon(el, o) {
+    const img = el.querySelector('img');
+    if (!img || !o.w || !o.h) return;
+    const iw = o.w / SLIDE_RX, ih = o.h;
+    el.style.width = iw + 'px';
+    el.style.height = ih + 'px';
+    img.style.cssText = 'width:' + iw + 'px;height:' + ih + 'px;display:block;transform-origin:50% 50%;'
+      + 'transform:scaleX(' + SLIDE_RX + ')' + (o.rot ? ' rotate(' + o.rot + 'deg)' : '') + ';';
   }
 
   function svgPump() {
@@ -519,7 +588,7 @@
   }
 
   // Element types that can carry a trend pen: analogue value, valve opening, valve/pump state.
-  const TRENDABLE = { ind: 1, avalve: 1, xv: 1, pump: 1 };
+  const TRENDABLE = { ind: 1, avalve: 1, xv: 1, pump: 1, bar: 1, btn: 1 };
   const CTRL_RE = /[A-Z]IC-3\d{2}/i;   // any *IC-3xxxx loop controller (PIC/HIC/LIC/TIC/FIC/SIC) -> faceplate
   let BIND_MAP = {};                   // tag -> {bind,u,dec,face,fp}: first bound occurrence across ALL screens
   function buildBindMap() {            // shared tags read the SAME value on every screen they appear
@@ -529,7 +598,7 @@
       // Trend map also carries 'avalve' (modulating valve OPENING %). BIND_MAP itself must
       // not: eff() uses it to let an unbound 'ind' inherit a bind, and folding valve entries
       // into that would change which value a shared tag renders.
-      if ((o.t === 'ind' || o.t === 'avalve') && o.bind && !tm[o.tag])
+      if ((o.t === 'ind' || o.t === 'avalve' || o.t === 'btn') && o.bind && !tm[o.tag])
         tm[o.tag] = { bind: o.bind, u: o.u, dec: o.dec, rng: o.rng };
       // Block valves and pumps trend as 0/1 digital pens. A pump binds to its object, so
       // the trendable quantity is the .on flag. Unbound ones (UI-local toggles with no
@@ -548,6 +617,13 @@
     const el = elMap[sid + '|' + o.k]; if (!el) return;
     o = eff(o);                        // inherit bind/unit/dec from any screen sharing this tag
     if (o.t === 'nav') return;                          // transparent screen-nav hotspot, no value
+    if (o.t === 'btn') { el.dataset.tip = o.tag + ' - click for faceplate'; return; }
+    if (o.t === 'hs') {                                 // hand-switch pushbutton, no value
+      const open = o.xv ? !!gp(lastS, o.xv) : false;
+      el.dataset.tip = o.tag + ' - ' + (o.xv ? o.xv.split('.').pop().replace('_', '-') : '')
+        + ' ' + (open ? 'OPEN' : 'CLOSED') + ' (click for faceplate)';
+      return;
+    }
     if (o.t === 'ae') {                                 // composition indicator (AE-* tag)
       el.classList.add('ae-indicator');
       el.dataset.tip = o.tag + ' — ' + (o.note || 'Click to view composition');
@@ -559,7 +635,7 @@
       const imgSrc = on ? 'img/pump-on.png' : 'img/pump-off.png';
       const img = el.querySelector('img');
       if (img && img.src.indexOf(imgSrc) < 0) img.src = imgSrc;
-      el.dataset.tip = o.tag + ' — ' + (on ? 'ON' : 'OFF');
+      el.dataset.tip = o.tag + ' — ' + (on ? 'ON' : 'OFF') + ' (click for START/STOP faceplate)';
     } else if (o.t === 'xv') {
       const open = xvOpen(sid, o);
       el.classList.toggle('closed', !open);
@@ -567,6 +643,13 @@
       const img = el.querySelector('img');
       if (img && img.src.indexOf(imgSrc) < 0) img.src = imgSrc;
       el.dataset.tip = o.tag + ' — ' + (open ? 'OPEN' : 'CLOSED');
+    } else if (o.t === 'bar') {                          // level bargraph: fill height = bound value, 0-100 %
+      const f = el.querySelector('.bf');
+      const v = o.bind ? gp(lastS, o.bind) : null;
+      const pc = (v == null || isNaN(v)) ? null : Math.max(0, Math.min(100, Number(v)));
+      el.classList.toggle('empty', pc == null);
+      if (f) f.style.height = (pc == null ? 0 : pc) + '%';
+      el.dataset.tip = o.tag + ' - ' + (pc == null ? 'no data' : pc.toFixed(1) + ' %');
     } else if (o.t === 'ovrd') {                         // 21.x interlock override pushbutton
       const armed = !!gp(lastS, 'trip_latched.' + (o.latch || '21_4'));
       const open = !!gp(lastS, o.xv || 'XV_322901');
@@ -591,7 +674,9 @@
   function activate(sid, o) {                   // run-mode left-click action
     o = eff(o);                                 // shared tag opens same faceplate / inherits bind
     if (o.t === 'pump') {
-      if (o.bind && o.id) { if (window.otsSend) otsSend({ type: 'pump_toggle', id: o.id }); return; }
+      // A pump click opens its faceplate; START/STOP are issued from there, never from the symbol.
+      if (o.bind && o.id && window.OTS_FACE && window.OTS_FACE.pump) { window.OTS_FACE.pump(o); return; }
+      return;
     } else if (o.t === 'xv') {
       if (o.cmd) { if (window.otsSend) otsSend({ type: 'xv_toggle', id: o.cmd }); return; }
     } else if (o.t === 'hs') {                    // hand switch: opens faceplate to control XV
@@ -608,9 +693,20 @@
     } else if (o.t === 'strm') {
       if (o.stream && window.openStreamPopup) window.openStreamPopup(o.stream);
       return;
+    } else if (o.t === 'btn') {                   // hand-switch button drawn on the slide (HS-322203)
+      if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
+      if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); }
+      return;
+    } else if (o.t === 'bar') {                   // level bargraph: same faceplate route as its tag
+      if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
+      if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); }
+      return;
     } else if (o.t === 'avalve' && o.route) {
       const api = window.OTS_LV324501_ROUTE;
       if (api && window.otsSend) api.activate(o.route, window.otsSend);
+      return;
+    } else if (o.t === 'avalve') {                // an auto-valve may carry a faceplate too (PV-322203 -> HIC-322203)
+      if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
       return;
     } else if (o.t === 'ind') {
       if (o.face && window.OTS_FACE && window.OTS_FACE[o.face]) { window.OTS_FACE[o.face](o); return; }
@@ -687,7 +783,7 @@
     for (const key in elMap) if (key.indexOf(sid + '|') === 0) delete elMap[key];
     cfg(sid).forEach(o => {
       const el = document.createElement('div');
-      el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'vessel' ? 'vessel' : o.t === 'nav' ? 'nav' : o.t === 'strm' ? 'strm' : o.t === 'ae' ? 'ae' : o.t === 'ovrd' ? 'ovrd' : o.t === 'hs' ? 'hs' : 'ind');
+      el.className = 'ov ' + (o.t === 'pump' ? 'pump' : o.t === 'xv' ? 'avalve' : o.t === 'vessel' ? 'vessel' : o.t === 'nav' ? 'nav' : o.t === 'strm' ? 'strm' : o.t === 'ae' ? 'ae' : o.t === 'ovrd' ? 'ovrd' : o.t === 'hs' ? 'hs' : o.t === 'bar' ? 'bar' : o.t === 'btn' ? 'nav' : 'ind');
       if (o.t === 'ind' || o.t === 'avalve') {                                 // avalve = modulating PV opening %, rendered as a numeric indicator (bug 3: opening was never shown)
         const eo = eff(o);
         if (!eo.bind) el.classList.add('empty');
@@ -712,9 +808,19 @@
         el.style.whiteSpace = 'nowrap';
         el.style.userSelect = 'none';
         el.dataset.stream = o.stream;
-      } else if (o.t === 'hs') {
-        el.innerHTML = '<b>OPEN</b>';
+      } else if (o.t === 'hs') {                                   // the green pushbutton square inside
+        el.innerHTML = '';                                         // the slide's "Open XV-..." panel --
+        if (o.w) el.style.width = o.w + 'px';                      // the panel already prints the legend,
+        if (o.h) el.style.height = o.h + 'px';                     // so the button itself carries no text
+      } else if (o.t === 'btn') {                                  // transparent hotspot over a button
+        el.style.width  = (o.w || 60) + 'px';                      // the slide already draws and labels
+        el.style.height = (o.h || 20) + 'px';
+      } else if (o.t === 'bar') {                                  // vertical level bargraph over the
+        el.style.width  = (o.w || 12) + 'px';                      // slot drawn on the vessel
+        el.style.height = (o.h || 80) + 'px';
+        el.innerHTML = '<i class="bf"></i>';
       }
+      if (o.fs) el.style.fontSize = o.fs + 'px';                   // slide-specified type size (PT-329201, LOAD)
       el.dataset.tip = o.tag;
       el.title = o.tag;
       // Only bound indicators/valve openings are draggable: an unbound white frame has no
@@ -722,10 +828,10 @@
       if (TRENDABLE[o.t] && (eff(o).bind || o.bind)) el.draggable = true;
       if (o.t === 'pump') {
         el.innerHTML = svgPump();
-        if (o.w && o.h) el.querySelector('img').style.cssText = `width:${o.w}px;height:${o.h}px;display:block;`;
+        sizeIcon(el, o);
       } else if (o.t === 'xv') {
         el.innerHTML = svgXV();
-        if (o.w && o.h) el.querySelector('img').style.cssText = `width:${o.w}px;height:${o.h}px;display:block;`;
+        sizeIcon(el, o);
       } else if (o.t === 'vessel') {
         if (o.img) {
           el.innerHTML = `<img src="img/${o.img}" style="width:${o.w}px;height:${o.h}px;display:block;">`;
@@ -775,7 +881,11 @@
       '.ov.ovrd.armed .ovl{background:#ffd000;border-color:#ffd000;box-shadow:0 0 5px #ffd000;animation:ovrdblink 1s steps(1) infinite;}' +
       '.ov.ovrd.on .ovl{background:#22ff22;border-color:#22ff22;}' +
       '@keyframes ovrdblink{50%{opacity:.35;}}' +
-      '.ov.hs{padding:4px 10px;background:#1a2808;border:1px solid #4a6b2f;border-radius:4px;color:#a0e060;font:bold 11px Arial;cursor:pointer;white-space:nowrap;user-select:none;}' +
+      '.ov.bar{padding:0;background:#04110d;border:1px solid #e8f4f0;border-radius:1px;overflow:hidden;display:flex;flex-direction:column-reverse;cursor:pointer;}' +
+      '.ov.bar .bf{display:block;width:100%;background:var(--btn-green,#22ff22);transition:height .15s linear;}' +
+      '.ov.bar.empty{border-color:#fff;background:transparent;}' +
+      'body.ov-editing .ov.bar{outline:1px dashed rgba(120,200,255,.8);}' +
+      '.ov.hs{padding:0;box-sizing:border-box;background:#1a2808;border:1px solid #4a6b2f;border-radius:4px;color:#a0e060;font:bold 11px Arial;cursor:pointer;white-space:nowrap;user-select:none;}' +
       '.ov.hs:hover{background:#2a3818;border-color:#6a8b4f;color:#c0ff80;}' +
       '.ov.hs:active{background:#0aa64d;color:#fff;border-color:#22ff22;}' +
       '#sim-toggle{position:fixed;left:12px;bottom:12px;z-index:9000;display:flex;align-items:center;gap:8px;font:600 12px "Segoe UI",system-ui;padding:7px 13px;background:#13202c;color:#cfe;border:1px solid #2f4858;border-radius:6px;cursor:pointer;user-select:none;}' +

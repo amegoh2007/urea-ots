@@ -35,7 +35,11 @@
       // and swallows every faceplate click on 322-1.  Make the layer click-through and let
       // only the widget itself take pointer events back.
       '.co2-comp-layer{pointer-events:none;}' +
-      '.co2-comp{position:absolute;left:16px;top:610px;width:196px;z-index:6;pointer-events:auto;' +
+      // Placed at the marker the 322-1 slide reserves for this widget (shape 227, centre
+      // 96.7,421.5).  Pulled to the screen edge and 43 px up: the widget is 196 x 53 against the
+      // marker's 63 x 54, and at the marker's own origin its right edge lands on the AT-322701
+      // indicator (187..266) and its bottom on the AE-322801 chip (441..465).
+      '.co2-comp{position:absolute;left:6px;top:352px;width:196px;z-index:6;pointer-events:auto;' +
         'background:var(--ratio,#2e8a8f);border:1px solid #99dadd;border-radius:3px;' +
         'padding:6px 8px 7px;box-shadow:0 2px 9px rgba(0,0,0,.45);user-select:none;}' +
       '.co2-comp .cc-hd{font:bold 10.5px Arial,Helvetica,sans-serif;letter-spacing:.7px;' +
