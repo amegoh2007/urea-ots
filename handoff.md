@@ -163,7 +163,14 @@ Verified green or baseline-identical:
 | `test_g8_lp_turbine_export.py` | 2 failed, 4 passed | identical to baseline (section 3 red list) |
 | `test_equation_audit_desorption.py` | 2 failed, 8 passed | identical to baseline; this is the file that exercises the three 328 bottoms valves |
 
-### test_ccw_loss_chain.py Phase 1a was ALREADY failing at dae861d -- measured, not assumed
+### test_ccw_loss_chain.py was ALREADY failing at dae861d, every gate -- measured, not assumed
+
+Phase 1b's seven "new terms inert at design" gaps fail **identically** on `dae861d` and on this
+branch (cool_frac 0.9958 / 0.9951, uncond 0.07 / 0.08 t/h, retained vapour 4.5 / 5.2 kg, swell
+0.1 / 0.1 %), and Phase 2 crashes identically on both. One line moves in the right direction: over
+the 6000 s Phase 1b hold, LT-329501 drifts 50.000 -> **49.400** on `dae861d` and holds **50.000**
+flat on this branch, which is the restored D-19 head term.
+
 
 Its first gate is `abs(pt_prod - 140.7) < 1e-3` after 3000 s at the production tick. Running the
 identical hold on **dae861d in a side worktree** and on this branch:
@@ -186,14 +193,17 @@ Worth noticing in the same table: the **322E003 sump holds NLL seven times tight
 (0.002 points off at 3000 s against 0.014). That is the D-19 head term making it a genuine
 attractor instead of an integrator, and it is a design-hold IMPROVEMENT, not a cost.
 
-### An engine-killing crash on the transport path, found and fixed
+### An engine-killing crash on the transport path -- PRE-EXISTING, and now fixed
 
 `_w_norm` divided by the sum of a packet's mass fractions with no guard, and
 `consequence.ZERO_PACKET` carries an EMPTY component vector -- so the moment a transported line
-delivered an empty packet while its departure carried mass (the line had been dry for longer than
-its dead time and flow then resumed), the tick died with `ZeroDivisionError`. All five transport
-sites had it. Reachable from any upset that takes a transported line to exactly zero flow; a total
-322E003 CCW loss does it at the 323C003 bottom drain, which is how it surfaced.
+delivered an empty packet while its departure carried mass (the line dry for longer than its dead
+time, then flow resuming), the tick died with `ZeroDivisionError`. All five transport sites had it.
+
+**Attributed, not assumed: `dae861d` crashes identically** -- same file, same line
+(`w_314_in = _w_norm(_pkt_arr_314.mass_fraction)`), same Phase 2, same `H.run(300)`. It is
+reachable from any upset that takes a transported line to exactly zero flow, and a total 322E003 CCW
+loss does it at the 323C003 bottom drain. Nothing in Phase 2 caused it or made it reachable.
 
 Fixed at the source: `_w_norm` takes an optional `fallback` used only when the total is
 non-positive, and each of the five sites passes its own departure composition. Nothing physical is
@@ -201,9 +211,11 @@ papered over -- when no mass arrives, the receiving stage's inflow term is zero,
 multiplies is arbitrary and the departure composition is the honest placeholder. Every OTHER caller
 passes a PFD row, where a zero total IS a data error and still raises.
 
-This is the fourth of the same family the CCW chain has now surfaced; section 9 lists three more
-that a previous pass fixed. **The chain is worth running after any change to the 323/324 train** --
-it is the only test that drives the flowsheet hard enough to reach these.
+This is the fourth of the same family the CCW chain has surfaced; section 9 lists three more that a
+previous pass fixed. **The chain is worth running after any change to the 323/324 train** -- it is
+the only test that drives the flowsheet hard enough to reach these. Note that until this fix it had
+never got past Phase 2, so **Phases 3 and 4 have not actually been exercised since the crash
+appeared**; whatever they report on the next run is new information, not a regression.
 
 **NOT re-run in this pass, and they should be**:
 `test_equation_audit_td014.py`, `test_ccw_loss_chain.py`, `test_transient_coldstart.py`,
