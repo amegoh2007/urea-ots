@@ -148,37 +148,85 @@ Both are one-line fixes and would take two reds off the board without touching t
 but with no vessel-pressure term, so a vacuum break would not change the drain rate. Wiring it to
 `hydraulics.gravity_outflow_kgh` needs the leg height, which no source in the repository gives.
 
-## 1f. Phase 3 — kinetics; A-8 and C-5 remain
+## 1f. Phase 3 — kinetics and reaction energy, CLOSED
 
-**C-1, C-2, C-3 and C-4 are CLOSED.** 322R001 runs on a two-step mechanism with Arrhenius kinetics
-marched over the column's own residence-time distribution, and biuret is second-order in urea (design
-point exact to 3.6e-12). 322E001's hydrolysis and biuret extents are on the Inoue-Otsuka second-order
-group and a second-order Arrhenius law, both integrated over the live wetted volume (design point
-exact). Full write-ups in the As-Built reference.
+**C-1, C-2, A-8, C-3 and C-4 are all closed, and C-5 was found already conforming.** 322R001 runs on
+a two-step mechanism with Arrhenius kinetics marched over the column's own residence-time
+distribution; its column temperature comes from a real energy balance on the two reaction enthalpies
+instead of a prescribed 13.0 C rise; and 322E001's hydrolysis and biuret extents are on the
+Inoue-Otsuka second-order group and a second-order Arrhenius law over the live wetted volume. Design
+seed exact on every PFD anchor. Full write-ups in the As-Built reference.
 
-Regression after C-3/C-4, 13 files: **7 failed / 149 passed**, and all 7 are the documented
-pre-existing set (4 `test_equation_audit_td014.py`, 1 `test_equation_audit_322e002.py`,
-2 `test_equation_audit_desorption.py`). No new failures.
+**A-8 is the one worth reading before touching this area again**, because it found a measurable
+error in something nobody had checked: the reactor's fitted Damkohler heat-release shape was 6.5 C
+wrong at TT-322007 against 1921 DCS samples in `References/Urea_NormalOp_29-06-2025_Trends.md`. The
+energy balance with volume-distributed carbamate absorption (the licensor's own mechanism, per
+`References/322R001 Description.md` section 4) lands at RMS 0.431 C against that trend, versus
+3.661 C for the shape it replaced.
 
-**Still open, and each needs real work rather than rewiring:**
+### Open, and genuinely open — the settled attractor drifts
 
-| finding | site | note |
-|---|---|---|
-| A-8 | `REACT_DT_COL_DES` (13.0 C prescribed column rise), `reactor.node_dTdt`, the 4-node integration in `step_sim` | the exotherm still enters as an IMPOSED dT scaled by conversion, not as an energy quantity. The replacement is the node energy balance with dH_carb = -117 and dH_dehyd = +15.5 kJ/mol -- **both already in-repo** (`STRIP_DH_CARB_JMOL`, `STRIP_DH_HYD_JMOL`) -- and the per-node extents `urea_extent_pfr` now returns as its second value, which is exactly the `r_r,n` the balance needs. The pieces are in place; the risk is that the reactor temperature stops being anchored at 183 C and has to FIND it, so the design pin needs care |
-| C-5 | `sol_biuret_xi` (downstream/desorption biuret) | uses the right Arrhenius FORM but an anchored design extent and no holdup term. The change is the one already made twice — second order in urea concentration, integrated over the vessel's live liquid volume. Needs the downstream vessels' geometry, which the 324/328 datasheets should carry |
+The design **seed** is exact (xi_urea 1302.270000943, xi_biu 2.414000000, T_ovf 183.000017), but over
+6000 s the settled overflow climbs to 183.488 C (+0.49) and xi_urea to 1316 (+1.05 %). The drift rate
+peaks near 5000 s and then falls, suggesting convergence near 183.6, but that was **not run out far
+enough to prove** — someone should.
 
-**A measured finding worth not re-deriving:** `STRIP_XI_HYD_DES = 88.1 kmol/h` cannot be produced by
-a urea-hydrolysis rate law. Inoue-Otsuka at the stripper's own design state gives 12.02 kmol/h over
-the whole tube bundle flooded and 17.48 kmol/h over bundle + sump — it would need a liquid fraction
-of 7.33 against a physical maximum of 1. And 88.1/1302.6 is 6.8 % of the urea feed destroyed in 97 s,
-where a real CO2 stripper loses well under 1 %. That constant almost certainly lumps carbamate
-decomposition. C-3 therefore anchors the extent and predicts the DEPARTURE; anyone tempted to "finish
-the job" by back-solving a rate constant to reach 88.1 would be fitting to the wrong reaction.
+This is a consequence of closing the thermal loop rather than a new fault: `p_syn` drifts to 140.209
+(design 140.7) and level to 79.90 over the same window, both pre-existing and documented elsewhere in
+this file. Previously the reactor temperature was imposed, so that drift could not reach it. Two
+things to weigh before "fixing" it:
 
-**Watch out for one thing when doing A-8:** the reactor kinetics and the thermal profile are mutually
-coupled (T -> rate -> exotherm -> T). The kinetics currently read `s.react_T_node` from the PREVIOUS
-substep as an explicit tear. A-8 closes that loop properly, so whichever direction is torn has to be
-chosen deliberately rather than inherited.
+* the settled 183.488 sits closer to the plant's own TT-322014 mean (183.556) than the PFD anchor
+  (183.0) does — the two source documents disagree by 0.56 C, twice the residual;
+* the drift's true origin is the pre-existing level/pressure creep, so chasing it in the reactor
+  energy balance would be treating a symptom.
+
+### Two calibration traps, already paid for — do not re-enter them
+
+Both were tried during A-8 and both are the wrong operating point for anchoring the thermal
+fixed point:
+
+| candidate | what happens |
+|---|---|
+| phase-1 settle capture | it is the CAS warm-up attractor; carbamate balance reads 253 kmol/h against the 279 the MAN runtime produces, c_p comes out 3.20 and the column runs to 184.3 C (settled 185.86, RMS 1.751) |
+| post-reset one-tick capture | a single tick off the seed, i.e. it pins the seed to itself |
+
+The design vectors are used instead — every input source-anchored (`_HPCC_DES` gas CO2,
+`REACT_OFFGAS_DES` CO2, `REACT_OVERFLOW_DES` mass).
+
+### A density-basis defect was found and fixed (introduced in C-1)
+
+`_react_vdot_m3h` divides the design overflow mass by the constant `REACT_OVERFLOW_RHO` (990.0),
+while the live path divides by `reactor.liquid_density(T_bulk)` (992.3 at 179.7 C). Two "design"
+operating points 0.23 % apart, with the direct call anchored to one and the live seed step to the
+other — so calibrating against either broke the other's bit-exactness contract. `REACT_KIN_ANCHOR` is
+now the seed step's own state. **If another `_react_vdot_*` is added, put it on the same density
+basis or this reopens.**
+
+The final A2/biuret calibration closes on the contract itself: step the plant exactly as
+`test_reactor_kinetics_phase3.py` does and scale until that step lands on the PFD extent, to 1e-14
+relative. A 1e-9 stop is NOT enough — it leaves 1.3e-6 absolute, which fails the 1e-6 design-identity
+assertions as the loop's own convergence noise.
+
+### C-5 — re-read and reclassified
+
+**The earlier note in this file was wrong.** `sol_biuret_xi` (`main.py:2378`) already carries all
+three departures C-4 added to the stripper: a LIVE holdup ratio (`M_*_pre / SOL_STAGES[key]["M"]`,
+passed at all five call sites), **second** order in urea (`SOL_BIU_ORDER = 2.0`), and Arrhenius on
+the live stage temperature with the shared `STRIP_BIU_EA`. What remains is only that the extent is
+anchored (`st["a"]["xi"]`) rather than predicted absolutely — the same deliberate choice C-3
+documents, for the same reason. Treat as closed unless someone wants absolute prediction, which would
+need a pre-exponential fitted to the very extent it replaces.
+
+### A measured finding worth not re-deriving (C-3)
+
+`STRIP_XI_HYD_DES = 88.1 kmol/h` cannot be produced by a urea-hydrolysis rate law. Inoue-Otsuka at
+the stripper's own design state gives 12.02 kmol/h over the whole tube bundle flooded and 17.48 over
+bundle + sump — it would need a liquid fraction of 7.33 against a physical maximum of 1. And
+88.1/1302.6 is 6.8 % of the urea feed destroyed in 97 s, where a real CO2 stripper loses well under
+1 %. That constant almost certainly lumps carbamate decomposition. C-3 therefore anchors the extent
+and predicts the DEPARTURE; anyone tempted to "finish the job" by back-solving a rate constant to
+reach 88.1 would be fitting to the wrong reaction.
 
 ## 2. Minor cleanups
 

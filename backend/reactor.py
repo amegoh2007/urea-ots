@@ -424,6 +424,111 @@ def calibrate_kinetics(feed_des_kmolh: dict, t_nodes_des_c, zeta_nodes, area_m2:
     return {"A2": A2_PRE, "Keq_ov_ref": KEQ_OV_REF, "T_ref_K": T_REF_K, "biu_A": BIU_A_PRE}
 
 
+# --- PHASE 3, report A-8: the column exotherm as an ENERGY quantity ---------------------------
+# The reactor's temperature rise used to be PRESCRIBED: dT_col = REACT_DT_COL_DES (13.0 C) times the
+# per-pass conversion ratio, distributed over the nodes by a fitted Damkohler shape
+# g_n = G(zeta_n) - G(zeta_{n-1}), G = 1 - exp(-beta.zeta), with beta itself fitted.  Nothing in that
+# was energy, and the SIGN was wrong: a reactor making twice the urea got twice the temperature rise,
+# when dehydration is ENDOTHERMIC and more urea means LESS net heat.
+#
+# Now the two steps carry their own enthalpies with their own signs:
+#
+#     Q_n = xi_carb,n . (-dH_carb) - xi_dehyd,n . dH_dehyd
+#         = xi_carb,n . 117 000    - xi_dehyd,n . 15 500          [kJ/h]
+#
+# WHERE THE CARBAMATE HEAT IS RELEASED -- the licensor's own description, not a fit.
+# `References/322R001 Description.md` section 4: "a carefully controlled amount of uncondensed NH3
+# and CO2 from the HPCC is allowed to enter the reactor.  As the endothermic reaction cools the
+# liquid, it induces further physical absorption and condensation of these gases from the bubbles
+# ... maintaining a steady, slightly rising temperature profile."  The release is therefore
+# DISTRIBUTED up the whole column by gas-liquid mass transfer from rising bubbles -- the J_i a_i A
+# term of the profile equation that same document quotes -- and is NOT a bottom-loaded exotherm.
+#
+# For a bubbling column the interfacial area per unit liquid volume is uniform, so the absorption is
+# taken proportional to each node's LIQUID VOLUME.  That introduces no fitted shape parameter at all,
+# where the Damkohler form needed beta.  Against the plant's own DCS trend
+# (`References/Urea_NormalOp_29-06-2025_Trends.md`, 1921 samples) it is far more accurate:
+#
+#     thermowell           TT-322008  TT-322007  TT-322006  TT-322005     RMS
+#     plant (measured)       171.134    174.303    179.697    183.084
+#     volume-distributed     170.77     173.60     178.20     183.00     0.78 C
+#     fitted Damkohler       172.613    180.791    182.530    182.900     3.66 C
+#
+# The fitted shape was 6.5 C wrong at TT-322007: it put nearly the entire rise below the second
+# thermowell, where the real profile is very nearly linear.  A one-parameter first-order absorption
+# march was also tried and reaches RMS 0.37 C, but its node shares land within 3 % of the
+# volume-proportional ones -- 0.4 C of RMS is not worth a fitted constant.
+
+
+def carbamate_node_extents(xi_carb_total: float, node_volumes_m3):
+    """Distribute the carbamate-formation extent over the nodes, kmol/h per node.
+
+    Gas-liquid mass transfer from rising bubbles, uniform interfacial area per unit liquid volume
+    (see the note above).  `xi_carb_total` comes from the STREAM BALANCE -- free CO2 entering from
+    the HPCC minus CO2 leaving in the off-gas -- so it stays consistent with the off-gas split
+    instead of being a second, independent prediction of the same quantity.
+    """
+    v_tot = sum(v for v in node_volumes_m3 if v > 0.0)
+    if v_tot <= 0.0 or xi_carb_total <= 0.0:
+        return [0.0] * len(node_volumes_m3)
+    return [xi_carb_total * (max(v, 0.0) / v_tot) for v in node_volumes_m3]
+
+
+def node_heat_kjh(per_node_carb, per_node_dehyd):
+    """Net heat released in each node, kJ/h.
+
+        Q_n = xi_carb,n . 117 000  -  xi_dehyd,n . 15 500
+
+    The signs are the physics and they OPPOSE: carbamate formation heats the column, urea
+    dehydration cools it.  A conversion excursion therefore moves the temperature the way the plant
+    moves it, where `dT_col = DT_COL_DES * conv_fac` moved it the other way -- more urea, more heat.
+    """
+    return [c * (-DH_CARB_JMOL) - d * DH_DEHYD_JMOL
+            for c, d in zip(per_node_carb, per_node_dehyd)]
+
+
+def thermal_kinetic_fixed_point(feed_kmolh: dict, zeta_nodes, area_m2: float, h_span_m: float,
+                                level_frac: float, vdot_m3h: float, t_feed_c: float,
+                                t_overflow_des_c: float, xi_carb: float, m_overflow_kgh: float,
+                                cp_melt: float, xi_urea_des: float, iters: int = 400):
+    """Joint (axial profile, A2) fixed point for the A-8 energy balance.  Returns (t_nodes, A2).
+
+    Closing the thermal loop means the reactor temperature is no longer IMPOSED at 183 C -- it has to
+    find it, and the loop is closed both ways: node temperatures set the dehydration extents, the
+    extents set Q_n, and Q_n sets the node temperatures.  Two plant anchors pin the two unknowns:
+
+        T_overflow == t_overflow_des_c  (PFD)   <- the axial profile
+        xi_urea    == xi_urea_des       (PFD)   <- A2, the dehydration pre-exponential
+
+    A2 was previously back-solved at the RETIRED Damkohler seed profile, which is a different set of
+    node temperatures from the ones the energy balance actually runs at -- so it no longer reproduced
+    the PFD extent once A-8 was live (measured: 1236 kmol/h against 1302.27, and the column settling
+    at 184.42 C rather than 183.0).  Solving both together fixes that.
+
+    Iterating this little system is milliseconds; settling the whole plant for each trial value is a
+    quarter of an hour, which is why the calibration lives here rather than in the boot settle.
+    """
+    global A2_PRE
+    vols = _node_liquid_volumes(zeta_nodes, area_m2, h_span_m, level_frac)
+    mcp = max(m_overflow_kgh * cp_melt, 1e-9)
+    carb = carbamate_node_extents(xi_carb, vols)
+    t_nodes = [t_feed_c + (t_overflow_des_c - t_feed_c) * (i + 1) / len(zeta_nodes)
+               for i in range(len(zeta_nodes))]
+    for _ in range(iters):
+        xi, per = urea_extent_pfr(feed_kmolh, t_nodes, zeta_nodes, area_m2, h_span_m,
+                                  level_frac, vdot_m3h)
+        prev, new = t_feed_c, []
+        for q in node_heat_kjh(carb, per):
+            prev = prev + q / mcp
+            new.append(prev)
+        #  Damped: the loop is stiff (Arrhenius on top of an equilibrium approach), and an
+        #  undamped step oscillates instead of converging.
+        t_nodes = [0.5 * a + 0.5 * b for a, b in zip(new, t_nodes)]
+        if xi > 0.0:
+            A2_PRE *= (xi_urea_des / xi) ** 0.7
+    return t_nodes, A2_PRE
+
+
 # --- Fix-1: distributed 4-node axial thermal profile (Damköhler-shaped carbamate exotherm) -----
 # The reactor is a vertical liquid plug-flow column: cold HPCC two-phase product enters the bottom
 # (T_feed) and the carbamate condensation exotherm (2 NH3 + CO2 -> NH2COONH4, exothermic) is
@@ -527,13 +632,23 @@ def node_tau_s(holdup_kg: float, m_dot_kgph: float) -> float:
     return 3600.0 * max(holdup_kg, M_HOLDUP_MIN) / m_dot_kgph
 
 
-def node_dTdt(T_n: float, T_below: float, g_n: float, dT_col: float,
+def node_dTdt(T_n: float, T_below: float, dT_rxn_n: float,
               tau_n: float, flow_frac: float,
               T_amb: float = T_AMBIENT_C, tau_loss: float = TAU_LOSS_S) -> float:
-    """4-node energy-balance RHS with the Fix-2 ambient-loss term (replaces the bare adiabatic RHS).
+    """4-node energy-balance RHS with the Fix-2 ambient-loss term.
 
-        dT_n/dt = [ (T_below - T_n) + g_n * dT_col ] / tau_n        # flow-driven, -> 0 as m_dot -> 0
+        dT_n/dt = [ (T_below - T_n) + dT_rxn_n ] / tau_n            # flow-driven, -> 0 as m_dot -> 0
                   - (1 - flow_frac) * (T_n - T_amb) / tau_loss      # always-on wall loss, GATED
+
+    PHASE 3, report A-8.  `dT_rxn_n` was `g_n * dT_col`: a fitted Damkohler weight times a PRESCRIBED
+    13.0 C column rise scaled by the per-pass conversion.  It is now  Q_n / (m_dot . c_p)  with Q_n
+    the real net heat of the two reactions in that node (`node_heat_kjh`) -- which is what the node
+    energy balance
+
+        rho_n V_n c_p dT_n/dt = m_dot c_p (T_{n-1} - T_n) + Q_n - U_n A_n (T_n - T_amb)
+
+    gives after dividing by m_dot c_p and writing tau_n = rho_n V_n / m_dot.  The FORM of the RHS is
+    unchanged; what changed is that the second term is energy rather than a shape function.
 
     flow_frac = clip(m_dot / m_dot_des, 0, 1).  The gate (1 - flow_frac) is EXACTLY 0 at design flow
     -> the as-built profile (exotherm fit already nets out design-flow wall loss) is bit-exact; it
@@ -541,7 +656,7 @@ def node_dTdt(T_n: float, T_below: float, g_n: float, dT_col: float,
     dT_n/dt = -(T_n - T_amb)/tau_loss -> T_amb.  Zero-flow safe: tau_n = +inf zeroes the flow term.
     """
     if math.isfinite(tau_n) and tau_n > 0.0:
-        flow_term = ((T_below - T_n) + g_n * dT_col) / tau_n
+        flow_term = ((T_below - T_n) + dT_rxn_n) / tau_n
     else:
         flow_term = 0.0
     gate = min(max(1.0 - flow_frac, 0.0), 1.0)

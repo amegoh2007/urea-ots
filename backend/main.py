@@ -3672,23 +3672,31 @@ REACT_TT_TEMPS_C = {tag: _react_tt_temp(el) for tag, el in REACT_TT_EL_MM.items(
 REACT_LEVEL_NLL_PCT  = 80.0      # LT-322504 top normal liquid level (% at design φ=φ_des)
 REACT_V_SPAN_M3      = _react_area_m2 * (REACT_LIQ_H_MM / 1000.0)   # liquid-span volume LT 0->100 %
 
-# --- Fix-1: DYNAMIC 4-node axial thermal profile (replaces the static residence-time probe) ----
+# --- DYNAMIC 4-node axial thermal profile ------------------------------------------------------
 # Lumped node energy balance integrated each tick (see reactor.py module note + step_sim):
-#     dT_n/dt = [ (T_{n-1} - T_n) + g_n·ΔT_col ] / τ_n ,  T_0 = T_feed (HPCC two-phase product).
-#   ΔT_col = REACT_DT_COL_DES · conversion_factor  -> the whole profile FLEXES with per-pass conversion.
-#   g_n    = Damköhler heat-release weights (reactor.node_heat_weights); β = τ_tot/τ_therm makes the
-#            steady-state node temps reproduce the as-built static probe bit-exact (HMB-preserving).
+#     dT_n/dt = [ (T_{n-1} - T_n) + Q_n/(m_dot·c_p) ] / τ_n ,  T_0 = T_feed (HPCC two-phase product).
+#   Q_n    = ξ_carb,n·117 000 - ξ_dehyd,n·15 500  [kJ/h]   -- real energy, the two terms OPPOSING.
 #   τ_n    = Δζ_n·τ_tot  (per-node liquid residence time, min).
-REACT_BETA_DAMK    = REACT_TAU_TOT_MIN / REACT_THERM_TAU_MIN          # ≈ 5.61 (column τ / exotherm τ)
+#
+# PHASE 3, report A-8.  This used to be  dT_n/dt = [(T_{n-1} - T_n) + g_n·ΔT_col]/τ_n  with ΔT_col a
+# PRESCRIBED 13.0 C scaled by the per-pass conversion and g_n a fitted Damköhler shape
+# g_n = G(ζ_n) - G(ζ_{n-1}), G = 1 - exp(-βζ), β itself fitted.  Against the plant's own DCS trend
+# (References/Urea_NormalOp_29-06-2025_Trends.md, 1921 samples) that shape was 6.5 C wrong at
+# TT-322007: it put nearly the whole rise below the second thermowell where the real profile is very
+# nearly linear.  The energy form with volume-distributed carbamate absorption -- the licensor's own
+# mechanism, see reactor.carbamate_node_extents -- lands at RMS 0.78 C against 3.66 C, with one
+# FEWER fitted parameter (β is gone; c_p replaces it and is a real physical property).
+REACT_BETA_DAMK    = REACT_TAU_TOT_MIN / REACT_THERM_TAU_MIN          # ≈ 5.61 -- import-time SEED only
 REACT_NODE_TAGS    = ["TT_322008", "TT_322007", "TT_322006", "TT_322005"]  # ASCENDING EL: node1(bot)..node4(top)
 REACT_ZETA_NODES   = [REACT_TT_EL_MM[t] / REACT_LIQ_H_MM for t in REACT_NODE_TAGS]   # dimensionless elevations
-REACT_G_NODES, REACT_G_OV = reactor.node_heat_weights(REACT_ZETA_NODES, REACT_BETA_DAMK)  # Σ + g_ov = 1
 _react_zeta_prev   = [0.0] + REACT_ZETA_NODES[:-1]
 REACT_TAU_NODE_MIN = [(z - zp) * REACT_TAU_TOT_MIN for z, zp in zip(REACT_ZETA_NODES, _react_zeta_prev)]  # node residence, min
 REACT_DT_COL_DES   = REACT_OVERFLOW_T_C - HPCC_T_PROD_DES_C           # 13.0 C design column rise (conv=1)
 REACT_OFFGAS_GAMMA = 0.6         # off-gas blend: T_offgas = T_top + γ_o·(T_overflow - T_top)
+#  Import-time SEED only: the boot pin replaces this with the profile the energy balance actually
+#  settles on, so State() starts on the pinned profile and not on the old fitted shape.
 REACT_NODE_SS_DES  = reactor.node_profile_ss(HPCC_T_PROD_DES_C, REACT_OVERFLOW_T_C,
-                                             REACT_ZETA_NODES, REACT_BETA_DAMK)  # design SS seed [T1..T4]
+                                             REACT_ZETA_NODES, REACT_BETA_DAMK)
 # --- Fix-2b: stagnant-flow hydraulic anchoring (Francis weir geometry + conserved holdup mass) -
 # Decouples reactor OUTFLOW from inflow (weir) and makes level a state of a CONSERVED holdup mass,
 # so a closed CO2 XV un-freezes level: it parks at the lip, then thermal contraction drops it below.
@@ -4263,6 +4271,49 @@ REACT_KIN_CAL = reactor.calibrate_kinetics(
     _HPCC_DES["feed_kmolh"], REACT_NODE_SS_DES, REACT_ZETA_NODES, _react_area_m2,
     REACT_LIQ_H_M, REACT_LEVEL_NLL_PCT / 100.0, _react_vdot_m3h,
     REACT_XI_UREA_DES, REACT_XI_BIU_DES, reactor.X_INF, REACT_OVERFLOW_DES["Urea"])
+
+# --- PHASE 3, report A-8: the melt heat capacity that closes the column energy balance ---------
+# The exotherm is now real energy (reactor.node_heat_kjh), so the column rise is Q/(m_dot.c_p) and
+# something has to supply c_p.  The repository has no heat capacity for a 140 bar a ammoniacal
+# carbamate/urea melt: `urea_soln_cp` is anchored on R323_CP_SOLN, an AQUEOUS urea-solution value
+# from the 323 evaporation section, and evaluating it here gives 3.6096 kJ/(kg.K) -- which lands the
+# column rise at 15.30 C against the PFD's 13.0.
+#
+# c_p is therefore fixed by the PFD column rise, and it is the right quantity to fix that way: it is
+# a genuine physical property, it is the one the repository is missing, and the value it takes
+# (4.2487 kJ/(kg.K)) is entirely ordinary for a melt that is ~29 % ammonia by mass -- liquid NH3
+# alone runs above 5 kJ/(kg.K) at these conditions.  Fixing a heat capacity leaves every ENERGY term
+# first-principles; fixing a wall-loss U instead would have implied 18 W/(m2.K) on an insulated HP
+# shell, which is not credible, and an effective desorption enthalpy would have been a fudge on a
+# stream that mostly arrives already gaseous.
+#
+# NOTE it is not a free parameter fighting the other anchors.  Once A2 is calibrated so the extent
+# is the PFD's 1302.27, Q_total is fully determined by the two anchored extents, and
+# c_p = Q/(m.dT) closes on itself -- the joint solve below converges straight back to this value.
+#  Design carbamate extent, from the PFD streams: the free CO2 the HPCC hands over as GAS, minus
+#  the CO2 that leaves in the published off-gas vector.  Both are source quantities, not fits.
+REACT_XI_CARB_DES  = max(_HPCC_DES["gas_kmolh"]["CO2"] - REACT_OFFGAS_DES.get("CO2", 0.0), 0.0)
+REACT_Q_COL_DES    = (REACT_XI_CARB_DES * (-reactor.DH_CARB_JMOL)
+                      - REACT_XI_UREA_DES * reactor.DH_DEHYD_JMOL)      # kJ/h net column exotherm
+REACT_M_OVERFLOW_DES = sum(REACT_OVERFLOW_DES[k] * MW_COMP[k] for k in MW_COMP)
+REACT_CP_MELT      = REACT_Q_COL_DES / (REACT_M_OVERFLOW_DES * REACT_DT_COL_DES)  # kJ/(kg.K)
+
+#  A-8 closes the thermal loop, so the node profile and the dehydration pre-exponential have to be
+#  solved TOGETHER against the two plant anchors (T_overflow = 183.0 and xi_urea = 1302.27).  A2 was
+#  back-solved at the retired Damkohler seed, which is a different set of temperatures from the ones
+#  the energy balance runs at; left alone it settled the column at 184.42 C and 1236 kmol/h.
+#  This is deliberately solved on the PFD DESIGN vectors and NOT re-solved on a live capture in the
+#  boot pin, unlike the kinetics.  Both live references were tried and both are the wrong operating
+#  point: the phase-1 settle is the CAS warm-up attractor, where the carbamate stream balance reads
+#  253 kmol/h against the 279 the MAN runtime produces (c_p came out 3.20 and the column ran away to
+#  184.3 C); and the post-reset capture is a single tick off the seed, which is the seed itself.  On
+#  the design vectors every input is source-anchored -- _HPCC_DES gas CO2, REACT_OFFGAS_DES CO2,
+#  REACT_OVERFLOW_DES mass -- and the seed profile lands on 183.0 exactly.
+REACT_NODE_SS_DES, _a8_a2 = reactor.thermal_kinetic_fixed_point(
+    _HPCC_DES["feed_kmolh"], REACT_ZETA_NODES, _react_area_m2, REACT_LIQ_H_M,
+    REACT_LEVEL_NLL_PCT / 100.0, _react_vdot_m3h, HPCC_T_PROD_DES_C, REACT_OVERFLOW_T_C,
+    REACT_XI_CARB_DES, REACT_M_OVERFLOW_DES, REACT_CP_MELT, REACT_XI_UREA_DES)
+REACT_KIN_CAL["A2"] = _a8_a2
 HPCC_LIQ_DES_LIVE  = None        # ISSUE-c/e: SETTLED live design liquid make (pinned in _pin_hpcc_ua);
 #   the synthetic HPCC_LIQ_DES_KGH above understates it ~2 %, so normalising phi_in on it left the
 #   level winding past NLL (drift +0.33 %/2min, never steady).  The live ref makes NLL a true fixed pt.
@@ -4401,9 +4452,21 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
                      - (sum(overflow.values()) + sum(offgas.values())))
     tear_mass = sum((REACT_TEAR_DES.get(k, 0.0) if REACT_TEAR_DES else 0.0) * MW_COMP[k]
                     for k in MW_COMP) * s_tear
+    #  PHASE 3, report A-8.  The node energy balance needs both reaction profiles, so publish them.
+    #  xi_carb is a STREAM BALANCE, not a second kinetic prediction: the free CO2 the HPCC did not
+    #  condense, minus the CO2 that leaves in the off-gas, is by definition what formed carbamate in
+    #  this vessel.  Taking it from the streams keeps it consistent with the off-gas split instead of
+    #  letting two independent mechanisms disagree about the same quantity.
+    _co2_gas_in = hpcc.get("gas_kmolh", {}).get("CO2", 0.0)
+    xi_carb = max(_co2_gas_in - offgas.get("CO2", 0.0), 0.0)
+    _q_nodes = reactor.node_heat_kjh(
+        reactor.carbamate_node_extents(xi_carb, reactor._node_liquid_volumes(
+            REACT_ZETA_NODES, _react_area_m2, REACT_LIQ_H_M, _lvl)),
+        _xi_nodes)
     return {"overflow_kmolh": overflow, "offgas_kmolh": offgas, "feed_kmolh": feed,
             "feed_corrected_kmolh": fc, "tear_mass_kgh": tear_mass,
             "xi_urea": xi_urea, "xi_biu": xi_biu, "closure_resid": closure_resid,
+            "xi_carb": xi_carb, "xi_nodes": _xi_nodes, "q_nodes_kjh": _q_nodes,
             "T_overflow": REACT_OVERFLOW_T_C, "T_offgas": REACT_OFFGAS_T_C,
             "P_bara": round(state.p_syn_bara, 2), "P_offgas": REACT_OFFGAS_P_BARA,
             "phi": phi, "phi_des": phi_des, "co2_scale": s,
@@ -6355,7 +6418,17 @@ def step_sim(dt: float) -> dict:
     _x_ref_cf = REACT_X_DES if REACT_X_DES is not None else reactor.X_DES
     conv_fac = react["X_conv"] / _x_ref_cf
     s.react_conv_fac = conv_fac                              # tear -> next step's design-anchored f_T base
-    dT_col   = REACT_DT_COL_DES * conv_fac
+    # PHASE 3, report A-8.  This was
+    #     dT_col = REACT_DT_COL_DES * conv_fac        # 13.0 C PRESCRIBED, scaled by conversion
+    #     ... + REACT_G_NODES[n] * dT_col             # fitted Damkohler shape, beta fitted too
+    # -- no energy anywhere in it, and the sign was wrong: a reactor making twice the urea got twice
+    # the temperature rise, when dehydration is ENDOTHERMIC and more urea means LESS net heat.
+    # Now each node carries its own Q_n from the two reactions' own enthalpies (-117 and +15.5
+    # kJ/mol), and the temperature rise is Q_n/(m_dot.c_p) -- an energy quantity, with the two terms
+    # opposing.  REACT_CP_MELT is the one back-solved constant (see its definition).
+    _m_ov_live = max(sum(react["overflow_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1.0e-6)
+    _mcp_live  = _m_ov_live * REACT_CP_MELT                   # kJ/C per hour of throughput
+    dT_rxn     = [q / _mcp_live for q in react["q_nodes_kjh"]]
     T_old     = list(s.react_T_node)
     T_up      = hpcc["T_prod"]                               # node-0 upstream = LIVE HPCC two-phase feed T (cascade)
     flow_frac = max(clamp(react["co2_scale"], 0.0, 1.0), 1.0e-3)  # m_dot/m_dot_des proxy (§7.6 P5-B: floor 1e-3>0 so tau_n=tau_des/flow_frac stays finite as load->0; bit-exact at design, co2_scale>>1e-3); tau-scale + loss gate
@@ -6365,12 +6438,14 @@ def step_sim(dt: float) -> dict:
         #   safe); node_dTdt adds the ANCHOR-GATED ambient wall loss (zero at design, full when stagnant)
         #   so a frozen reactor relaxes dT/dt = -(T_n - T_amb)/tau_loss -> ambient instead of sticking.
         tau_n = (REACT_TAU_NODE_MIN[n] * 60.0 / flow_frac) if flow_frac > 1.0e-9 else float("inf")
-        Tn = T_old[n] + reactor.node_dTdt(T_old[n], T_up, REACT_G_NODES[n], dT_col,
-                                          tau_n, flow_frac) * dt
+        Tn = T_old[n] + reactor.node_dTdt(T_old[n], T_up, dT_rxn[n], tau_n, flow_frac) * dt
         new_T.append(Tn)
         T_up = T_old[n]                                       # next node's upstream = this node (prev step)
     s.react_T_node     = new_T
-    s.react_T_overflow = new_T[3] + REACT_G_OV * dT_col       # overflow lip off INERTIAL node-3 (Σ g_n + g_ov = 1 anchor)
+    #  The top node's span already ends AT the overflow lip (its volume is clipped by the live level,
+    #  and the level sits below the top thermowell elevation), so there is no liquid above it to add a
+    #  further rise.  The old  + REACT_G_OV * dT_col  freeboard term was part of the fitted shape.
+    s.react_T_overflow = new_T[3]
     s.react_T_offgas   = new_T[3] + REACT_OFFGAS_GAMMA * (s.react_T_overflow - new_T[3])
     react["T_overflow"] = s.react_T_overflow                 # publish live profile to telemetry + scrubber
     react["T_offgas"]   = s.react_T_offgas
@@ -10133,7 +10208,8 @@ def _pin_hpcc_ua():
     170.0 C at the reconciled design point."""
     global HPCC_UA, state, last_packet, hpcc_322e002, react_322r001, ejector_322f001
     global REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE, _STEAM_READY
-    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES, REACT_KIN_CAL, REACT_KIN_ANCHOR
+    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES, REACT_KIN_CAL
+    global REACT_CP_MELT, REACT_NODE_SS_DES, REACT_KIN_ANCHOR
     global HPCC_NC_DES_LIVE
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
     _cap = {}
@@ -10232,10 +10308,60 @@ def _pin_hpcc_ua():
         #  PFD's 2.414 -- the tear is subtracted before the kinetics see the stream.
         _capf["feed"].get("Urea", 0.0) - (REACT_TEAR_DES.get("Urea", 0.0) if REACT_TEAR_DES else 0.0)
         + REACT_XI_UREA_DES)
+    #  PHASE 3 (A-8): finish the calibration against the SEED EVALUATION itself.
+    #  `calibrate_kinetics` above solves A2 at the conditions captured in `_capf` -- level, vdot and
+    #  node temperatures read AFTER the capture step.  The live path evaluates the kinetics with the
+    #  PRE-step tear values instead, so the two operating points differ by ~0.15 %.  That was
+    #  invisible while the column temperature was imposed; once A-8 let the temperature respond to
+    #  the extent the mismatch showed up as a seed extent of 1304.21 against the PFD's 1302.27, and
+    #  `test_the_design_extent_is_reproduced_by_the_rate_law` is right to call that a failure.
+    #  Calibrating against a proxy for the contract and hoping it transfers is what went wrong; so
+    #  close the loop on the contract itself -- step the plant exactly as the test does and scale A2
+    #  until that step lands on the PFD extent.  Converges geometrically in a handful of passes.
+    #  Tolerance is deliberately near machine precision: the design-identity tests assert the emitted
+    #  overflow vector to 1e-6 kmol/h, and a 1e-9 RELATIVE stop on the extent leaves 1.3e-6 absolute
+    #  -- which showed up as a 1.6e-6 NH3 residual, i.e. the loop's own convergence noise failing a
+    #  bit-exactness contract.  Geometric convergence makes the extra passes nearly free.
+    for _ in range(120):
+        state = State()
+        _rs = step_sim(0.25)["sm_diagnostics"]["react"]
+        _xi = _rs["xi_urea"]
+        if _xi <= 0.0 or abs(_xi - REACT_XI_UREA_DES) <= 1.0e-14 * REACT_XI_UREA_DES:
+            break
+        reactor.A2_PRE *= REACT_XI_UREA_DES / _xi
+    REACT_KIN_CAL["A2"] = reactor.A2_PRE
+    #  Biuret rides the same seed step: rescale it against what that step actually emits.
+    state = State()
+    _rs = step_sim(0.25)["sm_diagnostics"]["react"]
+    for _ in range(60):
+        if _rs["xi_biu"] <= 0.0 or abs(_rs["xi_biu"] - REACT_XI_BIU_DES) <= 1.0e-14 * REACT_XI_BIU_DES:
+            break
+        reactor.BIU_A_PRE *= REACT_XI_BIU_DES / _rs["xi_biu"]
+        state = State()
+        _rs = step_sim(0.25)["sm_diagnostics"]["react"]
+    REACT_KIN_CAL["biu_A"] = reactor.BIU_A_PRE
+    state = State()
     REACT_X_DES = (REACT_XI_UREA_DES / _capf["feed"]["CO2"]) if _capf["feed"].get("CO2", 0.0) > 0.0 \
         else _capf["X"]
-    REACT_KIN_ANCHOR = {"T_node": list(_capf["T_node"]), "lvl": _capf["lvl"],
-                        "vdot": _capf["vdot"],
+    #  PHASE 3 (A-8): re-solve the profile and A2 together on the LIVE feed, same reason the kinetics
+    #  are re-calibrated here -- the kinetic extent depends on the feed absolutely, and the live
+    #  settled feed differs from the synthetic design one by about 2 %.  c_p follows from the two
+    #  anchored extents and the live overflow mass; at the fixed point xi_urea IS the PFD extent, so
+    #  this is the same self-consistent value the design vectors give, just on the live streams.
+    #  PHASE 3 (A-8): anchor the DIRECT call on the same conditions the live seed step runs at.
+    #  `_capf` is captured AFTER the capture step, while step_sim passes the PRE-step tear values
+    #  (State() seeds T_node = REACT_NODE_SS_DES, level = REACT_LEVEL_NLL_PCT, and the volumetric
+    #  flow off REACT_OVERFLOW_DES at reactor.liquid_density(T_bulk) -- note that is a DIFFERENT
+    #  density basis from `_react_vdot_m3h`, which divides by the constant REACT_OVERFLOW_RHO).
+    #  The two operating points differ by ~0.15 %, so calibrating against one left the other 1.29
+    #  kmol/h off its PFD overflow CO2.  Both contracts assert the same design extent, so they have
+    #  to be the same point: the anchor now IS the seed step's own state.
+    REACT_KIN_ANCHOR = {"T_node": list(REACT_NODE_SS_DES),
+                        "lvl": REACT_LEVEL_NLL_PCT / 100.0,
+                        "vdot": max(REACT_M_OVERFLOW_DES
+                                    / max(reactor.liquid_density(
+                                        sum(REACT_NODE_SS_DES) / len(REACT_NODE_SS_DES)), 1e-6),
+                                    1e-6),
                         "m_feed": sum(_capf["feed"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP)}
     HPCC_NC_DES_LIVE = _capf.get("hpcc_L", REACT_L_FEED_DES)   # design melt N/C -> bubble_p fN anchor (P_bub==144.2)
     state = State()                                  # discard the capture step (fresh design seed)
@@ -10351,7 +10477,8 @@ def _apply_pin(d: dict) -> None:
     """Restore the pinned design constants from a cache dict (== state after a fresh _pin_hpcc_ua())."""
     global HPCC_UA, REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE
     global _STEAM_READY, state, last_packet
-    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES, REACT_KIN_CAL, REACT_KIN_ANCHOR
+    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES, REACT_KIN_CAL
+    global REACT_CP_MELT, REACT_NODE_SS_DES, REACT_KIN_ANCHOR
     global HPCC_NC_DES_LIVE, M_HPCC_DES_LIVE
     global A328_GCB_DES, A328_GCB_T, A328_PHI_ABS, A328_VENT_DES, A328_LAMBDA_ABS
     import steam_system as _ss
@@ -10367,6 +10494,10 @@ def _apply_pin(d: dict) -> None:
     #  engine on the import-time calibration (synthetic feed) while every other constant came from
     #  the live settle -- a silent 2.5 % urea offset that only appears on a warm boot.
     REACT_KIN_ANCHOR = d.get("REACT_KIN_ANCHOR")
+    if d.get("REACT_CP_MELT"):
+        REACT_CP_MELT = d["REACT_CP_MELT"]
+    if d.get("REACT_NODE_SS_DES"):
+        REACT_NODE_SS_DES = list(d["REACT_NODE_SS_DES"])
     if d.get("REACT_KIN_CAL"):
         REACT_KIN_CAL = d["REACT_KIN_CAL"]
         reactor.A2_PRE = REACT_KIN_CAL["A2"]
@@ -10404,6 +10535,8 @@ def _collect_pin() -> dict:
         "REACT_W_FEED_DES":   REACT_W_FEED_DES,
         "REACT_X_DES":        REACT_X_DES,
         "REACT_KIN_CAL":      REACT_KIN_CAL,
+        "REACT_CP_MELT":      REACT_CP_MELT,
+        "REACT_NODE_SS_DES":  list(REACT_NODE_SS_DES),
         "REACT_KIN_ANCHOR":   REACT_KIN_ANCHOR,
         "HPCC_NC_DES_LIVE":   HPCC_NC_DES_LIVE,
         "M_HPCC_DES_LIVE":    M_HPCC_DES_LIVE,   # design LP generation (== users + turbine); G8 cache key

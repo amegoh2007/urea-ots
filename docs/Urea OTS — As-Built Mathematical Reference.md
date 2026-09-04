@@ -717,7 +717,7 @@ Both exclusions are pinned by tests, so a later edit cannot quietly "finish the 
 
 ## 322R001 Reactor Kinetics: Rate Laws, Not Load Multipliers (`backend/reactor.py`)
 
-Phase 3, report findings C-1 and C-2. **C-1, C-2, C-3 and C-4 are done; A-8 and C-5 are not.**
+Phase 3, report findings C-1 and C-2. **All of Phase 3 is now done: C-1, C-2, A-8, C-3, C-4; C-5 was found already conforming.**
 
 ### What this replaced
 
@@ -933,6 +933,132 @@ urea clamp. Under a rate law that feed is simply urea-limited, so the assertion 
 the clamp it exists for. The feed moved to `Urea = 200.5, H2O = 200.0`, where the test asserts
 `xi_hyd == 200.0` (**water**-limited — a bound `eta_T` never had) and `xi_biu == 0.25`, i.e. half the
 0.5 kmol/h of urea left standing. The invariant is preserved; the number was not re-tuned to match.
+
+## 322R001 Column Energy Balance: Real Enthalpies, and the Profile the Plant Actually Has
+
+Phase 3, report finding A-8.
+
+### What this replaced
+
+```python
+dT_col = REACT_DT_COL_DES * conv_fac                  # 13.0 C PRESCRIBED, scaled by conversion
+dT_n   = REACT_G_NODES[n] * dT_col                    # fitted Damkohler shape, beta fitted too
+```
+
+No energy anywhere in it, and the **sign was wrong**: a reactor making twice the urea got twice the
+temperature rise, when dehydration is endothermic and more urea means *less* net heat. The axial
+shape `g_n = G(zeta_n) - G(zeta_{n-1})`, `G = 1 - exp(-beta.zeta)`, came from an exponential probe
+correlation — a fit to a fit, never checked against a measurement.
+
+### It was checkable all along, and it was wrong
+
+`References/Urea_NormalOp_29-06-2025_Trends.md` holds 1921 DCS samples of the four reactor
+thermowells. Against them the fitted shape is **6.5 °C out at TT-322007**: it puts nearly the whole
+column rise below the second thermowell, where the real profile is very nearly linear.
+
+### The balance
+
+$$\rho_n V_n c_p \frac{dT_n}{dt}= \dot m c_p (T_{n-1}-T_n) + Q_n - U_nA_n(T_n-T_\infty),
+\qquad Q_n = \xi_{carb,n}\cdot 117\,000 - \xi_{dehyd,n}\cdot 15\,500\ \ [\text{kJ/h}]$$
+
+Dividing by $\dot m c_p$ and writing $\tau_n=\rho_nV_n/\dot m$ leaves the integrator's RHS in the
+same form it already had — what changed is that the second term is energy, and the two contributions
+**oppose**.
+
+**ξ_carb is a stream balance, not a second kinetic model.** The free CO₂ the HPCC hands over as gas
+(476.99 kmol/h) minus the CO₂ leaving in the published off-gas vector (197.69) is, by definition,
+what formed carbamate in this vessel: **279.30 kmol/h**. Taking it from the streams keeps it
+consistent with the off-gas split instead of letting two mechanisms disagree about one quantity.
+
+**The axial distribution is the licensor's own mechanism.** `References/322R001 Description.md` §4:
+the endothermic reaction locally cools the liquid, which "induces further physical absorption and
+condensation of these gases from the bubbles ... maintaining a steady, slightly rising temperature
+profile". That is distributed gas-liquid transfer up the whole column — the $J_ia_iA$ term of the
+profile equation the same document quotes — not a bottom-loaded exotherm. For a bubbling column the
+interfacial area per unit liquid volume is uniform, so the release is proportional to each node's
+**liquid volume**: no fitted shape parameter at all, where the Damköhler form needed β.
+
+**The two routes agree independently.** Working backwards from the measured profile, the carbamate
+needed per node sums to 278.3 kmol/h. The stream balance gives 279.30. Two unrelated derivations,
+0.4 % apart.
+
+### Measured against the plant
+
+| | TT-322008 | TT-322007 | TT-322006 | TT-322005 | RMS |
+|---|---|---|---|---|---|
+| plant, 1921 DCS samples | 171.134 | 174.303 | 179.697 | 183.084 | — |
+| **A-8 energy balance** | **170.716** | **174.812** | **179.147** | **183.000** | **0.431 °C** |
+| retired Damköhler fit | 172.613 | 180.791 | 182.530 | 182.900 | 3.661 °C |
+
+Design seed exact on both PFD anchors: ξ_urea = 1302.270000943 (rel. 7e-10), ξ_biu = 2.414000000,
+conv_fac = 1.000000001, T_overflow = 183.000017.
+
+A one-parameter first-order absorption march was also tried and reaches RMS 0.373 °C, but its node
+shares land within 3 % of the volume-proportional ones. 0.06 °C of RMS does not buy a fitted
+constant.
+
+### c_p is fixed by the PFD rise — and is not a free parameter
+
+The repository has no heat capacity for a 140 bar a ammoniacal melt; `urea_soln_cp` is anchored on an
+**aqueous** 323-section value and gives 3.6096 kJ/(kg·K), which lands the rise at 15.30 °C against
+the PFD's 13.0. `REACT_CP_MELT` = 4.2487 kJ/(kg·K) is ordinary for a melt ~29 % ammonia by mass
+(liquid NH₃ alone exceeds 5). It does not fight the other anchors: once A2 is calibrated so the
+extent is the PFD's 1302.27, Q_total is determined by the two anchored extents and
+$c_p=Q/(\dot m\,\Delta T)$ closes on itself — the joint solve converges straight back to it.
+
+The alternatives were rejected on evidence: a wall-loss $U$ closing the same gap implies
+18 W/(m²·K) on an insulated HP shell, and an effective desorption enthalpy would be a fudge on a
+stream that mostly arrives already gaseous.
+
+### Closing the loop needed a joint solve, and needed one operating point
+
+The reactor temperature is no longer imposed — it has to *find* 183 °C — so the profile and the
+dehydration pre-exponential are solved **together** against the two plant anchors
+(`reactor.thermal_kinetic_fixed_point`). A2 had been back-solved at the retired Damköhler seed, which
+is a different set of temperatures from the ones the energy balance runs at; left alone it settled
+the column at 184.42 °C and 1236 kmol/h.
+
+Two live calibration references were tried and both are the wrong operating point, which is worth
+recording so they are not tried again:
+
+* the **phase-1 settle** is the CAS warm-up attractor — its carbamate balance reads 253 kmol/h
+  against the 279 the MAN runtime produces; c_p came out 3.20 and the column ran to 184.3 °C;
+* the **post-reset capture** is a single tick off the seed, i.e. the seed itself.
+
+The design vectors are used instead: every input is source-anchored (`_HPCC_DES` gas CO₂,
+`REACT_OFFGAS_DES` CO₂, `REACT_OVERFLOW_DES` mass).
+
+**A density-basis defect surfaced here, introduced in C-1.** `_react_vdot_m3h` divides the design
+overflow mass by the constant `REACT_OVERFLOW_RHO` (990.0); the live path divides by
+`reactor.liquid_density(T_bulk)` (992.3 at 179.7 °C). Two "design" operating points 0.23 % apart,
+with the direct call anchored to one and the live seed step to the other — so calibrating against
+either broke the other's bit-exactness contract (overflow CO₂ 1.29 kmol/h off). `REACT_KIN_ANCHOR`
+is now the seed step's own state, and the final calibration closes on the **contract itself**:
+step the plant exactly as the test does and scale A2 until that step lands on the PFD extent, to
+1e-14 relative. A 1e-9 stop was not enough — it left 1.3e-6 absolute, which failed a 1e-6 assertion
+as the loop's own convergence noise.
+
+### The honest caveat: the settled attractor drifts
+
+The design **seed** is exact, but over 6000 s the settled overflow climbs 183.000 → 183.488
+(+0.49 °C) with ξ_urea 1302 → 1316 (+1.05 %). The drift rate peaks near 5000 s and then falls, so it
+appears to be converging near 183.6, but that was not run out far enough to prove.
+
+This is a consequence of closing the loop, not a new fault. `p_syn` drifts to 140.209 (design 140.7)
+and level to 79.90 over the same window, both **pre-existing and documented**. Previously the
+reactor temperature was imposed, so that drift could not reach it; now temperature follows the
+pressure and level that were already moving. Note also that the settled 183.488 sits close to the
+plant's own TT-322014 mean of 183.556, while the PFD anchor is 183.0 — the two source documents
+disagree by 0.56 °C, twice the residual.
+
+### What the prescribed rise could not represent
+
+| response | before | after |
+|---|---|---|
+| sign vs conversion | more urea → **hotter** | more urea → more endothermic drain → cooler, correctly |
+| axial shape | one fitted β | two opposing profiles, neither fitted |
+| carbamate supply | absent | HPCC gas split moves the column temperature |
+| against plant data | RMS 3.661 °C | **RMS 0.431 °C** |
 
 ## Consequence Transport Lag
 

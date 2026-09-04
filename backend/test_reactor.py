@@ -258,9 +258,23 @@ def test_packet_tags_and_streams():
                 "P_offgas", "closure_resid"):
         assert tag in blk, tag
     assert abs(blk["AT_322701"] - 3.000) < 0.01           # N/C atom ratio of overflow
-    # residence-time axial T profile: rises with elevation toward 183 C overflow
-    assert abs(blk["TT_322005"] - 182.9) < 0.1     # N6 A top  (EL +21700)
-    assert abs(blk["TT_322008"] - 172.6) < 0.1     # N6 D bot  (EL +1000, near feed inlet)
+    # Axial T profile: rises with elevation toward the 183 C overflow.
+    #
+    # PHASE 3 (report A-8).  These used to assert 182.9 and 172.6 to +/-0.1 C.  Those numbers were
+    # not measurements -- they were the output of the fitted Damkohler heat-release shape the energy
+    # balance replaced, i.e. the test was asserting the fit against itself.  The plant's own DCS
+    # trend (References/Urea_NormalOp_29-06-2025_Trends.md, 1921 samples) reads
+    #
+    #     TT-322008 171.134   TT-322007 174.303   TT-322006 179.697   TT-322005 183.084
+    #
+    # and the retired shape was 6.5 C out at TT-322007: it put nearly the whole column rise below
+    # the second thermowell, where the real profile is very nearly linear.  The assertions now point
+    # at the MEASURED values, with a 1.0 C tolerance that reflects the model's actual accuracy
+    # (RMS 0.43 C against those four readings, against 3.66 C for the shape it replaced).
+    assert abs(blk["TT_322005"] - 183.084) < 1.0   # N6 A top  (EL +21700)
+    assert abs(blk["TT_322006"] - 179.697) < 1.0   # N6 B      (EL +14800)
+    assert abs(blk["TT_322007"] - 174.303) < 1.0   # N6 C      (EL  +7900)
+    assert abs(blk["TT_322008"] - 171.134) < 1.0   # N6 D bot  (EL  +1000, near feed inlet)
     assert blk["TT_322005"] > blk["TT_322006"] > blk["TT_322007"] > blk["TT_322008"]
     assert abs(blk["HIC_322605"] - 60.0) < 0.1
     assert abs(blk["HV_322605"] - 60.0) < 0.1
