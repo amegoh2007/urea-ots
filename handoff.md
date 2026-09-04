@@ -87,66 +87,103 @@ above this is **not** envelope-blocked: `gap_g6_h0_enthalpy` already covers all 
 phases, so `Q = Σ ṅ_cond,i ΔH_cond,i(T,P) + ṁ c_p ΔT` is buildable now. Deferred from Phase 1 only
 to keep the 324 mass balance out of a change already touching the 323 species layer.
 
-## 1e. Phase 2 — hydraulic network, 3 of 4 units still on the frozen forms
+## 1e. Phase 2 — hydraulic network, CLOSED except two vessels blocked on data
 
 `backend/hydraulics.py` carries the IEC 60534 / ISA-75.01 laws and the vapour-space pressure
-derivative. **Units 323 and 328 (C002/C004) are wired** (LV-323501, LV-323505, and the 323F010 vapour space); design seed
-bit-exact, 30 000 s envelope bounded, product unmoved. Full write-up in the As-Built reference.
+derivative. **A-6, D-1, D-2, D-8 and D-19/D-20/D-21 are closed.** Design seed bit-exact on every
+anchor after the change (xi_urea 1302.270000000, xi_biu 2.414000000, T_ovf 183.000017, all nine
+vessel pressures, p_syn 140.699999913). Full write-up in the As-Built under *Phase 2 remainder*.
 
-**Still on the frozen forms — units 322, 324, 328:**
+**Still open, and both are one missing number rather than a deferral:**
 
-| finding | sites | note |
+| finding | site | what is missing |
 |---|---|---|
-| A-6 | `A328_C001_P_KP`, `R324_F001/F003_P_KP`, `R3232_E011_P_KP` | four vessels still share 0.02 / 0.05. Geometry available: 324F001 ID 4570, 322C001 576/922 stepped, 323D001 11.10 m3 stated. **328C002 and 328C004 are DONE.** |
-| A-6 | `R328_C003_P_KP` | 328C003 hydrolyser. NOT a wiring job: its overhead is PV-328203B, a pressure-CONTROLLED valve, so d(m_748)/dP is zero and all the node's feedback is in PIC-328203. Stiffening the vessel 4.3x multiplies that loop gain 4.3x. Measure the open-loop gain first, then retune, exactly as TIC-323012 was handled. Engine seeds Kc=1.5 (Appendix A says 4.0 -- a documented divergence) |
-| A-6 | `R328_D001_P_KP` | 328D001. BLOCKED ON A SOURCE CONFLICT, not deferred: the datasheet narrative gives ID 1684 mm x T/T 1950 mm and calls that "19 cubic meters", but the cylinder is 4.343 m3. The engine's own R328_D001_M_DES is ~10.6 m3, matching neither and 243 % of the computed shell. On the computed volume V_v hits its floor and K is ~355x the present constant. Needs the real dimensions |
-| D-1 | LIC-328503/328504/328505 bottoms, PV-328203B, LV-322501, 328C002 and 328C004 overheads, 323D001 and 323E011 vents, 324F001 barometric leg, every `_fic_flow` loop | all still `design x (op/op_des)` |
-| D-2 | the steam-header letdowns, `core/valve.py:_valve_flow`, 328C002/328C004 overheads | still incompressible sqrt(dP) on choked service. **HV-322604 is DONE** -- and it also closed a 14 % leak through a valve commanded shut (`_eq_pct(0,50)` = 0.1414), worth checking for at the other equal-% sites |
-| D-8 | `322E001_BOT_KGH_LAG` (60 s), `FEED_TD_S` (345 s) | fixed FIFOs; `hydraulics.transport_time_s` is ready. Needs line D and L from the nozzle tables |
-| D-19/D-20/D-21 | `main.py` scrubber suction, stripper drain, HPCC level | see the 323C003 note below before deleting any of these |
+| A-6 | `R324_F001_P_KP` | 324F001's CYLINDRICAL HEIGHT. The datasheet gives 4600 OD / 4570 ID, the melt density and the whole nozzle schedule but not the height, and a 4570 mm bore admits 33 to 164 m3 depending on it — a factor of five on the only term A-6 needs. Two closures were tried and rejected: backing the shell mass out of the 21 500 kg delivery weight needs the internals/skirt share (the same guess in a different hat), and 324F003's 0.62 H/D ratio is a similarity argument, not a measurement |
+| A-6 | `R328_D001_P_KP` | 328D001's real dimensions. Pre-existing source conflict, unchanged: datasheet says ID 1684 x T/T 1950 and calls it "19 cubic meters" when the cylinder is 4.343 m3, and the engine's own `R328_D001_M_DES` (~10.6 m3) matches neither at 243 % of the computed shell |
+| A-7 | `R323_F004_P_BARA` | a real line dP. Unchanged and still blocked: `R323_F004_P_BARA` and `R3232_E011_P_BARA` are both 1.13 bar a, so the model's design dP across that line is identically zero, and the PFD's 0.1 bar rounding is the same order as the dP itself |
 
-**Pre-existing 328 failures, measured and attributed (NOT Phase 2):**
+**Also still open (not blocked, just not in this pass):**
 
-`test_equation_audit_desorption.py` has two red tests that fail identically with and without the
-Phase 2 wiring:
+* **323F010's barometric leg** is `M317_DES*sqrt(M/M_DES)` — head-driven in form but with no vessel
+  pressure term, so a vacuum break would not change the drain rate. Needs the leg height, which no
+  source gives.
+* **The three 328 bottoms valves are FLASHING services on a single-phase law.** All three carry
+  liquor at its own bubble point, so the physically correct Pv is the vessel pressure — and feeding
+  that to the single-phase choked limit collapses dP_eff to about 4 % of p1 and makes every one of
+  them a hard-choked orifice. They run with `pv = 0`, so the `FL^2.p1` ceiling applies the right
+  qualitative limit without claiming a two-phase capacity. Closing it properly needs the IEC 60534
+  two-phase sizing method, which does not exist in this repository. Same class of gap as the
+  D-19 letdown guards below.
+* **D-12, `pull_f010`** — an ejector machine map, and Phase 4's.
 
-* `test_design_hold_keeps_every_desorber_on_its_pfd_composition` — fails on **NH3**, not CO2.
-  328C002 settles at 0.7334 % against a PFD 0.63 %, an error of 1.03e-3 versus a 2.0e-4 tolerance
-  (5.6x over). Baseline is 0.7366 %, so Phase 2 changes it by 0.3 %. CO2 at the test's own 3900 s
-  sample point reads 2.11e-4 with the wiring and 1.95e-4 without, straddling the tolerance — but at
-  21 000 s it settles to 1.82e-4, INSIDE tolerance. The 3900 s reading is a transient: the 328 train
-  is still ringing there (P_c002 3.514 at 3900 s, 3.493 at 21 000 s, crossing design from above).
-  **The test samples at 3900 s a train that settles around 15 000 s.**
-* `test_hydrolyser_temperature_governs_the_urea_slip` — slip 2554.92 ppm at 160 C against a < 2000
-  bound, bit-identical with and without the wiring.
+### Three findings from this pass worth not re-deriving
 
-**Two test-file defects, one un-propagated rename** (`R328_C002_T_BOT` -> `R328_C002_T_BOT_BOT`,
-value 139.0; siblings `_T_BOT738/748/750` also exist):
+* **322C001's design holdup did not fit the vessel, and A-6 could not be written until it moved.**
+  `A328_C001_M_DES` was `M756_DES/3600 * 600 s`, an "indicative" residence. At the PFD stream-755
+  density that is 5.53 m3 of liquid in a vessel whose ENTIRE shell — both sections — is 3.27 m3, i.e.
+  169 % of the steel containing it, so V_v is negative and lands on its 2 % floor with a coefficient
+  683x the constant. It is now geometric: half the lower cylindrical section (where LT-322502
+  measures), 1392.3 kg, emergent residence 150.3 s. The design pin is untouched by construction
+  (LI-322502 is M/M_DES*50 and the state seeds at M_DES) and LIC-322502 holds — over 6000 s the
+  level moves 2e-6 %. **If another vessel's `_M_TAU_S` is ever used as an A-6 basis, check it
+  against the shell first; this one was out by 69 %.**
+* **328C003's stiffening is 3.05x, not the 4.3x this file previously estimated**, because the
+  hydrolyser is a LIQUID-FILLED column standing 12.55 m deep in a 20.85 m shell — only 24.8 m3 of it
+  is vapour. The open-loop gain the earlier note asked for was measured: a 6000 s settle leaves the
+  node inside a decaying +/-0.03 bar excursion about 16.80, so PIC-328203 at Kc 1.5 / Ti 50 s holds
+  it and NO retune was applied.
+* **323E011 and 323D011 are one gas envelope**, not two nodes — the condenser drains by gravity
+  through its DN 100 N2 nozzle straight into the drum beneath it with no valve between. The engine
+  already half-assumed this (the mass state on the node is the DRUM's inventory). The condenser's
+  share of the envelope is the shell bore MINUS the bundle: 382 tubes at 25 mm OD over 5900 mm
+  displace 37 % of the shell, and ignoring them overstates the free volume by 60 %.
 
-* `test_equation_audit_desorption.py:164` — latent `AttributeError`, currently masked because the
-  composition assert three lines earlier fails first. It will surface the moment NH3 is fixed.
-* `test_equation_audit_c10_live_cp.py:56` — the SOLE cause of that test's failure.
+### Regression status after this pass
 
-Both are one-line fixes and would take two reds off the board without touching the engine.
+Verified green or baseline-identical:
 
-**Two findings that need judgement, not just wiring:**
+| file | result | note |
+|---|---|---|
+| `test_hydraulics.py` | **38 passed** | 24 -> 38; the four newly wired vessels, the three 328 bottoms valves, the steam chokes, the SM valve port, the transport delays and the guards all pinned |
+| `test_reactor.py` | 14 passed | |
+| `test_reactor_kinetics_phase3.py` | 10 passed | |
+| `test_stripper_reaction_inventory.py` | 4 passed | |
+| `test_thermo_service.py` | 27 passed | |
+| `test_equation_audit_c10_live_cp.py` | 7 passed | |
+| `test_startup_stability.py` | 5 passed | |
+| `test_process_transport.py` | 7 passed | D-8 |
+| `test_3_scrubber_heat.py` | **8/8** | was 1 error; root-caused and the test strengthened, see above |
+| `test_consequence_propagation.py` | **8 passed, 2 xfailed** | was 10 failures |
+| `test_equation_audit_322e002.py` | 1 failed, 7 passed | identical to baseline |
+| `test_c003_pressure_coupling.py` | 1 failed, 19 passed | identical to baseline, verified by running HEAD in a side worktree |
 
-* **A-7, 323F004 pressure — BLOCKED ON DATA.** A real ODE needs a conductance on the
-  F004 -> 323E011 overhead, but `R323_F004_P_BARA` and `R3232_E011_P_BARA` are both 1.13 bar a, so
-  the model's design dP across that line is identically zero. The PFD row separates stream 701
-  (1.1 bar a) from the downstream carbamate gas (1.0 bar a), but it is rounded to 0.1 bar — the same
-  order as the dP itself. Either find the line dP, or restructure so n_out is the 323E011
-  condensation rate plus the PV-323203 vent.
-* **D-19 to D-21 are not all the same.** The report's argument (head-driven discharge makes the
-  guard unreachable) holds only for GRAVITY drains. Where the guard sits on a pressure letdown --
-  323C003's is on LV-323501, 4.1 -> 1.13 bar -- the dP does not vanish as the vessel empties, and
-  deleting the guard drains the vessel below empty. The real answer there is a two-phase valve model
-  (liquid -> vapour as the level uncovers the nozzle), which does not exist yet. Check each of the
-  three remaining sites for which kind it is before touching it.
+`test_ejector_spindle.py` reported **10 of its 11 tests passing** -- all three LT-329501 level
+tests and all three LT-322504 tests among them, which are the ones the D-19 head term actually
+drives -- before the run had to be stopped; only `test_tt322002_design_holds` had not reported.
 
-**Also open:** 323F010's barometric leg is `M317_DES*sqrt(M/M_DES)` — correctly head-driven in form
-but with no vessel-pressure term, so a vacuum break would not change the drain rate. Wiring it to
-`hydraulics.gravity_outflow_kgh` needs the leg height, which no source in the repository gives.
+**NOT re-run in this pass, and they should be**:
+`test_equation_audit_desorption.py`, `test_equation_audit_td014.py`, `test_ccw_loss_chain.py`,
+`test_transient_coldstart.py`, `test_foptd_fingerprint.py`, `test_g8_lp_turbine_export.py`,
+`test_equation_audit_322e001_enthalpy.py`, `test_scenario_consequences.py`. Not because of any
+finding — the machine this ran on has 4 logical cores and was 70-85 % consumed by unrelated
+desktop applications throughout, which took the engine from its normal ~126 ticks/s to roughly a
+tenth of that and made each of these multi-thousand-tick files an hour-plus proposition. The one with
+the strongest claim on attention is `test_equation_audit_desorption.py` (the three 328 bottoms
+valves; its two known failures are on NH3 composition and hydrolyser urea slip, neither touched
+here).
+
+### Two things that were dropped code, not missing physics
+
+Both were specified in a block comment sitting directly above the line that ignored them:
+
+* **`ejector_322f001` had `m_suc = capacity  # no head multiplier`** — the gravity-suction-head term
+  and the `EJ_HYD_FRAC_MAX` throat-choke ceiling the comment above it specifies were both absent, so
+  the 322E003 sump was a pure integrator (it flooded correctly on a shut XV-322903 and then never
+  came back). Restored. At design the head fraction is a literal 1.0, so the fixed point did not
+  move. This closes the "322E003 sump does not drain" item that was open in section 8 below.
+* **`_transport_process` computed a full per-route diagnostic every tick and dropped it in
+  `s.tlag`** where nothing could read it. Now published on the tick packet as
+  `CONSEQUENCE_TRANSPORT`.
 
 ## 1f. Phase 3 — kinetics and reaction energy, CLOSED
 
@@ -246,10 +283,39 @@ fails to COLLECT hides every test in it.
 | broken reference | reality | files | status |
 |---|---|---|---|
 | `R328_C002_T_BOT` | renamed `R328_C002_T_BOT_BOT` (139.0 C) | `test_equation_audit_c10_live_cp.py:56`, `test_equation_audit_desorption.py:164` | **FIXED** 2026-09-04. c10_live_cp went 6/1 -> 7 passed. In desorption it only unmasks a line that was never reached; that test still fails on NH3 |
-| `REACT_FUNNEL_ELEV_M` | **gone from the engine entirely** -- no surviving equivalent found | `test_scenario_consequences.py:40,43` | OPEN. Collection `AttributeError`, so the whole file is skipped and nothing in it runs. Needs whoever removed the constant to say what replaced it |
-| `CONSEQUENCE_TRANSPORT` / `CONSEQUENCE_ROUTES` | now `PROCESS_ROUTES`, but the packet key differs too | `test_consequence_propagation.py` (10 failures) | OPEN. Not a pure rename -- the test indexes a tick-packet key that no longer exists, so it needs re-pointing at the real structure, not sed |
+| `REACT_FUNNEL_ELEV_M` | renamed `REACT_WEIR_CREST_M` -- the 322R001 overflow-funnel lip elevation, now DERIVED from the design level and weir head (19.95 m) instead of stated flat (20.9 m) | `test_scenario_consequences.py:40,43` | **FIXED.** The engine's own history confirms the rename: the commit that introduced the weir wrote `REACT_WEIR_CREST_M = REACT_FUNNEL_ELEV_M` before the old name was dropped |
+| `CQ_SEAL_BAND_PCT` | moved into the consequence module as `consequence.SEAL_BAND_PCT_DEFAULT`, same 3.0 % | `test_scenario_consequences.py:48` | **FIXED.** It is the parameter's default there, so `seal_fraction` supplies it and the argument is dropped |
+| `VACUUM_DEGRADED_FRAC` | **gone, and so is the `VACUUM_COLLAPSE` flag it gated** -- the whole vacuum-degradation flag layer was removed and nothing replaced it | `test_scenario_consequences.py:142` | PARTIAL. The pressure threshold (1.35x design) is asserted directly, so a vacuum that degrades by less than that still fails the check. What CANNOT be restored is that a published FLAG tracks it -- see below |
+| `CONSEQUENCE_ROUTES` | now `PROCESS_ROUTES` | `test_consequence_propagation.py` | **FIXED.** The packet key `CONSEQUENCE_TRANSPORT` is now genuinely published too (the per-route diagnostics were being computed and dropped), so the transport assertions run against the real structure |
 
 
+
+### Two coverage gaps the renames were hiding
+
+A file that fails to COLLECT hides every symbol after the first bad one, so fixing
+`REACT_FUNNEL_ELEV_M` surfaced two more missing names in the same file. Both are recorded above.
+Beyond the names, two real gaps came out from under them:
+
+* **The vacuum-degradation flag layer is gone.** `VACUUM_DEGRADED_FRAC` and the `VACUUM_COLLAPSE`
+  flag it set have no successor anywhere in `main.py` or `consequence.py`. The pressure behaviour is
+  still testable and is still tested; what an operator no longer gets is a published flag saying the
+  vacuum has degraded. Decide whether that flag should come back before someone re-derives the
+  constant.
+* **`test_consequence_propagation.py` was written against SEVEN seal-loss transport routes and the
+  engine implements FIVE**, all of them unit-323/324 product lines. `323F010_TO_324E002`,
+  `328C003_TO_328C004`, `328C004_TO_740` and `322C001_TO_323E003` do not exist — there is no
+  transport route anywhere in unit 328 or off 322C001, so an emptied hydrolyser or LP absorber still
+  reaches its downstream vessel as a same-tick scalar with no dead time. The two tests that
+  exercised those routes are marked `xfail` with that reason rather than deleted, and the missing
+  names are listed in the file as `MISSING_SEAL_LOSS_ROUTES`. This is the productive next item in
+  the transport layer. `test_scenario_consequences.py` scenario 4b hit the same wall differently —
+  it indexed `328C003_TO_328C004` at module scope, so the `KeyError` aborted the file and took every
+  scenario BELOW it with it. It now reports the missing route through `check()` and carries on.
+
+**`test_scenario_consequences.py` is a SCRIPT, not a pytest module.** It ends in
+`sys.exit(1 if FAIL else 0)` at module scope, so under `pytest` any failure surfaces as a collection
+error rather than a test failure. Run it as `python test_scenario_consequences.py`. That is
+pre-existing design and was invisible until the collection AttributeError above was fixed.
 
 `pytest` is **not** in `backend/requirements.txt` although all 64 `backend/test_*.py` files are
 pytest modules. Install it separately (`python -m pip install pytest`) or add a dev-requirements
@@ -386,12 +452,22 @@ line shows the interlock, mirroring exactly what a START will do (`CLEAR` / `TRI
 
 Still open:
 
-- **The 322E003 sump does not drain after an XV-322903 excursion.** Shutting the valve floods the
-  sump correctly (50.0 -> 62.5 % in 60 s), but re-opening restores design entrainment only, so the
-  level holds at wherever it got to. `ejector_322f001` computes `scrub_level_frac` (the gravity
-  suction head) and then does not apply it — `m_suc = capacity  # no head multiplier`. That predates
-  this work; the valve just makes it easy to reach. Re-enabling the multiplier would make the sump
-  a self-regulating attractor again, but it changes the design fixed point, so it needs its own pass.
+- **The 322E003 sump does not drain after an XV-322903 excursion — CLOSED** in the Phase 2
+  remainder (report D-19). `ejector_322f001` computed `scrub_level_frac` and then did not apply it
+  (`m_suc = capacity  # no head multiplier`), so the sump was a pure integrator. Restored, along
+  with the `EJ_HYD_FRAC_MAX` throat-choke ceiling the same block comment specifies and which had
+  also never been applied. The worry recorded here — that it would change the design fixed point —
+  did not materialise: at design the head fraction is a literal 1.0, so the seed is bit-exact.
+  **What it DID do is break `test_3_scrubber_heat.py`, and that test was passing on the strength of
+  the defect.** Under the -30 % CCW throttle the old sump drained 50.0 -> 27.2 % and then sat at
+  26.7 % for ever with entrainment frozen at 53 368 kg/h; the corrected one troughs at 45.5 % and
+  recovers to 49.9 %. That dumped inventory was what powered the >= 0.15 bar PT-329201 relaxation
+  the test asserted. With the sump behaving, the CCW-attributable excursion is smaller -- correctly
+  -- and no longer clears the `_systest` harness's own dt = 2.0 s Euler walk (~+0.10 bar per 1000 s
+  at that point in the trajectory, and rising; section 9 below). The test now measures PT-329201
+  against a MATCHED NO-CUT CONTROL of identical length, so the walk cancels and the relaxation is
+  plainly visible: excess +0.400 bar at the end of the cut -> +0.300 bar after the relax window.
+  It also asserts the sump's trough-and-recovery, which is the new physics. 8/8 checks pass.
 
 - **Six stream hotspots were dropped from 322-1**, because the new drawing does not show the lines
   they sat on: `NH3_FEED`, `HP_DISCH`, `CARB_RECYCLE`, `HPCC_PROD` plus two with no identifiable

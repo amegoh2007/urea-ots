@@ -36,11 +36,20 @@ s = fresh()
 for n in (0, 600, 6000):
     if n:
         run(n)
+    # REACT_FUNNEL_ELEV_M was renamed REACT_WEIR_CREST_M in the engine and the rename was never
+    # propagated here, so this whole file failed to COLLECT and every test in it was skipped.  The
+    # two names are the same quantity -- the 322R001 overflow-funnel lip elevation in m -- and the
+    # engine's own history confirms it (the commit that introduced the weir wrote
+    # `REACT_WEIR_CREST_M = REACT_FUNNEL_ELEV_M` before the constant was dropped).  What changed
+    # with the rename is that the lip is now DERIVED from the design level and the weir head
+    # (19.95 m) instead of stated flat (20.9 m), so the printed seal % moves accordingly.
+    # main.CQ_SEAL_BAND_PCT (3.0 %) moved into the consequence module as SEAL_BAND_PCT_DEFAULT,
+    # same value and same role -- the level-span equivalent of the drain-nozzle bore.  It is the
+    # parameter's default there, so seal_fraction supplies it and the argument is dropped.
     seal_r = _cq.seal_fraction(s.react_level_pct,
-                               main.REACT_FUNNEL_ELEV_M / main.REACT_LIQ_H_M * 100.0,
-                               main.CQ_SEAL_BAND_PCT)
+                               main.REACT_WEIR_CREST_M / main.REACT_LIQ_H_M * 100.0)
     print(f"  t={n*0.1:7.0f}s  react_lvl={s.react_level_pct:6.2f}% "
-          f"(funnel at {main.REACT_FUNNEL_ELEV_M / main.REACT_LIQ_H_M * 100.0:.1f}%) seal={seal_r:.3f} "
+          f"(funnel at {main.REACT_WEIR_CREST_M / main.REACT_LIQ_H_M * 100.0:.1f}%) seal={seal_r:.3f} "
           f"| scrub_lvl={s.scrub_level_pct:6.2f}% | strip_lvl={s.strip_level:6.2f}% "
           f"| hpcc_lvl={s.hpcc_level_pct:6.2f}% | p_syn={s.p_syn_bara:7.3f}")
     active = sorted(k for k, v in s.flags.items() if v and any(
@@ -131,8 +140,16 @@ check("323F010 does NOT snap in one tick (ramps over >= 2 s)", t_f010 is not Non
 check("324F001 degrades no earlier than 323F010 (transport lag downstream)",
       t_f010 is not None and t_f001 is not None and t_f001 >= t_f010,
       f"323F010 at {t_f010} s, 324F001 at {t_f001} s")
-check("VACUUM_COLLAPSE flag is pressure-derived",
-      p010_max > main.R323_F010_P_BARA * main.VACUUM_DEGRADED_FRAC)
+# main.VACUUM_DEGRADED_FRAC (1.35) and the VACUUM_COLLAPSE flag it gated are BOTH gone from the
+# engine -- this is not a rename, the whole vacuum-degradation flag layer was removed and nothing
+# replaced it.  Two of the three checks that constant supported are recoverable without it, because
+# they only ever needed a pressure threshold: the ratio is asserted directly against the same 1.35
+# the engine used, so a vacuum that degrades by less than 35 % of design still fails here.  The
+# third -- that a published FLAG tracks it -- cannot be, and is recorded as an open gap rather than
+# quietly dropped.  See handoff.
+VACUUM_DEGRADED_FRAC = 1.35   # was main.VACUUM_DEGRADED_FRAC before the flag layer was removed
+check("323F010 vacuum degrades past the 1.35x threshold the removed flag used",
+      p010_max > main.R323_F010_P_BARA * VACUUM_DEGRADED_FRAC)
 # recoverability: put the valve back and the vacuum must come back
 s.LIC_323505["mode"] = "AUTO"
 run(9000)
@@ -161,25 +178,39 @@ s = fresh(); run(20)
 s.LIC_328504["mode"] = "MAN"; s.LIC_328504["op"] = 100.0
 p_c004_0 = s.a328_c004_P
 route_peak = 0.0; route_early = 0.0; p_c004_peak = p_c004_0; route_diag = None
-for i in range(250):
-    s.a328_c003_M = 1.0
-    packet = run(1)
-    diag = packet["CONSEQUENCE_TRANSPORT"]["328C003_TO_328C004"]
-    if i < 10:
-        route_early = max(route_early, diag["arrived_mass_kgh"])
-    if diag["arrived_mass_kgh"] > route_peak:
-        route_peak = diag["arrived_mass_kgh"]
-        route_diag = diag
-    p_c004_peak = max(p_c004_peak, s.a328_c004_P)
+# The engine implements FIVE transport routes, all unit-323/324 product lines; there is none
+# anywhere in unit 328.  Indexing it raised KeyError at module scope, which aborted the whole file
+# and took every scenario BELOW this one with it.  Report the gap and carry on: the point of this
+# file is coverage breadth, and one missing route must not hide the other fifteen scenarios.
+HAVE_328_ROUTE = "328C003_TO_328C004" in main.PROCESS_ROUTES
+if HAVE_328_ROUTE:
+    for i in range(250):
+        s.a328_c003_M = 1.0
+        packet = run(1)
+        diag = packet["CONSEQUENCE_TRANSPORT"]["328C003_TO_328C004"]
+        if i < 10:
+            route_early = max(route_early, diag["arrived_mass_kgh"])
+        if diag["arrived_mass_kgh"] > route_peak:
+            route_peak = diag["arrived_mass_kgh"]
+            route_diag = diag
+        p_c004_peak = max(p_c004_peak, s.a328_c004_P)
+else:
+    for _ in range(250):
+        s.a328_c003_M = 1.0
+        run(1)
+        p_c004_peak = max(p_c004_peak, s.a328_c004_P)
 check("328C003 seal loss produces blow-through", s.flags.get("LV328504_BLOWTHROUGH", False))
-check("328C003 consequence does not teleport to 328C004", route_early == 0.0)
-check("328C003 gas reaches and pressurizes 328C004 after line residence",
-      route_diag is not None and route_peak > 0.0 and p_c004_peak > p_c004_0,
-      f"arrival {route_peak:,.0f} kg/h, P {p_c004_0:.3f}->{p_c004_peak:.3f} bar a")
-check("328C003 arrived stream closes its component balance",
-      route_diag is not None
-      and abs(sum(route_diag["component_kgh"].values()) - route_peak) < 1e-6,
-      str(route_diag["mass_fraction"] if route_diag else {}))
+check("a 328C003 -> 328C004 transport route exists at all", HAVE_328_ROUTE,
+      "no route in unit 328: the consequence still crosses the boundary in one tick")
+if HAVE_328_ROUTE:
+    check("328C003 consequence does not teleport to 328C004", route_early == 0.0)
+    check("328C003 gas reaches and pressurizes 328C004 after line residence",
+          route_diag is not None and route_peak > 0.0 and p_c004_peak > p_c004_0,
+          f"arrival {route_peak:,.0f} kg/h, P {p_c004_0:.3f}->{p_c004_peak:.3f} bar a")
+    check("328C003 arrived stream closes its component balance",
+          route_diag is not None
+          and abs(sum(route_diag["component_kgh"].values()) - route_peak) < 1e-6,
+          str(route_diag["mass_fraction"] if route_diag else {}))
 
 # ------------------------------------------------- 5. Scenarios3.md 1.2 LPCC drum level
 print("\n=== 5. LPCC DRUM (323D011) LEVEL (Scenarios3.md 1.2) ===")

@@ -14,10 +14,19 @@ headers integrated by explicit Euler at the host dt:
     LP drums      4.4 bar a (322D001A/B, P_LP)    : HPCC 322E002 steam-raising + 9->4
                             let-down + 963 in -> 4-bar header (master-SP PIC-329207A/B/C).
 
-Valve flows use the standard incompressible orifice law shared by the rest of the sim
-(LV-322501 drain, HV-322604 vent):
+Valve flows are IEC 60534-2-1 / ISA-75.01 COMPRESSIBLE (report D-2).  They used to be the
+incompressible orifice law
 
     m_dot = K * (valve%/100) * sqrt(max(P_up - P_down, 0))                      [kg/s]
+
+which is wrong on saturated steam and wrong in a way that matters here: four of these eight
+valves are CHOKED at their own design point -- HV-329601 vents 9 bar a to atmosphere, PV-329207A
+vents 5.01, and PV-329207C / HV-329602 both drop 25 -> 5.01, all at pressure ratios above the
+critical F_gamma.xT of 0.696 -- and under the sqrt(dP) law their flow kept climbing as the
+downstream pressure fell, without limit.  A choked valve passes a flow that is a function of
+UPSTREAM conditions ONLY.  `_valve_flow` now applies the ISA expansion factor and the hard choke
+through `hydraulics._phi_gas`, ANCHORED on each valve's own design node pressures so every K
+seeding below and every design flow it was sized to reproduce are preserved bit-exactly.
 
 Header pressure is a lumped capacitance C [ (kg/s) per bar ]:
 
@@ -37,6 +46,9 @@ BIT-EXACT DESIGN ANCHOR
     PFD-26 conserved split, which reduces the earlier lumped 2-node stand-in.
 """
 from dataclasses import dataclass, field
+
+import hydraulics                    # PHASE 2 report D-2: ISA-75.01 compressible valve law
+from iapws_if97 import tsat_c        # shared pure-water saturation line (same call main uses)
 
 # ---------------------------------------------------------------- saturated-steam enthalpies (kJ/kg)
 #   Standard IAPWS/IF97 saturation table (sourced), used only for let-down desuperheat trims.
@@ -203,11 +215,48 @@ MSPAN_503    = 892.15 * (1.776 * 2.600) * 0.750         # kg, 329D009 horiz
 MSPAN_504    = 917.0  * (0.78539816 * 1.600 ** 2) * 2.000   # kg, 322D001 vert (A=pi/4*D^2=2.0106 m^2)
 
 
-def _valve_flow(K: float, opening_pct: float, p_up: float, p_down: float) -> float:
-    """Incompressible orifice flow (kg/s). Clamps opening to [0,100] and dP to >=0."""
+#  Saturated steam, gamma = c_p/c_v.  1.30 is the standard value for superheated/saturated steam
+#  over this pressure range and is the same one `hydraulics` defaults to; F_gamma = 1.30/1.40 =
+#  0.9286, so choking begins at dP/P1 = F_gamma.xT = 0.696 for the globe trim assumed throughout.
+STEAM_GAMMA = 1.30
+STEAM_MW    = 18.01528      # kg/kmol, H2O
+
+
+def _valve_flow(K: float, opening_pct: float, p_up: float, p_down: float,
+                p_up_des: float = None, p_down_des: float = None) -> float:
+    """ISA-75.01 compressible steam flow (kg/s), anchored on this valve's design node pressures.
+
+        m_dot = K.(op/100).sqrt(dP_des) . [ Phi_gas(live) / Phi_gas(design) ]
+
+        Phi_gas = P1 . Y . sqrt(x.M/(T1.Z)) ,   x = min(dP/P1, F_gamma.xT) ,  Y = 1 - x/(3.F_gamma.xT)
+
+    The min() IS the choke: past x = F_gamma.xT neither x nor Y may rise, so the flow stops
+    responding to p_down entirely -- which is the whole of finding D-2 and the reason four of the
+    valves in this module were unbounded.  T1 is the LIVE saturation temperature of the upstream
+    header, so a header that depressurises also gets hotter-per-kilogram in the right direction.
+
+    Anchoring rather than back-solving a Cv keeps every K seeding above untouched: at the design
+    node pressures the bracket is the same expression on the same operands, i.e. exactly 1.0, and
+    the law returns K.(op/100).sqrt(dP_des) for ANY opening -- the identical value the
+    incompressible form returned there.  Design splits and the boot pin are therefore bit-exact.
+    Defaults make p_up/p_down their own design condition (a boundary-to-atmosphere vent), which is
+    also exactly 1.0.
+    """
     op = max(0.0, min(100.0, opening_pct))
-    dP = max(p_up - p_down, 0.0)
-    return K * (op / 100.0) * dP ** 0.5
+    if op <= 0.0:
+        return 0.0
+    p1d = p_up   if p_up_des   is None else p_up_des
+    p2d = p_down if p_down_des is None else p_down_des
+    dP_des = max(p1d - p2d, 0.0)
+    if dP_des <= 0.0:
+        return 0.0
+    ref = hydraulics._phi_gas(1.0, p1d, p2d, tsat_c(p1d) + 273.15, STEAM_MW,
+                              STEAM_GAMMA, 1.0, "linear", hydraulics.XT_GLOBE)
+    if ref <= 0.0:
+        return 0.0
+    live = hydraulics._phi_gas(1.0, p_up, p_down, tsat_c(max(p_up, 1e-6)) + 273.15, STEAM_MW,
+                               STEAM_GAMMA, 1.0, "linear", hydraulics.XT_GLOBE)
+    return K * (op / 100.0) * dP_des ** 0.5 * (live / ref)
 
 
 def _seed_supply_pct() -> float:
@@ -344,8 +393,16 @@ def step_steam(state: SteamState, dt: float,
     # MAN: valve_supply_pct frozen; i_204 held -> bumpless return to AUTO
 
     # -- stream 902: BL -> 329D005 HP saturator (PV-329204) --
-    m_supply = _valve_flow(K_902, state.valve_supply_pct, state.P_SUP, state.P_MP)
-    m_vent_hp = _valve_flow(K_902, state.hv_vent_hp_pct, state.P_MP, 1.01325)  # HV-329601 atm
+    # D-2 design anchors: each valve's OWN design node pressures, the same pair its K above was
+    # seeded at, so the compressible law returns the identical design flow.  PV-329204 25 -> 19.7,
+    # dP/P1 = 0.21, comfortably sub-critical.
+    m_supply = _valve_flow(K_902, state.valve_supply_pct, state.P_SUP, state.P_MP,
+                           P_SUP_BARA, P_HP_BARA)
+    # HV-329601 vents the 19.7 bar saturator to atmosphere: dP/P1 = 0.949 against a critical
+    # 0.696, i.e. DEEPLY CHOKED at every opening.  Under the old sqrt(dP) law its flow rose
+    # without bound as the header pressure climbed; it is now a function of P1 alone.
+    m_vent_hp = _valve_flow(K_902, state.hv_vent_hp_pct, state.P_MP, 1.01325,
+                            P_HP_BARA, 1.01325)  # HV-329601 atm
 
     # -- 329D009 split-range PIC-329205 about the measured design make-up bias --
     # The A valve carries stream 903 at the design point.  Rising pressure first closes A; only
@@ -363,8 +420,10 @@ def step_steam(state: SteamState, dt: float,
     # MAN: split-range writes frozen; operator-set 205A/205B openings persist unchanged.
 
     # -- stream 903: BL -> 329D009 (PV-329205A) ; 9->4 let-down (PV-329205B) --
-    m_903 = _valve_flow(K_903, state.valve_admit9_pct,  state.P_SUP, state.P_9)
-    m_ld9 = _valve_flow(K_LD9, state.valve_letdown_pct, state.P_9,   state.P_LP)
+    m_903 = _valve_flow(K_903, state.valve_admit9_pct,  state.P_SUP, state.P_9,
+                        P_SUP_BARA, P_MP_BARA)     # PV-329205A 25 -> 9, dP/P1 = 0.64, just sub-critical
+    m_ld9 = _valve_flow(K_LD9, state.valve_letdown_pct, state.P_9,   state.P_LP,
+                        P_MP_BARA, P_LP_BARA)      # PV-329205B 9 -> 4 let-down, dP/P1 = 0.44
     m_attemper9 = M_ATTEMPER9_DES * (m_903 / max(M_903_DES, 1e-12))
     # desuperheat water bringing 9-bar let-down to saturated 4-bar
     m_water = m_ld9 * (H_G_MP - H_G_LP) / (H_G_LP - H_W)
@@ -382,7 +441,9 @@ def step_steam(state: SteamState, dt: float,
         state.i_207a = max(0.0, min(I207_CLAMP, state.i_207a + eA * dt))
         state.pv207a_pct = max(0.0, min(100.0, K_PIC_207 * eA + KI_PIC_207 * state.i_207a))
     # MAN: pv207a_pct frozen; i_207a held -> bumpless return to AUTO
-    m_vent = _valve_flow(K_207A, state.pv207a_pct, state.P_LP, 1.01325)
+    # PV-329207A vents the 4-bar header to atmosphere: dP/P1 = 0.798, CHOKED.
+    m_vent = _valve_flow(K_207A, state.pv207a_pct, state.P_LP, 1.01325,
+                         P_LP_BARA, 1.01325)
 
     # -- PIC-329207B turbine 320MT02 export: biased PI holds P_LP at SP_B by trimming the design
     #    export around BIAS_207B_PCT (G8).  At design eB==0 & i_pic==0 -> valve sits at the bias and
@@ -394,7 +455,8 @@ def step_steam(state: SteamState, dt: float,
         state.pv207b_pct = max(0.0, min(100.0,
             BIAS_207B_PCT + K_PIC_207 * eB + KI_PIC_207 * state.i_pic))
     # MAN: pv207b_pct frozen; i_pic held -> bumpless return to AUTO
-    m_turbine = _valve_flow(K_207B, state.pv207b_pct, state.P_LP, P_TURBINE_OUT_BARA)
+    m_turbine = _valve_flow(K_207B, state.pv207b_pct, state.P_LP, P_TURBINE_OUT_BARA,
+                            P_LP_BARA, P_TURBINE_OUT_BARA)   # PV-329207B, dP/P1 = 0.22
 
     # -- PIC-329207C BL 25-bar admit (direct: P_LP < SP_C -> open PV-329207C) --
     if state.pic207c_mode == "AUTO":
@@ -408,8 +470,13 @@ def step_steam(state: SteamState, dt: float,
     # MULTIPLIED in series, which both wired the hand valve into the PIC-329207C loop and -- because the
     # hand valve is design-shut at 0% -- zeroed the automatic make-up entirely.)  Both legs are 0 at the
     # design point (valve_963_pct=0 & hv_329602_pct=0) -> m_963=0 -> header balance bit-exact.
-    m_963_auto = _valve_flow(K_963,   state.valve_963_pct,  state.P_SUP, state.P_LP)   # PV-329207C (PIC loop)
-    m_hv602    = _valve_flow(K_HV602, state.hv_329602_pct,  state.P_SUP, state.P_LP)   # HV-329602 (hand, HIC-329602)
+    # Both 25 -> 4-bar make-up valves sit at dP/P1 = 0.80, i.e. CHOKED whenever they are cracked
+    # open.  Design-shut, so they contribute nothing at the seed either way -- but on a header
+    # collapse the old law had them accelerating into the falling pressure instead of saturating.
+    m_963_auto = _valve_flow(K_963,   state.valve_963_pct,  state.P_SUP, state.P_LP,
+                             P_SUP_BARA, P_LP_BARA)   # PV-329207C (PIC loop)
+    m_hv602    = _valve_flow(K_HV602, state.hv_329602_pct,  state.P_SUP, state.P_LP,
+                             P_SUP_BARA, P_LP_BARA)   # HV-329602 (hand, HIC-329602)
     m_963 = m_963_auto + m_hv602
 
     # net controlled export; leg C make-up (m_963) is accounted separately in the balance

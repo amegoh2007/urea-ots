@@ -516,7 +516,10 @@ the maths at design.
 ## Hydraulic Network: IEC 60534 Valves and Vapour-Space Pressure States (`backend/hydraulics.py`)
 
 Phase 2 of the eradication report. The module carries the equations; wiring is done one unit at a
-time so the boot pin can be re-proved after each. **Unit 323 is wired; 322, 324 and 328 are not.**
+time so the boot pin can be re-proved after each. **All of Phase 2 is now done except two A-6
+vessels, and both of those are blocked on a specific missing number rather than deferred by choice:
+324F001's cylindrical height and 328D001's contradictory volume.** Findings A-6, D-1, D-2, D-8 and
+D-19/D-20/D-21 are otherwise closed; A-7 remains blocked on data.
 
 ### Why the engine calls a ratio and not the absolute ISA law
 
@@ -676,7 +679,7 @@ Design invariance is preserved exactly — `valve_frac` is 1.0 to the bit at
 (HIC 50 %, 140.7 bar a, 114 °C), because the anchored ratio evaluates the same expression on the
 same operands in numerator and denominator.
 
-### The two unit-328 vessels that were NOT wired
+### The unit-328 vessel that is still NOT wired
 
 **328D001 — a source conflict, not a gap.** `References/328E004 328D001 328P002 Datasheets.md` gives
 inside diameter 1684 mm and tangent-to-tangent 1950 mm, *"which yields a nominal internal liquid
@@ -686,34 +689,280 @@ neither and standing at **243 % of the computed shell**. On the computed volume 
 its 2 % floor and $K$ would be ≈ 17.8 bar/(kg/s), **355×** the present constant and far outside the
 unit circle at a 0.25 s tick. It keeps `R328_D001_P_KP` until the real dimensions are established.
 
-**328C003 — stiffening it is a controller retune in disguise.** Unlike its two neighbours the
-hydrolyser's overhead is `m_748 = M748_DES · (pic203b_op / op_des)`: a pressure-*controlled* valve, so
-$\partial \dot m_{748}/\partial P = 0$ directly and every bit of the node's negative feedback runs
-through PIC-328203. A 4.3× stiffer vessel multiplies that loop's gain by 4.3×. (The engine seeds
-PIC-328203 at Kc = 1.5; Appendix A lists 4.0 — one of the documented plant-vs-simulator
-divergences.) Deferred until the open-loop gain is measured, exactly as TIC-323012 was.
+(328C003 was the other exclusion here. Its open-loop gain has since been measured and it is now
+wired — see *Phase 2 remainder* below.) The exclusion is pinned by a test, so a later edit cannot
+quietly "finish the job".
 
-Both exclusions are pinned by tests, so a later edit cannot quietly "finish the job".
+### Phase 2 remainder: the last four vessels, the 328 bottoms, the steam headers and the delays
 
-### What is NOT wired, and why
+The four vessels that could be closed on sourced geometry are closed. Two remain on the lumped
+constant and both are blocked on a specific missing number, recorded below rather than estimated.
 
-* **A-7, the 323F004 pressure state.** Still the algebraic `design + 0.45 bar per unit relative
-  vapour excess` chased through a 90 s lag. A real ODE needs a conductance on the F004 → 323E011
-  overhead, but `R323_F004_P_BARA` and `R3232_E011_P_BARA` are **both** 1.13 bar a, so the model's
-  design ΔP across that line is identically zero and no conductance can be anchored on it. The PFD
-  pressure row does distinguish stream 701 (1.1 bar a) from the downstream carbamate gas (1.0 bar a),
-  but it is rounded to 0.1 bar — the same order as the ΔP itself, a 3× uncertainty on the very
-  quantity that would size the conductance. Blocked on data, not deferred by choice.
-* **D-19 at 323C003.** The empty-vessel guard is kept deliberately. That finding argues such guards
-  become unreachable under a head-driven discharge law — true for a gravity drain, and 323F010's
-  barometric leg is already of that form. LV-323501 is a 4.1 → 1.13 bar letdown whose ΔP does *not*
-  vanish when the column empties; what really happens is the valve begins passing vapour, and this
-  engine has no two-phase valve model. Deleting the guard would let 323C003 drain below empty at full
-  letdown rate.
-* **D-12, `pull_f010`.** The ejector suction law is a machine map and belongs to Phase 4.
-* **323F010's barometric leg** still uses `M317_DES·√(M/M_DES)`, which is correctly head-driven in
-  form but ignores the vessel pressure, so a vacuum break would not change the drain rate. Wiring it
-  to `gravity_outflow_kgh` needs the leg height, which no source in the repository gives.
+| vessel | $V_{shell}$ m³ | $V_{liq}$ m³ | $V_v$ m³ | $\bar M$ | $T$ °C | $K_{new}$ bar/(kg/s) | vs. shared |
+|---|---|---|---|---|---|---|---|
+| 322C001 LP absorber | 3.2659 | 1.3854 | 1.8805 | 27.51 | 43 | 0.50810 | **25.4×** 0.02 |
+| 323E011 + 323D011 | 4.3751 | 1.2353 | 3.1398 | 17.40 | 45 | 0.48433 | **9.7×** 0.05 |
+| 328C003 hydrolyser | 62.2680 | 37.4926 | 24.7755 | 21.37 | 200 | 0.07431 | **3.72×** 0.02 |
+| 324F003 separator II | 7.4270 | 3.1122 | 4.3148 | 28.96 | 140 | 0.27486 | **13.7×** 0.02 |
+
+$ar M$ is the seed value of whatever the site actually uses — the live vent vector at 322C001 and
+the live `y_748` at 328C003, the sourced stream composition at the other two.
+
+The spread is the finding. One coefficient was carrying a 3.27 m³ absorber and a 62 m³ hydrolyser,
+and the correct values differ between them by a factor of seven — in the opposite direction to the
+volumes, because the hydrolyser is 60 % liquid-full while the absorber's vent is nearly pure air.
+
+#### 322C001: the holdup did not fit the vessel
+
+The datasheet gives a **stepped** column — upper part 576 mm ID over 1900 mm, lower part 922 mm ID
+over 4150 mm — so the two sections are summed, not averaged; the narrower top exists to accelerate
+the gas through the steam-condensate polishing bed.
+
+A-6 could not be written at all until an engine constant moved. `A328_C001_M_DES` was
+`M756_DES/3600 × 600 s`, an *indicative* residence time. At the PFD stream-755 density that is
+**5.53 m³ of liquid inside a 3.27 m³ vessel — 169 % of the shell containing it**, so
+$V_v = V_{shell} - M_l/\rho_l$ is negative and lands on its 2 % floor, returning a coefficient 683×
+the constant it was replacing.
+
+The holdup is now geometric: half the lower cylindrical section, which is where LT-322502 measures
+across the N9A/N9B pad flanges and where the datasheet describes the loop as holding "a steady 50
+percent holdup in the sump". That is 1392.3 kg and an **emergent** 150.3 s residence — four times
+shorter, and the honest number for a 922 mm column passing 33.4 t/h. The design pin is untouched by
+construction (LI-322502 is $M/M_{des}\times 50$ and the state seeds at $M_{des}$). What changes is
+the level *rate*, four times faster, because the old constant made this column four times more
+sluggish than the steel allows. LIC-322502 (Kc 1.0, Ti 100 s) was re-measured against the new gain
+and holds: over a 6000 s settle LI-322502 moves 2×10⁻⁶ %, and PT-322201 stays inside
+3.89984–3.90002 bar a.
+
+The vent MW is the **live** vector, not a frozen mean — 27.51 at the seed against the datasheet's
+29.45 design emission figure, the difference being that the engine tracks N₂/O₂/CH₄/H₂ where the
+datasheet counts argon. On an HP-scrubber cooling failure this vent stops being air altogether and
+becomes NH₃/CO₂, and the moles a kilogram of it carries nearly double.
+
+#### 323E011 and 323D011 are one gas envelope
+
+323E011 discharges its condensate by gravity through the DN 100 N2 nozzle straight into 323D011
+mounted directly beneath it, with no valve between — so the two vapour spaces are one envelope at
+one pressure. This is the same topology finding that closed the PT-323201 node, and the engine
+already half-assumed it: `s.r3232_e011_M` holds the **drum** inventory while `s.r3232_e011_P` is the
+shared pressure.
+
+The condenser's share is the shell bore **minus the bundle**: 382 tubes at 25 mm OD over a 5900 mm
+effective length displace 1.106 m³ of a 2.966 m³ shell, 37 % of it. Ignoring the bundle would
+overstate the free volume by 60 % and soften the node by the same factor. The seven 25 %-cut baffles
+are thin plates and are not deducted.
+
+Stream 702 is 89.4 wt% NH₃, giving $\bar M = 17.395$. That is what the shared coefficient could not
+know: at 17.4 kg/kmol a kilogram of this vent carries 2.5× the moles — and 2.5× the pressure — of a
+kilogram of the CO₂-rich vapour the same 0.05 was applied to elsewhere.
+
+#### 328C003: the deferred one, now measured
+
+328C002 and 328C004 self-regulate — their overheads rise with $\sqrt{\Delta P}$ against the next
+node, so stiffening the capacitance only makes a stable first-order node faster. 328C003 does not.
+Its overhead is PV-328203B, a pressure-**controlled** valve, so $d\dot m_{748}/dP$ through the
+hydraulics is identically zero and the whole loop gain sits in PIC-328203. That is why it was held
+back with an explicit "measure the open-loop gain first" note rather than wired with the other two.
+
+Measured, it is **3.7×** — close to the 4.3× first estimated but for a different reason than
+assumed: the hydrolyser is a liquid-filled column standing 12.55 m deep in a 20.85 m shell, so only
+24.8 m³ of it is vapour, and its overhead is lighter than the pure hydrolysis gas (the seed `y_748`
+is 70 mol% steam, $ar M$ 21.4, not the 26.0 of 2 NH₃ + CO₂ alone). A 6000 s settle
+from the design seed leaves the node inside a decaying ±0.03 bar excursion about 16.80 bar a.
+PIC-328203 at Kc 1.5 / Ti 50 s holds it, so **no retune was applied**.
+
+#### 324F003 wired; 324F001 blocked on one number
+
+324F003's OEM datasheet (UD-AU-324-EC-0008) gives 2500 mm OD and a 1550 mm cylindrical height. It
+gives no wall, so the 15 mm of the same OEM series is used — 324F001 is quoted 4600 OD / 4570 ID in
+its own datasheet. That is a stated assumption and a small one: taking the bore at the full OD
+instead moves the shell volume by 2.4 %, well inside the level swell this term exists to capture.
+Its ODE is solved *inside* the existing P/T Picard fixed point, so the 13.7× stiffer state is
+marched implicitly and the ejector's own $p_2$-proportional pull closes the loop.
+
+The vacuum ODE balances **non-condensables**, not boil-up: the condensables leave by condensing in
+324E005, and PIC-324203's entire control mechanism is admitting atmospheric air through PV-324203 to
+blanket that condenser. So the molecular weight on this balance is dry air, 28.9647.
+
+**324F001 is not wired.** Everything else it needs is sourced — 4600 mm OD / 4570 mm ID, the melt
+density, the full nozzle schedule — but no document in this repository states its **cylindrical
+height**, and that is the only term A-6 needs. A 4570 mm bore admits anything from 2 to 10 m, i.e.
+33 to 164 m³, so the coefficient is undetermined by a factor of five. Estimating it from the
+21 500 kg delivery weight was tried and rejected: backing out the shell mass needs the
+internals/skirt/nozzle share, which is the same guess wearing a different hat. Nor does the sibling
+help — 324F003's 0.62 height/diameter ratio is a similarity argument, not a measurement. It keeps
+the constant, the same standing 328D001 has.
+
+### D-1: the three unit-328 bottoms valves
+
+All three were `design × (op/op_des)` — a bare position gain with no ΔP term, no density and a linear
+installed characteristic whatever the trim. LV-328504 is the clearest case: it lets a 200 °C liquid
+down from 16.8 bar into a column whose pressure is now a live state, and the old form was blind to
+it.
+
+Each valve now takes $p_1$ from its own vessel: the live node pressure plus the hydrostatic head of
+the liquid standing on the nozzle, $h = M_l/(\rho A_{col})$, so the head collapses as the column
+empties. That is the same term that makes the empty-vessel guards of D-19 to D-21 unreachable.
+
+| valve | $p_1$ bar a | $p_2$ bar a | $\Delta P$ | head | basis |
+|---|---|---|---|---|---|
+| LV-328503 | 24.4000 | 16.8000 | 7.6000 | 0.1269 bar over 1.387 m | 328P006 discharge |
+| LV-328504 | 17.9185 | 3.7000 | 14.2185 | 1.1185 bar over 12.554 m | gravity letdown |
+| LV-328505 | 3.8148 | 1.0000 | 2.8148 | 0.1148 bar over 1.268 m | 740 boundary |
+
+**LV-328503 sits on a pump discharge**, so $p_1$ is not the column pressure, and the 328P006A/B
+datasheet gives the whole hydraulic line: 4.7 bar a suction, 24.4 bar a discharge, 19.7 bar
+differential, 215 m head, 52 m³/h rated. So
+$p_1 = P_{c002} + \rho g(h_{level} + Z)/10^5 + \Delta P_{pump}$, with $Z$ back-solved to make the
+design suction read the datasheet's 4.7 bar a **exactly**. It comes out 11.728 m — the fixed
+elevation from the column bottom nozzle down to the pump centreline, which is separate from the
+level and must not move with it. $\Delta P_{pump}$ is held at its rated value: the datasheet gives
+one point on the curve and no curve shape, so a head-versus-flow law here would be invented.
+
+**No vapour pressure is passed to any of the three**, and that is deliberate rather than an
+omission. All three carry liquor sitting at its own bubble point in the vessel above, so the
+physically correct $P_v$ is the vessel pressure itself — and feeding that to the single-phase choked
+limit collapses $\Delta P_{eff}$ to $F_L^2(1-F_F)p_1$, about 4 % of $p_1$, turning every one of them
+into a hard-choked orifice. These are **flashing** services; sizing them properly needs the IEC
+60534 two-phase method, which this repository does not have. With $P_v = 0$ the $F_L^2 p_1$ ceiling
+still applies the right qualitative limit without pretending to a two-phase capacity the model
+cannot compute. Left as a stated gap.
+
+Installed characteristic is **linear**, the same choice and the same reason as `R323_LV_CHAR`: no
+control-valve datasheets exist for these three, and linear reproduces the gain basis
+LIC-328503/504/505 were tuned against. This change delivers the terms that were *missing*; switching
+to equal-% is a retune, not a drop-in.
+
+### D-2: four of the eight steam-header valves were choked all along
+
+`steam_system._valve_flow` was the incompressible orifice law, which is wrong on saturated steam and
+wrong in a way that matters here. At their own design node pressures, against a critical
+$F_\gamma x_T = 0.6964$:
+
+| valve | $P_1 \to P_2$ bar a | $x = \Delta P/P_1$ | |
+|---|---|---|---|
+| PV-329204 | 25.00 → 19.70 | 0.2120 | sub-critical |
+| **HV-329601** | 19.70 → 1.01 | **0.9486** | **choked** |
+| PV-329205A | 25.00 → 9.00 | 0.6400 | sub-critical |
+| PV-329205B | 9.00 → 5.01 | 0.4430 | sub-critical |
+| **PV-329207A** | 5.01 → 1.01 | **0.7979** | **choked** |
+| PV-329207B | 5.01 → 3.90 | 0.2221 | sub-critical |
+| **PV-329207C** | 25.00 → 5.01 | **0.7995** | **choked** |
+| **HV-329602** | 25.00 → 5.01 | **0.7995** | **choked** |
+
+Under $\sqrt{\Delta P}$ the flow through all four kept climbing as the downstream pressure fell,
+without limit. A choked valve passes a flow that is a function of **upstream conditions only**. The
+law is now
+
+$$\dot m = K\cdot\frac{op}{100}\sqrt{\Delta P_{des}}\cdot\frac{\Phi_{gas}(\text{live})}{\Phi_{gas}(\text{design})},\qquad
+\Phi_{gas}=P_1 Y\sqrt{\frac{xM}{T_1 Z}},\quad x=\min\!\left(\frac{\Delta P}{P_1}, F_\gamma x_T\right)$$
+
+with $T_1$ the **live** saturation temperature of the upstream header, from the same IF97 boundary
+`main.tsat_steam` uses. Anchoring rather than back-solving a $C_v$ keeps every $K$ seeding in the
+module untouched: at the design node pressures the bracket is the same expression on the same
+operands, exactly 1.0, so the law returns $K(op/100)\sqrt{\Delta P_{des}}$ for **any** opening — the
+identical value the incompressible form returned there. Verified bit-exact at 0, 17.3, 50 and 100 %
+stroke on all six anchored valves.
+
+`core/valve.py:Valve322604` — the Sequential-Modular port of `main.hv_322604` — had been left behind
+when that function moved onto the ISA law in the HV-322604 pass. It still carried
+`_eq_pct(θ) × √(ΔP/ΔP_des)` on a service running at a pressure ratio of 0.028, and
+`_eq_pct(0, 50) = 50^{-0.5} = 0.1414`, so a HIC-322604 commanded fully **shut** still passed 14 % of
+the design off-gas — about 835 kg/h of NH₃/CO₂ out of a 140.7 bar loop the operator believes is
+isolated. Both ports now call the same anchored law on the same anchors, so the SM flowsheet and the
+tick engine cannot disagree about this valve again.
+
+### D-8: transport delays that move with flow
+
+Three fixed FIFOs remained: `FEED_TD_S` = 345 s on the CO₂ and NH₃ feed tears, and 60 s on the
+322E001 bottoms.
+
+The 345 s is a **measurement** and it stays exactly where it is — the PT-329201 FOPTD fit from the
+03-06-2025 DCS anchor set (R² = 0.9888, bracketed ≤ 572 s). What was wrong is that it did not
+*move*. A transport dead time is $t_d = \rho V_{line}/\dot m$, so at 50 % load it **doubles**, and
+the fixed FIFO held it at 345 s from turndown to trip.
+
+No nozzle table in this repository gives the battery-limit run lengths, so the line inventory is
+back-solved from the measurement instead of the geometry, $M_{line} = \dot m_{des}t_{d,des}/3600$ —
+the same anchored-departure form the valves use. Exact at the design flow by construction; if the
+real line D and L ever turn up they replace the back-solve, and the design point is unchanged if
+they agree with it.
+
+| line | inventory | design $t_d$ | at 50 % flow |
+|---|---|---|---|
+| BL → loop, CO₂ | 5234.2 kg | 345 s | 690 s |
+| BL → ejector, NH₃ | 4098.0 kg | 345 s | 690 s |
+| 322E001 bottoms → LT-322501 | 1.9166 m³ (2174.7 kg) | 60 s | 120 s |
+
+Capped at 3600 s so a dead feed gives a long-but-finite transit rather than an infinity.
+
+Separately, `_transport_process` had been computing a full per-route diagnostic every tick and
+dropping it into `s.tlag` where nothing could read it. It is now published on the tick packet as
+`CONSEQUENCE_TRANSPORT`, which is what makes the plug-flow boundary auditable from telemetry: a
+departure and an arrival differing on the same tick is the direct evidence that properties are no
+longer teleporting across an equipment boundary.
+
+### D-19 / D-20 / D-21: one deleted, one restored, two kept
+
+The reports argue that an empty-vessel limiter becomes unreachable once the discharge is driven by
+head. That is true for a **gravity** drain and false for a pressure letdown, so each of the four
+sites was checked for which kind it is.
+
+* **HPCC level (deleted).** Provably dead code, not merely redundant. The outflow is
+  $\varphi_{fwd}(L/NLL)$, so at $L = 0$ it is identically 0.0, and the guard's second condition asked
+  whether $0.0 > \varphi_{in}$ for a $\varphi_{in}$ that is a ratio of two non-negative liquid makes.
+  The branch was unreachable on every path.
+* **322F001 ejector suction (restored).** Not a guard — a *dropped* term. `m_suc = capacity`
+  discarded the gravity-head multiplier the block comment directly above it specifies, leaving the
+  322E003 sump a pure integrator: shutting XV-322903 flooded it correctly (50.0 → 62.5 % in 60 s) but
+  re-opening restored design entrainment only, so the level held wherever it got to and never came
+  back. With the head term restored the sump is a self-regulating attractor again, settling at
+  $L_{eq} = NLL(\text{overflow}/\text{capacity})$. At design $L = NLL$, so the fraction is a literal
+  1.0 and the fixed point does not move. `EJ_HYD_FRAC_MAX` — the throat-choke ceiling the same
+  comment specifies and which had also never been applied — now caps a real flood at 1.25×, inactive
+  at design.
+
+  Measured against the -30 % CCW throttle in `test_3_scrubber_heat.py`, the difference is stark.
+  Before, the sump drained 50.0 -> 27.2 % over the cut and then sat at 26.7 % **for ever**, with the
+  entrainment frozen at its design 53 368 kg/h the whole time. Now it troughs at 45.5 %, because the
+  falling head throttles the entrainment (53 368 -> 48 432 kg/h) and the shortfall is self-limiting,
+  and it recovers to 49.9 % within about 1400 s of the CCW being restored.
+
+  **This corrected one test by breaking another, and the second was passing on the strength of the
+  defect.** `test_3_scrubber_heat.py` asserted that PT-329201 relaxes by at least 0.15 bar within
+  1000 s of CCW restoration. That relaxation had been powered by the sump dumping 23 % of its
+  inventory into the synthesis loop during the cut; with the sump behaving, the CCW-attributable
+  excursion is smaller -- correctly so -- and it no longer clears the harness's own numerical noise.
+  That noise is documented and pre-existing: the `_systest` harness runs at $dt = 2.0$ s, where the
+  design seed itself walks about +0.10 bar per 1000 s by the time the test reaches its relax window,
+  and rising. The test was grading a raw pressure against a threshold smaller than the walk.
+
+  It now grades PT-329201 against a **matched no-cut control trajectory of identical length**, so the
+  walk cancels by construction and only the CCW effect survives. The relaxation is then perfectly
+  visible -- the CCW-attributable excess falls from +0.400 bar at the end of the cut to +0.300 bar
+  after the relax window -- and the sump's trough-and-recovery is asserted alongside it. Verified
+  separately: the free $dt = 2.0$ s walk is unchanged by any of Phase 2's work, tracking the
+  pre-change baseline within 0.03 bar over 4600 s (140.7125 vs 140.7118 at 1000 s; 141.1102 vs
+  141.1271 at 4400 s).
+* **Stripper drain and 323C003 (kept).** LV-322501 is a 140.7 → 4.0 bar letdown and LV-323501 a
+  4.1 → 1.13 bar letdown. Neither ΔP vanishes when the vessel empties. What happens on the plant is
+  that the valve starts passing vapour instead of liquid, and this engine has no two-phase valve
+  model; deleting either guard drains its vessel below empty at full letdown rate. Keeping them is
+  the honest floor until that model exists.
+
+### What is still open after this pass
+
+* **324F001's cylindrical height** and **328D001's volume** — the two A-6 vessels still on the lumped
+  constant. The first is a missing number, the second a source conflict (the datasheet says ID
+  1684 mm × T/T 1950 mm and calls it 19 m³; the cylinder is 4.343 m³, and the engine's own design
+  holdup matches neither at 243 % of the computed shell).
+* **A-7, the 323F004 pressure state.** Unchanged and still blocked on data: the design ΔP across the
+  F004 → 323E011 line is identically zero in the model, and the PFD rounding is the same order as the
+  ΔP itself.
+* **323F010's barometric leg**, still `M317_DES·√(M/M_DES)` — head-driven in form but with no vessel
+  pressure term, so a vacuum break would not change the drain rate. Needs the leg height.
+* **The 328 bottoms valves are flashing services on a single-phase law.** See D-1 above.
+* **D-12, `pull_f010`** — a machine map, and Phase 4's.
 
 ## 322R001 Reactor Kinetics: Rate Laws, Not Load Multipliers (`backend/reactor.py`)
 
