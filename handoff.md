@@ -213,9 +213,50 @@ passes a PFD row, where a zero total IS a data error and still raises.
 
 This is the fourth of the same family the CCW chain has surfaced; section 9 lists three more that a
 previous pass fixed. **The chain is worth running after any change to the 323/324 train** -- it is
-the only test that drives the flowsheet hard enough to reach these. Note that until this fix it had
-never got past Phase 2, so **Phases 3 and 4 have not actually been exercised since the crash
-appeared**; whatever they report on the next run is new information, not a regression.
+the only test that drives the flowsheet hard enough to reach these.
+
+### ...and behind it, a FIFTH: 324E001's temperature diverges on the post-trip plant -- OPEN
+
+With the transport crash fixed the chain got past Phase 2 for the first time. Phase 2 itself now
+runs to completion and passes **12 of its 13 checks**:
+
+```
+  LT-329501 TRUE min (%)          50.000 ->      34.600     -30.8%  [DOWN]
+  AT-322701 reactor N/C            3.002 ->      99.990   (analyzer span)
+  X_conv per-pass (%)             54.634 ->      23.456     -57.1%  [DOWN]
+  trip 22.2 latched at           3600 s   (setpoint 155.0 bar a)
+  [GAP ] CCW loss collapses cool_frac to 0  --> cool_frac=0.0033
+  [PASS] x12 -- condensate returns to off-gas, HV-322604 seat-limited, overflow T at the ceiling,
+         retained vapour integrates PT up, LT-329501 spikes and hunts on the froth, true sump drains
+         underneath the indication, N/C off anchor, conversion falls, PT reaches high-high,
+         SV-32201 does not lift, trip cuts CO2 and stops both HP-NH3 pumps
+```
+
+The single GAP is an exact-zero assertion (`cool_min == 0.0`) against a measured 0.0033 -- a
+tolerance question, not a physics one.
+
+Then `test_ccw_loss_chain.py:192`, the **post-trip** continuation (`H.run(600)`, "1200 s with the
+feed cut"), dies:
+
+```
+  File "main.py", line 8418, in step_sim
+    cp_feed2   = urea_soln_cp(w1_live, s.r324_e001_T)     # LIVE Stage-1 melt cp
+  File "main.py", line 820, in cp_water_kjkgk
+    + 0.000008708461 * T_C * T_C + 0.00000001809921 * T_C ** 3)
+OverflowError: (34, 'Result too large')
+```
+
+`T_C ** 3` can only overflow if `s.r324_e001_T` has run away to something astronomical, so the real
+defect is a **divergent temperature integrator on 324E001 once the plant is tripped and its feed is
+gone** -- the same shape as the `react_nc_ratio` runaway section 9 records (6.1e9 on a post-trip loop
+with the carbon gone), and it wants the same kind of answer: find why the state diverges, not a clamp
+on the property correlation. Clamping `cp_water_kjkgk` would hide a diverging state, which is worse
+than the crash.
+
+**Attribution: pre-existing.** Nothing in the Phase 2 remainder touches `urea_soln_cp` or the 324
+temperature integrator; it was simply unreachable while the transport crash stopped the chain one
+phase earlier. **Phases 3 and 4 have still never been exercised.** This is the productive next item
+in this area.
 
 **NOT re-run in this pass, and they should be**:
 `test_equation_audit_td014.py`, `test_ccw_loss_chain.py`, `test_transient_coldstart.py`,
