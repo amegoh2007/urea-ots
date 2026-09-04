@@ -163,6 +163,29 @@ Verified green or baseline-identical:
 | `test_g8_lp_turbine_export.py` | 2 failed, 4 passed | identical to baseline (section 3 red list) |
 | `test_equation_audit_desorption.py` | 2 failed, 8 passed | identical to baseline; this is the file that exercises the three 328 bottoms valves |
 
+### test_ccw_loss_chain.py Phase 1a was ALREADY failing at dae861d -- measured, not assumed
+
+Its first gate is `abs(pt_prod - 140.7) < 1e-3` after 3000 s at the production tick. Running the
+identical hold on **dae861d in a side worktree** and on this branch:
+
+| t (s) | dae861d | with Phase 2 | delta | scrub sump, base -> new |
+|---|---|---|---|---|
+| 500 | 140.705274 | 140.705202 | -7.2e-5 | 49.9990 -> 49.9996 |
+| 1000 | 140.707908 | 140.707843 | -6.5e-5 | 49.9976 -> 49.9993 |
+| 1500 | 140.710084 | 140.709985 | -9.9e-5 | 49.9956 -> 49.9990 |
+| 2000 | 140.712724 | 140.712596 | -1.3e-4 | 49.9929 -> 49.9987 |
+| 2500 | 140.715573 | 140.715442 | -1.3e-4 | 49.9897 -> 49.9984 |
+| 3000 | **140.718363** | **140.718261** | -1.0e-4 | 49.9858 -> **49.9981** |
+
+The +0.018 bar that fails the gate is **inherited from Phase 3**, and this branch is fractionally
+LOWER at every sample. The origin is the A-8 thermal-loop closure whose settled drift section 1f
+already records as open: before A-8 the reactor temperature was imposed and the loop drift could not
+reach it. The handoff's older quote of "140.70024 after 3000 s" predates Phase 3.
+
+Worth noticing in the same table: the **322E003 sump holds NLL seven times tighter** on this branch
+(0.002 points off at 3000 s against 0.014). That is the D-19 head term making it a genuine
+attractor instead of an integrator, and it is a design-hold IMPROVEMENT, not a cost.
+
 ### An engine-killing crash on the transport path, found and fixed
 
 `_w_norm` divided by the sum of a packet's mass fractions with no guard, and
