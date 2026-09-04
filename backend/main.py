@@ -2097,9 +2097,20 @@ SOL_SPECIES = tuple(MW_SOL)
 SOL_NONVOL  = ("Biuret", "HCHO")     # never leave in the vapour at these temperatures
 
 
-def _w_norm(d: dict) -> dict:
-    """PFD mass-% row -> mass FRACTIONS summing to exactly 1 (the C6 summation, applied once)."""
+def _w_norm(d: dict, fallback: dict = None) -> dict:
+    """PFD mass-% row -> mass FRACTIONS summing to exactly 1 (the C6 summation, applied once).
+
+    `fallback` is for the TRANSPORT path only, and it exists because an empty packet has no
+    composition to read.  `consequence.ZERO_PACKET` carries an empty component vector, so its
+    mass_fraction sums to zero and the division below raises -- an engine-killing ZeroDivisionError
+    reachable from any upset that takes a transported line to exactly zero flow (a total 322E003 CCW
+    loss does it at the 323C003 bottom drain).  Nothing physical is being papered over: when no mass
+    arrives the receiving stage's inflow term is zero, so the vector it multiplies is arbitrary and
+    the departure composition is the honest placeholder.  Every OTHER caller passes a PFD row, where
+    a zero total IS a data error and must still raise."""
     tot = sum(d.get(k, 0.0) for k in SOL_SPECIES)
+    if tot <= 0.0 and fallback is not None:
+        return _w_norm(fallback)
     return {k: d.get(k, 0.0) / tot for k in SOL_SPECIES}
 
 
@@ -7075,7 +7086,7 @@ def step_sim(dt: float) -> dict:
     else:
         m_feed_323 = _pkt_arr_323.mass_kgh
         T_feed_323 = _pkt_arr_323.temperature_c
-        w_feed_323 = _w_norm(_pkt_arr_323.mass_fraction)
+        w_feed_323 = _w_norm(_pkt_arr_323.mass_fraction, w_dep_323)
     cp_feed323 = _cp(w_feed_323.get("Urea", 0.0),          T_feed_323,        R323_CP_S208_DES)
     cp_c003    = _cp(s.w_c003.get("Urea", 0.0),            s.r323_c003_T,     R323_CP_C003_DES)
     cp_f004    = _cp(s.w_f004.get("Urea", 0.0),            s.r323_f004_T,     R323_CP_F004_DES)
@@ -7180,7 +7191,7 @@ def step_sim(dt: float) -> dict:
     else:
         m_314_in  = _pkt_arr_314.mass_kgh
         T_314_in  = _pkt_arr_314.temperature_c
-        w_314_in  = _w_norm(_pkt_arr_314.mass_fraction)
+        w_314_in  = _w_norm(_pkt_arr_314.mass_fraction, w_dep_314)
         cp_314_in = _cp(w_314_in.get("Urea", 0.0), T_314_in, R323_CP_C003_DES)
     s.r323_c003_M = max(M_c003_pre + (m_feed_323 - m_305 - m_314) / 3600.0 * dt, 1.0)
     # AUDIT F-8/TD-009: species balance on the SAME flows the mass ODE above just used.  The feed
@@ -7252,7 +7263,7 @@ def step_sim(dt: float) -> dict:
     else:
         m_319_in  = _pkt_arr_319.mass_kgh
         T_319_in  = _pkt_arr_319.temperature_c
-        w_319_in  = _w_norm(_pkt_arr_319.mass_fraction)
+        w_319_in  = _w_norm(_pkt_arr_319.mass_fraction, s.w_f004)
         cp_319_in = _cp(w_319_in.get("Urea", 0.0), T_319_in, R323_CP_F004_DES)
     P_f004    = (m_314_in / 3600.0 * cp_314_in * (T_314_in - s.r323_f004_T)
                  - m_701 / 3600.0 * R323_LAMBDA_701)                              # adiabatic (no Q) kW
@@ -7320,7 +7331,7 @@ def step_sim(dt: float) -> dict:
     else:
         m_317_in = _pkt_arr_317.mass_kgh
         T_317_in = _pkt_arr_317.temperature_c
-        w_317_in = _w_norm(_pkt_arr_317.mass_fraction)
+        w_317_in = _w_norm(_pkt_arr_317.mass_fraction, s.w_f010)
     P_f010    = (m_319_in / 3600.0 * cp_319_in * (T_319_in - s.r323_f010_T)
                  + m_331 / 3600.0 * cp_331 * (R323_M331_T_C - s.r323_f010_T)
                  + Q_e010_kw - m_evap / 3600.0 * R323_EVAP_LAMBDA)               # net kW on holdup
@@ -8255,7 +8266,7 @@ def step_sim(dt: float) -> dict:
     else:
         feed1_m   = _pkt_arr_324.mass_kgh
         T_feed1   = _pkt_arr_324.temperature_c
-        w_arr_324 = _w_norm(_pkt_arr_324.mass_fraction)
+        w_arr_324 = _w_norm(_pkt_arr_324.mass_fraction, s.w_d002)
     # AUDIT B1 (ripple).  This read the FROZEN R324_W_IN, so no composition change anywhere
     # upstream could reach the evaporators -- a measured 0 of 66 unit-324 telemetry leaves
     # responded to a reactor-overflow composition step.  It now reads the live 323D002 tank
