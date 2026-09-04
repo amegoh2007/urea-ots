@@ -3727,6 +3727,15 @@ SCRUB_HV604_P_OUT    = 4.0       # bar a, 322C001 LP-absorber downstream pressur
 SCRUB_HV604_MU_JT    = 0.55      # C/bar, mixture Joule-Thomson coeff (NH3/CO2-rich off-gas)
 SCRUB_HV604_DP_DES   = SCRUB_OFFGAS_P_BARA - SCRUB_HV604_P_OUT   # 136.7 bar, design ΔP across HV-322604 (dP_des)
 SCRUB_HV604_RANGE    = 50.0      # equal-% inherent rangeability R (datasheet char = EQUAL %): K_v(h)=K_vs·R^(h-1)
+# PHASE 2 (report D-2).  HV-322604 lets carbamate off-gas down 140.7 -> 4.0 bar a, a pressure ratio
+# of 0.028.  With gamma ~ 1.30 the choke threshold is F_gamma.xT = 0.696 while dP/P1 = 0.9716, so the
+# valve is CHOKED AT ITS OWN DESIGN POINT and stays choked until the downstream node rises above
+# about 42.7 bar a.  Choked flow is a function of UPSTREAM conditions only; the incompressible
+# sqrt(dP) law this replaces let the flow keep rising as the downstream pressure fell, which cannot
+# happen.  gamma is the mixture value for an NH3/CO2-rich off-gas (NH3 1.31, CO2 1.29, inerts 1.40).
+SCRUB_HV604_GAMMA    = 1.30      # -, off-gas mixture heat-capacity ratio
+SCRUB_HV604_MW_DES   = (sum(SCRUB_OFFGAS_KMOLH_DES[k] * MW_COMP[k] for k in MW_COMP)
+                        / max(sum(SCRUB_OFFGAS_KMOLH_DES.values()), 1e-12))   # 27.4768 kg/kmol
 # --- Shell-side CCW (Conditioning Cooling Water) closed loop: 329P006 A/B pump + 329E004 cooler ---
 #   322E003 shell -- TT-329125 -- 329P006 A/B -- FV-329409/FIC-329409 -- TIC-329005 -- shell in;
 #   branch after 329P006: TV-329005 -- 329E002 -- main CCW header (heat rejected via 329E004).
@@ -4433,7 +4442,25 @@ def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float,
     vent_cap_kgh is the seat's hydraulic ceiling on the OFFERED off-gas MASS (see Valve322604): what
     a DN-24 / Kvs 2.1 trim cannot pass is retained upstream, it does not vent.  None = no ceiling."""
     dP    = max(p_up - SCRUB_HV604_P_OUT, 0.0)
-    valve = _eq_pct(hic_pct, SCRUB_HIC604_DES_PCT) * math.sqrt(dP / SCRUB_HV604_DP_DES)   # equal-% trim × √ΔP-ratio
+    # PHASE 2, report D-2.  Was `_eq_pct(theta) * sqrt(dP/dP_des)` -- an INCOMPRESSIBLE orifice on a
+    # service that is choked at its own design point.  Two things were wrong with it and both are
+    # fixed by the ISA-75.01 compressible law:
+    #   * flow responded to the DOWNSTREAM pressure while choked, which is not physical; the new law
+    #     saturates at x = F_gamma.xT and is a function of upstream conditions only;
+    #   * `_eq_pct(0, 50)` is 50^-0.5 = 0.1414, so a FULLY CLOSED HIC-322604 still passed 14 % of the
+    #     design off-gas -- about 835 kg/h of NH3/CO2 out of a 140.7 bar loop the operator believes is
+    #     isolated.  The bare equal-% exponential R^(h-1) never reaches zero and nothing clamped it.
+    #     `hydraulics.cv_fraction` returns a hard 0.0 at zero travel.
+    # The design MW is passed explicitly so the composition does NOT cancel out of the ratio: a
+    # heavier off-gas puts more kilograms through the same trim, m ~ sqrt(M).
+    _n_og = sum(offgas.get(k, 0.0) for k in MW_COMP)
+    _mw_og = (sum(offgas.get(k, 0.0) * MW_COMP[k] for k in MW_COMP) / _n_og) if _n_og > 1e-12 \
+        else SCRUB_HV604_MW_DES
+    valve = hydraulics.valve_gas_anchored(
+        1.0, hic_pct / 100.0, p_up, SCRUB_HV604_P_OUT, T_in + 273.15,
+        SCRUB_HIC604_DES_PCT / 100.0, SCRUB_OFFGAS_P_BARA, SCRUB_HV604_P_OUT,
+        SCRUB_OFFGAS_T_C + 273.15, _mw_og, gamma=SCRUB_HV604_GAMMA,
+        characteristic="equal_pct", mw_des=SCRUB_HV604_MW_DES)
     off_kgh = sum(offgas.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
     pass_frac = 1.0 if (vent_cap_kgh is None or off_kgh <= 0.0) \
         else min(1.0, max(vent_cap_kgh, 0.0) / off_kgh)                           # capacity ceiling
@@ -6392,12 +6419,22 @@ def step_sim(dt: float) -> dict:
     top_ratio  = (strip["top_mol"] / STRIP_TOP_MOL_DES) if STRIP_TOP_MOL_DES else 1.0  # stripper overhead push
     nu = s.p_syn_bara / SYN_P_DES_BARA            # vent ratio = PT-329201/PT_des (prior-step state; breaks the algebraic loop)
     # HV-322604 back-pressure penalty — valve vent capacity vs the scrubber's required inert purge:
-    #   vent_frac = m_og/(m_og_des·s) = R^((θ−θ_des)/100)·√(ΔP/ΔP_des);  θ_des = design opening (50%,
-    #   demand-met), equal-% trim per datasheet (must match hv_322604 so the diagnostic vent flow and
-    #   the back-pressure penalty use one characteristic).  Pinch below design (vent_frac<1) starves the
-    #   inert vent -> uncondensed inerts accumulate and integrate PT-329201 up.  Prior-step p_syn for ΔP.
+    #   vent_frac = m_og/(m_og_des·s).  Pinch below design (vent_frac<1) starves the inert vent ->
+    #   uncondensed inerts accumulate and integrate PT-329201 up.  Prior-step p_syn breaks the loop.
+    #
+    #   PHASE 2, report D-2.  This is the SECOND call site of the HV-322604 characteristic, and the
+    #   comment here has always said it must match `hv_322604` so the diagnostic vent flow and the
+    #   back-pressure penalty share one law.  Rewriting `hv_322604` onto ISA-75.01 therefore has to
+    #   rewrite this one in the same breath, or the two silently disagree -- the valve would choke in
+    #   one place and not the other.  Same anchored compressible law, same design MW, and the same
+    #   hard shutoff: at HIC-322604 = 0 the old `_eq_pct(0, 50)` returned 0.1414, so a vent commanded
+    #   fully shut still credited 14 % of the design purge against the inert accumulation.
     dP_vent   = max(s.p_syn_bara - SCRUB_HV604_P_OUT, 0.0)
-    vent_frac = _eq_pct(s.HIC_322604, SCRUB_HIC604_DES_PCT) * math.sqrt(dP_vent / SCRUB_HV604_DP_DES)
+    vent_frac = hydraulics.valve_gas_anchored(
+        1.0, s.HIC_322604 / 100.0, s.p_syn_bara, SCRUB_HV604_P_OUT, SCRUB_OFFGAS_T_C + 273.15,
+        SCRUB_HIC604_DES_PCT / 100.0, SCRUB_OFFGAS_P_BARA, SCRUB_HV604_P_OUT,
+        SCRUB_OFFGAS_T_C + 273.15, SCRUB_HV604_MW_DES, gamma=SCRUB_HV604_GAMMA,
+        characteristic="equal_pct", mw_des=SCRUB_HV604_MW_DES)
     # PT-329201 reverse heat->pressure: condensation capacity (CCW flow) vs vent demand (s*nu).
     #   rho_cond < 1 (e.g. CCW throttled) -> off-gas under-condenses, accumulates, integrates PT up.
     #   Design: m_ccw=des, s=1, nu=1 -> rho=1 -> PT holds 140.7.

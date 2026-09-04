@@ -646,6 +646,36 @@ Measured over 24 000 s, the envelopes **decay** rather than settling into a cycl
 Settled: P_c002 3.5021 (design 3.500), P_c004 3.7034 (3.700), T_c002 139.021, T_c004 143.031, with
 unit 323 unmoved (urea 80.075 %, TT-323012 99.0007).
 
+### HV-322604, the choked inert purge (report D-2)
+
+The site the eradication brief named explicitly, and the one where the incompressible law was most
+plainly wrong. HV-322604 lets carbamate off-gas down from the synthesis loop at 140.7 bar a to the
+LP absorber at 4.0 bar a — a pressure ratio of 0.028. With $\gamma \approx 1.30$ the choke threshold is
+$F_\gamma x_T = 0.696$ while $\Delta P/P_1 = 0.9716$, so **the valve is choked at its own design
+point**, and stays choked until the downstream node rises above about 42.7 bar a. It is choked for
+every plausible $\gamma$ from 1.20 to 1.40, so this is not a marginal call.
+
+It was modelled as `_eq_pct(θ) · √(ΔP/ΔP_des)`. Two separate things were wrong with that:
+
+**Flow responded to downstream pressure while choked.** Choked flow is a function of upstream
+conditions only. Under the ISA-75.01 law the mass flow is now exactly linear in $P_1$ — measured
+5901.4/140.7 = 5033.1/120 = 4194.3/100 = 1887.4/45 = 41.94 kg/h per bar, identical to twelve
+significant figures — and $p_2$ does not enter at all.
+
+**A fully closed valve passed 14 % of design.** `_eq_pct(0, 50)` is $50^{-0.5} = 0.1414$: the bare
+equal-percentage exponential $R^{h-1}$ never reaches zero and nothing clamped it. So driving
+HIC-322604 to 0 % still vented ≈ 835 kg/h of NH₃/CO₂ out of a 140.7 bar loop the operator believes
+they have isolated — an operator trained on that learns that closing the vent does not stop the
+vent. `hydraulics.cv_fraction` returns a hard 0.0 at zero travel.
+
+The design molecular weight is passed explicitly (`mw_des`), so composition does **not** cancel out
+of the anchored ratio: $\dot m \propto \sqrt{M}$ survives, and a heavier off-gas puts proportionally
+more kilograms through the same trim. Verified to 1e-12 against $\sqrt{33.0/27.4768}$.
+
+Design invariance is preserved exactly — `valve_frac` is 1.0 to the bit at
+(HIC 50 %, 140.7 bar a, 114 °C), because the anchored ratio evaluates the same expression on the
+same operands in numerator and denominator.
+
 ### The two unit-328 vessels that were NOT wired
 
 **328D001 — a source conflict, not a gap.** `References/328E004 328D001 328P002 Datasheets.md` gives

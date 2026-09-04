@@ -218,3 +218,58 @@ def test_the_328_design_seed_holds_after_one_tick():
     # ... and unit 323 is untouched by the unit-328 change
     assert s.r323_f010_P == main.R323_F010_P_BARA
     assert s.r323_f010_T == main.R323_F010_T_SP_C
+
+
+# ==================================================================================================
+#  HV-322604 (Phase 2, report D-2).  The one site the brief named explicitly: an inert purge letting
+#  carbamate off-gas down 140.7 -> 4.0 bar a, previously modelled as an incompressible orifice.
+# ==================================================================================================
+def test_hv322604_is_choked_at_its_own_design_point():
+    """dP/P1 = 0.9716 against F_gamma.xT = 0.696 at gamma 1.30 -- and choked for ANY plausible
+    gamma, so this is not a marginal call.  That is why the sqrt(dP) law was wrong here rather than
+    merely imprecise."""
+    main = _main()
+    x_ratio = main.SCRUB_HV604_DP_DES / main.SCRUB_OFFGAS_P_BARA
+    assert abs(x_ratio - 0.9716) < 0.001
+    for gamma in (1.20, 1.30, 1.40):
+        assert x_ratio > (gamma / 1.40) * hy.XT_GLOBE, gamma
+
+
+def test_hv322604_flow_is_linear_in_upstream_pressure_while_choked():
+    """The signature of choked flow: m ~ P1 exactly, and p2 does not enter at all.  The law it
+    replaces had m ~ sqrt(P1 - 4.0), which keeps responding to the downstream node."""
+    main = _main()
+    og, T = main.SCRUB_OFFGAS_KMOLH_DES, main.SCRUB_OFFGAS_T_C
+    pts = [(pu, main.hv_322604(og, T, 50.0, pu)["mass_kgh"]) for pu in (140.7, 120.0, 100.0, 60.0, 45.0)]
+    ratios = [m / pu for pu, m in pts]
+    for r in ratios[1:]:
+        assert math.isclose(r, ratios[0], rel_tol=1e-12), ratios
+
+
+def test_hv322604_is_bit_exact_at_design():
+    main = _main()
+    hv = main.hv_322604(main.SCRUB_OFFGAS_KMOLH_DES, main.SCRUB_OFFGAS_T_C,
+                        main.SCRUB_HIC604_DES_PCT, main.SCRUB_OFFGAS_P_BARA)
+    assert hv["valve_frac"] == 1.0
+
+
+def test_a_closed_hv322604_passes_nothing():
+    """It used to pass 14 %.  `_eq_pct(0, 50)` is 50^-0.5 = 0.1414, so a fully shut HIC-322604 still
+    vented about 835 kg/h of NH3/CO2 from a 140.7 bar loop -- and an operator trained on that learns
+    that closing the vent does not stop the vent.  The bare equal-% exponential never reaches zero;
+    `cv_fraction` clamps it."""
+    main = _main()
+    hv = main.hv_322604(main.SCRUB_OFFGAS_KMOLH_DES, main.SCRUB_OFFGAS_T_C, 0.0,
+                        main.SCRUB_OFFGAS_P_BARA)
+    assert hv["mass_kgh"] == 0.0
+    assert hv["valve_frac"] == 0.0
+    assert 50.0 ** -0.5 > 0.14                      # what the old characteristic returned there
+
+
+def test_hv322604_carries_the_offgas_molecular_weight():
+    """m ~ sqrt(M): a heavier off-gas puts more kilograms through the same trim at the same
+    pressures.  Passing mw_des explicitly is what keeps composition from cancelling in the ratio."""
+    f = lambda mw: hy.valve_gas_anchored(5901.35, 0.5, 140.7, 4.0, 387.15,
+                                         0.5, 140.7, 4.0, 387.15, mw, mw_des=27.4768)
+    assert math.isclose(f(33.0) / f(27.4768), (33.0 / 27.4768) ** 0.5, rel_tol=1e-12)
+    assert f(27.4768) == 5901.35

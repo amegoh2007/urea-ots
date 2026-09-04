@@ -53,7 +53,7 @@ def test_aqueous_cp_returns_each_vessel_anchor_bit_exactly_at_its_own_design_tem
     """Every 328 / 322C001 call site is anchored on ITS OWN design temperature.  That is what makes
     the change safe: at the seed each one returns the frozen constant to the bit, so the design
     back-solves and the boot-pinned A328_LAMBDA_ABS cannot move."""
-    for anchor, T_des in ((main.R328_CP, main.R328_C002_T_BOT), (main.R328_CP, main.R328_C003_T),
+    for anchor, T_des in ((main.R328_CP, main.R328_C002_T_BOT_BOT), (main.R328_CP, main.R328_C003_T),
                           (main.R328_CP, main.R328_C004_T),     (main.R328_CP, main.R328_D001_T),
                           (main.A328_CP, main.A328_D003_TI),    (main.A328_CP, main.A328_D003_TII),
                           (main.A328_CP, main.A328_C001_T)):

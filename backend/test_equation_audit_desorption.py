@@ -161,7 +161,7 @@ def test_design_hold_keeps_every_desorber_on_its_pfd_composition():
     # the guarantee stream stays on its 1 ppm spec
     assert s.w_328c004["NH3"] * 1e6 < 1.5, "purified condensate NH3 must hold under 1 ppm"
     assert s.w_328c004["Urea"] * 1e6 < 1.5, "purified condensate urea must hold under 1 ppm"
-    assert abs(s.a328_c002_T - main.R328_C002_T_BOT) < 0.05
+    assert abs(s.a328_c002_T - main.R328_C002_T_BOT_BOT) < 0.05
     assert abs(s.a328_c004_T - main.R328_C004_T) < 0.05
 
 

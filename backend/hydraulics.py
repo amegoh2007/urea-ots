@@ -258,12 +258,20 @@ def valve_liquid_anchored(w_des_kgh: float, h: float, p1: float, p2: float, rho:
 def valve_gas_anchored(w_des_kgh: float, h: float, p1: float, p2: float, t1_k: float,
                        h_des: float, p1_des: float, p2_des: float, t1_des_k: float,
                        mw: float, gamma: float = 1.30, z: float = 1.0,
-                       characteristic: str = "equal_pct", xt: float = XT_GLOBE) -> float:
+                       characteristic: str = "equal_pct", xt: float = XT_GLOBE,
+                       mw_des: float = None, z_des: float = None) -> float:
     """IEC 60534 compressible flow, anchored on the licensor's design duty.  Bit-exact at design.
 
     The choke lives in `_phi_gas`, so a site anchored at an unchoked design condition still saturates
-    correctly when the downstream pressure falls away -- which is the whole of finding D-2."""
-    ref = _phi_gas(h_des, p1_des, p2_des, t1_des_k, mw, gamma, z, characteristic, xt)
+    correctly when the downstream pressure falls away -- which is the whole of finding D-2.
+
+    `mw_des` / `z_des` default to `mw` / `z`, which makes the composition CANCEL out of the ratio.
+    That default is right only where the vapour composition is genuinely fixed.  Pass the design
+    values explicitly wherever the composition can move, and the m ~ sqrt(M) dependence survives:
+    a heavier off-gas really does put more kilograms through the same trim at the same pressures."""
+    mw_d = mw if mw_des is None else mw_des
+    z_d = z if z_des is None else z_des
+    ref = _phi_gas(h_des, p1_des, p2_des, t1_des_k, mw_d, gamma, z_d, characteristic, xt)
     if ref <= 0.0:
         return 0.0
     return w_des_kgh * (_phi_gas(h, p1, p2, t1_k, mw, gamma, z, characteristic, xt) / ref)
