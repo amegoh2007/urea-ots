@@ -52,40 +52,32 @@ is a CO2-capture model fitted to dilute aqueous loadings below ~150 °C) **and**
 SRK data. Until then `REACT_THETA_OG`, `STRIP_FRAC_DES`, `SCRUB_OFFGAS_KMOLH_DES` and
 `_hpcc_flash_split` stay as they are — report findings B-2, B-4, B-6, B-7 remain open.
 
-## 1d. G-VLE-4 — the 323F010 / 324 design anchors were calibrated with a urea leak
+## 1d. Residual composition offset at the 323 stages after Phase 1
 
-**Needs a decision; deliberately NOT actioned.**
+**G-VLE-4 (TIC-323012 destabilisation) is CLOSED** — retuned Ti 306 -> 1200 s, Appendix C of
+`Master_PID_Tuning_Constants.md`; both legs of the F010 loop now sit on one thermodynamic surface
+(report A-11). Full derivation in the As-Built reference. What remains open is smaller and is a
+COMPOSITION gap, not a stability one.
 
-`_sol_stage_anchor` back-solves a relative volatility for every species from the PFD rows, urea
-included, and it did not come out zero: alpha_Urea = 0.000792 at 323C003 and 0.001363 at 323F010.
-So the frozen `sol_vapour_y` vector put 0.49 % urea in the 323F010 overhead — about **68 kg/h of
-urea evaporating** at the design rate — and `sol_advance` subtracts `m_vap * y[k]` from the holdup,
-so it was a real mass sink. Urea is non-volatile; `thermo_service` gives it K = 0 exactly.
+Settled at 20 000 s, all three stages on `electrolyte_gamma_phi` with no fallback:
 
-Removing the leak moves the settled design seed:
+| stage | species | design | settled | offset |
+|---|---|---|---|---|
+| 323F010 | urea | 80.0016 % | 80.0849 % | **+0.083 pt** |
+| 323F010 | CO2 | 0.0200 % | 0.0251 % | +25 % |
+| 323F004 | CO2 | 0.6600 % | 0.5293 % | **−20 %** |
+| 323C003 | CO2 | 1.0500 % | 0.9249 % | −12 % |
 
-| quantity | before | after | change |
-|---|---|---|---|
-| stream 317 product | 92 748.9 kg/h | 92 850 kg/h | +101 kg/h (+0.11 %) |
-| 323F010 temperature | 99.0 °C (setpoint) | 99.89 °C | +0.89 °C |
+NH3 lands within 3 % of design at every stage; CO2 does not, and the sign flips between 323F004
+(low) and 323F010 (high). The urea offset is the removed urea leak plus that CO2 redistribution.
++0.083 pt is inside the +/-0.10 pt band the regression gate uses and is in the safe direction
+(richer, not weaker), so this is a fidelity item and not a spec risk.
 
-Four assertions pin the OLD seed and now fail. They are physical-band checks, not bit-exact ones,
-so widening them would destroy what they exist to catch (0.01 °C of seed drift):
-
-- `test_equation_audit_c10_live_cp::test_the_design_seed_is_undisturbed_by_any_of_it` — 0.89 vs 0.01 °C
-- `test_equation_audit_species::test_stream_331_is_published_and_loads_the_pre_evaporator` — 0.101 vs 6e-3 t/h
-- `test_equation_audit_species` — one further stream-317 assertion in the same family
-- `test_equation_audit_323_324::test_evap1_steam_cut_dilutes_product_and_never_cools` — compares
-  TT-324001 (99.4) against `R324_FEED_T_C = 99.0`, which is the now-stale 323F010 product temperature
-
-**The decision:** re-pinning `R323_F010_T_SP_C`, `R323_M317_DES` and `R324_FEED_T_C` onto the
-leak-free seed changes constants sourced from the PFD, which CLAUDE.md holds as the strict source.
-That is a change to the plant's declared design point and is not something to absorb into a test
-tolerance, so it is left for sign-off.
-
-**Caveat on the magnitude.** The MECHANISM is verified (alpha_Urea != 0 is unphysical; K = 0 now) and
-the direction of the product change is consistent with the retained urea. The full settled magnitude
-is a re-convergence of the whole 323 train and has not been decomposed term by term.
+Most likely cause, untested: the anchored ratio scales each species' alpha independently, so the
+renormalisation in `sol_vapour_y` can move CO2 against NH3 in a way the joint flash would not. A
+ratio applied to the whole VOLATILE sub-vector before renormalisation, rather than per species,
+would preserve the NH3/CO2 split of the flash while still anchoring the total. Worth measuring
+before assuming the per-species form is wrong.
 
 ## 1c. Phase 1 remainder — vacuum-condenser static enthalpy (report B-9)
 

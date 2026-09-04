@@ -402,25 +402,104 @@ these temperatures — and `sol_advance` removes `m_vap * y[k]` from the holdup,
 mass sink, not a reporting artefact. `thermo_service` gives every non-volatile K = 0 exactly, so the
 loss is gone.
 
-The measurable consequences at the design seed, all traceable to that one correction:
+Removing the leak also CLOSES a feedback loop that the frozen vector had held open, and that is
+the more consequential result. 323F010 runs:
 
-| quantity | before | after | change |
+```text
+w_f010 -> T_bub -> qevap_relax -> m_evap -> energy balance -> T -> y_evap -> w_f010
+```
+
+The alpha vector had `dy/dT = 0` exactly, so the last leg did not exist. The flash gives it a real
+gain (measured at 0.46 bar a): dy_H2O/dT = +0.0096 /K at 99 °C, +0.0159 /K at 101 °C. Hotter ->
+more water leaves -> holdup more urea-rich -> higher bubble point -> less evaporative cooling ->
+hotter. That positive feedback is physically real and is what TIC-323012 exists to control.
+
+### Why the absolute flash split could not be used, and what replaced it
+
+The first cut of `sol_vapour_y_vle` returned the flash's `y` **outright**. That does not survive
+contact with the licensor's own design rows. Evaluated at the PFD design composition, temperature
+and pressure of each stage — i.e. at exactly the point the alpha vector was back-solved from — the
+model's absolute split is wrong by far more than its slope is:
+
+| stage | NH3 to vapour, PFD anchor | NH3 to vapour, raw flash | error |
 |---|---|---|---|
-| stream 317 product | 92 748.9 kg/h | 92 850 kg/h | +101 kg/h (+0.11 %) |
-| 323F010 temperature | 99.0 °C (setpoint) | 99.89 °C | +0.89 °C |
+| 323C003 | 8 092 kg/h | 5 107 kg/h | −37 % |
+| 323F004 | 1 363 kg/h | 609 kg/h | −55 % |
+| 323F010 | 819 kg/h | 497 kg/h | −39 % |
 
-The temperature rise follows the composition: with urea retained the liquor is richer and its
-bubble point and cp both move. **This means the 323F010 / 324 design anchors were calibrated with
-the urea leak present**, so three assertions that pinned the old seed now fail —
-`test_the_design_seed_is_undisturbed_by_any_of_it` (0.89 vs a 0.01 °C band),
-`test_stream_331_is_published_and_loads_the_pre_evaporator` (0.101 vs a 6e-3 t/h band), and
-`test_evap1_steam_cut_dilutes_product_and_never_cools`, which compares TT-324001 against the now
-stale `R324_FEED_T_C = 99.0`.
+This is the same bias `vle_nh3co2h2o` already records against the PFD triplets (+1.7 to +17.5 % on
+bubble pressure), surfacing on the split instead of on the pressure. Open loop it **compounds down
+the train**: the ammonia not stripped at 323C003 arrives at 323F004, and so on. Measured settled
+state was NH3 1.64 wt% / CO2 1.14 wt% in the 323F010 liquor against a design 0.08 / 0.02 — 20x and
+57x over. Dissolved ammonia elevates the boiling point hard, so the stage reached its 99 °C setpoint
+at **76.56 % urea instead of 80.00 %**: a 3.44-point miss on the product spec the 324 vacuum train
+depends on. Urea was not being lost — ammonia was taking its place. The mass balance closed; the
+product did not.
 
-These are **not** tolerance failures and have deliberately not been widened. Re-baselining
-`R323_F010_T_SP_C`, `R323_M317_DES` and `R324_FEED_T_C` onto the leak-free seed is a change to the
-plant's declared design point and needs sign-off, so it is recorded as **G-VLE-4** rather than
-absorbed silently into a tolerance.
+The replacement keeps the PFD as the anchor and takes only the derivative from the model:
+
+$$\alpha_i(\text{live}) = \alpha_{i,\text{PFD}} \times
+\frac{\alpha_{i,\text{model}}(T, P, w_{\text{live}})}{\alpha_{i,\text{model}}(\text{design})},
+\qquad \alpha_{i,\text{model}} = y_i/w_i \ \text{from the flash}$$
+
+At the design state the bracket is exactly 1.0, so the split is the licensor's own, bit-exact, and
+the boot pin and every back-solved lambda are untouched. Off design the Extended UNIQUAC + SRK
+K-values supply how the split moves — the thing the frozen vector could not do at all. This is the
+same departure construction the rest of the engine uses for cp, UA and the bubble points.
+
+The one term **not** scaled is the structurally non-volatile set (`SOL_NONVOLATILE` = urea, biuret,
+HCHO): there K = 0 is structure, not model bias, so those are zeroed outright. That is what removes
+the urea leak above, and it is the only reason the 323C003 and 323F010 design splits move at all
+(323F004's alpha_Urea was already zero, so its design split is unchanged to the last bit).
+
+### A clamped bubble point, and why it had to be made to refuse
+
+`thermo_service.bubble_t` originally returned the **bracket edge** when the root was not bracketed.
+At the ammonia-laden composition above, the true bubble point at 0.46 bar a lies below the activity
+model's own 80 °C grid floor, so the function silently handed back `80.0` as though it were an
+answer — precisely the clamped-lookup failure the service exists to refuse (the reason the HP loop
+was quarantined in the first place). It now raises `OutOfDomain` on either unbracketed end.
+
+This mattered, and not only in principle. With the clamp in place the 323F010 stage was pushed off
+its bubble-point branch onto the `min()` flow cap, where TIC-323012 *does* have direct gain: the run
+settled at 80.21 % urea with a 0.0002 °C envelope and looked like a clean result. It was the right
+answer for the wrong reason, resting on an off-envelope clamp of 87.9 °C. Refusing exposes it.
+
+### Both legs of the loop on one surface (finding A-11)
+
+`T_bub_f010` used `bubble_T_raoult` (ideal, water-only) while `y_evap` came from the electrolyte +
+SRK service — two thermodynamic models on the two legs of one feedback loop, disagreeing by 2.02 °C
+at the design composition (Raoult 100.4618, gamma-phi 98.4389) and by ~13 % in slope. `sol_bubble_t_dep`
+now takes both from the service, in the same departure form:
+
+$$T_{bub} = T_{sp} + \left[\,T_{bub}(w_{live}, P) - T_{bub}(w_{des}, P)\,\right]$$
+
+anchored by `_sol_tbub_anchor`, so the bracket is a literal 0.0 at design and the PFD boundary is
+still exact. Raoult survives as the off-envelope fallback only, and is used as a **matched pair**
+(its own live value against its own anchor) so a fallback evaluation stays internally consistent.
+
+### Measured result
+
+20 000 s from the design seed, all three stages reporting `electrolyte_gamma_phi` with no fallback
+and no refusal:
+
+| quantity | design | settled (t = 20 000 s) | error |
+|---|---|---|---|
+| TT-323012 | 99.0 °C | 99.0000 | 0.0000 |
+| stream 317 rate | 92.7489 t/h | 92.6148 | −0.14 % |
+| stream 317 urea | 80.0016 % | 80.0849 | +0.083 pt |
+| 323F010 NH3 | 0.0800 % | 0.0850 | — |
+| 323F004 NH3 | 0.8800 % | 0.8350 | — |
+| 323C003 NH3 | 2.1300 % | 2.0733 | — |
+
+against 76.56 % urea and NH3 1.64 % on the absolute-flash form. The residual envelope over the
+settled band is 0.026 °C at the retuned Ti (Appendix C of `Master_PID_Tuning_Constants.md`); it is a
+real limit cycle around a real positive-feedback loop, not a walk, and the pre-Phase-1 model reached
+a bit-stationary point only because that loop had been deleted.
+
+Memo cost, measured over the run: `bubble_t` 99.93 % hit rate (59 solves in 80 006 calls), flash
+99.64 % (855 in 240 003). A `bubble_t` miss is 9.7 ms and a hit 0.031 ms — 310x — which is what makes
+a per-tick rigorous bubble point affordable at all.
 
 ### Design-point identity short-circuits removed
 

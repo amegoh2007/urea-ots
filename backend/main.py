@@ -2016,6 +2016,52 @@ def bubble_T_raoult(P_bara: float, w: dict) -> float:
 # PFD boundary -- bit-exact, not a tolerance.
 R323_F010_TBUB_DES = bubble_T_raoult(R323_F010_P_BARA, W_S317)   # 80.00 % urea @ 0.46 bar a
 
+
+# --- PHASE 1, finding A-11: one thermodynamic surface per feedback loop -------------------------
+# 323F010 is a bubble-point stage whose temperature and whose vapour composition are the two legs of
+# ONE loop:  w -> T_bub -> q_relax -> m_evap -> y_evap -> w.  Until now those legs stood on two
+# different models -- T_bub on ideal Raoult-over-water (`bubble_T_raoult`), y_evap on the Extended
+# UNIQUAC + SRK flash -- and the loop necessarily settled where the two surfaces CROSS rather than
+# where either one is right.  Measured at the design composition the disagreement is 2.02 C
+# (Raoult 100.46, gamma-phi 98.44) and the slopes differ by ~13 % (dT_bub/d(w_urea) 101-107 vs
+# 89-95 C per unit fraction), which is exactly the size of the settled product error it produced.
+#
+# Both legs now come off `thermo_service`.  The DEPARTURE form is kept, so the PFD boundary is still
+# the anchor and the design point is still bit-exact: `sol_bubble_t_dep` calls `bubble_t` with the
+# live composition and subtracts the value memoised here for the design composition, and the memo
+# guarantees the two calls return the identical float when w == w_des.  The Raoult pair survives as
+# the OFF-ENVELOPE fallback only, used as a matched pair (its own live value against its own anchor)
+# so a fallback evaluation is internally consistent too.
+SOL_TBUB_DES = {}
+
+
+def _sol_tbub_anchor(key: str, w_des: dict, p_bara: float):
+    """Memoise the design bubble point of one stage on the rigorous surface; None if off-envelope."""
+    try:
+        SOL_TBUB_DES[key] = thermo_service.bubble_t(w_des, p_bara)
+    except (thermo_service.OutOfDomain, ValueError, ZeroDivisionError):
+        SOL_TBUB_DES[key] = None
+    return SOL_TBUB_DES[key]
+
+
+def sol_bubble_t_dep(key: str, w: dict, p_bara: float, t_sp_c: float, tbub_raoult_des: float) -> float:
+    """Stage bubble point in departure form, on the same surface as that stage's flash.
+
+        T_bub = T_sp + [ T_bub(w_live, P) - T_bub(w_des, P) ]
+
+    At the design composition the bracket is a literal 0.0 and this returns the PFD boundary exactly.
+    """
+    des = SOL_TBUB_DES.get(key)
+    if des is not None:
+        try:
+            return t_sp_c + (thermo_service.bubble_t(w, p_bara) - des)
+        except (thermo_service.OutOfDomain, ValueError, ZeroDivisionError):
+            pass
+    return t_sp_c + (bubble_T_raoult(p_bara, w) - tbub_raoult_des)
+
+
+_sol_tbub_anchor("F010", W_S317, R323_F010_P_BARA)
+
 # --- AUDIT C10, 323 half: one lumped cp for the whole recirculation train ----------------------
 # `cp323 = R323_CP_SOLN` (2.5 kJ/kg.K) covered every stream from the 44 % granulation return at
 # 40 C to the 80 % product at 99 C.  cp falls as the solution concentrates -- molten urea is about
@@ -2102,35 +2148,125 @@ def sol_vapour_y(w: dict, alpha: dict) -> dict:
 SOL_VLE_DOMAIN = {}
 
 
-def sol_vapour_y_vle(key: str, w: dict, t_c: float, p_bara: float, alpha: dict) -> dict:
-    """Vapour mass fractions leaving a solution stage, from the rigorous gamma-phi flash.
+#  Species that cannot enter the vapour at ANY temperature or pressure these stages reach.  Their
+#  K-value is zero as a matter of structure, not of model bias, so the anchored form below sets them
+#  to zero outright rather than scaling the licensor's back-solved alpha.  This is the urea leak the
+#  Phase-1 audit found: `_sol_stage_anchor` back-solves alpha for EVERY species, so it produced
+#  alpha_Urea = 7.92e-4 at 323C003 and 1.36e-3 at 323F010, i.e. a frozen y_Urea = 0.4887 % at the
+#  pre-evaporator -- about 59 kg/h of urea "evaporating" into a 0.46 bar a vacuum and subtracted
+#  from the holdup by `sol_advance` as a real mass sink.  Urea's vapour pressure at 99 C is nil.
+SOL_NONVOLATILE = ("Urea", "Biuret", "HCHO")
 
-    PHASE 1 (Heuristic Eradication Report, finding B-8).  The frozen `alpha` vector this replaces
-    was back-solved from the PFD design rows once and then held CONSTANT: the same numbers governed
-    323C003 at 135 C / 4.1 bar a and 323F010 at 99 C / 0.46 bar a, so the vapour composition had a
-    derivative of exactly zero with respect to both temperature and pressure.  `thermo_service.flash`
-    replaces it with an isothermal Rachford-Rice solve on Extended UNIQUAC activities, Rumpf-Maurer
-    Henry constants, the IAPWS-IF97 water line and SRK vapour fugacity.
+#  Per-stage relative volatility from the rigorous model AT THE DESIGN STATE -- the denominator of
+#  the departure form below.  None means that stage's design state is off-envelope.
+SOL_ALPHA_MODEL_DES = {}
 
-    Falls back to the anchored `alpha` -- and records that it did -- whenever the state leaves the
-    fitted envelope.  That is not a silent degrade: `thermo_service` REFUSES off-envelope rather than
-    returning a clamped edge lookup, and the fallback is reported in `SOL_VLE_DOMAIN` and published
-    in the tick packet, so a stage running on the anchored vector is visible rather than assumed.
-    """
+
+def _sol_model_alpha(w: dict, t_c: float, p_bara: float) -> dict:
+    """Mass-basis relative volatility  alpha_i ~ y_i / w_i  from the rigorous gamma-phi flash.
+
+    `sol_vapour_y` consumes exactly this shape (y_i = alpha_i.w_i / sum alpha_j.w_j), so the model
+    and the licensor's back-solved vector are directly comparable term by term.  Any common factor
+    cancels in the ratio taken by `sol_vapour_y_vle`, so no normalisation is needed here."""
+    fr = thermo_service.flash(w, t_c, p_bara)
+    if not fr.converged:
+        raise thermo_service.OutOfDomain("flash did not converge at %s C / %s bar a" % (t_c, p_bara))
+    out = {}
+    for k in SOL_SPECIES:
+        wi = w.get(k, 0.0)
+        out[k] = (fr.y.get(k, 0.0) / wi) if wi > 1.0e-12 else 0.0
+    out["_domain"] = fr.domain
+    return out
+
+
+def _sol_alpha_anchor(key: str, w_des: dict, t_des: float, p_des: float):
+    """Memoise one stage's model alpha at its design state; None if that state is off-envelope."""
     try:
-        fr = thermo_service.flash(w, t_c, p_bara)
+        SOL_ALPHA_MODEL_DES[key] = _sol_model_alpha(w_des, t_des, p_des)
+    except (thermo_service.OutOfDomain, ValueError, ZeroDivisionError):
+        SOL_ALPHA_MODEL_DES[key] = None
+    return SOL_ALPHA_MODEL_DES[key]
+
+
+def sol_vapour_y_vle(key: str, w: dict, t_c: float, p_bara: float, alpha: dict) -> dict:
+    """Vapour mass fractions leaving a solution stage: PFD anchor, rigorous gamma-phi departure.
+
+        alpha_i(live) = alpha_i,PFD  x  [ alpha_i,model(T, P, w_live) / alpha_i,model(design) ]
+
+    PHASE 1 (Heuristic Eradication Report, finding B-8).  What this replaces was a frozen vector:
+    `_sol_stage_anchor` back-solved alpha from the PFD design rows once and held it CONSTANT, so the
+    same numbers governed 323C003 at 135 C / 4.1 bar a and 323F010 at 99 C / 0.46 bar a, and the
+    vapour composition had a derivative of exactly zero with respect to temperature, pressure and
+    composition alike.  `thermo_service.flash` supplies that derivative from an isothermal
+    Rachford-Rice solve on Extended UNIQUAC activities, Rumpf-Maurer Henry constants, the IAPWS-IF97
+    water line and SRK vapour fugacity.
+
+    WHY THE RATIO AND NOT THE ABSOLUTE SPLIT.  The first cut of this function returned the flash's
+    y outright.  Measured against the licensor's own design rows, the model's ABSOLUTE split is off
+    by far more than its slope is:
+
+        stage    NH3 to vapour, PFD anchor   NH3 to vapour, raw flash   error
+        323C003        8092 kg/h                   5107 kg/h            -37 %
+        323F004        1363 kg/h                    609 kg/h            -55 %
+        323F010         819 kg/h                    497 kg/h            -39 %
+
+    That is the same bias the bubble-pressure comparison in `vle_nh3co2h2o` already records (+1.7 to
+    +17.5 % against the PFD triplets), showing up on the split instead of on the pressure.  Run open
+    loop it compounds down the train: the NH3 the model fails to strip at 323C003 arrives at 323F004,
+    and so on.  Measured steady state was NH3 1.64 wt% / CO2 1.14 wt% in the 323F010 liquor against
+    a design 0.08 / 0.02.  Dissolved ammonia elevates the boiling point hard, so the stage reached
+    its 99 C setpoint at 76.56 % urea instead of 80.00 % -- a 3.44-point miss on a product spec the
+    324 vacuum train depends on, and a liquor whose true bubble point at 0.46 bar a is below the
+    activity model's own 80 C grid edge.
+
+    The ratio keeps the licensor's absolute split, which is measured plant data, and takes from the
+    model only what the model is actually good for: how that split MOVES.  This is the same
+    departure construction the rest of the engine is built on (cp, UA, bubble points), and at the
+    design state the bracket is exactly 1.0, so alpha == alpha_PFD bit-exact and the boot pin, the
+    PFD rows and every back-solved lambda are untouched.
+
+    The one term NOT scaled is the non-volatile set: urea, biuret and HCHO have K == 0 as a matter
+    of structure, so `SOL_NONVOLATILE` zeroes them rather than scaling the back-solve's artefact.
+
+    Falls back to the frozen `alpha` -- and records that it did in `SOL_VLE_DOMAIN`, which is
+    published in the tick packet -- whenever the state leaves the fitted envelope.  That is not a
+    silent degrade: `thermo_service` REFUSES off-envelope rather than returning a clamped edge
+    lookup, so a stage on the frozen vector is visible rather than assumed.
+    """
+    ref = SOL_ALPHA_MODEL_DES.get(key)
+    if ref is None:
+        SOL_VLE_DOMAIN[key] = None
+        return sol_vapour_y(w, alpha)
+    try:
+        live = _sol_model_alpha(w, t_c, p_bara)
     except (thermo_service.OutOfDomain, ValueError, ZeroDivisionError):
         SOL_VLE_DOMAIN[key] = None
         return sol_vapour_y(w, alpha)
-    if not fr.converged:
+    a = {}
+    for k in SOL_SPECIES:
+        if k in SOL_NONVOLATILE:
+            a[k] = 0.0                                   # K == 0 by structure, not by model bias
+        elif ref[k] > 1.0e-30:
+            a[k] = alpha[k] * (live[k] / ref[k])         # == alpha[k] exactly at the design state
+        else:
+            a[k] = alpha[k]                              # no design-state reference to depart from
+    if sum(a[k] * w.get(k, 0.0) for k in SOL_SPECIES) <= 1.0e-15:   # degenerate: no volatile left
         SOL_VLE_DOMAIN[key] = None
         return sol_vapour_y(w, alpha)
-    y = fr.y
-    if sum(y.get(k, 0.0) for k in SOL_SPECIES) <= 1.0e-9:     # degenerate: no volatile left
-        SOL_VLE_DOMAIN[key] = None
-        return sol_vapour_y(w, alpha)
-    SOL_VLE_DOMAIN[key] = fr.domain
-    return {k: y.get(k, 0.0) for k in SOL_SPECIES}
+    SOL_VLE_DOMAIN[key] = live["_domain"]
+    return sol_vapour_y(w, a)
+
+
+#  Design-state anchors for the departure form above.  Each stage is anchored on ITS OWN design
+#  liquid composition, temperature and pressure -- exactly the (w, T, P) triplet the licensor's
+#  alpha was back-solved from -- so the ratio is 1.0 there and the split is the PFD's own.
+#  323C003 and 323F004 hold NH3/CO2-bearing liquors and 323F010 an 80 % urea liquor; all three are
+#  inside the electrolyte envelope.  The 324 stages are NOT anchored here (G-VLE-2: a 94-98 % urea
+#  melt fails the infinite-dilution basis of the loading grid), so they keep the frozen vector and
+#  report `None` in SOL_VLE_DOMAIN.
+_sol_alpha_anchor("C003", W_S314, R323_C003_T_SP_C, R323_C003_P_BARA)
+_sol_alpha_anchor("F004", W_S319, R323_F004_T_SP_C, R323_F004_P_BARA)
+_sol_alpha_anchor("F010", W_S317, R323_F010_T_SP_C, R323_F010_P_BARA)
 
 
 def sol_biuret_xi(key: str, M: float, w: dict, T_c: float) -> float:
@@ -4912,7 +5048,7 @@ class State:
         self.TIC_323012 = {"mode": "AUTO", "op": R323_E010_PCHEST_DES,
                            "sp": R323_F010_T_SP_C, "pv": R323_F010_T_SP_C,
                            "pv1": R323_F010_T_SP_C, "pv2": R323_F010_T_SP_C,
-                           "Kc": 3.6, "Ti": 306.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 3.6, "Ti": 1200.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": R323_P_STEAM_SUP, "sp_lo": 50.0, "sp_hi": 130.0}
         self.PIC_329208 = {"mode": "CAS", "op": R323_E010_OP_DES,
                            "sp": R323_E010_PCHEST_DES, "pv": R323_E010_PCHEST_DES,
@@ -6556,12 +6692,14 @@ def step_sim(dt: float) -> dict:
     # runs against a FIXED 0.46 bar a vacuum boundary, so its bubble point cannot move with pressure;
     # what moves it is CONCENTRATION.  That is the correct physics for a vacuum evaporator and it is
     # what TIC-323012 actually controls on the plant: more steam -> more water off -> higher urea
-    # fraction -> lower water mole fraction -> higher boiling point -> higher T.  Raoult supplies
-    # that slope with no fitted constant (see bubble_T_raoult); the departure form keeps the design
-    # point exact.  Design: w == W_S317 -> the bracket is a literal 0.0 -> T_bub == 99.0 == T ->
-    # q_relax == 0.0 -> the ratio is exactly 1.0 -> m_evap == R323_MEVAP_DES (the min() ties).
-    T_bub_f010 = (R323_F010_T_SP_C
-                  + (bubble_T_raoult(R323_F010_P_BARA, s.w_f010) - R323_F010_TBUB_DES))
+    # fraction -> lower water activity -> higher boiling point -> higher T.  PHASE 1 (A-11): that
+    # slope now comes from the SAME Extended UNIQUAC + SRK surface as y_evap below, via
+    # `sol_bubble_t_dep`, instead of from ideal Raoult -- two models on the two legs of one loop made
+    # it settle where they cross.  The departure form keeps the design point exact: w == W_S317 ->
+    # the bracket is a literal 0.0 -> T_bub == 99.0 == T -> q_relax == 0.0 -> the ratio is exactly
+    # 1.0 -> m_evap == R323_MEVAP_DES (the min() ties).
+    T_bub_f010 = sol_bubble_t_dep("F010", s.w_f010, R323_F010_P_BARA,
+                                  R323_F010_T_SP_C, R323_F010_TBUB_DES)
     qevap_relax_kw = (s.r323_f010_M * cp_f010 * (T_bub_f010 - s.r323_f010_T)
                       / R323_F010_M_TAU_S)                                        # kW retained to reach bubble point
     m_evap    = min(R323_MEVAP_DES * ((m_319_in + m_331) / (R323_M319_DES + R323_M331_DES)),

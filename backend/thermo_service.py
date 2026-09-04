@@ -310,8 +310,47 @@ def bubble_p(w: dict, t_c: float, srk: bool = True, iters: int = 30) -> float:
     return max(p_bub, 1.0e-9)
 
 
+_BUBT_CACHE_SIZE = 4096
+_bubble_t_cache: dict = {}
+_bubble_t_stats = {"hit": 0, "miss": 0}
+
+
+def bubble_t_cache_stats() -> dict:
+    """Hit/miss counters for the quantised bubble-T memo (telemetry + tests)."""
+    total = _bubble_t_stats["hit"] + _bubble_t_stats["miss"]
+    return {"hit": _bubble_t_stats["hit"], "miss": _bubble_t_stats["miss"],
+            "entries": len(_bubble_t_cache),
+            "hit_rate": (_bubble_t_stats["hit"] / total) if total else 0.0}
+
+
 def bubble_t(w: dict, p_bara: float, t_lo: float = None, t_hi: float = None,
              tol: float = 1.0e-6) -> float:
+    """Memoised bubble-point temperature (C) -- see `_bubble_t_solve` for the bisection itself.
+
+    A bubble_t is 60 bisection steps, each a full gamma-phi `bubble_p`, so it costs ~8 ms against a
+    flash's ~9 ms.  The engine calls it once per stage per 0.25 s tick, which is 45x more often than
+    the composition can actually move, so it is quantised on exactly the same grid as the flash memo
+    (`_W_QUANTUM`, `_P_QUANTUM_BARA`) -- far below any composition analyser or PT in the plant.
+    Explicit brackets bypass the memo, since they change the answer."""
+    if _BUBT_CACHE_SIZE <= 0 or t_lo is not None or t_hi is not None:
+        return _bubble_t_solve(w, p_bara, t_lo, t_hi, tol)
+    z = _norm_mass(w)
+    key = (round(p_bara / _P_QUANTUM_BARA), round(tol / 1.0e-9),
+           tuple(round(z[s] / _W_QUANTUM) for s in SPECIES))
+    hit = _bubble_t_cache.get(key)
+    if hit is not None:
+        _bubble_t_stats["hit"] += 1
+        return hit
+    _bubble_t_stats["miss"] += 1
+    val = _bubble_t_solve(z, p_bara, t_lo, t_hi, tol)
+    if len(_bubble_t_cache) >= _BUBT_CACHE_SIZE:
+        _bubble_t_cache.clear()              # cheap generational evict; the working set is tiny
+    _bubble_t_cache[key] = val
+    return val
+
+
+def _bubble_t_solve(w: dict, p_bara: float, t_lo: float = None, t_hi: float = None,
+                    tol: float = 1.0e-6) -> float:
     """Bubble-point temperature (C) of liquid `w` at `p_bara`, by bisection on bubble_p - P.
 
     Brackets default to the owning model's own envelope, so the answer can never be reported from
@@ -327,10 +366,17 @@ def bubble_t(w: dict, p_bara: float, t_lo: float = None, t_hi: float = None,
     hi = hi_d if t_hi is None else min(t_hi, hi_d)
     if lo >= hi:
         raise OutOfDomain(f"empty bracket for bubble_t: {domain_report(w, lo, p_bara)}")
+    #  REFUSE, never clamp.  These two used to `return lo` / `return hi`, i.e. hand back the edge of
+    #  the fitted temperature grid as though it were a converged bubble point.  That is the exact
+    #  failure mode this service exists to avoid, and it bit: a 323F010 liquor that had accumulated
+    #  1.6 wt% NH3 has a real bubble point BELOW the 80 C grid edge at 0.46 bar a, and a clamped
+    #  80.0 came back looking like an answer.  An unbracketed root means the state is off-envelope.
     if bubble_p(w, lo) >= p_bara:
-        return lo
+        raise OutOfDomain(f"bubble point below the fitted grid ({lo} C): P_bub({lo} C) = "
+                          f"{bubble_p(w, lo):.6g} >= {p_bara} bar a")
     if bubble_p(w, hi) <= p_bara:
-        return hi
+        raise OutOfDomain(f"bubble point above the fitted grid ({hi} C): P_bub({hi} C) = "
+                          f"{bubble_p(w, hi):.6g} <= {p_bara} bar a")
     for _ in range(60):
         mid = 0.5 * (lo + hi)
         if bubble_p(w, mid) < p_bara:
@@ -496,6 +542,9 @@ def flash_cache_clear() -> None:
     _warm_start.clear()
     _flash_cache_stats["hit"] = 0
     _flash_cache_stats["miss"] = 0
+    _bubble_t_cache.clear()
+    _bubble_t_stats["hit"] = 0
+    _bubble_t_stats["miss"] = 0
 
 
 #  Convergence tolerance on the liquid mass fraction.  MEASURED cost/accuracy at 323C003:
