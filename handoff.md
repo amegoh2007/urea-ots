@@ -161,8 +161,9 @@ Verified green or baseline-identical:
 | `test_equation_audit_322e001_enthalpy.py` | 13 passed | |
 | `test_equation_audit_322e001_flood.py` | 11 passed | |
 | `test_g8_lp_turbine_export.py` | 2 failed, 4 passed | identical to baseline (section 3 red list) |
+| `test_equation_audit_desorption.py` | 2 failed, 8 passed | identical to baseline; this is the file that exercises the three 328 bottoms valves |
 
-**NOT re-run in this pass, and they should be**: `test_equation_audit_desorption.py`,
+**NOT re-run in this pass, and they should be**:
 `test_equation_audit_td014.py`, `test_ccw_loss_chain.py`, `test_transient_coldstart.py`,
 `test_scenario_consequences.py`. Not because of any
 finding — the machine this ran on has 4 logical cores and was 70-85 % consumed by unrelated
@@ -170,12 +171,13 @@ desktop applications throughout, which took the engine from its normal ~126 tick
 tenth of that and made each of these multi-thousand-tick files an hour-plus proposition.
 `test_transient_coldstart.py` alone is 32 000 ticks by construction (T_END 16 000 s at DT 0.5).
 
-All five carry known pre-existing failures, and the baselines to match are recorded here so the
-next session compares rather than re-derives: **desorption 2F/8P, td014 4F/7P, transient_coldstart
-5 failures, scenario_coverage 6**. The one with the strongest claim on attention is
-`test_equation_audit_desorption.py`, because it is the file that exercises the three 328 bottoms
-valves; its two known failures are on 328C002 NH3 composition and hydrolyser urea slip, neither of
-which this pass touched.
+All four carry known pre-existing failures, and the baselines to match are recorded here so the
+next session compares rather than re-derives: **td014 4F/7P, transient_coldstart 5 failures,
+scenario_coverage 6**.
+
+The one that mattered most -- `test_equation_audit_desorption.py`, the file that exercises the three
+328 bottoms valves -- did finish, at **2 failed / 8 passed, identical to baseline**. Its two failures
+remain the 328C002 NH3 composition and the hydrolyser urea slip, neither of which this pass touched.
 
 ### Two things that were dropped code, not missing physics
 
