@@ -191,10 +191,38 @@ def test_scale_s080():
     r = main.react_322r001(_design_hpcc(0.8), 0.8 * main.CO2_DES_KGH / 1000.0,
                            main.REACT_HIC605_DES_PCT, **_design_drive())
     assert abs(r["co2_scale"] - 0.8) < 1e-9
-    assert abs(r["overflow_kmolh"]["NH3"] - main.REACT_OVERFLOW_DES["NH3"] * 0.8) < 1e-6
-    assert abs(r["offgas_kmolh"]["NH3"] - main.REACT_OFFGAS_DES["NH3"] * 0.8) < 1e-6
-    assert abs(r["xi_urea"] - r1["xi_urea"] * 0.8) < 1e-6
-    assert abs(r["xi_biu"] - r1["xi_biu"] * 0.8) < 1e-6
+    # The SPLIT (theta) is still uniform, but out_total is not: the extent no longer scales with
+    # load, so the products it makes and the reagents it consumes do not either.  The off-gas is
+    # nearly linear because it is mostly inerts and unreacted NH3 vapour; the liquid overflow is
+    # where the extra conversion shows.
+    # Both NH3 streams fall BELOW linear at turndown, and for one reason: the longer residence
+    # time raises the per-pass conversion, so more ammonia is consumed and less is left to
+    # partition either way.  Measured at 80 % load, overflow -6.0 % and off-gas -7.5 % against
+    # their linear values.  Asserting the direction rather than a fitted band -- the magnitude is
+    # an output of the rate law, not a contract.
+    for stream, des in (("overflow_kmolh", main.REACT_OVERFLOW_DES),
+                        ("offgas_kmolh", main.REACT_OFFGAS_DES)):
+        assert r[stream]["NH3"] < des["NH3"] * 0.8, stream
+        assert r[stream]["NH3"] > des["NH3"] * 0.6, stream      # ... a turndown, not a collapse
+    # PHASE 3 (report C-1).  These two assertions used to read
+    #     assert abs(r["xi_urea"] - r1["xi_urea"] * 0.8) < 1e-6
+    #     assert abs(r["xi_biu"]  - r1["xi_biu"]  * 0.8) < 1e-6
+    # i.e. the extent scales EXACTLY linearly with load -- which is the load-multiplier defect
+    # itself, `xi = XI_DES * s`, asserted as a contract.  A real rate law cannot do that: at 80 %
+    # throughput the same vessel gives the liquid 25 % longer to react, so the per-pass conversion
+    # RISES and the extent falls by less than the load does.  Measured 0.556 -> 0.630 conversion
+    # between 100 % and 80 % load.
+    # The split fractions above are unchanged and still scale linearly -- that part was never the
+    # defect.  What is asserted here now is the physics the multiplier could not represent.
+    assert r["xi_urea"] < r1["xi_urea"], "extent must still fall with load"
+    assert r["xi_urea"] > r1["xi_urea"] * 0.8, "...but SUBLINEARLY: longer residence, more conversion"
+    assert r["X_conv"] > r1["X_conv"], "per-pass conversion rises at turndown"
+    # Biuret goes the OTHER way at turndown, and that is the physically important result: the melt
+    # is more urea-rich (higher conversion) AND sits in the column longer, and r_biu ~ C_urea^2 over
+    # the residence time.  Measured 2.414 -> 3.12 kmol/h between 100 % and 80 % load.  A load
+    # multiplier said biuret simply falls with throughput; the plant's product-quality specification
+    # actually gets WORSE on a deep turndown, which is a scenario this model can now teach.
+    assert r["xi_biu"] > r1["xi_biu"], (r["xi_biu"], r1["xi_biu"])
 
 
 def test_valve_phi_decoupled_phase1():
@@ -268,10 +296,17 @@ def test_at322701_nc_ratio():
                            main.REACT_HIC605_DES_PCT, **_design_drive())
     nc = main.react_nc_ratio(r["overflow_kmolh"])
     assert abs(nc - 3.000) < 0.01, nc
-    # invariant to uniform throughput scaling (overflow scales uniformly -> N/C unchanged)
+    # PHASE 3 (report C-1).  This used to assert the overflow N/C was INVARIANT to throughput
+    # scaling to 1e-6, which holds only while the extent is a load multiplier and the whole vector
+    # scales uniformly.  With a real rate law a turndown lengthens the residence time, raises the
+    # per-pass conversion, and so consumes more ammonia per unit carbon: the overflow N/C FALLS.
+    # Measured 3.000 -> 2.968 between 100 % and 70 % load.  That is a real, operator-visible
+    # behaviour on AT-322701 that the multiplier could not produce at all.
     r2 = main.react_322r001(_design_hpcc(0.7), 0.7 * main.CO2_DES_KGH / 1000.0,
                             main.REACT_HIC605_DES_PCT, **_design_drive())
-    assert abs(main.react_nc_ratio(r2["overflow_kmolh"]) - nc) < 1e-6
+    nc2 = main.react_nc_ratio(r2["overflow_kmolh"])
+    assert nc2 < nc, (nc2, nc)
+    assert abs(nc2 - nc) < 0.10, (nc2, nc)      # ... but a turndown, not a collapse
 
 
 def test_dynamic_level_responds_to_hv605():

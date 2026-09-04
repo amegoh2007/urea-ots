@@ -3544,6 +3544,12 @@ REACT_TEAR_DES   = None   # explicit pinned recycle-tear vector (kmol/h): feed_d
 REACT_L_FEED_DES = None   # boot-pinned design liquid-NH3 driver L_feed (AT-322701 shift anchor)
 REACT_W_FEED_DES = None   # boot-pinned design water driver W_feed
 REACT_X_DES      = None   # boot-pinned design per-pass conversion X_conv (deficit-slip anchor)
+#  PHASE 3: the exact reactor state `reactor.calibrate_kinetics` was solved at, captured by the boot
+#  pin.  `react_322r001` defaults to it, so calling the function with the design feed and no extra
+#  arguments reproduces the design extent -- the identity contract test_reactor.py asserts.  Using
+#  the synthetic REACT_NODE_SS_DES / 80 % / _react_vdot_m3h instead left it 0.154 % low, because the
+#  live settled node temperatures, level and throughput are not exactly those constants.
+REACT_KIN_ANCHOR = None
 EJ_MOTIVE_DES_LIVE = None        # settled live design motive NH3 (kg/h), pinned in _pin_hpcc_ua ->
                                  #   phi_m = motive/EJ_MOTIVE_DES_LIVE == 1.0 bit-exact at design steady
                                  #   state (so the 322E003 sump holdup ODE is a STATIONARY fixed point).
@@ -4171,6 +4177,21 @@ _HPCC_DES = hpcc_322e002(
     stripper_322e001(CO2_DES_KGH / 1000.0, STRIP_STEAM_T_DES_C, STRIP_P_DES_BARA),
     ejector_322f001(EJ_MOTIVE_NH3_DES, EJ_MOTIVE_T_DES_C, EJ_OPEN_DES))            # design make ref
 HPCC_LIQ_DES_KGH   = _HPCC_DES["liq_kgh"]                                          # design make
+
+# --- PHASE 3 (report C-1 / C-2): calibrate the reactor rate laws against the design point --------
+# `reactor.calibrate_kinetics` back-solves exactly two numbers -- the dehydration pre-exponential A2
+# and the overall equilibrium constant Kov_ref -- plus the biuret pre-exponential.  No vendor
+# kinetics exist for this reactor and one design point determines one parameter, so this is the same
+# treatment the Phase 2 valve coefficients got.  Everything else in the rate law is sourced:
+#   * Ea(dehydration) = R x 11100 + 15500 = 107.8 kJ/mol, from Inoue & Otsuka Eq. (6) for the
+#     reverse step plus the Helwan dehydration enthalpy;
+#   * dH(overall) = -117 + 15.5 = -101.5 kJ/mol, the same figure R328_HYD_DH_KJMOL already carries;
+#   * Ea(biuret) = STRIP_BIU_EA = 85 kJ/mol, the value the stripper already uses.
+# Kov_ref is anchored so the equilibrium conversion at design is X_INF, the plant-anchored ceiling.
+REACT_KIN_CAL = reactor.calibrate_kinetics(
+    _HPCC_DES["feed_kmolh"], REACT_NODE_SS_DES, REACT_ZETA_NODES, _react_area_m2,
+    REACT_LIQ_H_M, REACT_LEVEL_NLL_PCT / 100.0, _react_vdot_m3h,
+    REACT_XI_UREA_DES, REACT_XI_BIU_DES, reactor.X_INF, REACT_OVERFLOW_DES["Urea"])
 HPCC_LIQ_DES_LIVE  = None        # ISSUE-c/e: SETTLED live design liquid make (pinned in _pin_hpcc_ua);
 #   the synthetic HPCC_LIQ_DES_KGH above understates it ~2 %, so normalising phi_in on it left the
 #   level winding past NLL (drift +0.33 %/2min, never steady).  The live ref makes NLL a true fixed pt.
@@ -4200,9 +4221,11 @@ def _react_delta(fc: dict, xi_urea: float, xi_biu: float) -> dict:
 
 def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
                   L_drive: float = None, W_drive: float = None,
-                  T_overflow_c: float = REACT_OVERFLOW_T_C) -> dict:
+                  T_overflow_c: float = REACT_OVERFLOW_T_C,
+                  t_nodes_c=None, level_frac: float = None, vdot_m3h: float = None) -> dict:
     """322R001 HP urea reactor -- rigorous component mole balance with exact atom conservation.
       feed_corrected_i = feed_i - TEAR_DES_i * s          (explicit pinned recycle tear)
+
       out_total_i      = feed_corrected_i + sum_r nu_{i,r} * xi_r   (urea couple + biuret)
       overflow_i = out_total_i * (1 - theta_i);  offgas_i = out_total_i * theta_i
     Conservative composition shifts (AT-322701 NH3 partition; conversion-deficit slip) move species
@@ -4218,14 +4241,57 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
     feed = hpcc["feed_kmolh"]
     # kinetics module supplies ONLY the scalar extent + conversion/holdup state; its internal overflow
     # mutation is discarded (throwaway design vector passed in).
-    xi_urea, _ov_discard, X_conv, L_feed, W_feed = reactor.react_couple(
-        feed, dict(REACT_OVERFLOW_DES), REACT_XI_UREA_DES * s, T_overflow_c,
-        L_override=L_drive, W_override=W_drive)
-    xi_biu = REACT_XI_BIU_DES * s
+    # PHASE 3 (report C-1 / C-2).  This was
+    #     xi_urea = REACT_XI_UREA_DES * s * conversion_factor(L, W, T)
+    #     xi_biu  = REACT_XI_BIU_DES  * s
+    # i.e. the design extents times the CO2 load ratio times a dimensionless correlation renormalised
+    # to return exactly 1.0 at design.  Reaction extent was independent of residence time, of holdup
+    # volume, and of concentration except through two feed RATIOS; biuret -- the plant's principal
+    # product-quality specification -- had no temperature dependence at all.
+    #
+    # Both are now integrated over the column's own liquid volume with real rate laws.  Residence
+    # time is V_wetted/Vdot from the live level and the live volumetric flow, so a level drop or a
+    # throughput change moves the conversion the way it does on the plant.  The node temperatures
+    # come from the PREVIOUS substep (s.react_T_node), the same explicit tear the thermal profile
+    # already uses -- the two are mutually coupled and one of them has to be torn.
+    L_feed = (feed.get("NH3", 0.0) / feed["CO2"]) if feed.get("CO2", 0.0) > 0.0 else reactor.L0_DES
+    W_feed = (feed.get("H2O", 0.0) / feed["CO2"]) if feed.get("CO2", 0.0) > 0.0 else reactor.W0_DES
+    if L_drive is not None:
+        L_feed = L_drive
+    if W_drive is not None:
+        W_feed = W_drive
+    _anc = REACT_KIN_ANCHOR
+    _t_nodes = list(t_nodes_c) if t_nodes_c is not None else list(
+        _anc["T_node"] if _anc else REACT_NODE_SS_DES)
+    _lvl = level_frac if level_frac is not None else (
+        _anc["lvl"] if _anc else REACT_LEVEL_NLL_PCT / 100.0)
+    if vdot_m3h is not None and vdot_m3h > 1e-9:
+        _vdot = vdot_m3h
+    elif _anc:
+        #  No live throughput given: scale the anchor's volumetric flow with the FEED MASS rather
+        #  than freezing it.  A caller that scales the feed down is turning the plant down, not
+        #  diluting it, and a frozen vdot turns a turndown into a concentration drop -- which made
+        #  conversion RISE with load (0.541 at 70 % to 0.559 at 110 %), the wrong sign.  At design
+        #  the ratio is exactly 1.0, so the identity contract is untouched.
+        _m_feed = sum(feed.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+        _vdot = _anc["vdot"] * (_m_feed / max(_anc.get("m_feed", _m_feed), 1e-9))
+    else:
+        _vdot = _react_vdot_m3h
+    xi_urea, _xi_nodes = reactor.urea_extent_pfr(
+        feed, _t_nodes, REACT_ZETA_NODES, _react_area_m2, REACT_LIQ_H_M, _lvl, _vdot)
+    X_conv = xi_urea / feed["CO2"] if feed.get("CO2", 0.0) > 0.0 else 0.0
     # feed corrected for the pinned recycle tear (documented torn quantity, main.py:995):
     s_tear = s if REACT_TEAR_DES is not None else 0.0
     fc = {k: feed.get(k, 0.0) - (REACT_TEAR_DES.get(k, 0.0) if REACT_TEAR_DES else 0.0) * s_tear
           for k in MW_COMP}
+    #  Biuret forms from the urea ACTUALLY present in the column -- the feed urea plus what this
+    #  pass just made -- not from a load-scaled design constant.  With `REACT_OVERFLOW_DES * s` the
+    #  concentration was s/s = constant and the extent came out load-INVARIANT, i.e. still a frozen
+    #  number wearing an Arrhenius coat.  Using the real outlet urea makes it respond to conversion,
+    #  which is the whole point: a reactor running hot and long makes more biuret.
+    _urea_col = max(fc.get("Urea", 0.0), 0.0) + max(xi_urea, 0.0)
+    xi_biu = reactor.biuret_extent(_t_nodes, REACT_ZETA_NODES, _react_area_m2, REACT_LIQ_H_M,
+                                   _lvl, _vdot, _urea_col)
     # extent feasibility clamps (non-binding at/near design -> bit-exact; bind under reagent starvation)
     xi_urea = max(min(xi_urea, fc.get("CO2", 0.0), 0.5 * fc.get("NH3", 0.0)), 0.0)
     xi_biu  = max(min(xi_biu, 0.5 * (fc.get("Urea", 0.0) + xi_urea)), 0.0)
@@ -4245,7 +4311,10 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
     # amplifier (offgas *= 1+g).  Anchored to boot-pinned design X so H-1 creep cannot unpin it.  At/
     # above design delta_X = 0 -> no shift (bit-exact).  Dalton partials p_i = y_i*P_offgas tracked off
     # the re-partitioned off-gas; dimensionless loop forcing Pi = kappa*delta_X (built in step_sim).
-    X_ref = REACT_X_DES if REACT_X_DES is not None else reactor.X_DES_RAW
+    #  X_conv is now an ABSOLUTE per-pass conversion from the rate law (xi/CO2_feed), not the old
+    #  dimensionless X(L,W,T).  The design reference moves with it: reactor.X_DES is the as-built
+    #  0.543, which is what xi_urea_des/CO2_feed_des evaluates to.
+    X_ref = REACT_X_DES if REACT_X_DES is not None else reactor.X_DES
     delta_X = max(1.0 - X_conv / X_ref, 0.0)
     g = REACT_OFFGAS_DEFICIT_GAIN * delta_X
     for k in ("NH3", "CO2"):
@@ -6160,8 +6229,13 @@ def step_sim(dt: float) -> dict:
     #   conversion->composition->HPCC-N/C cliff return leg that closed an unstable G~-15 thermal recycle
     #   (the source of the TT-322010 161<->213 oscillation). conv_fac=1 -> 170+13=183=T0_DES (bit-exact).
     T_conv_c = HPCC_T_PROD_DES_C + REACT_DT_COL_DES * s.react_conv_fac
+    _react_vdot_live = max(sum(s.react_overflow_kmolh.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+                           / max(reactor.liquid_density(sum(s.react_T_node) / 4.0), 1e-6), 1e-6)
     react   = react_322r001(hpcc, F_CO2_syn_th, s.HIC_322605, L_drive=L_blend, W_drive=W_blend,
-                            T_overflow_c=T_conv_c)
+                            T_overflow_c=T_conv_c,
+                            t_nodes_c=s.react_T_node,                 # explicit tear (prev substep)
+                            level_frac=s.react_level_pct / 100.0,     # live level -> wetted volume
+                            vdot_m3h=_react_vdot_live)                # live throughput -> residence
     
     # Dynamic Darcy-Weisbach pressure drop for Reactor
     dP_des_react = state.p_syn_bara - HPCC_P_DES_BARA
@@ -6202,7 +6276,12 @@ def step_sim(dt: float) -> dict:
     # Explicit Euler; the upstream term uses the PREVIOUS-step node temps (T_old) so the cascade is
     # decoupled within a tick (steady state is identical: T_old[n-1]==T_new[n-1] -> telescopes to
     # T_n = T_feed + ΔT_col·G_raw(ζ_n), the as-built residence-time probe profile when conv_fac->1).
-    conv_fac = react["X_conv"] / reactor.X_DES_RAW
+    #  Against the BOOT-PINNED design conversion, not the as-built 0.543: X_conv is now an absolute
+    #  per-pass conversion from the rate law, and the live settled feed differs from the synthetic
+    #  design reference by ~2 %.  Using reactor.X_DES here left conv_fac at 1.024 on the design seed,
+    #  which inflated dT_col by 0.3 C and pushed the overflow lip off its anchor.
+    _x_ref_cf = REACT_X_DES if REACT_X_DES is not None else reactor.X_DES
+    conv_fac = react["X_conv"] / _x_ref_cf
     s.react_conv_fac = conv_fac                              # tear -> next step's design-anchored f_T base
     dT_col   = REACT_DT_COL_DES * conv_fac
     T_old     = list(s.react_T_node)
@@ -9982,7 +10061,7 @@ def _pin_hpcc_ua():
     170.0 C at the reconciled design point."""
     global HPCC_UA, state, last_packet, hpcc_322e002, react_322r001, ejector_322f001
     global REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE, _STEAM_READY
-    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES
+    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES, REACT_KIN_CAL, REACT_KIN_ANCHOR
     global HPCC_NC_DES_LIVE
     state.SIC_321951.set_mode("CAS")                 # match the live design driver (ratio cascade)
     _cap = {}
@@ -10029,6 +10108,15 @@ def _pin_hpcc_ua():
     _capf["xi_urea"] = rr["xi_urea"]; _capf["xi_biu"] = rr["xi_biu"]
     _capf["L"]       = rr["L_feed"];  _capf["W"]      = rr["W_feed"]
     _capf["X"]       = rr["X_conv"]
+    #  PHASE 3: the live settled reactor state the rate laws are anchored on.  These are NOT the
+    #  synthetic `_HPCC_DES` values -- main.py's own note above records that the synthetic
+    #  construction understates the live throughput by about 2 %, and the kinetic extent depends on
+    #  the feed ABSOLUTELY (not just through ratios, as the old correlation did), so calibrating on
+    #  the synthetic feed put 2.5 % more urea through the reactor than the PFD allows.
+    _capf["T_node"]  = list(state.react_T_node)
+    _capf["lvl"]     = state.react_level_pct / 100.0
+    _capf["vdot"]    = max(sum(state.react_overflow_kmolh.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
+                           / max(reactor.liquid_density(sum(state.react_T_node) / 4.0), 1e-6), 1e-6)
     _hf = res["sm_diagnostics"]["hpcc"].get("feed_kmolh", {})
     _co2 = _hf.get("CO2", 0.0)
     if _co2 > 1e-9:
@@ -10045,7 +10133,12 @@ def _pin_hpcc_ua():
     #   feed gives feed_corrected, and out_total = feed_corrected + nu*xi closes atoms AND mass to
     #   machine zero.  At the seed xi_live == xi_pin and feed == feed_des -> feed_corrected restores
     #   the closed design feed -> overflow/off-gas partition == published vectors bit-exact.
-    _xu, _xb = _capf["xi_urea"], _capf["xi_biu"]
+    #  PHASE 3: the tear must be built from the extents the RECALIBRATED rate law produces, which
+    #  are the PFD values by construction (calibrate_kinetics solves A2 and the biuret pre-exponential
+    #  against them on the live feed, a few lines below).  Using the captured `_capf` extents instead
+    #  builds the tear against the pre-recalibration kinetics and leaves the design overflow 1.6-3.4
+    #  kmol/h off its published vector even though the extents themselves are exact.
+    _xu, _xb = REACT_XI_UREA_DES, REACT_XI_BIU_DES
     _impl = {k: REACT_OVERFLOW_DES.get(k, 0.0) + REACT_OFFGAS_DES.get(k, 0.0) for k in MW_COMP}
     _impl["CO2"]    += _xu
     _impl["NH3"]    += 2.0 * _xu - _xb
@@ -10053,7 +10146,25 @@ def _pin_hpcc_ua():
     _impl["H2O"]    += -_xu
     _impl["Biuret"] += -_xb
     REACT_TEAR_DES   = {k: _capf["feed"].get(k, 0.0) - _impl[k] for k in MW_COMP}
-    REACT_L_FEED_DES = _capf["L"]; REACT_W_FEED_DES = _capf["W"]; REACT_X_DES = _capf["X"]
+    REACT_L_FEED_DES = _capf["L"]; REACT_W_FEED_DES = _capf["W"]
+    #  PHASE 3: re-solve A2 and the biuret pre-exponential against the LIVE settled feed, so the
+    #  design extent is the PFD's REACT_XI_UREA_DES exactly rather than whatever the synthetic feed
+    #  happened to give.  Only the two back-solved scale factors move; every sourced quantity in the
+    #  rate law (Ea, the two enthalpies, X_INF) is untouched.  REACT_X_DES then follows from the PFD
+    #  extent and the live feed, so conv_fac is 1.0 at design by construction.
+    REACT_KIN_CAL = reactor.calibrate_kinetics(
+        _capf["feed"], _capf["T_node"], REACT_ZETA_NODES, _react_area_m2, REACT_LIQ_H_M,
+        _capf["lvl"], _capf["vdot"], REACT_XI_UREA_DES, REACT_XI_BIU_DES, reactor.X_INF,
+        #  Same urea reference the engine uses: the TEAR-CORRECTED feed urea plus this pass's
+        #  extent.  Passing the raw feed urea instead left the design biuret at 2.4316 against the
+        #  PFD's 2.414 -- the tear is subtracted before the kinetics see the stream.
+        _capf["feed"].get("Urea", 0.0) - (REACT_TEAR_DES.get("Urea", 0.0) if REACT_TEAR_DES else 0.0)
+        + REACT_XI_UREA_DES)
+    REACT_X_DES = (REACT_XI_UREA_DES / _capf["feed"]["CO2"]) if _capf["feed"].get("CO2", 0.0) > 0.0 \
+        else _capf["X"]
+    REACT_KIN_ANCHOR = {"T_node": list(_capf["T_node"]), "lvl": _capf["lvl"],
+                        "vdot": _capf["vdot"],
+                        "m_feed": sum(_capf["feed"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP)}
     HPCC_NC_DES_LIVE = _capf.get("hpcc_L", REACT_L_FEED_DES)   # design melt N/C -> bubble_p fN anchor (P_bub==144.2)
     state = State()                                  # discard the capture step (fresh design seed)
 
@@ -10168,7 +10279,7 @@ def _apply_pin(d: dict) -> None:
     """Restore the pinned design constants from a cache dict (== state after a fresh _pin_hpcc_ua())."""
     global HPCC_UA, REACT_MASS_DES, HPCC_LIQ_DES_LIVE, EJ_MOTIVE_DES_LIVE
     global _STEAM_READY, state, last_packet
-    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES
+    global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES, REACT_KIN_CAL, REACT_KIN_ANCHOR
     global HPCC_NC_DES_LIVE, M_HPCC_DES_LIVE
     global A328_GCB_DES, A328_GCB_T, A328_PHI_ABS, A328_VENT_DES, A328_LAMBDA_ABS
     import steam_system as _ss
@@ -10180,6 +10291,16 @@ def _apply_pin(d: dict) -> None:
     REACT_L_FEED_DES   = d["REACT_L_FEED_DES"]
     REACT_W_FEED_DES   = d["REACT_W_FEED_DES"]
     REACT_X_DES        = d["REACT_X_DES"]
+    #  Restore the Phase 3 rate-law scale factors too.  Without this a cache hit would run the
+    #  engine on the import-time calibration (synthetic feed) while every other constant came from
+    #  the live settle -- a silent 2.5 % urea offset that only appears on a warm boot.
+    REACT_KIN_ANCHOR = d.get("REACT_KIN_ANCHOR")
+    if d.get("REACT_KIN_CAL"):
+        REACT_KIN_CAL = d["REACT_KIN_CAL"]
+        reactor.A2_PRE = REACT_KIN_CAL["A2"]
+        reactor.KEQ_OV_REF = REACT_KIN_CAL["Keq_ov_ref"]
+        reactor.T_REF_K = REACT_KIN_CAL["T_ref_K"]
+        reactor.BIU_A_PRE = REACT_KIN_CAL["biu_A"]
     HPCC_NC_DES_LIVE   = d.get("HPCC_NC_DES_LIVE", REACT_L_FEED_DES)   # bubble_p fN anchor (design melt N/C)
     # G8: the cache stores the design LP GENERATION (M_HPCC_DES_LIVE == users + turbine) separately
     # from the reduced 4-bar user boundary, so both the generation anchor and the 322D001 make-up
@@ -10210,6 +10331,8 @@ def _collect_pin() -> dict:
         "REACT_L_FEED_DES":   REACT_L_FEED_DES,
         "REACT_W_FEED_DES":   REACT_W_FEED_DES,
         "REACT_X_DES":        REACT_X_DES,
+        "REACT_KIN_CAL":      REACT_KIN_CAL,
+        "REACT_KIN_ANCHOR":   REACT_KIN_ANCHOR,
         "HPCC_NC_DES_LIVE":   HPCC_NC_DES_LIVE,
         "M_HPCC_DES_LIVE":    M_HPCC_DES_LIVE,   # design LP generation (== users + turbine); G8 cache key
         "M_USERS_LP":         _ss.M_USERS_LP,

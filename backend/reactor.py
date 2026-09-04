@@ -155,6 +155,275 @@ def react_couple(feed: dict, overflow_scaled: dict, xi_urea_scaled: float,
     return xi_urea, ov, inoue_kanai_X(L, W, T_c), L, W
 
 
+# ==================================================================================================
+#  PHASE 3 (report C-1 / C-2): real kinetics, integrated over the column's own residence time
+# ==================================================================================================
+#  WHAT THIS REPLACES.  `conversion_factor` above is a dimensionless separable correlation --
+#  X(L,W,T)/X(L0,W0,T0) -- renormalised to return exactly 1.0 at design.  The engine multiplied the
+#  DESIGN extent by it and by the CO2 load ratio:  xi_urea = XI_UREA_DES * s * cf(L, W, T).  So the
+#  reaction extent was independent of residence time, of holdup volume, and of concentration except
+#  through two feed RATIOS; and biuret was `XI_BIU_DES * s` with no temperature dependence at all,
+#  on the plant's principal product-quality specification.
+#
+#  THE MECHANISM.  Two steps, the second rate-controlling (Stamicarbon / Inoue):
+#      (1)  2 NH3 + CO2  <-> NH2COONH4          fast, equilibrium-limited
+#      (2)  NH2COONH4    <-> NH2CONH2 + H2O     rate-controlling
+#  Step 1 is taken to completion in the liquid, which is the standard assumption at 140 bar a and
+#  N/C ~ 3: essentially all CO2 present in the melt is carbamate.  So the CO2 that the axial march
+#  carries IS the carbamate inventory, and step 2 consumes it.
+#
+#      r2 = k2(T) * ( C_carb  -  C_urea * C_H2O / Keq2(T) )        kmol/(m3.h)
+#      k2 = A2 * exp(-Ea2 / R T)
+#
+#  ACTIVITY BASIS -- STATED, NOT HIDDEN.  The brief asks for a_i = gamma_i x_i from the Phase 1 VLE
+#  service.  That service REFUSES here, and correctly: G-VLE-3 measured the HP loop at 54x outside
+#  the Extended UNIQUAC loading grid (322E003 feed N = 869 mol/kg water against a 16.0 top node), so
+#  asking it for gamma at 183 C and 140 bar a would return a clamped edge lookup dressed as an
+#  activity.  This module therefore uses CONCENTRATIONS (gamma = 1) and says so.  That is a real
+#  limitation and it is the right place for an HP activity package when one exists -- but it does
+#  not weaken what C-1 was about: temperature, concentration, holdup volume and residence time now
+#  drive the extent, where previously NONE of them did.
+#
+#  Ea2 IS DERIVED FROM IN-REPO SOURCES, not asserted.  Inoue & Otsuka (1973) Eq. (6) gives the
+#  second-order rate constant for urea hydrolysis as ln k = 21.8 - 11100/T, i.e. an activation
+#  energy of R x 11100 = 92.3 kJ/mol for the rate-controlling REVERSE step (urea + H2O -> carbamate).
+#  For one elementary step run both ways the activation energies differ by the step enthalpy, and
+#  the Helwan Fundamentals value for dehydration is +15.5 kJ/mol, so
+#      Ea(carbamate -> urea + H2O) = 92.3 + 15.5 = 107.8 kJ/mol.
+#  Both numbers already carry citations elsewhere in this repo (R328_HYD_K_B_K, STRIP_DH_HYD_JMOL).
+#
+#  A2 AND Keq2_ref ARE BACK-SOLVED FROM THE PLANT, exactly as the Phase 2 valve coefficients were:
+#  no vendor kinetics exist for this reactor, and one design point determines one parameter.  Keq2
+#  is anchored so the EQUILIBRIUM conversion at design conditions is X_INF (the plant-anchored
+#  thermodynamic ceiling this module already carried), and A2 is then solved so the march reproduces
+#  the design extent bit-exactly.  Everything else -- the Arrhenius temperature response, the
+#  van 't Hoff shift of the equilibrium, the concentration dependence, the residence-time scaling --
+#  is first-principles once those two are fixed.
+
+R_GAS_J        = 8.314             # J/(mol.K)
+DH_DEHYD_JMOL  = 15_500.0          # +15.5 kJ/mol, carbamate -> urea + H2O (Helwan Fundamentals)
+EA_HYD_REV_K   = 11_100.0          # K, Inoue & Otsuka (1973) Eq. (6) exponent
+EA_DEHYD_JMOL  = EA_HYD_REV_K * R_GAS_J + DH_DEHYD_JMOL      # 107 785 J/mol, derived above
+
+#  Filled by `calibrate_kinetics()`; None until then so an uncalibrated call fails loudly rather
+#  than silently returning a wrong extent.
+DH_CARB_JMOL   = -117_000.0        # -117 kJ/mol, 2 NH3 + CO2 -> NH2COONH4   (Helwan Fundamentals)
+DH_OVERALL_JMOL = DH_CARB_JMOL + DH_DEHYD_JMOL   # -101.5 kJ/mol overall, == R328_HYD_DH_KJMOL
+
+#  WHICH EQUILIBRIUM CONSTRAINS THE REACTOR -- this was got wrong once, so it is written out.
+#  The rate-controlling step is dehydration, which is ENDOTHERMIC (+15.5 kJ/mol), so ITS equilibrium
+#  constant rises with temperature.  Constraining the march with that alone gave X = 0.92 at 200 C
+#  and X = 1.00 at 230 C: the model taught that a hotter reactor converts more, which is the
+#  opposite of the truth and dangerous in a training simulator.
+#
+#  The reaction the conversion is actually limited by is the OVERALL one,
+#      2 NH3 + CO2 <-> NH2CONH2 + H2O ,   dH = -117 + 15.5 = -101.5 kJ/mol,
+#  which is EXOTHERMIC -- the same -101.5 the desorption section already carries as
+#  R328_HYD_DH_KJMOL for the reverse (hydrolysis) direction.  Its equilibrium conversion therefore
+#  FALLS with temperature, and that, against a rate constant that rises with temperature, is what
+#  produces a conversion optimum.  No fitted parabola is needed and none is used:
+#
+#      r2 = k2(T) . ( C_carb  -  C_urea C_H2O / ( Kov(T) C_NH3^2 ) )
+#      Kov(T) = Kov_ref . exp( -dH_overall/R (1/T - 1/T_ref) )        van 't Hoff, dH < 0
+#
+#  Kov_ref is anchored so the equilibrium conversion at the design state is X_INF, the
+#  plant-anchored ceiling this module already carried.  Everything about how conversion moves with
+#  temperature then follows from two enthalpies and one activation energy, all sourced in-repo.
+A2_PRE         = None              # 1/h, pre-exponential of the dehydration step
+KEQ_OV_REF     = None              # m3/kmol, overall equilibrium constant at T_REF_K
+T_REF_K        = None              # K, the temperature KEQ2_REF is quoted at
+BIU_A_PRE      = None              # m3/(kmol.h), biuret pre-exponential
+BIU_EA_JMOL    = 85_000.0          # J/mol -- the activation energy the stripper already uses
+
+
+def k2_dehydration(t_c: float) -> float:
+    """Rate constant of the rate-controlling dehydration step, 1/h."""
+    return A2_PRE * math.exp(-EA_DEHYD_JMOL / (R_GAS_J * (t_c + 273.15)))
+
+
+def keq_overall(t_c: float) -> float:
+    """Overall equilibrium constant (m3/kmol) for 2 NH3 + CO2 <-> urea + H2O.
+
+    van 't Hoff on the OVERALL enthalpy, which is exothermic, so Kov falls as the reactor heats and
+    the attainable conversion falls with it."""
+    t_k = t_c + 273.15
+    return KEQ_OV_REF * math.exp(-DH_OVERALL_JMOL / R_GAS_J * (1.0 / t_k - 1.0 / T_REF_K))
+
+
+def _node_liquid_volumes(zeta_nodes, area_m2, h_span_m, level_frac):
+    """Wetted liquid volume of each node, m3, truncated at the live level.
+
+    This is what makes residence time scale with GEOMETRY and LEVEL rather than being a constant:
+    a level drop shortens the column the plug actually flows through, and the nodes above the
+    surface contribute nothing."""
+    vols = []
+    prev = 0.0
+    for z in zeta_nodes:
+        lo = min(prev, level_frac)
+        hi = min(z, level_frac)
+        vols.append(max(hi - lo, 0.0) * h_span_m * area_m2)
+        prev = z
+    return vols
+
+
+def _equilibrium_extent(n_kmolh: dict, vdot_m3h: float, kov: float) -> float:
+    """Extent (kmol/h) at which the OVERALL reaction is at equilibrium for this composition.
+
+    Solves  C_carb - C_urea C_H2O / (Kov C_NH3^2) = 0  for the extent, by bisection on the bracket
+    the stoichiometry allows.  Signed: negative when the stream is already past equilibrium and the
+    reaction should run backwards, which is what makes an over-hot reactor lose conversion."""
+    co2 = max(n_kmolh.get("CO2", 0.0), 0.0)
+    nh3 = max(n_kmolh.get("NH3", 0.0), 0.0)
+    urea = max(n_kmolh.get("Urea", 0.0), 0.0)
+    h2o = max(n_kmolh.get("H2O", 0.0), 0.0)
+    if vdot_m3h <= 1e-12 or kov <= 1e-30:
+        return 0.0
+
+    def g(xi):
+        c_carb = (co2 - xi) / vdot_m3h
+        c_nh3 = (nh3 - 2.0 * xi) / vdot_m3h
+        c_urea = (urea + xi) / vdot_m3h
+        c_h2o = (h2o + xi) / vdot_m3h
+        if c_nh3 <= 1e-12:
+            return -1.0e30
+        return c_carb - c_urea * c_h2o / (kov * c_nh3 * c_nh3)
+
+    hi = min(co2, 0.5 * nh3) * (1.0 - 1.0e-12)
+    lo = -min(urea, h2o) * (1.0 - 1.0e-12)
+    g_lo, g_hi = g(lo), g(hi)
+    if g_lo <= 0.0:
+        return lo                     # already past equilibrium in the reverse direction
+    if g_hi >= 0.0:
+        return hi                     # stoichiometry binds before equilibrium does
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if g(mid) > 0.0:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def urea_extent_pfr(feed_kmolh: dict, t_nodes_c, zeta_nodes, area_m2: float, h_span_m: float,
+                    level_frac: float, vdot_m3h: float):
+    """Per-pass urea extent (kmol/h) by marching the liquid plug up the column.
+
+        dN_i/dz = nu_i * r2 * A_cs      integrated node by node, T from that node's own state
+
+    Returns (xi_total, per_node_extents).  The march consumes CO2 (as carbamate) and NH3 and makes
+    urea and water, so the driving force falls as the plug rises -- the axial composition profile
+    the correlation had no way to represent."""
+    if vdot_m3h <= 1e-9:
+        return 0.0, [0.0] * len(zeta_nodes)
+    n = {k: float(v) for k, v in feed_kmolh.items()}
+    vols = _node_liquid_volumes(zeta_nodes, area_m2, h_span_m, level_frac)
+    xi_total = 0.0
+    per_node = []
+    for v_n, t_c in zip(vols, t_nodes_c):
+        if v_n <= 0.0:
+            per_node.append(0.0)
+            continue
+        tau_n = v_n / vdot_m3h                                   # h, this node's own residence time
+        xi_eq = _equilibrium_extent(n, vdot_m3h, keq_overall(t_c))
+        #  EXACT integration over the node, not r2*V_n.  The rate is linear in its own driving
+        #  force, so within a node  dxi/dt = k2 (xi_eq - xi)  and the closed form is the first-order
+        #  approach below.  Multiplying r2 by the node volume instead lets a large k2 overshoot the
+        #  equilibrium inside one node and reverse in the next, which made the extent non-monotone
+        #  in A2 and left the design back-solve with nothing to converge on.
+        dxi = xi_eq * (1.0 - math.exp(-min(k2_dehydration(t_c) * tau_n, 700.0)))
+        if dxi > 0.0:
+            dxi = min(dxi, n.get("CO2", 0.0), 0.5 * n.get("NH3", 0.0))
+        else:
+            dxi = max(dxi, -n.get("Urea", 0.0), -n.get("H2O", 0.0))
+        n["CO2"] = n.get("CO2", 0.0) - dxi
+        n["NH3"] = n.get("NH3", 0.0) - 2.0 * dxi
+        n["Urea"] = n.get("Urea", 0.0) + dxi
+        n["H2O"] = n.get("H2O", 0.0) + dxi
+        xi_total += dxi
+        per_node.append(dxi)
+    return xi_total, per_node
+
+
+def biuret_extent(t_nodes_c, zeta_nodes, area_m2: float, h_span_m: float, level_frac: float,
+                  vdot_m3h: float, urea_kmolh: float) -> float:
+    """Biuret extent (kmol/h),  2 Urea -> Biuret + NH3,  second order in urea.
+
+        r_biu = A exp(-Ea/RT) C_urea^2 ,   xi = integral over the wetted liquid volume
+
+    Report C-2: this was `REACT_XI_BIU_DES * s` -- the plant's principal product-quality
+    specification with no temperature, concentration or residence-time dependence whatsoever, so a
+    hot reactor could not produce a quality excursion."""
+    if vdot_m3h <= 1e-9 or BIU_A_PRE is None:
+        return 0.0
+    c_urea = max(urea_kmolh, 0.0) / vdot_m3h
+    vols = _node_liquid_volumes(zeta_nodes, area_m2, h_span_m, level_frac)
+    xi = 0.0
+    for v_n, t_c in zip(vols, t_nodes_c):
+        if v_n <= 0.0:
+            continue
+        k_b = BIU_A_PRE * math.exp(-BIU_EA_JMOL / (R_GAS_J * (t_c + 273.15)))
+        xi += k_b * c_urea * c_urea * v_n
+    return xi
+
+
+def calibrate_kinetics(feed_des_kmolh: dict, t_nodes_des_c, zeta_nodes, area_m2: float,
+                       h_span_m: float, level_frac_des: float, vdot_des_m3h: float,
+                       xi_urea_des: float, xi_biu_des: float, x_ceiling: float,
+                       urea_out_des_kmolh: float):
+    """Solve A2, Keq2_ref and the biuret pre-exponential against the plant's design point.
+
+    Keq2 first: at the thermodynamic ceiling X_inf the dehydration step is AT equilibrium, so
+    Keq2 = C_urea C_H2O / C_carb evaluated at the composition that ceiling implies.  Then A2 by
+    bisection on the march until it reproduces the design extent -- monotone in A2, so this is
+    robust.  Both are then fixed; every temperature, concentration and residence-time response of
+    the model follows from the rate law, not from these two numbers."""
+    global A2_PRE, KEQ_OV_REF, T_REF_K, BIU_A_PRE
+    co2_0 = feed_des_kmolh.get("CO2", 0.0)
+    urea_0 = feed_des_kmolh.get("Urea", 0.0)
+    h2o_0 = feed_des_kmolh.get("H2O", 0.0)
+    nh3_0 = feed_des_kmolh.get("NH3", 0.0)
+    t_bulk = sum(t_nodes_des_c) / len(t_nodes_des_c)
+    T_REF_K = t_bulk + 273.15
+    #  Kov_ref: at the plant-anchored ceiling X_INF the OVERALL reaction is at equilibrium, so
+    #  Kov = C_urea C_H2O / (C_NH3^2 C_carb) evaluated at the composition that ceiling implies.
+    xi_eq = x_ceiling * co2_0
+    c_carb_eq = max(co2_0 - xi_eq, 1e-12) / vdot_des_m3h
+    c_urea_eq = (urea_0 + xi_eq) / vdot_des_m3h
+    c_h2o_eq = (h2o_0 + xi_eq) / vdot_des_m3h
+    c_nh3_eq = max(nh3_0 - 2.0 * xi_eq, 1e-12) / vdot_des_m3h
+    KEQ_OV_REF = c_urea_eq * c_h2o_eq / (c_nh3_eq * c_nh3_eq * c_carb_eq)
+
+    def march(a2):
+        global A2_PRE
+        A2_PRE = a2
+        xi, _ = urea_extent_pfr(feed_des_kmolh, t_nodes_des_c, zeta_nodes, area_m2, h_span_m,
+                                level_frac_des, vdot_des_m3h)
+        return xi
+
+    #  Bracket spans thirty decades on purpose: at Ea = 107.8 kJ/mol and 453 K the Arrhenius factor
+    #  is exp(-28.6) = 3.7e-13, so a physically ordinary liquid-phase pre-exponential lands near
+    #  1e12 /h.  Geometric bisection, because the unknown is a scale factor spanning decades.
+    lo, hi = 1.0e-6, 1.0e30
+    for _ in range(500):
+        mid = math.sqrt(lo * hi)
+        if march(mid) < xi_urea_des:
+            lo = mid
+        else:
+            hi = mid
+        if hi / lo < 1.0 + 1e-14:
+            break
+    A2_PRE = math.sqrt(lo * hi)
+    march(A2_PRE)
+
+    #  Biuret: one design point, one parameter, same treatment.
+    c_urea = max(urea_out_des_kmolh, 0.0) / vdot_des_m3h
+    vols = _node_liquid_volumes(zeta_nodes, area_m2, h_span_m, level_frac_des)
+    denom = sum(math.exp(-BIU_EA_JMOL / (R_GAS_J * (t + 273.15))) * c_urea * c_urea * v
+                for v, t in zip(vols, t_nodes_des_c) if v > 0.0)
+    BIU_A_PRE = (xi_biu_des / denom) if denom > 0.0 else 0.0
+    return {"A2": A2_PRE, "Keq_ov_ref": KEQ_OV_REF, "T_ref_K": T_REF_K, "biu_A": BIU_A_PRE}
+
+
 # --- Fix-1: distributed 4-node axial thermal profile (Damköhler-shaped carbamate exotherm) -----
 # The reactor is a vertical liquid plug-flow column: cold HPCC two-phase product enters the bottom
 # (T_feed) and the carbamate condensation exotherm (2 NH3 + CO2 -> NH2COONH4, exothermic) is

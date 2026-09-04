@@ -715,6 +715,134 @@ Both exclusions are pinned by tests, so a later edit cannot quietly "finish the 
   form but ignores the vessel pressure, so a vacuum break would not change the drain rate. Wiring it
   to `gravity_outflow_kgh` needs the leg height, which no source in the repository gives.
 
+## 322R001 Reactor Kinetics: Rate Laws, Not Load Multipliers (`backend/reactor.py`)
+
+Phase 3, report findings C-1 and C-2. **C-1 and C-2 are done; A-8 and C-3/C-4/C-5 are not started.**
+
+### What this replaced
+
+```python
+xi_urea = REACT_XI_UREA_DES * s * conversion_factor(L, W, T)     # design extent x load x correlation
+xi_biu  = REACT_XI_BIU_DES  * s                                  # design extent x load
+```
+
+`conversion_factor` is a separable correlation renormalised to return exactly 1.0 at design, so the
+urea extent was independent of residence time, of holdup volume, and of concentration except through
+two feed **ratios**. Biuret — the plant's principal product-quality specification — had a temperature
+derivative of exactly zero, so a hot reactor could not produce a quality excursion at all.
+
+### The mechanism
+
+Two steps, the second rate-controlling. Step 1 is taken as fast in the liquid, which is the standard
+assumption at 140 bar a and N/C ≈ 3, so the CO₂ the axial march carries **is** the carbamate:
+
+$$r_2=k_2(T)\left(C_{carb}-\frac{C_{urea}C_{H_2O}}{K_{ov}(T)\,C_{NH_3}^2}\right),\qquad
+k_2=A_2\exp\!\left(\frac{-E_{a,2}}{RT}\right)$$
+
+marched node by node up the column, $dN_i/dz=\nu_i r_2 A_{cs}$, with each node's own temperature and
+its own residence time $\tau_n = V_{wetted,n}/\dot V$ from the **live level and live throughput**.
+
+Within a node the rate is linear in its own driving force, so the integration is exact rather than
+$r_2 V_n$:  $\xi_n=\xi_{eq,n}\left(1-e^{-k_2\tau_n}\right)$. This matters — multiplying the rate by the
+node volume let a large $k_2$ overshoot equilibrium inside one node and reverse in the next, which
+made the extent non-monotone in $A_2$ and left the design back-solve with nothing to converge on.
+
+### Which equilibrium constrains it — this was got wrong once
+
+The rate-controlling step is dehydration, which is **endothermic** (+15.5 kJ/mol), so its own
+equilibrium constant *rises* with temperature. Constraining the march with that alone gave X = 0.92
+at 200 °C and **X = 1.00 at 230 °C**: the model taught that a hotter reactor converts more, which is
+the opposite of the truth and actively dangerous in a training simulator.
+
+The reaction conversion is actually limited by is the **overall** one,
+
+$$2\,\mathrm{NH_3}+\mathrm{CO_2}\rightleftharpoons\mathrm{NH_2CONH_2}+\mathrm{H_2O},\qquad
+\Delta H=-117+15.5=-101.5\ \text{kJ/mol}$$
+
+which is **exothermic** — the same −101.5 the desorption section already carries as
+`R328_HYD_DH_KJMOL` for the reverse direction. Its equilibrium conversion therefore falls with
+temperature, and that against a rate constant that rises with temperature is what produces a
+conversion optimum. The optimum now **emerges at ≈ 200 °C**; nothing in the code names a peak
+temperature, where the old model fitted one as `exp[-k((T-Topt)² - (T0-Topt)²)]`.
+
+### Provenance: two back-solved numbers, everything else sourced
+
+No vendor kinetics exist for this reactor and one design point determines one parameter, so `A2` and
+`Keq_ov_ref` are back-solved — the same treatment the Phase 2 valve coefficients got, for the same
+reason. `Keq_ov_ref` is anchored so the equilibrium conversion at design is `X_INF`, the
+plant-anchored ceiling the module already carried.
+
+The activation energy is **derived, not asserted**. Inoue & Otsuka (1973) Eq. (6) gives urea
+hydrolysis as $\ln k = 21.8 - 11100/T$, i.e. $R\times 11100 = 92.3$ kJ/mol for the rate-controlling
+**reverse** step. For one elementary step run both ways the activation energies differ by the step
+enthalpy, and the Helwan dehydration enthalpy is +15.5 kJ/mol, so
+
+$$E_{a}(\text{carbamate}\to\text{urea}+\mathrm{H_2O}) = 92.3+15.5 = 107.8\ \text{kJ/mol}$$
+
+Both numbers already carry citations elsewhere in this repo (`R328_HYD_K_B_K`, `STRIP_DH_HYD_JMOL`).
+Biuret uses `STRIP_BIU_EA` = 85 kJ/mol, the value the stripper already uses, with
+$r_{biu}=A e^{-E_a/RT}C_{urea}^2$ integrated over the wetted volume. The measured $A_2 = 3.8\times10^{12}$ /h
+is an ordinary liquid-phase pre-exponential for that activation energy, and $k_2 = 1.39$ /h at design
+gives a Damköhler of order 1 at τ = 35.9 min — right for a reactor at 55 % conversion.
+
+### Activity basis — stated, not hidden
+
+The brief asks for $a_i=\gamma_i x_i$ from the Phase 1 VLE service. **That service refuses here, and
+correctly**: G-VLE-3 measured the HP loop at 54× outside the Extended UNIQUAC loading grid, so asking
+it for γ at 183 °C and 140 bar a would return a clamped edge lookup dressed as an activity. The rate
+law therefore uses concentrations (γ = 1) and says so. That is a real limitation and the right place
+for an HP activity package when one exists — but it does not weaken what C-1 was about: temperature,
+concentration, holdup volume and residence time now drive the extent, where previously none did.
+
+### Anchoring: the calibration lives in the boot pin
+
+The kinetic extent depends on the feed **absolutely**, where the old correlation depended only on its
+ratios. Calibrating on the synthetic `_HPCC_DES` feed therefore put **2.5 % more urea** through the
+reactor than the PFD allows (`REACT_X_DES` pinned at 0.5567 against the as-built 0.543). `A2` and the
+biuret pre-exponential are now re-solved inside the boot pin against the **live settled** feed, node
+temperatures, level and throughput, and `REACT_KIN_ANCHOR` stores that state so
+`react_322r001(design_feed)` with no extra arguments still reproduces the design extent — the
+identity contract `test_reactor.py` asserts. Both are carried in the pin cache, or a warm boot would
+silently run the import-time calibration.
+
+`REACT_TEAR_DES` is built from the **recalibrated** extents (the PFD values, guaranteed by the
+calibration) rather than the captured pre-recalibration ones; using the captured values left the
+design overflow 1.6–3.4 kmol/h off its published vector even though the extents were exact.
+
+### Measured
+
+Design point: ξ_urea and ξ_biu reproduce the PFD to 3.6e-12 and 0.0; worst overflow and off-gas
+deviation 3.6e-12 against the 1e-6 identity tolerance; conv_fac 0.9999996, TT-322014 182.99999996.
+
+What the multiplier could not represent, all now measured:
+
+| response | result |
+|---|---|
+| residence time | ξ 1754 → 1071 kmol/h as τ goes 59.8 → 27.6 min |
+| holdup volume | ξ rises monotonically with level 40 → 100 % |
+| turndown | per-pass conversion 0.556 → 0.674 at 70 % load |
+| temperature optimum | emerges at ≈ 200 °C, falls either side |
+| biuret vs temperature | was **bit-flat** over 2 h; now ×1.5+ per 17 °C |
+| biuret at turndown | 2.414 → 3.12 kmol/h — quality gets **worse**, a scenario the model could not teach |
+| AT-322701 N/C | 3.000 → 2.968 at 70 % load |
+
+The slow level and synthesis-pressure drift over 2 h is **pre-existing and unchanged** (level 80.21 %
+baseline vs 80.20 % here). ξ_urea drifts more than baseline (+0.27 % vs +0.073 %) precisely because
+it now follows the level and temperature that are drifting instead of ignoring them.
+
+### Test assertions rewritten, and why
+
+Four assertions in `test_reactor.py` encoded the defect and had to change. A stashed baseline
+confirmed the file was **14 passed / 0 failed** beforehand, so these are consequences of this work
+and not pre-existing rot:
+
+* `xi_urea` and `xi_biu` scaling **exactly linearly** with load to 1e-6 — that is `xi = XI_DES * s`
+  asserted as a contract. Now: extent falls with load but **sublinearly**, and conversion rises.
+* overflow and off-gas NH₃ scaling linearly — both now fall **below** linear at turndown, because the
+  higher conversion consumes more ammonia (overflow −6.0 %, off-gas −7.5 % at 80 % load).
+* overflow N/C **invariant** to throughput scaling to 1e-6 — it now falls 3.000 → 2.968 at 70 % load,
+  a real AT-322701 behaviour.
+
 ## Consequence Transport Lag
 
 A consequence arrives when its fluid parcel arrives. `consequence.StreamPacket` carries one closed

@@ -148,6 +148,25 @@ Both are one-line fixes and would take two reds off the board without touching t
 but with no vessel-pressure term, so a vacuum break would not change the drain rate. Wiring it to
 `hydraulics.gravity_outflow_kgh` needs the leg height, which no source in the repository gives.
 
+## 1f. Phase 3 — kinetics, half done
+
+**C-1 and C-2 are CLOSED**: 322R001 runs on a two-step mechanism with Arrhenius kinetics marched over
+the column's own residence-time distribution, and biuret is second-order in urea. Design point exact
+to 3.6e-12, suite clean against baseline. Full write-up in the As-Built reference.
+
+**Still open, and each needs real work rather than rewiring:**
+
+| finding | site | note |
+|---|---|---|
+| A-8 | `REACT_DT_COL_DES` (13.0 C prescribed column rise), `reactor.node_dTdt`, the 4-node integration in `step_sim` | the exotherm still enters as an IMPOSED dT scaled by conversion, not as an energy quantity. The replacement is the node energy balance with dH_carb = -117 and dH_dehyd = +15.5 kJ/mol -- **both already in-repo** (`STRIP_DH_CARB_JMOL`, `STRIP_DH_HYD_JMOL`) -- and the per-node extents `urea_extent_pfr` now returns as its second value, which is exactly the `r_r,n` the balance needs. The pieces are in place; the risk is that the reactor temperature stops being anchored at 183 C and has to FIND it, so the design pin needs care |
+| C-3 | `xi_hyd_raw = STRIP_XI_HYD_DES * eta_T` (322E001 stripper) | mostly a REWIRING, not new physics: `urea_hydrolysis_k_m3_kmol_h` (Inoue & Otsuka Eq. 6) and the second-order PFR integral `hydrolysis_x_328c003` already exist and are already used by 328C003. The stripper needs the same treatment with its own tube volume and live holdup |
+| C-4 / C-5 | downstream biuret and desorption rates still on anchored design inputs | `sol_biuret_xi` uses the right Arrhenius FORM but an anchored design extent; converting it to `A exp(-Ea/RT) C_urea^2 V_l` is the same change just made in the reactor |
+
+**Watch out for one thing when doing A-8:** the reactor kinetics and the thermal profile are mutually
+coupled (T -> rate -> exotherm -> T). The kinetics currently read `s.react_T_node` from the PREVIOUS
+substep as an explicit tear. A-8 closes that loop properly, so whichever direction is torn has to be
+chosen deliberately rather than inherited.
+
 ## 2. Minor cleanups
 
 - `backend/core/thermo.py` still carries a dead `EmpiricalThermo.bubble_p` placeholder with no
