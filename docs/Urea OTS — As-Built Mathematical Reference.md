@@ -964,6 +964,70 @@ sites was checked for which kind it is.
 * **The 328 bottoms valves are flashing services on a single-phase law.** See D-1 above.
 * **D-12, `pull_f010`** — a machine map, and Phase 4's.
 
+## Melt-Temperature Integration in Unit 324: Why an Empty Evaporator Killed the Engine
+
+Both 324 stages advanced their melt temperature with an explicit Euler step over the liquid
+inventory alone:
+
+$$T' = T + \frac{\dot P\,\Delta t}{\max(M\,c_p,\ 10^{-6})}$$
+
+The floor is the defect. It exists to stop a division by zero, but what it actually does is convert
+a drained stage into an amplifier of gain $10^{6}$. The failure is not subtle:
+
+* a CCW loss trips the plant and the feed is cut;
+* 324F001 drains, so $M \to$ its floor;
+* one tick with the chest still above the melt temperature puts $Q\,\Delta t/10^{-6}$ into the step
+  and throws $T$ past $10^{10}$;
+* from there the sensible term $-\dot m\,c_{p,f}\,T$ dominates, alternates sign and **doubles every
+  tick** — the textbook explicit-Euler instability at $|1 - \lambda \Delta t| \gg 1$;
+* about 340 doublings later `cp_water_kjkgk` evaluates $T^3$ on a number above $5.6\times10^{102}$
+  and the tick dies with `OverflowError: Result too large`.
+
+An `OverflowError` inside a heat-capacity correlation looks like a property-range problem and is
+not one. Clamping `cp_water_kjkgk` would have hidden a diverging state behind a plausible-looking
+number, which is worse than the crash — the trainee would see a running plant with a fictional
+evaporator.
+
+### The fix is a better integration scheme, not a limiter
+
+The terms that make this ODE stiff are the ones that depend on the temperature being solved for:
+the feed sensible term, and the chest duty while it is still driving heat in. Treat those
+implicitly. Backward Euler on them, rearranged so the increment keeps its explicit numerator:
+
+$$\frac{M c_p}{\Delta t}(T' - T) = \dot P(T) - k_{cap}(T' - T)
+\qquad\Longrightarrow\qquad
+T' = T + \frac{\dot P\,\Delta t}{M c_p + k_{cap}\,\Delta t}$$
+
+$$k_{cap} = \frac{\dot m_{feed}}{3600}c_{p,feed} + \begin{cases} UA & Q > 0\\ 0 & Q = 0\end{cases}$$
+
+Three properties make this the right answer rather than a patch:
+
+* **Unconditionally stable** in both stiff terms. The amplification factor is
+  $Mc_p/(Mc_p + k_{cap}\Delta t) \in (0, 1]$ for any $\Delta t$, so the oscillation cannot grow.
+* **Correct in the limit it used to break.** As $M \to 0$ the step becomes
+  $T' \to T + \dot P/k_{cap}$, which is the algebraic solution — a vessel with no thermal inertia
+  whose outlet simply follows its inlet. That *is* the physics of an empty evaporator; the old form
+  asserted the opposite, that a vessel holding nothing could still integrate heat.
+* **Bit-exact at the design seed.** $\dot P$ is identically zero there by construction (the UA and
+  $\lambda$ anchors are back-solved for it), so $T' = T + 0$ regardless of the denominator. The
+  boot pin cannot move. This is why the increment form is used instead of the algebraically
+  equivalent $(Mc_pT/\Delta t + k_{cap}T_f + Q)/(Mc_p/\Delta t + k_{cap})$, which is correct in
+  exact arithmetic but relies on a cancellation that floating point does not deliver.
+
+The `max(..., 1e-6)` stays, but it is no longer load-bearing: the denominator is now bounded away
+from zero by the flow term whenever anything is moving, and the only state that still reaches the
+floor — no inventory and no flow — has $\dot P = 0$ as well.
+
+### The same shape exists at nine more integrators
+
+`grep` finds eleven `dt / max(M*cp, 1e-6)` steps in `main.py`. The two 324 stages are fixed here
+because they are where the crash was demonstrated; **323C003, 323F004, 323F010, 323D002, 328D003
+(both compartments), 328C003, 328D001 and 322C001 carry the identical construct** and the identical
+latent instability, reachable by whatever upset drains each of them. The transformation is the same
+one line and the same bit-exactness argument at each; what differs per vessel is only the
+heat-capacity rate that goes into $k_{cap}$. Listed in the handoff rather than swept, because each
+site's flow terms need reading before its denominator is changed.
+
 ## 322R001 Reactor Kinetics: Rate Laws, Not Load Multipliers (`backend/reactor.py`)
 
 Phase 3, report findings C-1 and C-2. **All of Phase 3 is now done: C-1, C-2, A-8, C-3, C-4; C-5 was found already conforming.**

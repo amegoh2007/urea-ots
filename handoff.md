@@ -246,17 +246,46 @@ feed cut"), dies:
 OverflowError: (34, 'Result too large')
 ```
 
-`T_C ** 3` can only overflow if `s.r324_e001_T` has run away to something astronomical, so the real
-defect is a **divergent temperature integrator on 324E001 once the plant is tripped and its feed is
-gone** -- the same shape as the `react_nc_ratio` runaway section 9 records (6.1e9 on a post-trip loop
-with the carbon gone), and it wants the same kind of answer: find why the state diverges, not a clamp
-on the property correlation. Clamping `cp_water_kjkgk` would hide a diverging state, which is worse
-than the crash.
-
 **Attribution: pre-existing.** Nothing in the Phase 2 remainder touches `urea_soln_cp` or the 324
 temperature integrator; it was simply unreachable while the transport crash stopped the chain one
-phase earlier. **Phases 3 and 4 have still never been exercised.** This is the productive next item
-in this area.
+phase earlier.
+
+### ...and the fifth is FIXED: the melt-temperature step is now semi-implicit
+
+Root-caused rather than clamped. Both 324 stages advanced their melt temperature with
+`T' = T + pwr*dt / max(M*cp, 1e-6)`, and the floor is the defect: it stops a division by zero and in
+doing so turns a DRAINED stage into an amplifier of gain 1e6. A CCW trip cuts the feed, 324F001
+drains, one tick with the chest still above the melt throws T past 1e10, and from there the sensible
+term -m.cp_f.T alternates sign and DOUBLES every tick until `cp_water_kjkgk` evaluates T^3 above
+5.6e102 and the tick dies. An `OverflowError` inside a heat-capacity correlation looks like a
+property-range problem and is not one -- clamping the correlation would have hidden a diverging
+state behind a plausible number, which is worse than the crash.
+
+The stiff terms are the ones that depend on the temperature being solved for, so they are now
+treated implicitly:
+
+    (M.cp/dt)(T' - T) = pwr(T) - k_cap.(T' - T)   ->   T' = T + pwr.dt / (M.cp + k_cap.dt)
+    k_cap = m_feed/3600 * cp_feed  +  UA  (the latter only while Q > 0)
+
+Unconditionally stable (the amplification factor is `M.cp/(M.cp + k_cap.dt)`, always in (0,1]);
+correct in the limit that used to break it (as M -> 0 the step becomes the algebraic
+`T' = T + pwr/k_cap`, which is an empty vessel's outlet following its inlet); and **bit-exact at the
+design seed**, because `pwr` is identically 0 there so `T' = T + 0` whatever the denominator is.
+That last point is why the INCREMENT form is used rather than the algebraically equivalent
+`(M.cp.T/dt + k_cap.T_f + Q)/(M.cp/dt + k_cap)` -- the latter is right in exact arithmetic but leans
+on a cancellation floating point does not deliver, and the boot pin asserts the design point to the
+last bit. Full derivation in the As-Built under *Melt-Temperature Integration in Unit 324*.
+
+### The same construct sits at NINE more integrators -- OPEN
+
+`grep -n "dt / max(.*cp.*1e-6" backend/main.py` finds eleven. The two 324 stages are fixed because
+that is where the crash was demonstrated. **323C003, 323F004, 323F010, 323D002, 328D003 (both
+compartments), 328C003, 328D001 and 322C001 carry the identical construct** and the identical latent
+instability, reachable by whatever upset drains each of them. The transformation is the same one
+line and the same bit-exactness argument at each; what differs per vessel is only the heat-capacity
+rate that goes into `k_cap`, which is why they are listed rather than swept -- each site's flow
+terms need reading before its denominator is changed. This is a contained, mechanical, high-value
+next task.
 
 **NOT re-run in this pass, and they should be**:
 `test_equation_audit_td014.py`, `test_ccw_loss_chain.py`, `test_transient_coldstart.py`,

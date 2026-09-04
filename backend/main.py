@@ -8335,7 +8335,23 @@ def step_sim(dt: float) -> dict:
         v1_m = clamp(feed1_m - urea1_in / max(w_eq1, 1e-6), 0.0, feed1_m)
         pwr1 = (feed1_m/3600.0 * cp_feed1 * (T_feed1 - t1_solved)
                 + Q_e001_kw - v1_m/3600.0 * R324_LAM_V1)
-        t1_next = t1_old + pwr1 * dt / max(M_f001_pre * cp_hold1, 1e-6)
+        # STIFFNESS: the melt-temperature step is SEMI-IMPLICIT in the terms that depend on the
+        # temperature it is solving for.  Explicit Euler over `M.cp` alone divides by an inventory
+        # that goes to ZERO when the stage drains, and `max(..., 1e-6)` then turns the evaporator
+        # into an amplifier of gain 1e6: one tick with the feed cut and the separator empty threw
+        # the temperature past 1e10, and from there the sensible term -m.cp_f.T alternated sign and
+        # DOUBLED every tick until `cp_water_kjkgk` overflowed on T^3 and killed the engine.  That
+        # is a numerical failure, not a physical one -- an evaporator holding no liquid has no
+        # thermal inertia, so its outlet simply follows its inlet, which is exactly the limit the
+        # form below takes.  Backward Euler on the T-dependent terms, rearranged so the increment
+        # keeps its explicit numerator:
+        #     (M.cp/dt)(T' - T) = pwr(T) - k_cap.(T' - T)   ->   T' = T + pwr.dt/(M.cp + k_cap.dt)
+        # k_cap is the heat-capacity rate that resists the change: the feed stream, plus UA while
+        # the chest is still driving heat in.  Unconditionally stable in both, and BIT-EXACT at the
+        # design seed -- pwr is identically 0 there, so T' == T whatever the denominator is.
+        k_cap1 = (feed1_m / 3600.0 * cp_feed1
+                  + (R324_E001_UA_KW if Q_e001_kw > 0.0 else 0.0))
+        t1_next = t1_old + pwr1 * dt / max(M_f001_pre * cp_hold1 + k_cap1 * dt, 1e-6)
         m703_fp = (VACUUM_CONDENSERS["324E002"]["inlet_kgh"]
                    + (m_evap - R323_MEVAP_DES) + (v1_m - R324_V1_DES)
                    + (fa202_m - R324_F001_FA_DES))
@@ -8451,7 +8467,10 @@ def step_sim(dt: float) -> dict:
         v2_m = clamp(feed2_m - urea2_in / max(w_eq2, 1e-6), 0.0, feed2_m)
         pwr2 = (feed2_m/3600.0 * cp_feed2 * (s.r324_e001_T - t2_solved)
                 + Q_e003_kw - v2_m/3600.0 * R324_LAM_V2)
-        t2_next = t2_old + pwr2 * dt / max(M_f003_pre * cp_hold2, 1e-6)
+        # Same semi-implicit step as Stage 1 above, and for the same reason.
+        k_cap2 = (feed2_m / 3600.0 * cp_feed2
+                  + (R324_E003_UA_KW if Q_e003_kw > 0.0 else 0.0))
+        t2_next = t2_old + pwr2 * dt / max(M_f003_pre * cp_hold2 + k_cap2 * dt, 1e-6)
         m709_fp = (VACUUM_CONDENSERS["324E005"]["inlet_kgh"]
                    + (v2_m - R324_V2_DES) + (fa203_m - R324_F003_FA_DES))
         nc005_fp = max(584.0 - R324_F003_FA_DES + fa203_m, 0.0)
