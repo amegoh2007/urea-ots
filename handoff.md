@@ -148,19 +148,32 @@ Both are one-line fixes and would take two reds off the board without touching t
 but with no vessel-pressure term, so a vacuum break would not change the drain rate. Wiring it to
 `hydraulics.gravity_outflow_kgh` needs the leg height, which no source in the repository gives.
 
-## 1f. Phase 3 — kinetics, half done
+## 1f. Phase 3 — kinetics; A-8 and C-5 remain
 
-**C-1 and C-2 are CLOSED**: 322R001 runs on a two-step mechanism with Arrhenius kinetics marched over
-the column's own residence-time distribution, and biuret is second-order in urea. Design point exact
-to 3.6e-12, suite clean against baseline. Full write-up in the As-Built reference.
+**C-1, C-2, C-3 and C-4 are CLOSED.** 322R001 runs on a two-step mechanism with Arrhenius kinetics
+marched over the column's own residence-time distribution, and biuret is second-order in urea (design
+point exact to 3.6e-12). 322E001's hydrolysis and biuret extents are on the Inoue-Otsuka second-order
+group and a second-order Arrhenius law, both integrated over the live wetted volume (design point
+exact). Full write-ups in the As-Built reference.
+
+Regression after C-3/C-4, 13 files: **7 failed / 149 passed**, and all 7 are the documented
+pre-existing set (4 `test_equation_audit_td014.py`, 1 `test_equation_audit_322e002.py`,
+2 `test_equation_audit_desorption.py`). No new failures.
 
 **Still open, and each needs real work rather than rewiring:**
 
 | finding | site | note |
 |---|---|---|
 | A-8 | `REACT_DT_COL_DES` (13.0 C prescribed column rise), `reactor.node_dTdt`, the 4-node integration in `step_sim` | the exotherm still enters as an IMPOSED dT scaled by conversion, not as an energy quantity. The replacement is the node energy balance with dH_carb = -117 and dH_dehyd = +15.5 kJ/mol -- **both already in-repo** (`STRIP_DH_CARB_JMOL`, `STRIP_DH_HYD_JMOL`) -- and the per-node extents `urea_extent_pfr` now returns as its second value, which is exactly the `r_r,n` the balance needs. The pieces are in place; the risk is that the reactor temperature stops being anchored at 183 C and has to FIND it, so the design pin needs care |
-| C-3 | `xi_hyd_raw = STRIP_XI_HYD_DES * eta_T` (322E001 stripper) | mostly a REWIRING, not new physics: `urea_hydrolysis_k_m3_kmol_h` (Inoue & Otsuka Eq. 6) and the second-order PFR integral `hydrolysis_x_328c003` already exist and are already used by 328C003. The stripper needs the same treatment with its own tube volume and live holdup |
-| C-4 / C-5 | downstream biuret and desorption rates still on anchored design inputs | `sol_biuret_xi` uses the right Arrhenius FORM but an anchored design extent; converting it to `A exp(-Ea/RT) C_urea^2 V_l` is the same change just made in the reactor |
+| C-5 | `sol_biuret_xi` (downstream/desorption biuret) | uses the right Arrhenius FORM but an anchored design extent and no holdup term. The change is the one already made twice — second order in urea concentration, integrated over the vessel's live liquid volume. Needs the downstream vessels' geometry, which the 324/328 datasheets should carry |
+
+**A measured finding worth not re-deriving:** `STRIP_XI_HYD_DES = 88.1 kmol/h` cannot be produced by
+a urea-hydrolysis rate law. Inoue-Otsuka at the stripper's own design state gives 12.02 kmol/h over
+the whole tube bundle flooded and 17.48 kmol/h over bundle + sump — it would need a liquid fraction
+of 7.33 against a physical maximum of 1. And 88.1/1302.6 is 6.8 % of the urea feed destroyed in 97 s,
+where a real CO2 stripper loses well under 1 %. That constant almost certainly lumps carbamate
+decomposition. C-3 therefore anchors the extent and predicts the DEPARTURE; anyone tempted to "finish
+the job" by back-solving a rate constant to reach 88.1 would be fitting to the wrong reaction.
 
 **Watch out for one thing when doing A-8:** the reactor kinetics and the thermal profile are mutually
 coupled (T -> rate -> exotherm -> T). The kinetics currently read `s.react_T_node` from the PREVIOUS

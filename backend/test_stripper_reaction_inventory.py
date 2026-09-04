@@ -79,13 +79,22 @@ def test_hydrolysis_is_limited_by_each_reagent(feed, expected_hydrolysis):
 
 
 def test_biuret_is_limited_by_urea_remaining_after_hydrolysis():
-    # The unconstrained Arrhenius extent is about 0.309 kmol/h here, but
-    # hydrolysis leaves only 0.005 kmol/h urea for the 2:1 biuret reaction.
-    feed = _feed(Urea=92.51, H2O=200.0)
+    # PHASE 3 (report C-3).  The old feed here was Urea=92.51 / H2O=200 with the assertions
+    # xi_hyd == 92.505 and xi_biu == 0.0025.  Those numbers were not invariants: they came out of
+    # `xi_hyd_raw = STRIP_XI_HYD_DES * eta_T` landing at 88.1 x 1.0500 = 92.505, which happened to
+    # sit 0.005 kmol/h below the urea in the feed.  With hydrolysis on the Inoue-Otsuka second-order
+    # law that synthetic feed is simply urea-limited (xi_hyd = 92.51, nothing left for biuret), so
+    # the old numbers no longer exercise the clamp this test exists for.
+    #
+    # The INVARIANT is unchanged and is what is asserted: biuret cannot consume more urea than
+    # hydrolysis leaves, because 2 Urea -> Biuret + NH3.  This feed is water-limited (H2O = 200
+    # caps hydrolysis at 200), leaving exactly 0.5 kmol/h of urea, and the unconstrained Arrhenius
+    # extent is far above that -- so the 2:1 clamp binds, which is the case worth testing.
+    feed = _feed(Urea=200.5, H2O=200.0)
     result = _run(feed)
 
-    assert result["xi_hyd"] == pytest.approx(92.505)
-    assert result["xi_biu"] == pytest.approx(0.0025)
+    assert result["xi_hyd"] == pytest.approx(200.0)     # water-limited
+    assert result["xi_biu"] == pytest.approx(0.25)      # == 0.5 x the 0.5 kmol/h urea remaining
     assert math.isclose(
         2.0 * result["xi_biu"],
         feed["Urea"] - result["xi_hyd"],

@@ -675,6 +675,51 @@ STRIP_SUMP_AREA_M2  = 4.638       # m2, pi/4 * 2.43^2 bottom-head cross-section
 STRIP_LEVEL_SPAN_M  = 1.5         # m, liquid band for 0..100 % (LT-322501 span)
 STRIP_RHO_BOTTOM    = 1134.64     # kg/m3, bottom-solution density (LV inlet, 172 C)
 STRIP_LEVEL_SP_DES  = 50.0        # %, design level setpoint (LIC-322501)
+
+# --- PHASE 3 (report C-3 / C-4): real rate laws for the 322E001 reactions ----------------------
+# The tube bundle's own geometry, from the DDS lines already quoted above.  This is the volume the
+# second-order laws below integrate over, and it scales with the LIVE holdup rather than being a
+# constant, so a level or throughput excursion moves the extent.
+STRIP_V_TUBES_M3   = STRIP_N_TUBES * math.pi * 0.25 * STRIP_TUBE_ID_M ** 2 * STRIP_TUBE_L_EFF_M
+STRIP_V_SUMP_M3    = STRIP_SUMP_AREA_M2 * STRIP_LEVEL_SPAN_M       # 0 -> 100 % of LT-322501
+#
+# WHY HYDROLYSIS IS ANCHORED AND NOT PREDICTED ABSOLUTELY -- this was measured, not assumed.
+# `urea_hydrolysis_k_m3_kmol_h` is Inoue & Otsuka (1973) Eq. (6), the same law 328C003 already runs
+# on.  Evaluated at the stripper's own design state it CANNOT reach STRIP_XI_HYD_DES:
+#
+#     tube bundle 7.658 m3, feed 283.7 m3/h -> 97.2 s full-bore residence (a falling FILM is less)
+#     k(172 C) = 0.043482 m3/(kmol h),  C_urea 4.592,  C_H2O 7.860 kmol/m3
+#     xi over the WHOLE bundle flooded            = 12.02 kmol/h
+#     xi over bundle + bottom sump, both flooded  = 17.48 kmol/h
+#     STRIP_XI_HYD_DES                            = 88.10 kmol/h
+#
+# i.e. it needs a liquid fraction of 7.33 where the physical maximum is 1, and even the entire
+# vessel full of liquid delivers a fifth of it.  88.1 kmol/h is 6.8 % of the urea feed destroyed in
+# 97 seconds; a real CO2 stripper loses well under 1 %.  The constant is therefore NOT urea
+# hydrolysis alone -- it almost certainly lumps carbamate decomposition, which is what the stripper
+# is actually for -- and predicting it from a hydrolysis rate law would be fitting a rate constant
+# to a quantity that is not that reaction.  So the PFD extent stays the anchor (CLAUDE.md strict
+# source) and Inoue-Otsuka supplies the DEPARTURE: how the extent moves with temperature,
+# concentration and holdup.  That is what `eta_T` -- a product of fabricated ratio penalties -- was
+# standing in for, and the departure is the part that was actually wrong.
+STRIP_HYD_T_DES_C  = STRIP_T_BOTTOM_DES_C
+_strip_vdot_des    = STRIP_FEED_DES_KGH / STRIP_RHO_L_IN_DES
+_strip_vliq_des    = STRIP_V_TUBES_M3 + STRIP_V_SUMP_M3 * (STRIP_LEVEL_SP_DES / 100.0)
+
+
+def strip_hyd_rate_group(t_c: float, urea_kmolh: float, h2o_kmolh: float,
+                         vdot_m3h: float, v_liq_m3: float) -> float:
+    """Second-order Inoue-Otsuka hydrolysis group  k(T) . C_urea . C_H2O . V_liq  [kmol/h].
+
+    Used as a RATIO against its own design value, so the units and any common factor cancel and
+    what survives is the temperature, concentration and holdup dependence."""
+    if vdot_m3h <= 1e-9 or v_liq_m3 <= 0.0:
+        return 0.0
+    c_u = max(urea_kmolh, 0.0) / vdot_m3h
+    c_w = max(h2o_kmolh, 0.0) / vdot_m3h
+    return urea_hydrolysis_k_m3_kmol_h(t_c) * c_u * c_w * v_liq_m3
+
+
 # Direct-acting PI on the bottom-sump level.  Level is an INTEGRATING process, so the loop
 # must be proportional-dominant (pure-I -> 2 integrators -> limit cycle); velocity form.
 LIC_322501_KC       = 2.5         # %OP per %level (proportional gain)
@@ -2703,6 +2748,12 @@ def hydrolysis_x_328c003(T_c: float, m_746: float,
 
 
 R328_C003_X_DES      = hydrolysis_x_328c003(R328_C003_T, R328_C003_M746_DES)
+
+#  PHASE 3 (C-3): evaluated HERE rather than beside its own constants, because it needs
+#  `urea_hydrolysis_k_m3_kmol_h` (defined just above) as well as the design feed vector.
+STRIP_HYD_GROUP_DES = strip_hyd_rate_group(
+    STRIP_HYD_T_DES_C, _STRIP_FEED_DES["Urea"], _STRIP_FEED_DES["H2O"],
+    _strip_vdot_des, _strip_vliq_des)
 R328_C003_XI_DES     = R328_C003_UREA_DES / MW_SOL["Urea"] * R328_C003_X_DES
 R328_HYD_GAS_MW      = 2.0 * MW_SOL["NH3"] + MW_SOL["CO2"]              # 78.0706 kg gas per kmol urea
 R328_C003_GASHYD_DES = R328_C003_XI_DES * R328_HYD_GAS_MW
@@ -3228,7 +3279,8 @@ def _f_flow(T: float, T_cryst: float, dT_mush: float = 5.0) -> float:
 
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
                      overflow_kmolh: dict = None, L_feed: float = None,
-                     W_feed: float = None, T_feed_C: float = None) -> dict:
+                     W_feed: float = None, T_feed_C: float = None,
+                     strip_level_pct: float = STRIP_LEVEL_SP_DES) -> dict:
     """HP Stripper 322E001 reduced steady-state model.
     Top liquid feed = 322R001 overflow (boundary constant, stream 207).
     Bottom strip gas = live CO2 feed (co2_feed_th, t/h).  Shell = condensing MP steam.
@@ -3315,18 +3367,37 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     L_strip = (feed["NH3"] / feed["CO2"]) if feed["CO2"] else STRIP_L0   # stripper-feed N/C (diag)
     W_strip = (feed["H2O"] / feed["CO2"]) if feed["CO2"] else STRIP_W0   # stripper-feed H/C (diag)
 
-    # 3. reactions: hydrolysis scales with penalized eta_T; biuret = Arrhenius k0 exp(-Ea/RT)*[Urea].
+    # 3. reactions: both now on real rate laws (Phase 3, C-3/C-4) -- see the block below.  eta_T is
+    #    retained as a REPORTED strip-efficiency diagnostic only; it no longer drives any extent.
     T_bot_C = min(STRIP_T_BOTTOM_DES_C + 0.7 * dTs + dT_bot + dT_strip, T_steam_C) # TT-322004 (steam-heat + G/L strip-cool, ≤ steam sat; dT_bot flood-anchored to reactor T)
     T_bot_K = T_bot_C + 273.15
     # TT-322013 overhead: hoisted out of the return dict because the enthalpy balance below needs it.
     T_top_C = min(STRIP_T_TOPGAS_DES_C + 0.6 * dTs
                   + STRIP_T_TOP_LOAD_K * dT_bot + dT_strip, T_steam_C)
-    xi_hyd_raw = STRIP_XI_HYD_DES * eta_T
+    # PHASE 3, report C-3.  Was `STRIP_XI_HYD_DES * eta_T`: the design extent times a dimensionless
+    # efficiency built from fabricated N/C and H/C ratio penalties, with no rate constant, no
+    # residence time and no water concentration anywhere in it.  Now the licensor's extent times the
+    # DEPARTURE of the Inoue & Otsuka second-order group -- k(T).C_urea.C_H2O.V_liq -- against its own
+    # design value.  See the note at STRIP_V_TUBES_M3 for why the extent stays anchored rather than
+    # being predicted outright: the rate law cannot reach 88.1 kmol/h by a factor of five even with
+    # the whole vessel flooded, so that constant is not urea hydrolysis alone.
+    # V_liq tracks the LIVE sump level, so the holdup term is a real state and not a constant.
+    _strip_vdot = max(m_feed_kgh / STRIP_RHO_L_IN_DES, 1e-9)
+    _strip_vliq = STRIP_V_TUBES_M3 + STRIP_V_SUMP_M3 * clamp(strip_level_pct / 100.0, 0.0, 1.0)
+    _hyd_group = strip_hyd_rate_group(T_bot_C, feed["Urea"], feed["H2O"], _strip_vdot, _strip_vliq)
+    xi_hyd_raw = STRIP_XI_HYD_DES * (_hyd_group / STRIP_HYD_GROUP_DES
+                                     if STRIP_HYD_GROUP_DES > 0.0 else 1.0)
     xi_hyd = max(min(xi_hyd_raw, feed["Urea"], feed["H2O"]), 0.0)
     urea_after_hyd = max(feed["Urea"] - xi_hyd, 0.0)
+    # PHASE 3, report C-4.  The Arrhenius FORM was already right, but the concentration term was
+    # FIRST order in urea (a bare feed ratio) where biuret formation is 2 Urea -> Biuret + NH3, and
+    # there was no holdup term at all.  Second order now, and integrated over the same live liquid
+    # volume, so a deep turndown -- more urea-rich melt sitting longer -- raises it the way it does
+    # in the reactor.
     xi_biu_raw = (STRIP_XI_BIU_DES
                   * math.exp((STRIP_BIU_EA / STRIP_R_GAS_J) * (1.0 / STRIP_T_BIU_DES_K - 1.0 / T_bot_K))
-                  * (feed["Urea"] / STRIP_UREA0))                       # 0.667 at design (ratio=1)
+                  * (feed["Urea"] / STRIP_UREA0) ** 2
+                  * (_strip_vdot_des / _strip_vdot) * (_strip_vliq / _strip_vliq_des))
     xi_biu = max(min(xi_biu_raw, 0.5 * urea_after_hyd), 0.0)
     avail = dict(feed)
     avail["Urea"]   -= (xi_hyd + 2.0 * xi_biu)
@@ -3355,11 +3426,11 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # Feed-load (flood) choke g_T<1 CUTS the split -- steam-limited stripping leaves the volatiles in
     # the BOTTOMS (NH3 slip to LP via LV-322501), it does NOT lift them overhead.  min(g_T,1) keeps the
     # feed-lean branch (g_T>1, already rewarded through eta_T) and the design point (g_T=1) bit-exact.
-    # g_flood multiplies the SPLIT only, never eta_T.  eta_T drives xi_hyd, and flooding does not
-    # suppress hydrolysis -- Brouwer is explicit that a flooded tube's liquid residence time INCREASES
-    # ("stagnation or upward dragging of the film"), so hydrolysis and biuret go UP, not down.  That
-    # rise is already carried, without a new term: dT_flood raises T_bot, and xi_biu is Arrhenius in
-    # T_bot_K.  Folding g_flood into eta_T would have cut hydrolysis, i.e. the wrong sign.
+    # g_flood multiplies the SPLIT only.  Flooding does not suppress hydrolysis -- Brouwer is explicit
+    # that a flooded tube's liquid residence time INCREASES ("stagnation or upward dragging of the
+    # film"), so hydrolysis and biuret go UP, not down.  Since C-3 that rise is carried EXPLICITLY:
+    # V_liq below tracks the live sump level, and dT_flood raises T_bot into the Arrhenius k(T).
+    # Folding g_flood into the reaction extents would cut hydrolysis, i.e. the wrong sign.
     mod = clamp(eta_T_steam * eta_co2 * eta_P, 0.0, 1.12) * min(g_T, 1.0) * g_flood
     slip = max(1.0 - g_NC, 0.0) + max(1.0 - g_HC, 0.0)   # composition (N/C, H/C) breakthrough only
     top = {}; bot = {}
@@ -6098,7 +6169,8 @@ def step_sim(dt: float) -> dict:
     strip = stripper_322e001(F_CO2_syn_th, T_steam_live, P_strip_live,
                              overflow_kmolh=s.react_overflow_kmolh,
                              L_feed=s.react_L_feed, W_feed=s.react_W_feed,
-                             T_feed_C=T_feed_live)
+                             T_feed_C=T_feed_live,
+                             strip_level_pct=s.strip_level)   # PHASE 3 C-3: live holdup, not a constant
 
     # LIC-322501 bottom-solution level control, DIRECT-acting on the FC LV-322501:
     #   level^ -> op^ -> air-to-open valve opens -> drain^ -> level v  (neg. feedback).

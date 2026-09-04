@@ -717,7 +717,7 @@ Both exclusions are pinned by tests, so a later edit cannot quietly "finish the 
 
 ## 322R001 Reactor Kinetics: Rate Laws, Not Load Multipliers (`backend/reactor.py`)
 
-Phase 3, report findings C-1 and C-2. **C-1 and C-2 are done; A-8 and C-3/C-4/C-5 are not started.**
+Phase 3, report findings C-1 and C-2. **C-1, C-2, C-3 and C-4 are done; A-8 and C-5 are not.**
 
 ### What this replaced
 
@@ -842,6 +842,97 @@ and not pre-existing rot:
   higher conversion consumes more ammonia (overflow −6.0 %, off-gas −7.5 % at 80 % load).
 * overflow N/C **invariant** to throughput scaling to 1e-6 — it now falls 3.000 → 2.968 at 70 % load,
   a real AT-322701 behaviour.
+
+## 322E001 Stripper Reactions: Inoue-Otsuka, and Why the Extent Stays Anchored
+
+Phase 3, report findings C-3 and C-4.
+
+### What this replaced
+
+```python
+xi_hyd_raw = STRIP_XI_HYD_DES * eta_T                       # eta_T = eta_steam . g_NC . g_HC . g_T
+xi_biu_raw = STRIP_XI_BIU_DES * exp(Ea/R (1/T_des - 1/T)) * (Urea/UREA0)   # FIRST order, no holdup
+```
+
+`eta_T` is a product of a steam-temperature ratio and two fabricated penalties on the reactor-feed
+N/C and H/C ratios (`STRIP_ETA_KN = 1.50`, `STRIP_ETA_KW = 1.50`, both dimensionless slopes with no
+provenance). It contains **no rate constant, no residence time, and no water concentration** — and
+water is the other reactant. Biuret carried the right Arrhenius form but was **first** order in urea
+where `2 Urea -> Biuret + NH3` is second, and had no holdup term at all.
+
+### The measurement that decided the form
+
+`urea_hydrolysis_k_m3_kmol_h` is Inoue & Otsuka (1973) Eq. (6), $\ln k = 21.8 - 11100/T$ — the same
+law 328C003 already runs on. Evaluated at the stripper's **own** design state it cannot reach
+`STRIP_XI_HYD_DES`, and not marginally:
+
+| | |
+|---|---|
+| tube bundle, from the DDS lines | 7.658 m³ |
+| feed 283.7 m³/h -> full-bore residence | 97.2 s (a falling *film* is less) |
+| k(172 °C) | 0.043482 m³/(kmol·h) |
+| C_urea, C_H₂O | 4.592, 7.860 kmol/m³ |
+| ξ over the **whole bundle flooded** | 12.02 kmol/h |
+| ξ over bundle **+ sump, both flooded** | 17.48 kmol/h |
+| `STRIP_XI_HYD_DES` | **88.10 kmol/h** |
+
+It needs a liquid fraction of **7.33** where the physical maximum is 1, and the entire vessel full of
+liquid still delivers a fifth of it. Independently: 88.1 / 1302.6 is **6.8 % of the urea feed
+destroyed in 97 seconds**, where a real CO₂ stripper loses well under 1 %.
+
+So `STRIP_XI_HYD_DES` is **not urea hydrolysis alone**. It almost certainly lumps carbamate
+decomposition, which is what the stripper is actually for. Predicting it from a hydrolysis rate law
+would mean fitting a rate constant to a quantity that is not that reaction — a heuristic wearing a
+citation. The PFD extent therefore stays the anchor (CLAUDE.md strict source) and Inoue-Otsuka
+supplies the **departure**:
+
+$$\xi_{hyd}=\xi_{hyd,des}\cdot\frac{k(T)\,C_{urea}C_{H_2O}V_{liq}}{\left[k(T)\,C_{urea}C_{H_2O}V_{liq}\right]_{des}},
+\qquad V_{liq}=V_{tubes}+V_{sump}\cdot\frac{L}{100}$$
+
+with $C_i = \dot n_i/\dot V$ from the live feed and the live volumetric flow. The departure is the
+part `eta_T` was getting wrong; the anchor was never in dispute.
+
+Biuret takes the same volume and the same live throughput, second order:
+
+$$\xi_{biu}=\xi_{biu,des}\,e^{\frac{E_a}{R}\left(\frac{1}{T_{des}}-\frac{1}{T}\right)}
+\left(\frac{C_{urea}}{C_{urea,des}}\right)^{2}\frac{V_{liq}}{V_{liq,des}}$$
+
+`V_tubes` = 7.658 m³ from the tube count, bore and effective length already quoted above;
+`V_sump` = 6.957 m³ from `STRIP_SUMP_AREA_M2 x STRIP_LEVEL_SPAN_M`, i.e. 0 -> 100 % of LT-322501.
+
+### Measured
+
+Design point exact — ξ_hyd = 88.100000000, ξ_biu = 0.667000000 — and the engine holds p_syn 140.7000,
+T_ovf 183.0000, level 80.0000, T_f010 99.0000.
+
+What `eta_T` could not represent:
+
+| response | before | after |
+|---|---|---|
+| steam temperature | ratio penalties, no rate constant | ξ_hyd 55.4 -> 177.5 over T_steam 200 -> 230 °C (T_bot 163.9 -> 184.9 °C) |
+| sump holdup | **no term at all** | ξ_hyd 71.6 -> 115.6 over level 20 -> 100 % |
+| water concentration | absent | second order, C_urea·C_H₂O |
+| biuret order in urea | **first** | **second** — 2 Urea -> Biuret + NH3 |
+| biuret holdup | absent | ξ_biu 0.542 -> 0.875 over level 20 -> 100 % |
+
+The flooded-tube argument the split logic already carried is now represented rather than asserted:
+Brouwer's "stagnation or upward dragging of the film" raises residence time, and `V_liq` tracking the
+live level is what makes hydrolysis and biuret rise under flooding instead of merely being described
+as doing so.
+
+`eta_T` survives as a **reported** strip-efficiency diagnostic on the tick packet. It drives no
+extent; the split fractions use `eta_T_steam . eta_co2 . eta_P . min(g_T,1) . g_flood`, which is a
+separate quantity and out of C-3's scope.
+
+### One test assertion rewritten, and why
+
+`test_biuret_is_limited_by_urea_remaining_after_hydrolysis` asserted `xi_hyd == 92.505` on a feed of
+`Urea = 92.51, H2O = 200.0`. That number was not an invariant: it is `88.1 x eta_T` with
+`eta_T = 1.0500`, landing 0.005 below the feed urea by coincidence, and the test then checked the
+urea clamp. Under a rate law that feed is simply urea-limited, so the assertion stopped exercising
+the clamp it exists for. The feed moved to `Urea = 200.5, H2O = 200.0`, where the test asserts
+`xi_hyd == 200.0` (**water**-limited — a bound `eta_T` never had) and `xi_biu == 0.25`, i.e. half the
+0.5 kmol/h of urea left standing. The invariant is preserved; the number was not re-tuned to match.
 
 ## Consequence Transport Lag
 
