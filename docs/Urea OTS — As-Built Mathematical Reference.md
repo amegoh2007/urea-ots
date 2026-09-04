@@ -617,6 +617,54 @@ Aperiodic and bounded, with no trend across 8.3 h of sim time and the tightest w
 moves at most 0.005 bar on a 0.46 bar node (1 %). Product urea sits in 80.064–80.075 % throughout —
 unchanged by Phase 2, against 80.085 % before it.
 
+### Unit 328, what changed
+
+| finding | site | was | is |
+|---|---|---|---|
+| A-6 | 328C002 vapour space | shared `0.02 bar/(kg/s)` | $RT/(V_v\overline M)$ on a real 12.849 m³ shell — **8.5×** |
+| A-6 | 328C004 vapour space | shared `0.02 bar/(kg/s)` | same, 15.990 m³ shell — **6.7×** |
+| — | `dP_737`, `dP_750_live` | assigned twice, lagged form dead | dead stores removed, no number changed |
+
+Geometry from the vessel datasheet narratives: 328C002 ID 1250 × 10 470 mm, 328C004 ID 1250 ×
+13 030 mm. Both desorbers carry only a tray inventory — 13.2 % and 9.7 % liquid-full at design — so
+most of the shell is vapour and the real coefficient is far above the constant they shared with a
+62 m³ hydrolyser and a level tank.
+
+Both are **self-regulating**, which is why they were safe to stiffen: each overhead rises with
+$\sqrt{\Delta P}$ against the next node, so $\partial\dot m/\partial P > 0$ and the node stays
+first-order. 328C002 pole −0.176 /s (discrete 0.956), 328C004 −0.632 /s (discrete 0.842).
+
+Measured over 24 000 s, the envelopes **decay** rather than settling into a cycle:
+
+| window | P_c002 span | P_c004 span | T_c002 span (°C) | T_c004 span (°C) |
+|---|---|---|---|---|
+| 3 000 s | 0.0540 | 0.0542 | 0.540 | 0.495 |
+| 9 000 s | 0.0333 | 0.0311 | 0.334 | 0.284 |
+| 15 000 s | 0.0102 | 0.0087 | 0.102 | 0.079 |
+| 24 000 s | 0.0102 | 0.0081 | 0.102 | 0.074 |
+
+Settled: P_c002 3.5021 (design 3.500), P_c004 3.7034 (3.700), T_c002 139.021, T_c004 143.031, with
+unit 323 unmoved (urea 80.075 %, TT-323012 99.0007).
+
+### The two unit-328 vessels that were NOT wired
+
+**328D001 — a source conflict, not a gap.** `References/328E004 328D001 328P002 Datasheets.md` gives
+inside diameter 1684 mm and tangent-to-tangent 1950 mm, *"which yields a nominal internal liquid
+capacity of 19 cubic meters"*. But $\pi/4 \times 1.684^2 \times 1.950 = 4.343$ m³ — the two figures in
+one sentence differ by 4.4×. The engine's own `R328_D001_M_DES` is 10 554 kg ≈ 10.6 m³, matching
+neither and standing at **243 % of the computed shell**. On the computed volume $V_v$ would sit on
+its 2 % floor and $K$ would be ≈ 17.8 bar/(kg/s), **355×** the present constant and far outside the
+unit circle at a 0.25 s tick. It keeps `R328_D001_P_KP` until the real dimensions are established.
+
+**328C003 — stiffening it is a controller retune in disguise.** Unlike its two neighbours the
+hydrolyser's overhead is `m_748 = M748_DES · (pic203b_op / op_des)`: a pressure-*controlled* valve, so
+$\partial \dot m_{748}/\partial P = 0$ directly and every bit of the node's negative feedback runs
+through PIC-328203. A 4.3× stiffer vessel multiplies that loop's gain by 4.3×. (The engine seeds
+PIC-328203 at Kc = 1.5; Appendix A lists 4.0 — one of the documented plant-vs-simulator
+divergences.) Deferred until the open-loop gain is measured, exactly as TIC-323012 was.
+
+Both exclusions are pinned by tests, so a later edit cannot quietly "finish the job".
+
 ### What is NOT wired, and why
 
 * **A-7, the 323F004 pressure state.** Still the algebraic `design + 0.45 bar per unit relative

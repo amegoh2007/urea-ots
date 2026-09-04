@@ -1275,6 +1275,27 @@ R328_C004_H_NLL  = 0.920                      # m
 # For 328C002 the two differ (PFD 743 = 933.0 @ 139 C, datasheet = 944.0 @ 138 C); the datasheet
 # figure is the conservative MECHANICAL design value used for weights and hydrostatic head, so the
 # process model takes the PFD's.
+# --- PHASE 2 (report A-6): unit-328 column geometry, from the vessel datasheet narratives in
+# References/328P003, 328P006, 328P007, 328C002. 328C003. 328C004, 328E007, 328E001 Datasheets.md.
+# Real shells, so each vessel gets its OWN RT/(V_v.Mbar) instead of the 0.02 bar/(kg/s) that eight
+# vessels shared.  Measured at the design holdup: 328C002 is 13.2 % liquid-full and 328C004 9.7 %,
+# so their vapour spaces are large and their coefficients land 8.5x and 6.7x the shared constant.
+R328_C002_ID_M     = 1.250                    # m, 328C002 inside diameter (1250 mm)
+R328_C002_SHELL_M  = 10.470                   # m, cylindrical shell height (10470 mm)
+R328_C002_VOL_M3   = math.pi * 0.25 * R328_C002_ID_M ** 2 * R328_C002_SHELL_M      # 12.849 m3
+R328_C004_ID_M     = 1.250                    # m, 328C004 inside diameter (1250 mm)
+R328_C004_SHELL_M  = 13.030                   # m, cylindrical shell height (13030 mm)
+R328_C004_VOL_M3   = math.pi * 0.25 * R328_C004_ID_M ** 2 * R328_C004_SHELL_M      # 15.990 m3
+#
+#  328D001 IS DELIBERATELY NOT GIVEN A GEOMETRY, and the reason is a source conflict rather than a
+#  gap.  References/328E004 328D001 328P002 Datasheets.md gives inside diameter 1684 mm and a
+#  tangent-to-tangent height of 1950 mm, "which yields a nominal internal liquid capacity of 19 cubic
+#  meters" -- but pi/4 x 1.684^2 x 1.950 is 4.343 m3, not 19.  The two numbers in one sentence differ
+#  by 4.4x, and the engine's own R328_D001_M_DES (10 554 kg, about 10.6 m3) matches NEITHER: it is
+#  243 % of the computed shell.  Wiring A-6 on the computed volume would put V_v on its 2 % floor and
+#  give a coefficient of ~17.8 bar/(kg/s), 355x the present constant and far outside the unit circle
+#  at a 0.25 s tick.  So 328D001 keeps R328_D001_P_KP until the vessel's real dimensions are
+#  established.  See handoff.
 R328_C002_RHO    = 933.0                      # kg/m3, PFD stream 743 @ 139 C
 R328_C004_RHO    = 923.28                     # kg/m3, PFD stream 739 @ 143 C
 
@@ -5051,6 +5072,13 @@ class State:
         #  an explicit tear, the same discipline `s.r3232_d001_P` already uses.  At the design seed
         #  the vapour composition is stationary, so the tear costs exactly nothing there.
         self.y_evap_f010 = dict(SOL_F010_Y_DES)
+        #  Beginning-of-substep tears for the unit-328 A-6 pressure states, same discipline: the
+        #  vapour composition sets the mean molecular weight that turns kg/h into kmol/h, and the
+        #  saturation temperature is slaved to the pressure being solved, so both are read from the
+        #  previous substep.  All three are stationary at the design seed, so the tear costs nothing.
+        self.y_328_737 = dict(W_STEAM)
+        self.a328_c002_T_prev = R328_C002_T_BOT_BOT
+        self.a328_c004_T_prev = R328_C004_T
         self.r323_f004_M = R323_F004_M_DES         # 323F004 flash-tank holdup
         self.r323_f004_T = R323_F004_T_SP_C        # 106 C
         self.r323_f004_P = R323_F004_P_BARA        # 323F004 flash pressure (dynamic, read by PIC-323203 LP node)
@@ -7139,13 +7167,33 @@ def step_sim(dt: float) -> dict:
     # and the temperature is the bubble point at the bottom node.
     gen737   = max(R328_C002_M737_DES * (q_c002 / R328_C002_Q_DES), 0.0)  # boil-up (kg/h)
     # Dynamic pressure drop coupling: flow driven by column-to-drum dP
-    _p001_lag = _lag1(s.tlag, 'P_D001_lag', s.a328_d001_P, 2.0, dt)
-    _p002_lag_737 = _lag1(s.tlag, 'P_C002_lag_737', s.a328_c002_P, 2.0, dt)
-    dP_737   = max(_p002_lag_737 - _p001_lag, 0.001)
+    # DEAD STORE REMOVED.  `dP_737` was assigned twice: a lagged form from two `_lag1` filters, then
+    # immediately overwritten by the unlagged difference on the very next line.  The lagged value was
+    # never read by anything, and the two lag states it maintained (`P_D001_lag`, `P_C002_lag_737`)
+    # were read by nothing else in the engine.  The unlagged form below is what has actually been
+    # running, so removing the dead pair changes no number -- it just stops computing and discarding
+    # two first-order filters on every tick.
     dP_737   = max(s.a328_c002_P - s.a328_d001_P, 0.001)
     m_737    = R328_C002_M737_DES * math.sqrt(dP_737 / R328_E004_DP)
     M_c002_pre = s.a328_c002_M
-    s.a328_c002_P = max(s.a328_c002_P + R328_C002_P_KP*(gen737 - m_737)/3600.0*dt, 0.1)
+    # PHASE 2, report A-6.  Was the shared 0.02 bar/(kg/s); 328C002's own coefficient from its real
+    # 12.849 m3 shell is 8.5x that, because a desorber running 13 % liquid-full has a big vapour
+    # space and a low-molecular-weight overhead.  Self-regulating through its own overhead: m_737
+    # rises with sqrt(P_c002 - P_d001), giving a pole of -0.176 /s (discrete 0.956 at dt = 0.25).
+    # The thermal term reads the PREVIOUS substep's dT/dt because T is slaved to the pressure being
+    # solved here -- an explicit tear, and a literal 0.0 at the design seed.
+    _mw737 = 1.0 / max(sum(s.y_328_737.get(k, 0.0) / MW_SOL[k] for k in SOL_SPECIES), 1e-12)
+    _vv_c002 = hydraulics.vapour_volume_m3(R328_C002_VOL_M3, M_c002_pre, R328_C002_RHO)
+    _dmdt_c002 = (in_c002 - m_737 - m_743) / 3600.0
+    _T_c002_pre = s.a328_c002_T
+    s.a328_c002_P = max(
+        s.a328_c002_P + hydraulics.vessel_dpdt(
+            s.a328_c002_P, s.a328_c002_T + 273.15, _vv_c002, _mw737,
+            gen737 / _mw737, m_737 / _mw737,
+            dtdt_k_s=(s.a328_c002_T - s.a328_c002_T_prev) / dt,
+            dvvdt_m3_s=-_dmdt_c002 / R328_C002_RHO) * dt,
+        0.1)
+    s.a328_c002_T_prev = _T_c002_pre
     s.a328_c002_T = tsat_steam(s.a328_c002_P + R328_C002_DP_COL)          # bubble point at the bottom
     s.a328_c002_M = max(M_c002_pre + (in_c002 - m_737 - m_743)/3600.0*dt, 1.0)
     # Species: four inlets.  The two vapour recycles carry LAGGED compositions, the same tear the
@@ -7155,6 +7203,7 @@ def step_sim(dt: float) -> dict:
                                      [(W_S738, m_738), (W_S775, m775_prev),
                                       (s.y_328_748, m748_prev), (s.y_328_750, m750_prev)],
                                      m_737, a_c002, m_743, 0.0, dt)
+    s.y_328_737 = y_737                                 # close the A-6 pressure tear
 
     # ----- Stage 4 : 328C003  Hydrolyser (200°C, MP-steam 911) -----------
     Tc003    = s.a328_c003_T
@@ -7251,14 +7300,25 @@ def step_sim(dt: float) -> dict:
     gen750   = max(R328_C004_M750_DES * (q_c004 / R328_C004_Q_DES), 0.0)  # boil-up (kg/h)
     # Dynamic pressure drop coupling: flow driven by 328C004 to 328C002 dP
     dP_750_des = R328_C004_P_BARA - R328_C002_P_TOP
-    _p004_lag = _lag1(s.tlag, 'P_C004_lag', s.a328_c004_P, 2.0, dt)
-    _p002_lag = _lag1(s.tlag, 'P_C002_lag', s.a328_c002_P, 2.0, dt)
-    dP_750_live = max(_p004_lag - _p002_lag, 0.001)
-    
+    # DEAD STORE REMOVED -- identical pattern to dP_737 above, same conclusion, no number changes.
     dP_750_live = max(s.a328_c004_P - s.a328_c002_P, 0.001)
     m_750    = R328_C004_M750_DES * math.sqrt(dP_750_live / dP_750_des)
     M_c004_pre = s.a328_c004_M
-    s.a328_c004_P = max(s.a328_c004_P + R328_C004_P_KP*(gen750 - m_750)/3600.0*dt, 0.1)
+    # PHASE 2, report A-6.  Same replacement as 328C002; 328C004 runs 9.7 % liquid-full in a
+    # 15.990 m3 shell, so its coefficient is 6.7x the shared constant.  Self-regulating through
+    # m_750 ~ sqrt(P_c004 - P_c002): pole -0.632 /s, discrete 0.842 at dt = 0.25.
+    _mw750 = 1.0 / max(sum(s.y_328_750.get(k, 0.0) / MW_SOL[k] for k in SOL_SPECIES), 1e-12)
+    _vv_c004 = hydraulics.vapour_volume_m3(R328_C004_VOL_M3, M_c004_pre, R328_C004_RHO)
+    _dmdt_c004 = (in_c004 - m_750 - m_739) / 3600.0
+    _T_c004_pre = s.a328_c004_T
+    s.a328_c004_P = max(
+        s.a328_c004_P + hydraulics.vessel_dpdt(
+            s.a328_c004_P, s.a328_c004_T + 273.15, _vv_c004, _mw750,
+            gen750 / _mw750, m_750 / _mw750,
+            dtdt_k_s=(s.a328_c004_T - s.a328_c004_T_prev) / dt,
+            dvvdt_m3_s=-_dmdt_c004 / R328_C004_RHO) * dt,
+        0.1)
+    s.a328_c004_T_prev = _T_c004_pre
     s.a328_c004_T = tsat_steam(s.a328_c004_P + R328_C004_DP_COL)          # bubble point at the bottom
     s.a328_c004_M = max(M_c004_pre + (in_c004 - m_750 - m_739)/3600.0*dt, 1.0)
     a_c004   = des_alpha_live("C004", Tc004, m_931, m_739)

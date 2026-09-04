@@ -90,18 +90,44 @@ to keep the 324 mass balance out of a change already touching the 323 species la
 ## 1e. Phase 2 — hydraulic network, 3 of 4 units still on the frozen forms
 
 `backend/hydraulics.py` carries the IEC 60534 / ISA-75.01 laws and the vapour-space pressure
-derivative. **Unit 323 is wired** (LV-323501, LV-323505, and the 323F010 vapour space); design seed
+derivative. **Units 323 and 328 (C002/C004) are wired** (LV-323501, LV-323505, and the 323F010 vapour space); design seed
 bit-exact, 30 000 s envelope bounded, product unmoved. Full write-up in the As-Built reference.
 
 **Still on the frozen forms — units 322, 324, 328:**
 
 | finding | sites | note |
 |---|---|---|
-| A-6 | `R328_C002/C003/C004_P_KP`, `A328_C001_P_KP`, `R324_F001/F003_P_KP`, `R328_D001_P_KP`, `R3232_E011_P_KP` | eight vessels still share 0.02 / 0.05 bar/(kg/s). Geometry IS available for all of them in `References/` (328C002 1250x10470, 328C003 1950x20850, 328C004 1250x13030, 328D001 1684x1950, 323D001 11.10 m3 stated, 324F001 ID 4570, 322C001 576/922 stepped) |
+| A-6 | `A328_C001_P_KP`, `R324_F001/F003_P_KP`, `R3232_E011_P_KP` | four vessels still share 0.02 / 0.05. Geometry available: 324F001 ID 4570, 322C001 576/922 stepped, 323D001 11.10 m3 stated. **328C002 and 328C004 are DONE.** |
+| A-6 | `R328_C003_P_KP` | 328C003 hydrolyser. NOT a wiring job: its overhead is PV-328203B, a pressure-CONTROLLED valve, so d(m_748)/dP is zero and all the node's feedback is in PIC-328203. Stiffening the vessel 4.3x multiplies that loop gain 4.3x. Measure the open-loop gain first, then retune, exactly as TIC-323012 was handled. Engine seeds Kc=1.5 (Appendix A says 4.0 -- a documented divergence) |
+| A-6 | `R328_D001_P_KP` | 328D001. BLOCKED ON A SOURCE CONFLICT, not deferred: the datasheet narrative gives ID 1684 mm x T/T 1950 mm and calls that "19 cubic meters", but the cylinder is 4.343 m3. The engine's own R328_D001_M_DES is ~10.6 m3, matching neither and 243 % of the computed shell. On the computed volume V_v hits its floor and K is ~355x the present constant. Needs the real dimensions |
 | D-1 | LIC-328503/328504/328505 bottoms, PV-328203B, LV-322501, 328C002 and 328C004 overheads, 323D001 and 323E011 vents, 324F001 barometric leg, every `_fic_flow` loop | all still `design x (op/op_des)` |
 | D-2 | HV-322604, the steam-header letdowns, `core/valve.py:_valve_flow` | still incompressible sqrt(dP) on choked service; `hydraulics.valve_flow_gas` is ready and unused |
 | D-8 | `322E001_BOT_KGH_LAG` (60 s), `FEED_TD_S` (345 s) | fixed FIFOs; `hydraulics.transport_time_s` is ready. Needs line D and L from the nozzle tables |
 | D-19/D-20/D-21 | `main.py` scrubber suction, stripper drain, HPCC level | see the 323C003 note below before deleting any of these |
+
+**Pre-existing 328 failures, measured and attributed (NOT Phase 2):**
+
+`test_equation_audit_desorption.py` has two red tests that fail identically with and without the
+Phase 2 wiring:
+
+* `test_design_hold_keeps_every_desorber_on_its_pfd_composition` — fails on **NH3**, not CO2.
+  328C002 settles at 0.7334 % against a PFD 0.63 %, an error of 1.03e-3 versus a 2.0e-4 tolerance
+  (5.6x over). Baseline is 0.7366 %, so Phase 2 changes it by 0.3 %. CO2 at the test's own 3900 s
+  sample point reads 2.11e-4 with the wiring and 1.95e-4 without, straddling the tolerance — but at
+  21 000 s it settles to 1.82e-4, INSIDE tolerance. The 3900 s reading is a transient: the 328 train
+  is still ringing there (P_c002 3.514 at 3900 s, 3.493 at 21 000 s, crossing design from above).
+  **The test samples at 3900 s a train that settles around 15 000 s.**
+* `test_hydrolyser_temperature_governs_the_urea_slip` — slip 2554.92 ppm at 160 C against a < 2000
+  bound, bit-identical with and without the wiring.
+
+**Two test-file defects, one un-propagated rename** (`R328_C002_T_BOT` -> `R328_C002_T_BOT_BOT`,
+value 139.0; siblings `_T_BOT738/748/750` also exist):
+
+* `test_equation_audit_desorption.py:164` — latent `AttributeError`, currently masked because the
+  composition assert three lines earlier fails first. It will surface the moment NH3 is fixed.
+* `test_equation_audit_c10_live_cp.py:56` — the SOLE cause of that test's failure.
+
+Both are one-line fixes and would take two reds off the board without touching the engine.
 
 **Two findings that need judgement, not just wiring:**
 

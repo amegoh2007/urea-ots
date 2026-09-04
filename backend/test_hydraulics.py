@@ -145,3 +145,76 @@ def test_the_design_seed_holds_after_one_tick():
     assert s.r323_f010_M == main.R323_F010_M_DES
     assert s.r323_f004_M == main.R323_F004_M_DES
     assert s.r323_c003_M == main.R323_C003_M_DES
+
+
+# ==================================================================================================
+#  Unit 328 wiring (Phase 2, second unit).  328C002 and 328C004 only -- see the two exclusion tests
+#  below, which pin the REASONS the other two vessels were left alone so a later edit cannot quietly
+#  "finish the job" and destabilise them.
+# ==================================================================================================
+def test_the_328_column_geometry_matches_the_vessel_datasheet():
+    main = _main()
+    assert (main.R328_C002_ID_M, main.R328_C002_SHELL_M) == (1.250, 10.470)
+    assert (main.R328_C004_ID_M, main.R328_C004_SHELL_M) == (1.250, 13.030)
+    assert abs(main.R328_C002_VOL_M3 - 12.849) < 0.001
+    assert abs(main.R328_C004_VOL_M3 - 15.990) < 0.001
+
+
+def test_the_328_columns_run_mostly_empty_so_their_coefficients_are_large():
+    """A-6.  Both desorbers hold only a tray inventory, so most of the shell is vapour and the real
+    RT/(V_v.Mbar) is several times the 0.02 they shared with a 62 m3 hydrolyser and a level tank."""
+    main = _main()
+    for vol, m_des, rho, kp in ((main.R328_C002_VOL_M3, main.R328_C002_M_DES, main.R328_C002_RHO,
+                                 main.R328_C002_P_KP),
+                                (main.R328_C004_VOL_M3, main.R328_C004_M_DES, main.R328_C004_RHO,
+                                 main.R328_C004_P_KP)):
+        vv = hy.vapour_volume_m3(vol, m_des, rho)
+        assert vv > 0.8 * vol                       # under 20 % liquid-full at design
+        k = hy.vessel_dpdt(3.5, 412.15, vv, 18.0, 3600.0 / 18.0, 0.0)
+        assert k > 5.0 * kp, (k, kp)
+
+
+def test_328d001_is_left_on_its_constant_because_its_geometry_conflicts():
+    """NOT a gap -- a source conflict, pinned so nobody "fixes" it by inventing a volume.
+    The datasheet narrative gives ID 1684 mm and T/T 1950 mm and then calls that 19 m3; the
+    cylinder is 4.343 m3.  The engine's own design holdup is ~10.6 m3, which matches neither and is
+    243 % of the computed shell -- so V_v would sit on its floor and the coefficient would be ~355x
+    the present constant, far outside the unit circle at a 0.25 s tick."""
+    main = _main()
+    import math
+    v_cyl = math.pi * 0.25 * 1.684 ** 2 * 1.950
+    assert abs(v_cyl - 4.343) < 0.001                       # not the 19 m3 the same sentence claims
+    assert main.R328_D001_M_DES / 1000.0 > 2.0 * v_cyl      # design holdup exceeds the whole shell
+    assert not hasattr(main, "R328_D001_VOL_M3")            # so no geometry is asserted for it
+    assert main.R328_D001_P_KP == 0.05                      # and it stays on the lumped constant
+
+
+def test_328c003_is_left_alone_because_its_only_feedback_is_a_controller():
+    """328C002 and 328C004 self-regulate: their overheads rise with sqrt(dP) against the next node,
+    so stiffening the capacitance only makes a stable first-order node faster.  328C003's overhead
+    is PV-328203B, whose opening comes from PIC-328203 -- d(m_748)/dP is zero directly, so the whole
+    loop gain sits in the controller and a 4.3x stiffer vessel is a 4.3x controller retune wearing a
+    physics costume.  Pinned until that open-loop gain is measured."""
+    main = _main()
+    assert main.R328_C003_P_KP == 0.02                      # still the lumped constant
+    assert not hasattr(main, "R328_C003_VOL_M3")
+    # The gain the retune would multiply.  NOTE the engine seeds 1.5 while Appendix A of
+    # Master_PID_Tuning_Constants.md lists PIC-328203 at 4.0 -- one more of the 33-of-46 documented
+    # plant-vs-simulator divergences, not a bug, but it is the simulator value that matters here.
+    assert main.State().PIC_328203["Kc"] == 1.5
+
+
+def test_the_328_design_seed_holds_after_one_tick():
+    main = _main()
+    main.state = main.State()
+    main.step_sim(0.25)
+    s = main.state
+    assert s.a328_c002_P == main.R328_C002_P_TOP
+    assert s.a328_c004_P == main.R328_C004_P_BARA
+    assert s.a328_c002_M == main.R328_C002_M_DES
+    assert s.a328_c004_M == main.R328_C004_M_DES
+    assert abs(s.a328_c002_T - main.R328_C002_T_BOT_BOT) < 1e-9
+    assert abs(s.a328_c004_T - main.R328_C004_T) < 1e-9
+    # ... and unit 323 is untouched by the unit-328 change
+    assert s.r323_f010_P == main.R323_F010_P_BARA
+    assert s.r323_f010_T == main.R323_F010_T_SP_C
