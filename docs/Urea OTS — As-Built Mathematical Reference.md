@@ -964,22 +964,42 @@ sites was checked for which kind it is.
 * **The 328 bottoms valves are flashing services on a single-phase law.** See D-1 above.
 * **D-12, `pull_f010`** — a machine map, and Phase 4's.
 
-## Melt-Temperature Integration in Unit 324: Why an Empty Evaporator Killed the Engine
+## Melt-Temperature Integration in Unit 324: Why a Draining Evaporator Killed the Engine
 
 Both 324 stages advanced their melt temperature with an explicit Euler step over the liquid
 inventory alone:
 
 $$T' = T + \frac{\dot P\,\Delta t}{\max(M\,c_p,\ 10^{-6})}$$
 
-The floor is the defect. It exists to stop a division by zero, but what it actually does is convert
-a drained stage into an amplifier of gain $10^{6}$. The failure is not subtle:
+The `1e-6` floor looks like the defect and is not: `s.r324_f001_M` is written back as
+`max(..., 1.0)`, so $M \geq 1$ kg always and that floor is unreachable dead code at every one of
+these integrators. The defect is the scheme. Written out, the step is
 
-* a CCW loss trips the plant and the feed is cut;
-* 324F001 drains, so $M \to$ its floor;
-* one tick with the chest still above the melt temperature puts $Q\,\Delta t/10^{-6}$ into the step
-  and throws $T$ past $10^{10}$;
-* from there the sensible term $-\dot m\,c_{p,f}\,T$ dominates, alternates sign and **doubles every
-  tick** — the textbook explicit-Euler instability at $|1 - \lambda \Delta t| \gg 1$;
+$$T' = T + \frac{\Delta t}{M c_p}\Big[\underbrace{\tfrac{\dot m_{feed}}{3600}c_{p,f}(T_f - T) + UA\,(T_{sat} - T)}_{\text{depends on the } T \text{ being solved for}} - \tfrac{\dot v}{3600}\lambda\Big]$$
+
+which is $T' - T = (1 - \Delta t/\tau)(T - T_\infty)$ with $\tau = Mc_p/k_{cap}$ and
+
+$$k_{cap} = \frac{\dot m_{feed}}{3600}c_{p,f} + UA .$$
+
+$k_{cap}$ is a property of the **flows**, not of the inventory, so as the separator drains $\tau$
+collapses while the driver does not. The step amplifies whenever $\Delta t/\tau > 2$, i.e. below
+
+$$M_{crit} = \frac{k_{cap}\,\Delta t}{2\,c_{p,hold}}$$
+
+| stage | $\dot m_{feed}$ (kg/h) | $k_{cap}$ (kW/K) | $M_{des}$ (kg) | $M_{crit}$ @ 0.1 s | $M_{crit}$ @ 2 s |
+|---|---|---|---|---|---|
+| 324F001 | 92 748.9 | 856.47 | 3933.8 | 19.5 kg (0.50 %) | 389.9 kg (9.91 %) |
+| 324F003 | 78 675.8 | 116.25 | 3796.9 | 2.7 kg (0.07 %) | 54.8 kg (1.44 %) |
+
+That second column is the finding. On the **harness** tick, $\Delta t = 2$ s, 324F001 is already
+unstable at one tenth of its design inventory — a normal deep level excursion, not an empty vessel.
+At 100 kg of holdup the per-step amplification is 6.8×; at the 1 kg floor it is 779×. On the
+production tick it takes a true drain, amplifying 38× per step at the floor. The observed failure
+is the arithmetic of that table:
+
+* a CCW loss trips the plant and 324F001 draws down past $M_{crit}$;
+* $T$ starts alternating sign about $T_\infty$ and **doubles every tick** — the textbook explicit
+  Euler instability at $|1 - \Delta t/\tau| \gg 1$;
 * about 340 doublings later `cp_water_kjkgk` evaluates $T^3$ on a number above $5.6\times10^{102}$
   and the tick dies with `OverflowError: Result too large`.
 
@@ -990,43 +1010,103 @@ evaporator.
 
 ### The fix is a better integration scheme, not a limiter
 
-The terms that make this ODE stiff are the ones that depend on the temperature being solved for:
-the feed sensible term, and the chest duty while it is still driving heat in. Treat those
-implicitly. Backward Euler on them, rearranged so the increment keeps its explicit numerator:
+Treat the $T$-dependent terms implicitly. Backward Euler on them, rearranged so the increment keeps
+its explicit numerator:
 
 $$\frac{M c_p}{\Delta t}(T' - T) = \dot P(T) - k_{cap}(T' - T)
 \qquad\Longrightarrow\qquad
 T' = T + \frac{\dot P\,\Delta t}{M c_p + k_{cap}\,\Delta t}$$
 
-$$k_{cap} = \frac{\dot m_{feed}}{3600}c_{p,feed} + \begin{cases} UA & Q > 0\\ 0 & Q = 0\end{cases}$$
+$$k_{cap} = \frac{\dot m_{feed}}{3600}c_{p,feed} + \begin{cases} UA & Q > 0\ 0 & Q = 0\end{cases}$$
+
+The $UA$ term is gated on $Q > 0$ because the chest duty is itself clamped at zero once the melt
+runs above saturation; past that point $UA$ no longer resists a change in $T$ and including it
+would over-damp.
 
 Three properties make this the right answer rather than a patch:
 
 * **Unconditionally stable** in both stiff terms. The amplification factor is
-  $Mc_p/(Mc_p + k_{cap}\Delta t) \in (0, 1]$ for any $\Delta t$, so the oscillation cannot grow.
+  $Mc_p/(Mc_p + k_{cap}\Delta t) \in (0, 1]$ for any $\Delta t$ and any $M$, so $M_{crit}$ ceases
+  to exist.
 * **Correct in the limit it used to break.** As $M \to 0$ the step becomes
   $T' \to T + \dot P/k_{cap}$, which is the algebraic solution — a vessel with no thermal inertia
-  whose outlet simply follows its inlet. That *is* the physics of an empty evaporator; the old form
-  asserted the opposite, that a vessel holding nothing could still integrate heat.
+  whose outlet simply follows its inlet. That *is* the physics of a drained evaporator; the old
+  form asserted the opposite, that a vessel holding almost nothing could still integrate heat over
+  a 2-second step.
 * **Bit-exact at the design seed.** $\dot P$ is identically zero there by construction (the UA and
   $\lambda$ anchors are back-solved for it), so $T' = T + 0$ regardless of the denominator. The
   boot pin cannot move. This is why the increment form is used instead of the algebraically
   equivalent $(Mc_pT/\Delta t + k_{cap}T_f + Q)/(Mc_p/\Delta t + k_{cap})$, which is correct in
   exact arithmetic but relies on a cancellation that floating point does not deliver.
 
-The `max(..., 1e-6)` stays, but it is no longer load-bearing: the denominator is now bounded away
-from zero by the flow term whenever anything is moving, and the only state that still reaches the
-floor — no inventory and no flow — has $\dot P = 0$ as well.
+The `max(..., 1e-6)` stays for shape, but it was never load-bearing and is less so now: the
+denominator is bounded below by $k_{cap}\Delta t$ whenever anything is flowing, and by the 1 kg
+mass floor when nothing is.
 
-### The same shape exists at nine more integrators
+### The same shape sat at eleven more integrators — all now swept
 
-`grep` finds eleven `dt / max(M*cp, 1e-6)` steps in `main.py`. The two 324 stages are fixed here
-because they are where the crash was demonstrated; **323C003, 323F004, 323F010, 323D002, 328D003
-(both compartments), 328C003, 328D001 and 322C001 carry the identical construct** and the identical
-latent instability, reachable by whatever upset drains each of them. The transformation is the same
-one line and the same bit-exactness argument at each; what differs per vessel is only the
-heat-capacity rate that goes into $k_{cap}$. Listed in the handoff rather than swept, because each
-site's flow terms need reading before its denominator is changed.
+`grep` finds thirteen `dt / max(M*cp, 1e-6)` steps in `main.py`. Ten of the remaining eleven now
+carry the same semi-implicit denominator; the eleventh is deliberately left alone and the reason is
+the more interesting half of the result.
+
+$k_{cap}$ is **per vessel** — it is that vessel's own inlet heat-capacity rate, plus a $UA$ only
+where the duty is genuinely temperature-driven:
+
+| node | $k_{cap}$ | $UA$ in $k_{cap}$? |
+|---|---|---|
+| 323F004 | $\dot m_{314}c_{p,314}/3600$ | no duty |
+| 323F010 | $(\dot m_{319}c_{p,319} + \dot m_{331}c_{p,331})/3600$ | yes, 323E010 while $Q>0$ |
+| 323D002 | $(\dot m_{317}c_{p,317} + \dot m_{recyc}c_{p,recyc})/3600$ | no duty |
+| 323C005 | $(\dot m_{756} + \dot m_{702} + \dot m_{708})c_p/3600$ | no duty |
+| 328D003-I | $(\dot m_{719} + \dot m_{720} + \dot m_{721} + \dot m_{759})c_p/3600$ | no duty |
+| 328D003-II | $(\dot m_{bot,C005} + \dot m_{741})c_p/3600$ | no duty |
+| 328C003 | $\dot m_{746}c_p/3600$ | no duty |
+| 328D001 | $(\dot m_{737} + \dot m_{718A} + \dot m_{793})c_p/3600$ | **no** — see below |
+| 322C001 | $(\dot m_{755} + \dot m_{CPL} + \dot m_{GCB})c_p/3600$ | no duty |
+| 323E003 | $(\dot m_{305} + \dot m_{718B} + \dot m_{776} + \dot m_{797})c_p/3600$ | **yes** |
+| 323E011 | $(\dot m_{701} + \dot m_{786} + \dot m_{321} + \dot m_{402})c_p/3600$ | **yes** |
+
+The $UA$ column is not bookkeeping. A duty belongs in $k_{cap}$ only if it *resists a change in the
+temperature being solved for*. 323E003's $Q = UA(T_{E003} - T_{tw})$ and 323E011's
+$Q = UA(T_{E011} - 35)$ both do. 328D001's $Q_{E004}$ does not: it is
+`R328_E004_Q_DES_KW * (tic002_op / R328_E004_TV_OP_DES)`, a *stroke*-driven duty off TV-328002 with
+no $T_{D001}$ in it at all, so putting its $UA$ in the denominator would damp a resistance that does
+not exist. Same for the 328C003 hydrolyser: the 911 steam injection, the 748 latent draw and the
+hydrolysis endotherm are all independent of $T_{C003}$, leaving the 746 feed as the only term.
+
+### 323C003 is the exception, and it shows what the defect actually was
+
+323C003 keeps its explicit step. It is the one vessel in the engine whose energy balance is written
+in **relaxation** form rather than in-minus-out:
+
+$$\dot q_{relax} = \frac{M c_p (T_{bub} - T)}{\tau_{res}}
+\qquad\Longrightarrow\qquad
+\frac{\partial \dot P}{\partial T} = -\frac{M c_p}{\tau_{res}}$$
+
+The heat-capacity rate that resists the change is $Mc_p/\tau_{res}$, which carries $M$ itself. So
+$\Delta t/\tau$ collapses to the constant $\Delta t/\tau_{res}$ — 0.1 s against a 300 s residence
+time — *no matter how far the column drains*. There is no $M_{crit}$; the step is already
+unconditionally stable, and adding a $k_{cap}$ would only over-damp a bubble-point relaxation that
+is correct as it stands.
+
+That contrast is the whole finding stated cleanly. The instability was never about small numbers or
+a division guard. It was about **where the heat-capacity rate lives**: when it belongs to the flows
+it survives the inventory going away, and explicit Euler divides a surviving driver by a vanishing
+capacity. When it belongs to the inventory, as at 323C003, it vanishes with it and the ratio is
+constant. 323F004 sits on the boundary and shows the rule works either way — it carries *both* a
+relaxation term and a real letdown sensible load, and only the second one goes into $k_{cap}$.
+
+### Verification
+
+* **All 20 pinned boot constants are byte-identical** before and after the sweep
+  (`.boot_pin_cache.json`, compared entry by entry against `HEAD`).
+* **The design seed is bit-identical** at $t = 0$ across all 29 probed states, every anchor landing
+  on its exact PFD value: 322C001 3.900000000, 328C003 16.800000000, 324F001 0.330000000,
+  324F003 0.131000000, 323F010 0.460000000, 323D002 99.000000000, TT-322014 183.000000000.
+* After **200 production ticks** the nodes that were *not* touched are still bit-identical, and the
+  ten that were differ by at most $1.5\times10^{-6}$ °C and $3\times10^{-8}$ bar — last-digit motion
+  on states that already carry a small non-zero $\dot P$ at the settled attractor, not a moved
+  design point.
 
 ## 322R001 Reactor Kinetics: Rate Laws, Not Load Multipliers (`backend/reactor.py`)
 

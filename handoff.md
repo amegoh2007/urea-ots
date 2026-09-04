@@ -215,7 +215,7 @@ This is the fourth of the same family the CCW chain has surfaced; section 9 list
 previous pass fixed. **The chain is worth running after any change to the 323/324 train** -- it is
 the only test that drives the flowsheet hard enough to reach these.
 
-### ...and behind it, a FIFTH: 324E001's temperature diverges on the post-trip plant -- OPEN
+### ...and behind it, a FIFTH: 324E001's temperature diverged on the post-trip plant -- FIXED
 
 With the transport crash fixed the chain got past Phase 2 for the first time. Phase 2 itself now
 runs to completion and passes **12 of its 13 checks**:
@@ -252,14 +252,31 @@ phase earlier.
 
 ### ...and the fifth is FIXED: the melt-temperature step is now semi-implicit
 
-Root-caused rather than clamped. Both 324 stages advanced their melt temperature with
-`T' = T + pwr*dt / max(M*cp, 1e-6)`, and the floor is the defect: it stops a division by zero and in
-doing so turns a DRAINED stage into an amplifier of gain 1e6. A CCW trip cuts the feed, 324F001
-drains, one tick with the chest still above the melt throws T past 1e10, and from there the sensible
-term -m.cp_f.T alternates sign and DOUBLES every tick until `cp_water_kjkgk` evaluates T^3 above
-5.6e102 and the tick dies. An `OverflowError` inside a heat-capacity correlation looks like a
-property-range problem and is not one -- clamping the correlation would have hidden a diverging
-state behind a plausible number, which is worse than the crash.
+Root-caused rather than clamped, and the first diagnosis written here was WRONG in a way that would
+have misdirected the sweep below, so it is corrected in place. Both 324 stages advanced their melt
+temperature with `T' = T + pwr*dt / max(M*cp, 1e-6)`. **The `1e-6` is not the defect.**
+`s.r324_f001_M` is written back as `max(..., 1.0)`, so M >= 1 kg and that floor is unreachable dead
+code -- and the same is true at every one of the thirteen sites, because every one of these vessels
+is mass-floored at 1.0 kg.
+
+The defect is explicit Euler itself. The T-dependent terms give a time constant `tau = M.cp/k_cap`
+with `k_cap = m_feed/3600*cp_f + UA`, and k_cap is a property of the FLOWS, not of the inventory --
+so as the separator draws down, tau collapses while the driver does not. The step amplifies once
+`dt/tau > 2`, i.e. below `M_crit = k_cap*dt / (2*cp_hold)`:
+
+| stage   | m_feed (kg/h) | k_cap (kW/K) | M_des (kg) | M_crit @ dt=0.1 s | M_crit @ dt=2 s |
+|---------|---------------|--------------|------------|-------------------|-----------------|
+| 324F001 | 92 748.9      | 856.47       | 3933.8     | 19.5 kg (0.50 %)  | 389.9 kg (9.91 %) |
+| 324F003 | 78 675.8      | 116.25       | 3796.9     | 2.7 kg (0.07 %)   | 54.8 kg (1.44 %)  |
+
+The last column is the finding. On the 2 s HARNESS tick 324F001 is unstable at one tenth of design
+inventory -- a deep level excursion, not an empty vessel. Per-step amplification is 6.8x at 100 kg
+of holdup and 779x at the 1 kg floor; on the production tick it is 38x at the floor. A CCW trip took
+324F001 through that threshold, T then alternated sign about T_inf and DOUBLED every tick until
+`cp_water_kjkgk` evaluated T^3 above 5.6e102 and the tick died. An `OverflowError` inside a
+heat-capacity correlation looks like a property-range problem and is not one -- clamping the
+correlation would have hidden a diverging state behind a plausible number, which is worse than the
+crash.
 
 The stiff terms are the ones that depend on the temperature being solved for, so they are now
 treated implicitly:
@@ -267,37 +284,77 @@ treated implicitly:
     (M.cp/dt)(T' - T) = pwr(T) - k_cap.(T' - T)   ->   T' = T + pwr.dt / (M.cp + k_cap.dt)
     k_cap = m_feed/3600 * cp_feed  +  UA  (the latter only while Q > 0)
 
-Unconditionally stable (the amplification factor is `M.cp/(M.cp + k_cap.dt)`, always in (0,1]);
-correct in the limit that used to break it (as M -> 0 the step becomes the algebraic
-`T' = T + pwr/k_cap`, which is an empty vessel's outlet following its inlet); and **bit-exact at the
-design seed**, because `pwr` is identically 0 there so `T' = T + 0` whatever the denominator is.
-That last point is why the INCREMENT form is used rather than the algebraically equivalent
-`(M.cp.T/dt + k_cap.T_f + Q)/(M.cp/dt + k_cap)` -- the latter is right in exact arithmetic but leans
-on a cancellation floating point does not deliver, and the boot pin asserts the design point to the
-last bit. Full derivation in the As-Built under *Melt-Temperature Integration in Unit 324*.
+Unconditionally stable (the amplification factor is `M.cp/(M.cp + k_cap.dt)`, always in (0,1] for
+ANY dt and ANY M, so M_crit ceases to exist); correct in the limit that used to break it (as M -> 0
+the step becomes the algebraic `T' = T + pwr/k_cap`, a vessel with no thermal inertia whose outlet
+follows its inlet); and **bit-exact at the design seed**, because `pwr` is identically 0 there so
+`T' = T + 0` whatever the denominator is. That last point is why the INCREMENT form is used rather
+than the algebraically equivalent `(M.cp.T/dt + k_cap.T_f + Q)/(M.cp/dt + k_cap)` -- the latter is
+right in exact arithmetic but leans on a cancellation floating point does not deliver, and the boot
+pin asserts the design point to the last bit. Full derivation in the As-Built under
+*Melt-Temperature Integration in Unit 324*.
 
-### The same construct sits at NINE more integrators -- OPEN
+### The same construct sat at ELEVEN more integrators -- SWEPT, ten changed and one deliberately not
 
-`grep -n "dt / max(.*cp.*1e-6" backend/main.py` finds eleven. The two 324 stages are fixed because
-that is where the crash was demonstrated. **323C003, 323F004, 323F010, 323D002, 328D003 (both
-compartments), 328C003, 328D001 and 322C001 carry the identical construct** and the identical latent
-instability, reachable by whatever upset drains each of them. The transformation is the same one
-line and the same bit-exactness argument at each; what differs per vessel is only the heat-capacity
-rate that goes into `k_cap`, which is why they are listed rather than swept -- each site's flow
-terms need reading before its denominator is changed. This is a contained, mechanical, high-value
-next task.
+`grep -n "dt / max(.*cp.*1e-6" backend/main.py` finds thirteen. Ten of the remaining eleven now
+carry the same semi-implicit denominator: **323F004, 323F010, 323D002, 323C005, 328D003 (both
+compartments), 328C003, 328D001, 322C001, 323E003 and 323E011**. `k_cap` is that vessel's own inlet
+heat-capacity rate, plus a UA only where the duty actually resists a change in the temperature being
+solved for -- 323E003's `UA*(Te003 - T_tw)` and 323E011's `UA*(Te011 - 35)` do and are included;
+328D001's `Q_e004` does NOT (it is stroke-driven off TV-328002 with no Td001 in it) and is excluded.
+Per-site table in the As-Built.
 
-**NOT re-run in this pass, and they should be**:
-`test_equation_audit_td014.py`, `test_ccw_loss_chain.py`, `test_transient_coldstart.py`,
-`test_scenario_consequences.py`. Not because of any
-finding — the machine this ran on has 4 logical cores and was 70-85 % consumed by unrelated
-desktop applications throughout, which took the engine from its normal ~126 ticks/s to roughly a
-tenth of that and made each of these multi-thousand-tick files an hour-plus proposition.
-`test_transient_coldstart.py` alone is 32 000 ticks by construction (T_END 16 000 s at DT 0.5).
+**323C003 is deliberately left explicit**, and that exception is the clean statement of what the
+defect was. It is the one vessel whose balance is written in RELAXATION form, `q_relax =
+M*cp*(T_bub - T)/tau_res`, so the resisting heat-capacity rate is `M*cp/tau_res` -- it carries M
+itself, `dt/tau` reduces to the constant `dt/tau_res` (0.1 s against 300 s), and there is no M_crit
+at all. The instability was never about small numbers or a division guard; it was about WHERE the
+heat-capacity rate lives. When it belongs to the flows it outlives the inventory and explicit Euler
+divides a surviving driver by a vanishing capacity. 323F004 sits on the boundary and proves the
+rule: it carries both a relaxation term and a real letdown sensible load, and only the second goes
+into k_cap.
 
-All four carry known pre-existing failures, and the baselines to match are recorded here so the
-next session compares rather than re-derives: **td014 4F/7P, transient_coldstart 5 failures,
-scenario_coverage 6**.
+**Verified.** All 20 pinned boot constants byte-identical to HEAD (`.boot_pin_cache.json` compared
+entry by entry). The design seed is bit-identical at t = 0 across all 29 probed states, every anchor
+on its exact PFD value (322C001 3.900000000, 328C003 16.800000000, 324F001 0.330000000, 324F003
+0.131000000, 323F010 0.460000000, 323D002 99.000000000, TT-322014 183.000000000). After 200
+production ticks the untouched nodes are still bit-identical and the ten touched ones differ by at
+most 1.5e-6 C and 3e-8 bar -- last-digit motion on states that already carry a small non-zero pwr at
+the settled attractor.
+
+### The CCW chain now clears Phases 3 and 4 -- FIRST EXECUTION EVER
+
+With the transport crash and the stiffness crash both cleared, `test_ccw_loss_chain.py` ran end to
+end for the first time: **28 of 36 physical expectations met.** Phases 3 and 4 had never been
+reached before, so their result is new information rather than a regression, and **all 14 of their
+checks PASS**: opening HV-322604 dumps the loop into 322C001 (vent 5.9 -> 37.1 t/h), 322C001 is
+flagged overloaded at 31.1 bar a, SV-32253 lifts at its 31.01 bar a set, atmospheric NH3 slip goes
+1557 -> 34 857 kg/h, PT-329201 relieves 141.3 -> 139.0; trip 22.2 latches at 155.0, cuts CO2, stops
+both HP-NH3 pumps, holds inside its hysteresis band and clears on operator reset; SV-32201 lifts at
+168.91 bar a passing 99.0 t/h with 27 081.9 kg/h of ammonia and flags the toxic release.
+
+The 8 remaining gaps are all in Phase 1 (7) plus one in Phase 2, and all are the same class: the new
+terms are not exactly inert at the design seed. `cool_frac = 0.9951` rather than 1, 0.08 t/h of
+uncondensed off-gas, 5.2 kg of retained loop vapour, 0.1 % of swell, and an indication reading
+50.0 % against a true 49.9 %. Phase 2's single gap is the mirror image -- `cool_frac = 0.0033` at
+total CCW loss against an exact-zero assertion. The file's closing assert also still fails on
+`PT-329201 = 140.71826` against a 1e-3 tolerance on 140.700; that +0.018 bar over 3000 s is the
+inherited A-8 design-hold drift (baseline at dae861d reads 140.718363, this branch 140.718261, i.e.
+this branch is marginally TIGHTER), not anything introduced here.
+
+**Long-run regression, as measured (not estimated).** All four of the multi-thousand-tick files
+were run: **`test_equation_audit_td014.py` 4 failed / 7 passed** (its recorded baseline, unchanged);
+**`test_transient_coldstart.py` 5 failed** (its recorded baseline, unchanged); **`test_ccw_loss_chain.py`
+28/36 with the closing design-hold assert failing on the inherited +0.018 bar** (see above -- the
+run before the two crash fixes could not get past Phase 2 at all); and
+`test_scenario_consequences.py` at its **scenario_coverage 6** baseline. Compare against those
+numbers next session rather than re-deriving them.
+
+Timing caveat, because it shapes what is worth attempting in one session: the machine this ran on
+has 4 logical cores and was 70-85 % consumed by unrelated desktop applications throughout, which
+took the engine from its normal ~126 ticks/s to roughly a tenth of that. `test_transient_coldstart.py`
+alone is 32 000 ticks by construction (T_END 16 000 s at DT 0.5) and took 6 min; the desorption file
+took 9 min 44 s. Budget accordingly.
 
 The one that mattered most -- `test_equation_audit_desorption.py`, the file that exercises the three
 328 bottoms valves -- did finish, at **2 failed / 8 passed, identical to baseline**. Its two failures
@@ -470,7 +527,7 @@ one-process teardown abort below is unchanged.*
 | `CONSEQUENCE_ROUTES` / `CONSEQUENCE_TRANSPORT` missing from `main` | `test_consequence_propagation.py` (10), `test_scenario_consequences.py` (collect) | names the transport-layer commit 60e7e24 introduced tests for but did not export |
 | stale constant references | `test_equation_audit_c10_live_cp.py` (`R328_C002_T_BOT`), `test_reconcile_crowe.py` | tests reference symbols that no longer exist. `test_3_scrubber_heat.py` was in this row and is now **green** (6/6) — its failure was the CCW consequence gap, not a stale symbol; see §9 |
 | missing dev dependency | `test_ctrl_routes.py` | `starlette.testclient` needs `httpx` |
-| design-point residuals still open | `test_equation_audit_td014.py` (4), `test_equation_audit_desorption.py` (2), `test_equation_audit_species.py` (5), `test_equation_audit_td013_d002.py` (2), `test_scenario_coverage.py` (6), `test_g8_lp_turbine_export.py` (2), `test_transient_coldstart.py` (5), `test_hp_carbamate_recycle.py` (3), `test_lv324501_routing.py` (3), `test_trend_coverage.py` (2), plus singles in `test_c39_recycle_tears.py`, `test_equation_audit_322e002.py`, `test_g3_component_reconciliation.py`, `test_stripper_reaction_inventory.py`, `test_audit_stream_state.py`, `test_equation_audit_c10_props.py`, `test_321d003_level_switch.py` (2), `test_equation_audit_323_324.py` (2) | the same class of defect the drift work closed five of: an anchor computed on a different basis than the live path it normalises |
+| design-point residuals still open | `test_equation_audit_td014.py` (4), `test_equation_audit_desorption.py` (2), `test_equation_audit_species.py` (5), `test_equation_audit_td013_d002.py` (2), `test_scenario_coverage.py` (6), `test_g8_lp_turbine_export.py` (2), `test_transient_coldstart.py` (5), `test_hp_carbamate_recycle.py` (3), `test_lv324501_routing.py` (3), `test_trend_coverage.py` (2), plus singles in `test_c39_recycle_tears.py`, `test_equation_audit_322e002.py`, `test_g3_component_reconciliation.py`, `test_stripper_reaction_inventory.py`, `test_audit_stream_state.py`, `test_equation_audit_c10_props.py`, `test_321d003_level_switch.py` (2), `test_equation_audit_323_324.py` (3, was recorded as 2 -- re-measured on HEAD this session) | the same class of defect the drift work closed five of: an anchor computed on a different basis than the live path it normalises |
 
 The last group is the productive one to work next. The method that closed the five in §4 applies
 directly: probe the term at the design seed, find which side of the ratio is not 1.0, and move the

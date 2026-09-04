@@ -7169,6 +7169,14 @@ def step_sim(dt: float) -> dict:
     # state cp_c003 was evaluated at.
     T_dep_314 = s.r323_c003_T
     w_dep_314 = s.w_c003
+    # NOT made semi-implicit, and the reason is the point.  Every other integrator in this engine
+    # carries a sensible load m_in.cp.(T_in - T) whose heat-capacity rate belongs to the FLOWS, so
+    # it keeps driving after the inventory has gone and explicit Euler blows up below
+    # M_crit = k_cap.dt/(2.cp) (see the 324 stages).  323C003 has no such term: its whole
+    # temperature dependence enters through q305_relax = M.cp.(T_bub - T)/tau_res, whose derivative
+    # is M.cp/tau_res -- it scales WITH the inventory, so dt/tau reduces to dt/tau_res, a constant
+    # no matter how far the column drains.  Unconditionally stable already; adding a k_cap here
+    # would only over-damp a bubble-point relaxation that is correct as it stands.
     s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp_c003, 1e-6)
     # PHASE 2, report D-19 to D-21: this guard is deliberately KEPT, and the reason matters.
     # Those findings say an empty-vessel limiter becomes unreachable once the discharge is driven by
@@ -7268,7 +7276,12 @@ def step_sim(dt: float) -> dict:
     P_f004    = (m_314_in / 3600.0 * cp_314_in * (T_314_in - s.r323_f004_T)
                  - m_701 / 3600.0 * R323_LAMBDA_701)                              # adiabatic (no Q) kW
     M_f004_pre = s.r323_f004_M
-    s.r323_f004_T = s.r323_f004_T + P_f004 * dt / max(M_f004_pre * cp_f004, 1e-6)
+    # SEMI-IMPLICIT in the T-dependent term, same scheme and reason as the two 324 stages (As-Built,
+    # *Melt-Temperature Integration in Unit 324*).  Here that term is the letdown sensible load; the
+    # bubble-point relaxation is NOT included because it carries M itself and so vanishes with the
+    # inventory instead of dominating it.  Bit-exact: P_f004 is 0 at the seed.
+    k_cap_f004 = m_314_in / 3600.0 * cp_314_in
+    s.r323_f004_T = s.r323_f004_T + P_f004 * dt / max(M_f004_pre * cp_f004 + k_cap_f004 * dt, 1e-6)
     s.r323_f004_M = max(M_f004_pre + (m_314_in - m_701 - m_319) / 3600.0 * dt, 1.0)
     y_701      = sol_vapour_y_vle("F004", s.w_f004, s.r323_f004_T, s.r323_f004_P,
                                   SOL_F004["alpha"])   # AUDIT F-8 -> Phase 1 rigorous flash
@@ -7336,7 +7349,10 @@ def step_sim(dt: float) -> dict:
                  + m_331 / 3600.0 * cp_331 * (R323_M331_T_C - s.r323_f010_T)
                  + Q_e010_kw - m_evap / 3600.0 * R323_EVAP_LAMBDA)               # net kW on holdup
     M_f010_pre = s.r323_f010_M
-    s.r323_f010_T = s.r323_f010_T + P_f010 * dt / max(M_f010_pre * cp_f010, 1e-6)
+    # SEMI-IMPLICIT, as 324 above: the two feeds plus the 323E010 chest while it is still driving in.
+    k_cap_f010 = (m_319_in / 3600.0 * cp_319_in + m_331 / 3600.0 * cp_331
+                  + (R323_E010_UA_KW if Q_e010_kw > 0.0 else 0.0))
+    s.r323_f010_T = s.r323_f010_T + P_f010 * dt / max(M_f010_pre * cp_f010 + k_cap_f010 * dt, 1e-6)
     s.r323_f010_M = max(M_f010_pre + (m_319_in + m_331 - m_evap - m_317) / 3600.0 * dt, 1.0)
     # Mapping — live 323F010 vacuum (PT-323204).  The evolved vapour m_evap is pulled out through
     # HV-323605 (gas outlet, HIC-323605) and evacuated by the 324F002 ejector on HV-329605; opening
@@ -7456,10 +7472,12 @@ def step_sim(dt: float) -> dict:
     cp_d002_recyc = urea_soln_cp(d002_recyc_w.get("Urea", R324_W_EV2), d002_recyc_T)
     cp_d002     = urea_soln_cp(s.w_d002.get("Urea", R324_W_IN), s.r323_d002_T)
     M_d002_T    = (M_I_pre + M_II_pre) if tie_open else M_I_pre
+    # SEMI-IMPLICIT, as 324 above.  Both inlets are T-dependent; there is no duty.
+    k_cap_d002 = (m_317_in / 3600.0 * cp_d002_in + d002_recyc / 3600.0 * cp_d002_recyc)
     s.r323_d002_T = s.r323_d002_T + (
         m_317_in / 3600.0 * cp_d002_in * (T_317_in - s.r323_d002_T)
         + d002_recyc / 3600.0 * cp_d002_recyc * (d002_recyc_T - s.r323_d002_T)
-    ) * dt / max(M_d002_T * cp_d002, 1e-6)
+    ) * dt / max(M_d002_T * cp_d002 + k_cap_d002 * dt, 1e-6)
     # AUDIT F-8: the buffer tank is a well-mixed species blender -- no vapour, no reaction (99 C,
     # atmospheric).  This is what gives the 324 feed a real composition instead of a constant.
     #
@@ -7580,7 +7598,9 @@ def step_sim(dt: float) -> dict:
                  + m702_prev/3600.0*R3232_CP*(45.0 - Tc005)
                  + m708_prev/3600.0*R3232_CP*(121.0 - Tc005))
                 + abs_c005/3600.0*A323_C005_LAM)
-    s.a323_c005_T = Tc005 + P_c005*dt/max(s.a323_c005_M*R3232_CP, 1e-6)
+    # SEMI-IMPLICIT, as 324 above: the three gas/liquid feeds are the T-dependent load.
+    k_cap_c005 = (m756_prev + m702_prev + m708_prev)/3600.0*R3232_CP
+    s.a323_c005_T = Tc005 + P_c005*dt/max(s.a323_c005_M*R3232_CP + k_cap_c005*dt, 1e-6)
     s.a323_c005_M = max(s.a323_c005_M + (m756_prev + abs_c005 - bot_c005)/3600.0*dt, 1.0)
 
     # ----- Stage 2 : 328D003 active bays I/II + communicating accumulation bay III ----
@@ -7626,14 +7646,18 @@ def step_sim(dt: float) -> dict:
                  + m_721*(A328_D003_M721_T - TI)
                  + m_759*(A328_D003_M759_T - TI))/3600.0*cp_328d3i
                 + (m_719 + m_720 + m_721 + m_759)/3600.0*A328_D003_LAM_I)
-    TI_raw = TI + P_compI*dt/max(s.a328_d003_MI*cp_328d3i, 1e-6)
+    # SEMI-IMPLICIT, as 324 above: the four vacuum-condenser returns are the T-dependent load.
+    k_cap_d3i = (m_719 + m_720 + m_721 + m_759)/3600.0*cp_328d3i
+    TI_raw = TI + P_compI*dt/max(s.a328_d003_MI*cp_328d3i + k_cap_d3i*dt, 1e-6)
     MI_raw = max(s.a328_d003_MI + (in_compI - out_compI)/3600.0*dt, 1.0)
     TII      = s.a328_d003_TII
     in_compII = bot_c005 + m_741 + A328_D003_COMP_II_ROUNDING_KGH
     out_compII = m_735 + m_401 + m_402 + m_793
     P_compII = ((bot_c005 * (A328_D003_V001_T - TII)
                  + m_741 * (A328_M741_T - TII)) / 3600.0 * cp_328d3ii)
-    TII_raw = TII + P_compII*dt/max(s.a328_d003_MII*cp_328d3ii, 1e-6)
+    # SEMI-IMPLICIT, as 324 above.
+    k_cap_d3ii = (bot_c005 + m_741)/3600.0*cp_328d3ii
+    TII_raw = TII + P_compII*dt/max(s.a328_d003_MII*cp_328d3ii + k_cap_d3ii*dt, 1e-6)
     MII_raw = max(s.a328_d003_MII + (in_compII - out_compII)/3600.0*dt, 1.0)
 
     # The approved openings make compartment III the shared surge volume. With no opening areas or
@@ -7808,7 +7832,10 @@ def step_sim(dt: float) -> dict:
             dvvdt_m3_s=-((in_c003 - m_748 - m_747) / 3600.0) / R328_C003_RHO_746_KGM3) * dt,
         0.1)
     s.a328_c003_T_prev = _T_c003_pre
-    s.a328_c003_T = Tc003 + P_c003*dt/max(M_c003_pre*cp_328c003, 1e-6)
+    # SEMI-IMPLICIT, as 324 above: the 746 feed is the only T-dependent term (the 911 steam
+    # injection, the 748 latent draw and the hydrolysis endotherm are all independent of Tc003).
+    k_cap_328c003 = m_746/3600.0*cp_328c003
+    s.a328_c003_T = Tc003 + P_c003*dt/max(M_c003_pre*cp_328c003 + k_cap_328c003*dt, 1e-6)
     s.a328_c003_M = max(M_c003_pre + (in_c003 - m_748 - m_747)/3600.0*dt, 1.0)
     # Species: the hydrolyser is a LIQUID-FILLED column (Stamicarbon, "Zero waste urea production"),
     # not a stripping cascade, so its volatilities stay at the design anchor -- no Kremser stage
@@ -7945,7 +7972,10 @@ def step_sim(dt: float) -> dict:
                  + m_793*(s.a328_d003_TII - Td001))/3600.0*cp_328d001)
     P_d001   = sens_d001 + m_737/3600.0*R328_D001_LAM737 - Q_e004
     s.a328_d001_P = max(s.a328_d001_P + R328_D001_P_KP*(gen786 - m_786_d001)/3600.0*dt, 0.1)
-    s.a328_d001_T = Td001 + P_d001*dt/max(s.a328_d001_M*cp_328d001, 1e-6)
+    # SEMI-IMPLICIT, as 324 above.  Q_e004 is NOT in k_cap: it is stroke-driven off TV-328002,
+    # not a UA.(T - Tc) that resists a change in Td001.
+    k_cap_328d001 = (m_737 + m718A_prev + m_793)/3600.0*cp_328d001
+    s.a328_d001_T = Td001 + P_d001*dt/max(s.a328_d001_M*cp_328d001 + k_cap_328d001*dt, 1e-6)
     s.a328_d001_M = max(s.a328_d001_M + (in_d001 - m_786_d001 - m_775 - m_776)/3600.0*dt, 1.0)
 
     # ----- AUDIT C4 : unit-328 ENERGY-CLOSURE DIAGNOSTIC -------------------
@@ -8075,7 +8105,10 @@ def step_sim(dt: float) -> dict:
         sens_c001 = ((m_755*(A328_M755_T - Tc001) + s.cpl_flow_kgh*(A328_CPL_T - Tc001))/3600.0*cp_322c001
                      + gcb_m*(gcb_T - Tc001)/3600.0*cp_322c001)
         P_c001    = sens_c001 + abs_c001/3600.0*A328_LAMBDA_ABS + Q_flood
-        s.a328_c001_T = Tc001 + P_c001*dt/max(s.a328_c001_M*cp_322c001, 1e-6)
+        # SEMI-IMPLICIT, as 324 above: the 755 draw, the carbamate recycle and the gas-cooler
+        # bypass are the T-dependent load.
+        k_cap_322c001 = (m_755 + s.cpl_flow_kgh + gcb_m)/3600.0*cp_322c001
+        s.a328_c001_T = Tc001 + P_c001*dt/max(s.a328_c001_M*cp_322c001 + k_cap_322c001*dt, 1e-6)
     s.a328_c001_M = max(s.a328_c001_M + (m_755 + s.cpl_flow_kgh + abs_c001 - m_756)/3600.0*dt, 1.0)
     # --- liquor species CSTR (TD-009 remainder): feeds 755 + CPL + absorbed(NH3/CO2), draw 756, no
     #     vapour off (the vent is un-absorbed gas that never entered the liquid).  des_advance with
@@ -8139,7 +8172,12 @@ def step_sim(dt: float) -> dict:
                      m_env_in)                                       # cannot condense what is not there
     dM_env     = m_env_in - m_env_cond - m_321                       # kg/h accumulating as gas
     s.r3232_d001_P = max(s.r3232_d001_P + dM_env / R3232_ENV_GAS_C_KG_BAR / 3600.0 * dt, 0.1)
-    s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP, 1e-6)
+    # SEMI-IMPLICIT, as 324 above.  Q_e003 IS in k_cap here: it is UA.(Te003 - T_tw), a genuine
+    # temperature-driven resistance, unlike the
+    # stroke-driven Q_e004 at 328D001.
+    k_cap_e003 = ((m_305 + m718B_prev + m_776 + R3232_M797_DES)/3600.0*R3232_CP
+                  + R3232_E003_UA_KW)
+    s.r3232_e003_T = Te003 + P_e003*dt/max(s.r3232_d001_M*R3232_CP + k_cap_e003*dt, 1e-6)
     if s.r3232_d001_M <= 1.0 and m_308 > (in_e003 - m_321):
         m_308 = max(in_e003 - m_321, 0.0)
     s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_308)/3600.0*dt, 1.0)
@@ -8219,7 +8257,10 @@ def step_sim(dt: float) -> dict:
             dvvdt_m3_s=-((in_e011 - m_v011 - m_718A - m_718B) / 3600.0) / R3232_E011_RHO_L) * dt,
         0.1)
     s.r3232_e011_T_prev = _T_e011_pre
-    s.r3232_e011_T = Te011 + P_e011*dt/max(s.r3232_e011_M*R3232_CP, 1e-6)
+    # SEMI-IMPLICIT, as 324 above.  Q_e011 = UA.(Te011 - 35) is temperature-driven, so it counts.
+    k_cap_e011 = ((m_701 + R3232_E011_RECON_KGH + m_786_d001 + m_321 + m_402)/3600.0*R3232_CP
+                  + R3232_E011_UA_KW)
+    s.r3232_e011_T = Te011 + P_e011*dt/max(s.r3232_e011_M*R3232_CP + k_cap_e011*dt, 1e-6)
     s.r3232_e011_M = max(s.r3232_e011_M + (in_e011 - m_v011 - m_718A - m_718B)/3600.0*dt, 1.0)
 
     # ----- recycle-tear writes (one-tick delay -> next step reads these) --
@@ -8336,18 +8377,22 @@ def step_sim(dt: float) -> dict:
         pwr1 = (feed1_m/3600.0 * cp_feed1 * (T_feed1 - t1_solved)
                 + Q_e001_kw - v1_m/3600.0 * R324_LAM_V1)
         # STIFFNESS: the melt-temperature step is SEMI-IMPLICIT in the terms that depend on the
-        # temperature it is solving for.  Explicit Euler over `M.cp` alone divides by an inventory
-        # that goes to ZERO when the stage drains, and `max(..., 1e-6)` then turns the evaporator
-        # into an amplifier of gain 1e6: one tick with the feed cut and the separator empty threw
-        # the temperature past 1e10, and from there the sensible term -m.cp_f.T alternated sign and
-        # DOUBLED every tick until `cp_water_kjkgk` overflowed on T^3 and killed the engine.  That
-        # is a numerical failure, not a physical one -- an evaporator holding no liquid has no
-        # thermal inertia, so its outlet simply follows its inlet, which is exactly the limit the
-        # form below takes.  Backward Euler on the T-dependent terms, rearranged so the increment
-        # keeps its explicit numerator:
+        # temperature it is solving for.  The `1e-6` is NOT what was wrong -- `s.r324_f001_M` is
+        # written back as max(..., 1.0), so M >= 1 kg and that floor is unreachable.  What was
+        # wrong is explicit Euler itself.  The T-dependent terms give a time constant
+        # tau = M.cp / k_cap with k_cap = m_feed.cp_f/3600 + UA, and k_cap belongs to the FLOWS,
+        # not to the inventory -- so as the separator draws down, tau collapses while the driver
+        # does not.  The step amplifies once dt/tau > 2, i.e. below M_crit = k_cap.dt/(2.cp_hold):
+        # 19.5 kg on the production tick (0.50 % of design) but 389.9 kg on the 2 s harness tick,
+        # which is one TENTH of design inventory -- a deep level excursion, not an empty vessel.
+        # A CCW trip took 324F001 through it; T then alternated sign about T_inf and DOUBLED every
+        # tick until `cp_water_kjkgk` overflowed on T^3 and killed the engine.  Backward Euler on
+        # the T-dependent terms, rearranged so the increment keeps its explicit numerator:
         #     (M.cp/dt)(T' - T) = pwr(T) - k_cap.(T' - T)   ->   T' = T + pwr.dt/(M.cp + k_cap.dt)
-        # k_cap is the heat-capacity rate that resists the change: the feed stream, plus UA while
-        # the chest is still driving heat in.  Unconditionally stable in both, and BIT-EXACT at the
+        # Amplification is M.cp/(M.cp + k_cap.dt) in (0, 1] for ANY dt and ANY M, so M_crit ceases
+        # to exist; as M -> 0 the step tends to T + pwr/k_cap, the algebraic answer for a vessel
+        # with no thermal inertia.  UA is gated on Q > 0 because the chest duty is itself clamped
+        # at zero above saturation and stops resisting a change in T there.  BIT-EXACT at the
         # design seed -- pwr is identically 0 there, so T' == T whatever the denominator is.
         k_cap1 = (feed1_m / 3600.0 * cp_feed1
                   + (R324_E001_UA_KW if Q_e001_kw > 0.0 else 0.0))
@@ -8467,7 +8512,9 @@ def step_sim(dt: float) -> dict:
         v2_m = clamp(feed2_m - urea2_in / max(w_eq2, 1e-6), 0.0, feed2_m)
         pwr2 = (feed2_m/3600.0 * cp_feed2 * (s.r324_e001_T - t2_solved)
                 + Q_e003_kw - v2_m/3600.0 * R324_LAM_V2)
-        # Same semi-implicit step as Stage 1 above, and for the same reason.
+        # Same semi-implicit step as Stage 1 above, and for the same reason.  This stage's
+        # k_cap is 7x smaller (116.3 vs 856.5 kW/K), so M_crit is 2.7 kg / 54.8 kg at the
+        # two tick rates -- the exposure is real here too, just later in the drawdown.
         k_cap2 = (feed2_m / 3600.0 * cp_feed2
                   + (R324_E003_UA_KW if Q_e003_kw > 0.0 else 0.0))
         t2_next = t2_old + pwr2 * dt / max(M_f003_pre * cp_hold2 + k_cap2 * dt, 1e-6)
