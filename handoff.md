@@ -157,6 +157,20 @@ but with no vessel-pressure term, so a vacuum break would not change the drain r
 
 ## 3. Test suite
 
+### Renamed/removed engine constants that test files still reference
+
+Three renames were never propagated into the tests, and between them they account for a large slice
+of the red list. They cost real time to distinguish from genuine regressions, because a file that
+fails to COLLECT hides every test in it.
+
+| broken reference | reality | files | status |
+|---|---|---|---|
+| `R328_C002_T_BOT` | renamed `R328_C002_T_BOT_BOT` (139.0 C) | `test_equation_audit_c10_live_cp.py:56`, `test_equation_audit_desorption.py:164` | **FIXED** 2026-09-04. c10_live_cp went 6/1 -> 7 passed. In desorption it only unmasks a line that was never reached; that test still fails on NH3 |
+| `REACT_FUNNEL_ELEV_M` | **gone from the engine entirely** -- no surviving equivalent found | `test_scenario_consequences.py:40,43` | OPEN. Collection `AttributeError`, so the whole file is skipped and nothing in it runs. Needs whoever removed the constant to say what replaced it |
+| `CONSEQUENCE_TRANSPORT` / `CONSEQUENCE_ROUTES` | now `PROCESS_ROUTES`, but the packet key differs too | `test_consequence_propagation.py` (10 failures) | OPEN. Not a pure rename -- the test indexes a tick-packet key that no longer exists, so it needs re-pointing at the real structure, not sed |
+
+
+
 `pytest` is **not** in `backend/requirements.txt` although all 64 `backend/test_*.py` files are
 pytest modules. Install it separately (`python -m pip install pytest`) or add a dev-requirements
 file.
