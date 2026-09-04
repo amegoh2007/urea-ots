@@ -70,3 +70,78 @@ def test_gravity_outflow_goes_to_zero_with_head():
     f = lambda lvl: hy.gravity_outflow_kgh(300.0, 1.0, lvl, 1240.0, 0.46, 0.46)
     assert f(0.0) == 0.0                       # D-19..21: the guard is unreachable, not deleted
     assert 0.0 < f(0.1) < f(1.0) < f(2.0)
+
+
+# ==================================================================================================
+#  Unit 323 wiring (Phase 2, first unit).  These import `main`, so they are slower than the
+#  primitive tests above; they assert the two things that matter for a wiring change: the design
+#  seed does not move, and the terms that were MISSING are now present with the right sign.
+# ==================================================================================================
+def _main():
+    import main
+    return main
+
+
+def test_the_323_letdown_valves_are_bit_exact_at_the_design_seed():
+    """The whole point of the anchored ratio: swapping in IEC 60534 must not move the pin."""
+    main = _main()
+    m314 = hy.valve_liquid_anchored(
+        main.R323_M314_DES, main.R323_LV501_OP_DES / 100.0,
+        main.R323_C003_P_BARA, main.R323_F004_P_BARA, main.R323_RHO_C003_DES,
+        main.R323_LV501_OP_DES / 100.0, main.R323_C003_P_BARA, main.R323_F004_P_BARA,
+        main.R323_RHO_C003_DES, characteristic=main.R323_LV_CHAR)
+    assert m314 == main.R323_M314_DES
+    m319 = hy.valve_liquid_anchored(
+        main.R323_M319_DES, main.R323_LV505_OP_DES / 100.0,
+        main.R323_F004_P_BARA, main.R323_F010_P_BARA, main.R323_RHO_F004_DES,
+        main.R323_LV505_OP_DES / 100.0, main.R323_F004_P_BARA, main.R323_F010_P_BARA,
+        main.R323_RHO_F004_DES, characteristic=main.R323_LV_CHAR)
+    assert m319 == main.R323_M319_DES
+
+
+def test_the_letdown_valves_now_see_downstream_pressure():
+    """Report D-1's core complaint: `design x (op/op_des)` has NO dP term, so backing the flash drum
+    up moved the letdown flow by exactly nothing.  It must move now, and downward."""
+    main = _main()
+    f = lambda p2: hy.valve_liquid_anchored(
+        main.R323_M314_DES, 0.5, main.R323_C003_P_BARA, p2, main.R323_RHO_C003_DES,
+        0.5, main.R323_C003_P_BARA, main.R323_F004_P_BARA, main.R323_RHO_C003_DES,
+        characteristic=main.R323_LV_CHAR)
+    assert f(2.5) < f(main.R323_F004_P_BARA) < f(0.5)
+    assert f(main.R323_C003_P_BARA) == 0.0            # no dP, no flow
+
+
+def test_the_323f010_vapour_space_is_not_on_the_shared_capacitance():
+    """A-6.  The engine shared 0.02 bar/(kg/s) across nine vessels.  323F010's own coefficient,
+    from its real 23.15 m3 shell and its design holdup, is several times that -- which is the whole
+    finding, and is why one constant could not have been right for all of them."""
+    main = _main()
+    vv = hy.vapour_volume_m3(main.R323_F010_VOL_M3, main.R323_F010_M_DES, main.R323_D002_RHO)
+    assert 0.0 < vv < main.R323_F010_VOL_M3          # the melt really does occupy part of the shell
+    k_new = hy.vessel_dpdt(main.R323_F010_P_BARA, main.R323_F010_T_SP_C + 273.15, vv, 18.54,
+                           3600.0 / 18.54, 0.0)      # 1 kg/s of steam
+    assert k_new > 3.0 * main.R323_F010_P_KP, (k_new, main.R323_F010_P_KP)
+
+
+def test_the_323_geometry_matches_the_vessel_datasheet():
+    """Sourced, not fitted: References/323F004 323E010 323F010.md gives both vessels' ID and shell
+    height directly.  Asserted so a future edit cannot quietly turn them into tuning knobs."""
+    main = _main()
+    assert (main.R323_F004_ID_M, main.R323_F004_SHELL_M) == (1.384, 1.800)
+    assert (main.R323_F010_ID_M, main.R323_F010_SHELL_M) == (3.478, 2.437)
+    assert abs(main.R323_F004_VOL_M3 - 2.708) < 0.001
+    assert abs(main.R323_F010_VOL_M3 - 23.153) < 0.001
+
+
+def test_the_design_seed_holds_after_one_tick():
+    """End to end: a fresh State stepped once must still sit on every 323 design boundary."""
+    main = _main()
+    main.state = main.State()
+    main.step_sim(0.25)
+    s = main.state
+    assert s.r323_f004_P == main.R323_F004_P_BARA
+    assert s.r323_f010_P == main.R323_F010_P_BARA
+    assert s.r323_f010_T == main.R323_F010_T_SP_C
+    assert s.r323_f010_M == main.R323_F010_M_DES
+    assert s.r323_f004_M == main.R323_F004_M_DES
+    assert s.r323_c003_M == main.R323_C003_M_DES

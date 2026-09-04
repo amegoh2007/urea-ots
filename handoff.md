@@ -87,6 +87,41 @@ above this is **not** envelope-blocked: `gap_g6_h0_enthalpy` already covers all 
 phases, so `Q = Σ ṅ_cond,i ΔH_cond,i(T,P) + ṁ c_p ΔT` is buildable now. Deferred from Phase 1 only
 to keep the 324 mass balance out of a change already touching the 323 species layer.
 
+## 1e. Phase 2 — hydraulic network, 3 of 4 units still on the frozen forms
+
+`backend/hydraulics.py` carries the IEC 60534 / ISA-75.01 laws and the vapour-space pressure
+derivative. **Unit 323 is wired** (LV-323501, LV-323505, and the 323F010 vapour space); design seed
+bit-exact, 30 000 s envelope bounded, product unmoved. Full write-up in the As-Built reference.
+
+**Still on the frozen forms — units 322, 324, 328:**
+
+| finding | sites | note |
+|---|---|---|
+| A-6 | `R328_C002/C003/C004_P_KP`, `A328_C001_P_KP`, `R324_F001/F003_P_KP`, `R328_D001_P_KP`, `R3232_E011_P_KP` | eight vessels still share 0.02 / 0.05 bar/(kg/s). Geometry IS available for all of them in `References/` (328C002 1250x10470, 328C003 1950x20850, 328C004 1250x13030, 328D001 1684x1950, 323D001 11.10 m3 stated, 324F001 ID 4570, 322C001 576/922 stepped) |
+| D-1 | LIC-328503/328504/328505 bottoms, PV-328203B, LV-322501, 328C002 and 328C004 overheads, 323D001 and 323E011 vents, 324F001 barometric leg, every `_fic_flow` loop | all still `design x (op/op_des)` |
+| D-2 | HV-322604, the steam-header letdowns, `core/valve.py:_valve_flow` | still incompressible sqrt(dP) on choked service; `hydraulics.valve_flow_gas` is ready and unused |
+| D-8 | `322E001_BOT_KGH_LAG` (60 s), `FEED_TD_S` (345 s) | fixed FIFOs; `hydraulics.transport_time_s` is ready. Needs line D and L from the nozzle tables |
+| D-19/D-20/D-21 | `main.py` scrubber suction, stripper drain, HPCC level | see the 323C003 note below before deleting any of these |
+
+**Two findings that need judgement, not just wiring:**
+
+* **A-7, 323F004 pressure — BLOCKED ON DATA.** A real ODE needs a conductance on the
+  F004 -> 323E011 overhead, but `R323_F004_P_BARA` and `R3232_E011_P_BARA` are both 1.13 bar a, so
+  the model's design dP across that line is identically zero. The PFD row separates stream 701
+  (1.1 bar a) from the downstream carbamate gas (1.0 bar a), but it is rounded to 0.1 bar — the same
+  order as the dP itself. Either find the line dP, or restructure so n_out is the 323E011
+  condensation rate plus the PV-323203 vent.
+* **D-19 to D-21 are not all the same.** The report's argument (head-driven discharge makes the
+  guard unreachable) holds only for GRAVITY drains. Where the guard sits on a pressure letdown --
+  323C003's is on LV-323501, 4.1 -> 1.13 bar -- the dP does not vanish as the vessel empties, and
+  deleting the guard drains the vessel below empty. The real answer there is a two-phase valve model
+  (liquid -> vapour as the level uncovers the nozzle), which does not exist yet. Check each of the
+  three remaining sites for which kind it is before touching it.
+
+**Also open:** 323F010's barometric leg is `M317_DES*sqrt(M/M_DES)` — correctly head-driven in form
+but with no vessel-pressure term, so a vacuum break would not change the drain rate. Wiring it to
+`hydraulics.gravity_outflow_kgh` needs the leg height, which no source in the repository gives.
+
 ## 2. Minor cleanups
 
 - `backend/core/thermo.py` still carries a dead `EmpiricalThermo.bubble_p` placeholder with no

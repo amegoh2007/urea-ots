@@ -41,6 +41,7 @@ from typing import Optional, Set
 import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
 import thermo_extended_uniquac as extended_uniquac
 import thermo_service                      # Phase 1 unified rigorous VLE / flash service
+import hydraulics                          # Phase 2 IEC 60534 valves + vapour-space pressure states
 import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-97)
 import gap_g6_h0_enthalpy as h0_enthalpy  # H0 stream enthalpy on the elements-at-298.15 K datum
 import consequence  # ISA-75.01.01 consequence physics + plug-flow line transport (StreamPacket)
@@ -960,6 +961,33 @@ R323_F010_LVL_SP    = 60.0                      # %
 R323_D002_VOL_I_M3  = 80.0                      # m3, Compartment I (active flow-through)
 R323_D002_VOL_II_M3 = 300.0                     # m3, Compartment II (passive buffer)
 R323_D002_RHO       = 1151.0                    # kg/m3, PFD stream 315/317 effective density (80 % urea, 99 C)
+
+# --- PHASE 2 (report A-6 / D-1): 323 vessel geometry and letdown-valve design conditions -------
+# Geometry is REAL, from References/323F004 323E010 323F010.md sections 3.1 and 3.2 -- the vessel
+# datasheet narrative, not a back-solve.  It is what turns the copy-pasted 0.02 bar/(kg/s)
+# capacitance into the actual RT/(V_v.Mbar), and it is what lets level swell compress the vapour
+# space (a fuller vessel gives a stiffer pressure response; the lumped form had no such term).
+R323_F004_ID_M     = 1.384                      # m, 323F004 inside diameter (1384 mm)
+R323_F004_SHELL_M  = 1.800                      # m, cylindrical shell height (1800 mm)
+R323_F004_VOL_M3   = math.pi * 0.25 * R323_F004_ID_M ** 2 * R323_F004_SHELL_M      # 2.708 m3
+R323_F010_ID_M     = 3.478                      # m, 323F010 inside diameter (3478 mm)
+R323_F010_SHELL_M  = 2.437                      # m, cylindrical shell height (2437 mm)
+R323_F010_VOL_M3   = math.pi * 0.25 * R323_F010_ID_M ** 2 * R323_F010_SHELL_M      # 23.153 m3
+
+# PFD-published effective densities (STRICT source, PFD-21 "Density eff." row) for the two liquid
+# services the letdown valves pass.  Density is the term the frozen `design x stroke/stroke_des`
+# form dropped entirely -- it cancels only if constant, and it is not across 68-80 % urea.
+R323_RHO_S314      = 1106.0                     # kg/m3, PFD stream 314 (323C003 bottoms -> LV-323501)
+R323_RHO_S319      = 1130.0                     # kg/m3, PFD stream 319 (323F004 drain  -> LV-323505)
+
+# Installed characteristic for the two 323 level-letdown valves.  There are no control-valve
+# datasheets in this repository (see hydraulics.py), so this is a stated modelling choice, and the
+# conservative one: LINEAR reproduces the gain basis the existing LIC-323501 / LIC-323505 tuning was
+# derived against, so this change delivers the terms that were actually missing -- live dP from node
+# pressures on both sides, live density, and the cavitation limit -- without silently re-scaling two
+# level loops.  Equal-percentage is available in `hydraulics.cv_fraction` and would roughly double
+# the loop gain at the 50 % design stroke; switching to it is a retune, not a drop-in.
+R323_LV_CHAR       = "linear"
 # LIC-323507 sits LOW on purpose.  At 80 % urea and 99 C the protective ammonia has already been
 # flashed off, so 2 Urea -> Biuret + NH3 runs in the tank; the licensor sizes Comp I so the ACTIVE
 # residence stays under ~6 min (10 % of 80 m3 = 8 m3 against an 80.6 m3/h feed).  Holding it at a
@@ -2076,6 +2104,12 @@ R323_CP_S208_DES = urea_soln_cp(W_S208["Urea"], R323_FEED_DES_T_C)   # 55.87 % @
 R323_CP_C003_DES = urea_soln_cp(W_S314["Urea"], R323_C003_T_SP_C)    # 68.74 % @ 135 C, column bottoms
 R323_CP_F004_DES = urea_soln_cp(W_S319["Urea"], R323_F004_T_SP_C)    # 71.74 % @ 106 C, flash liquid
 R323_CP_F010_DES = urea_soln_cp(W_S317["Urea"], R323_F010_T_SP_C)    # 80.00 % @  99 C == R323_CP_SOLN
+
+# Density anchors for the letdown valves, built the same way as the cp anchors above: the design
+# value is this same function evaluated at the stage's design composition and temperature, so the
+# live/design ratio inside the valve law is exactly 1.0 at the seed and the pin cannot move.
+R323_RHO_C003_DES = urea_soln_rho(W_S314["Urea"], R323_C003_T_SP_C, R323_RHO_S314)
+R323_RHO_F004_DES = urea_soln_rho(W_S319["Urea"], R323_F004_T_SP_C, R323_RHO_S319)
 R323_CP_S331_DES = urea_soln_cp(W_S331["Urea"], R323_M331_T_C)       # 44.37 % @  40 C, granulation return
 
 
@@ -2267,6 +2301,12 @@ def sol_vapour_y_vle(key: str, w: dict, t_c: float, p_bara: float, alpha: dict) 
 _sol_alpha_anchor("C003", W_S314, R323_C003_T_SP_C, R323_C003_P_BARA)
 _sol_alpha_anchor("F004", W_S319, R323_F004_T_SP_C, R323_F004_P_BARA)
 _sol_alpha_anchor("F010", W_S317, R323_F010_T_SP_C, R323_F010_P_BARA)
+
+#  The design vapour composition each stage publishes once the anchored ratio and the non-volatile
+#  zeroing are applied.  Used to seed the 323F010 pressure tear, so a fresh State starts on exactly
+#  the vector the first tick would have produced.
+SOL_F010_Y_DES = sol_vapour_y_vle("F010", W_S317, R323_F010_T_SP_C, R323_F010_P_BARA,
+                                  SOL_F010["alpha"])
 
 
 def sol_biuret_xi(key: str, M: float, w: dict, T_c: float) -> float:
@@ -5005,6 +5045,12 @@ class State:
         self.r323_c003_M = R323_C003_M_DES        # 323C003 rectifier bottom holdup
         self.r323_c003_T = R323_C003_T_SP_C        # 135 C
         self.r323_c003_P = R323_C003_P_BARA        # PT-323201 column pressure (dynamic, hydraulic coupling)
+        #  Beginning-of-substep 323F010 vapour composition.  The A-6 pressure ODE needs the vapour's
+        #  MEAN MOLECULAR WEIGHT to turn kg/h into kmol/h, but `y_evap` is solved AFTER the pressure
+        #  is advanced (the flash reads the new P), so this carries the previous substep's value --
+        #  an explicit tear, the same discipline `s.r3232_d001_P` already uses.  At the design seed
+        #  the vapour composition is stationary, so the tear costs exactly nothing there.
+        self.y_evap_f010 = dict(SOL_F010_Y_DES)
         self.r323_f004_M = R323_F004_M_DES         # 323F004 flash-tank holdup
         self.r323_f004_T = R323_F004_T_SP_C        # 106 C
         self.r323_f004_P = R323_F004_P_BARA        # 323F004 flash pressure (dynamic, read by PIC-323203 LP node)
@@ -6558,7 +6604,15 @@ def step_sim(dt: float) -> dict:
     q305_avail_kw = q_flash_avail_kw + Q_e002_kw                                  # total available latent kW
     lvl_c003  = clamp(s.r323_c003_M / R323_C003_M_FULL * 100.0, 0.0, 100.0)
     lv501_op  = _ctrl_ipd(s.LIC_323501, lvl_c003, dt)                             # LV-323501 stroke (%)
-    m_314     = max(R323_M314_DES * (lv501_op / R323_LV501_OP_DES), 0.0)          # bottom drain -> flash (kg/h)
+    # LV-323501, IEC 60534 liquid (report D-1).  Was `M314_DES * (op/op_des)`: a pure valve-position
+    # gain with NO dP term at all, so the column pressure rising or the flash drum backing up moved
+    # this flow by exactly nothing.  Now driven by the LIVE node pressures on both sides and the
+    # live density of what it is actually passing.
+    m_314     = hydraulics.valve_liquid_anchored(
+        R323_M314_DES, lv501_op / 100.0, s.r323_c003_P, s.r323_f004_P,
+        urea_soln_rho(s.w_c003.get("Urea", 0.0), s.r323_c003_T, R323_RHO_S314),
+        R323_LV501_OP_DES / 100.0, R323_C003_P_BARA, R323_F004_P_BARA, R323_RHO_C003_DES,
+        characteristic=R323_LV_CHAR)                                              # bottom drain -> flash (kg/h)
     P_c003    = (q305_avail_kw - m_305 / 3600.0 * R323_LAMBDA_305)               # net kW on holdup
 
     M_c003_pre = s.r323_c003_M
@@ -6568,6 +6622,14 @@ def step_sim(dt: float) -> dict:
     T_dep_314 = s.r323_c003_T
     w_dep_314 = s.w_c003
     s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp_c003, 1e-6)
+    # PHASE 2, report D-19 to D-21: this guard is deliberately KEPT, and the reason matters.
+    # Those findings say an empty-vessel limiter becomes unreachable once the discharge is driven by
+    # hydrostatic head, because h -> 0 drives the flow to zero on its own.  That argument holds for a
+    # GRAVITY drain -- 323F010's barometric leg is already of that form -- but LV-323501 is a
+    # pressure letdown, 4.1 -> 1.13 bar a, and its dP does NOT vanish when the column empties.  What
+    # actually happens on the plant is that the valve starts passing vapour instead of liquid, and
+    # this engine has no two-phase valve model.  Deleting the guard here would let 323C003 drain
+    # below empty at full letdown rate; keeping it is the honest floor until that model exists.
     if M_c003_pre <= 1.0 and m_314 > (m_feed_323 - m_305):
         m_314 = max(m_feed_323 - m_305, 0.0)
     # ---- 323C003 -> 323F004 drain line: plug-flow transport of the CLOSED packet ---------------
@@ -6635,7 +6697,14 @@ def step_sim(dt: float) -> dict:
                     0.0)                                                          # flash vapor -> LPCC (701, kg/h)
     lvl_f004  = clamp(s.r323_f004_M / R323_F004_M_FULL * 100.0, 0.0, 100.0)
     lv505_op  = _ctrl_ipd(s.LIC_323505, lvl_f004, dt)                            # LV-323505 stroke (%)
-    m_319     = max(R323_M319_DES * (lv505_op / R323_LV505_OP_DES), 0.0)          # drain -> pre-evaporator (kg/h)
+    # LV-323505, IEC 60534 liquid (report D-1).  Same replacement as LV-323501: the flash drum's own
+    # pressure and the 323F010 vacuum now both appear in the flow, which is what couples the level
+    # loop to the vacuum system the way the plant is coupled.
+    m_319     = hydraulics.valve_liquid_anchored(
+        R323_M319_DES, lv505_op / 100.0, s.r323_f004_P, s.r323_f010_P,
+        urea_soln_rho(s.w_f004.get("Urea", 0.0), s.r323_f004_T, R323_RHO_S319),
+        R323_LV505_OP_DES / 100.0, R323_F004_P_BARA, R323_F010_P_BARA, R323_RHO_F004_DES,
+        characteristic=R323_LV_CHAR)                                              # drain -> pre-evaporator (kg/h)
     # ---- 323F004 -> 323F010 drain line (LV-323505): plug-flow transport of the CLOSED packet ----
     # Departure state is the pre-advance drum state, i.e. the state of the liquid actually leaving on
     # this sub-step and the state cp_f004 was evaluated at.
@@ -6732,9 +6801,33 @@ def step_sim(dt: float) -> dict:
     pull_f010  = (R323_MEVAP_DES * (s.r323_f010_P / R323_F010_P_BARA)
                   * (s.HIC_323605 / R323_HIC605_DES_PCT)
                   * (s.HIC_329605 / R324_HIC9605_DES_PCT))
-    s.r323_f010_P = clamp(s.r323_f010_P + R323_F010_P_KP*(m_evap - pull_f010)/3600.0*dt, 0.05, 1.0)
+    # PHASE 2, report A-6.  This ODE was  dP/dt = 0.02 * (m_evap - pull)/3600  -- a capacitance of
+    # 0.02 bar per kg/s that this vessel SHARED with eight others, among them the 16.8 bar a
+    # hydrolyser.  The real coefficient is RT/(V_v.Mbar) and it is 4.8x stiffer here than the
+    # copy-pasted constant, because a 23.15 m3 separator two-thirds full of melt has a small vapour
+    # space and steam has a low molecular weight.  Three terms the lumped form did not have:
+    #   * MOLAR accumulation, not mass -- 1 kg/s of steam and 1 kg/s of CO2 are not the same dP/dt;
+    #   * the thermal term, so heating the vapour space raises its pressure with no molar change;
+    #   * level swell, V_v = V_vessel - M_l/rho_l, so a filling vessel gets a stiffer response.
+    # Design invariance: m_evap == pull_f010 == R323_MEVAP_DES bit-exactly at the seed, and dT/dt and
+    # dV_v/dt are both a literal 0.0 there, so dP/dt is exactly 0.0 and the pin cannot move.
+    # `pull_f010` above is still the ejector's design-anchored suction law -- that is report D-12 and
+    # belongs to the Phase 4 machine maps, so it is deliberately untouched here.
+    _y_tear = s.y_evap_f010                                                       # previous substep
+    _mw_evap = 1.0 / max(sum(_y_tear.get(k, 0.0) / MW_SOL[k] for k in SOL_SPECIES), 1e-12)
+    _rho_f010 = urea_soln_rho(s.w_f010.get("Urea", 0.0), s.r323_f010_T, R323_D002_RHO)
+    _vv_f010 = hydraulics.vapour_volume_m3(R323_F010_VOL_M3, M_f010_pre, _rho_f010)
+    _dmdt_f010 = (m_319_in + m_331 - m_evap - m_317) / 3600.0                     # kg/s of holdup
+    s.r323_f010_P = clamp(
+        s.r323_f010_P + hydraulics.vessel_dpdt(
+            s.r323_f010_P, s.r323_f010_T + 273.15, _vv_f010, _mw_evap,
+            m_evap / _mw_evap, pull_f010 / _mw_evap,                              # kmol/h each
+            dtdt_k_s=P_f010 / max(M_f010_pre * cp_f010, 1e-6),
+            dvvdt_m3_s=-_dmdt_f010 / max(_rho_f010, 1e-6)) * dt,
+        0.05, 1.0)
     y_evap     = sol_vapour_y_vle("F010", s.w_f010, s.r323_f010_T, s.r323_f010_P,
                                   SOL_F010["alpha"])   # AUDIT F-8 -> Phase 1 rigorous flash
+    s.y_evap_f010 = y_evap                             # close the A-6 pressure tear
     xi_f010    = sol_biuret_xi("F010", M_f010_pre, s.w_f010, s.r323_f010_T)
     s.w_f010   = sol_advance(s.w_f010, M_f010_pre, s.r323_f010_M, m_319_in, w_319_in,
                              m_evap, y_evap, m_317, xi_f010, dt, m_in2=m_331, w_in2=W_S331)

@@ -513,6 +513,130 @@ Both now run their own solve at the design point and land on it by converging. T
 distributing feed, or a feed already single-phase) and are degenerate-input answers, not a bypass of
 the maths at design.
 
+## Hydraulic Network: IEC 60534 Valves and Vapour-Space Pressure States (`backend/hydraulics.py`)
+
+Phase 2 of the eradication report. The module carries the equations; wiring is done one unit at a
+time so the boot pin can be re-proved after each. **Unit 323 is wired; 322, 324 and 328 are not.**
+
+### Why the engine calls a ratio and not the absolute ISA law
+
+`References/Datasheets` holds equipment datasheets — vessels, exchangers, pumps. It contains **no
+control-valve datasheets**, so there is no vendor `Cv`, `FL` or `xT` anywhere in this repository, and
+asserting one would be inventing data. Rather than back-solve a `Cv` and pretend to it, every site
+calls the ratio of the ISA law to itself at the design condition:
+
+$$\dot m = \dot m_{des}\cdot\frac{\Phi(\text{live})}{\Phi(\text{design})},\qquad
+\Phi_{liq}=f(h)\sqrt{\Delta P_{eff}\,\rho_1},\qquad
+\Phi_{gas}=f(h)\,P_1 Y\sqrt{\frac{xM}{T_1Z}}$$
+
+$N_6/N_8$, $F_p$ and $C_{v,max}$ appear identically in numerator and denominator and cancel
+**algebraically**, so the answer never depended on the `Cv` we do not have. What survives is exactly
+what the frozen `design × stroke/stroke_des` form was missing: the installed characteristic, the live
+density, the live $\Delta P$ from node pressures on both sides, and the choke.
+
+There is also a numerical reason. Back-solving `Cv` and multiplying straight back through is **not**
+bit-exact — measured `101490.00000000001` against `101490.0` — and this engine's pin asserts the
+design point to the last bit. A 1-ulp drift at every valve on every tick walks a long run off its
+anchor. In the ratio form the design bracket is exactly 1.0.
+
+`FL = 0.90`, `FF = 0.96` and `xT = 0.75` are IEC 60534-2-1 Table-1 representative values for a globe
+valve with a contoured plug, applied uniformly and stated as assumptions. They set only *where*
+choking begins; every 323 liquid service runs well below that point at design.
+
+### Choking, which the old form could not represent at all
+
+For compressible service $x=\min(\Delta P/P_1,\;F_\gamma x_T)$ and $Y = 1-x/(3F_\gamma x_T)$, floored
+at 2/3. The `min()` **is** the choke: past the critical ratio the flow depends on downstream pressure
+not at all. Verified on a 140.7 bar a service — flow flat at 24 563 kg/h for $p_2$ = 20, 4 and
+0.5 bar a. The incompressible $\sqrt{\Delta P}$ law it replaces had flow still climbing as the
+downstream pressure fell, which is not a thing that happens.
+
+### Unit 323, what changed
+
+| finding | site | was | is |
+|---|---|---|---|
+| D-1 | LV-323501 | `M314_DES × (op/op_des)` — no ΔP term at all | IEC 60534 liquid on live `r323_c003_P` → `r323_f004_P` |
+| D-1 | LV-323505 | `M319_DES × (op/op_des)` | same, on `r323_f004_P` → `r323_f010_P` |
+| A-6 | 323F010 vapour space | shared `0.02 bar/(kg/s)` | $RT/(V_v\overline M)$ + thermal term + level swell |
+
+Geometry is sourced, not fitted: `References/323F004 323E010 323F010.md` gives 323F004 as ID 1384 mm
+× 1800 mm shell (2.708 m³) and 323F010 as ID 3478 mm × 2437 mm (23.153 m³). Densities 1106 and
+1130 kg/m³ are the PFD-21 "Density eff." row for streams 314 and 319.
+
+The installed characteristic for both letdown valves is set **linear** (`R323_LV_CHAR`), and that is
+a deliberate, conservative choice rather than a physical claim: with no valve datasheet, equal-%
+would roughly double LIC-323501/505 loop gain at the 50 % design stroke, which is a retune wearing a
+physics costume. Linear preserves the gain basis those loops were tuned against while still
+delivering the terms that were genuinely absent.
+
+### The shared capacitance was wrong by 4.69× at this vessel
+
+323F010's own coefficient, from its real shell and its design holdup:
+
+$$V_v = 23.153 - \frac{M_l}{\rho_l} = 17.781\ \text{m}^3,\qquad
+K = \frac{RT}{V_v\overline M} = 0.0939\ \text{bar}/(\text{kg/s})$$
+
+against the `0.02` it shared with eight other vessels — among them the 16.8 bar a hydrolyser. The
+lumped form also had no molar basis (1 kg/s of steam and 1 kg/s of CO₂ are not the same dP/dt), no
+thermal term, and no level swell.
+
+**This is not a stability risk, and the reason is worth recording.** `pull_f010` is linear in P, so
+the node is first-order: $d\delta P/dt = -K\,(\partial \dot m_{pull}/\partial P)\,\delta P$ with
+$\partial \dot m_{pull}/\partial P = \dot m_{evap,des}/P_{des} = 7.254$ kg/s/bar. Stiffening $K$ can
+only make it faster, never oscillatory:
+
+| | K | pole | τ | discrete pole at dt = 0.25 s |
+|---|---|---|---|---|
+| old shared 0.02 | 0.02000 | −0.1451 /s | 6.89 s | 0.9637 |
+| new RT/(V_v·M̄) | 0.09386 | −0.6809 /s | **1.47 s** | 0.8298 |
+
+Both are well inside the unit circle. A 17.8 m³ vapour space really does respond in about 1.5 s; the
+old constant was over-damping it by a factor of five with no physical basis.
+
+### Measured, 30 000 s from the design seed
+
+Design invariance first: after one tick `r323_f004_P` = 1.1300000000, `r323_f010_P` = 0.4600000000,
+`r323_f010_T` = 99.0000000000, and all three 323 holdups are bit-exact at design.
+
+Envelope per 3 000 s window, to show the wider ripple is bounded rather than slowly growing:
+
+| window (s) | T span (°C) | P span (bar) | urea (%) |
+|---|---|---|---|
+| 0 – 3 000 | 0.0228 | 0.00237 | 80.048 |
+| 3 000 – 6 000 | 0.0700 | 0.00506 | 80.071 |
+| 6 000 – 9 000 | 0.0318 | 0.00308 | 80.065 |
+| 9 000 – 12 000 | 0.0416 | 0.00271 | 80.075 |
+| 12 000 – 15 000 | 0.0809 | 0.00333 | 80.070 |
+| 15 000 – 18 000 | 0.0099 | 0.00132 | 80.075 |
+| 18 000 – 21 000 | 0.0747 | 0.00345 | 80.064 |
+| 21 000 – 24 000 | 0.0412 | 0.00243 | 80.066 |
+| 24 000 – 27 000 | 0.0267 | 0.00210 | 80.065 |
+| 27 000 – 30 000 | **0.0072** | 0.00075 | 80.065 |
+
+Aperiodic and bounded, with no trend across 8.3 h of sim time and the tightest window last. Pressure
+moves at most 0.005 bar on a 0.46 bar node (1 %). Product urea sits in 80.064–80.075 % throughout —
+unchanged by Phase 2, against 80.085 % before it.
+
+### What is NOT wired, and why
+
+* **A-7, the 323F004 pressure state.** Still the algebraic `design + 0.45 bar per unit relative
+  vapour excess` chased through a 90 s lag. A real ODE needs a conductance on the F004 → 323E011
+  overhead, but `R323_F004_P_BARA` and `R3232_E011_P_BARA` are **both** 1.13 bar a, so the model's
+  design ΔP across that line is identically zero and no conductance can be anchored on it. The PFD
+  pressure row does distinguish stream 701 (1.1 bar a) from the downstream carbamate gas (1.0 bar a),
+  but it is rounded to 0.1 bar — the same order as the ΔP itself, a 3× uncertainty on the very
+  quantity that would size the conductance. Blocked on data, not deferred by choice.
+* **D-19 at 323C003.** The empty-vessel guard is kept deliberately. That finding argues such guards
+  become unreachable under a head-driven discharge law — true for a gravity drain, and 323F010's
+  barometric leg is already of that form. LV-323501 is a 4.1 → 1.13 bar letdown whose ΔP does *not*
+  vanish when the column empties; what really happens is the valve begins passing vapour, and this
+  engine has no two-phase valve model. Deleting the guard would let 323C003 drain below empty at full
+  letdown rate.
+* **D-12, `pull_f010`.** The ejector suction law is a machine map and belongs to Phase 4.
+* **323F010's barometric leg** still uses `M317_DES·√(M/M_DES)`, which is correctly head-driven in
+  form but ignores the vessel pressure, so a vacuum break would not change the drain rate. Wiring it
+  to `gravity_outflow_kgh` needs the leg height, which no source in the repository gives.
+
 ## Consequence Transport Lag
 
 A consequence arrives when its fluid parcel arrives. `consequence.StreamPacket` carries one closed
