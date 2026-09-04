@@ -156,21 +156,26 @@ Verified green or baseline-identical:
 | `test_consequence_propagation.py` | **8 passed, 2 xfailed** | was 10 failures |
 | `test_equation_audit_322e002.py` | 1 failed, 7 passed | identical to baseline |
 | `test_c003_pressure_coupling.py` | 1 failed, 19 passed | identical to baseline, verified by running HEAD in a side worktree |
+| `test_ejector_spindle.py` | **11 passed** | the D-19 head term drives LT-329501 and LT-322504 here |
+| `test_foptd_fingerprint.py` | 3 passed | D-8 |
+| `test_equation_audit_322e001_enthalpy.py` | 13 passed | |
+| `test_equation_audit_322e001_flood.py` | 11 passed | |
+| `test_g8_lp_turbine_export.py` | 2 failed, 4 passed | identical to baseline (section 3 red list) |
 
-`test_ejector_spindle.py` reported **10 of its 11 tests passing** -- all three LT-329501 level
-tests and all three LT-322504 tests among them, which are the ones the D-19 head term actually
-drives -- before the run had to be stopped; only `test_tt322002_design_holds` had not reported.
-
-**NOT re-run in this pass, and they should be**:
-`test_equation_audit_desorption.py`, `test_equation_audit_td014.py`, `test_ccw_loss_chain.py`,
-`test_transient_coldstart.py`, `test_foptd_fingerprint.py`, `test_g8_lp_turbine_export.py`,
-`test_equation_audit_322e001_enthalpy.py`, `test_scenario_consequences.py`. Not because of any
+**NOT re-run in this pass, and they should be**: `test_equation_audit_desorption.py`,
+`test_equation_audit_td014.py`, `test_ccw_loss_chain.py`, `test_transient_coldstart.py`,
+`test_scenario_consequences.py`. Not because of any
 finding — the machine this ran on has 4 logical cores and was 70-85 % consumed by unrelated
 desktop applications throughout, which took the engine from its normal ~126 ticks/s to roughly a
-tenth of that and made each of these multi-thousand-tick files an hour-plus proposition. The one with
-the strongest claim on attention is `test_equation_audit_desorption.py` (the three 328 bottoms
-valves; its two known failures are on NH3 composition and hydrolyser urea slip, neither touched
-here).
+tenth of that and made each of these multi-thousand-tick files an hour-plus proposition.
+`test_transient_coldstart.py` alone is 32 000 ticks by construction (T_END 16 000 s at DT 0.5).
+
+All five carry known pre-existing failures, and the baselines to match are recorded here so the
+next session compares rather than re-derives: **desorption 2F/8P, td014 4F/7P, transient_coldstart
+5 failures, scenario_coverage 6**. The one with the strongest claim on attention is
+`test_equation_audit_desorption.py`, because it is the file that exercises the three 328 bottoms
+valves; its two known failures are on 328C002 NH3 composition and hydrolyser urea slip, neither of
+which this pass touched.
 
 ### Two things that were dropped code, not missing physics
 
