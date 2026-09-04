@@ -1,16 +1,99 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-02 (322E003 CCW-loss consequence chain closed end to end)
+**Last updated:** 2026-09-04 (Phase 1 thermodynamic foundation: unified rigorous VLE / flash service)
 
 ---
 
-## 1. Documentation reconciliation — `project.md` §5.1
+## 1. Documentation reconciliation — `project.md` §5.1 — partially closed
 
-`project.md` §5.1 claims the Extended UNIQUAC electrolyte model (`props_nh3co2h2o.py`,
-`vle_nh3co2h2o.py`) supplies the 323C003, 323F004 and 328D003 bubble points. Neither module is
-imported at runtime: all ionic-section VLE uses IAPWS-IF97 pure-water `tsat` plus a frozen design
-offset. Reclassify Extended UNIQUAC as a validated-but-unintegrated research module and document
-the as-built method. No code risk.
+**Closed for 323C003 / 323F004 / 323F010.** `backend/thermo_service.py` (Phase 1) now wires
+`vle_nh3co2h2o`, `props_nh3co2h2o` (SRK), `thermo_extended_uniquac` and `gap_g6_h0_enthalpy` into a
+single `flash / flash_ph / bubble_p / bubble_t / dew_t` service, and those three stages take their
+vapour composition from a Rachford-Rice gamma-phi solve instead of the frozen `sol_vapour_y` alpha
+vector. Live confirmation is published per tick as `SOL.vle_domain`.
+
+**Still open:** 328D003 and the whole 328 desorption train still use `sol_vapour_y` with anchored
+alphas — they were not evaluated against the table envelope in this phase. Check their loadings
+against `thermo_service.classify` before wiring; the 328 columns run 60-145 °C on dilute ammonia
+water, so several are plausibly in domain.
+
+## 1a. G-VLE-2 — no volatile split on a urea melt (324E001 / 324E003)
+
+`thermo_service.flash` refuses `DOMAIN_NEUTRAL_UREA`. The neutral H2O/urea binary carries no NH3 or
+CO2 at all, and the electrolyte path is outside its dilute limit there: the loading basis is mol per
+kg of **water**, so 0.04 wt% NH3 in a 1.39 wt% water melt reads as 1.69 mol/kg and the flash returns
+an NH3 vapour mole fraction of 0.24 for a melt whose vapour is essentially pure steam. `bubble_p` /
+`bubble_t` remain valid and are good there (+2.2 % at 324E003, against +65.7 % for the electrolyte
+model). 324E001/E003 therefore keep their anchored vapour vector.
+
+**To close:** a urea-melt NH3/CO2 solubility source (Henry constants on a urea-melt basis, not an
+aqueous one). This is new source material, not new wiring.
+
+## 1b. G-VLE-3 — the HP synthesis loop is outside every fitted envelope
+
+The 322 loop cannot go on the rigorous service and Phase 1 deliberately did not force it. Measured
+against the electrolyte table (T 80-170 °C, N ≤ 16, C ≤ 7 mol/kg water):
+
+| state | T | N load | C load |
+|---|---|---|---|
+| 322R001 overflow (stream 207) | 183 °C | 100.0 (6.2×) | 22.4 (3.2×) |
+| 322E003 off-gas feed | 183 °C | 869.3 (54.3×) | 258.1 (36.9×) |
+
+and the 322E003 feed carries N2, O2, CH4, H2, for which the repo holds neither Henry constants nor
+SRK critical constants (`props_nh3co2h2o.SRK_CRIT` = H2O, NH3, CO2 only).
+
+This matters more than a normal out-of-range case because `vle_nh3co2h2o._bracket` **clamps** rather
+than extrapolating: an off-envelope call silently returns the edge node, i.e. a frozen constant
+behind a call that looks like a solve — strictly worse than the honest `HPCC_FRAC_GAS_DES` dict it
+would replace. `thermo_service` raises `OutOfDomain` instead.
+
+**To close:** rebuild the activity grid over a molten-carbamate envelope (the current parameter set
+is a CO2-capture model fitted to dilute aqueous loadings below ~150 °C) **and** source inert Henry /
+SRK data. Until then `REACT_THETA_OG`, `STRIP_FRAC_DES`, `SCRUB_OFFGAS_KMOLH_DES` and
+`_hpcc_flash_split` stay as they are — report findings B-2, B-4, B-6, B-7 remain open.
+
+## 1d. G-VLE-4 — the 323F010 / 324 design anchors were calibrated with a urea leak
+
+**Needs a decision; deliberately NOT actioned.**
+
+`_sol_stage_anchor` back-solves a relative volatility for every species from the PFD rows, urea
+included, and it did not come out zero: alpha_Urea = 0.000792 at 323C003 and 0.001363 at 323F010.
+So the frozen `sol_vapour_y` vector put 0.49 % urea in the 323F010 overhead — about **68 kg/h of
+urea evaporating** at the design rate — and `sol_advance` subtracts `m_vap * y[k]` from the holdup,
+so it was a real mass sink. Urea is non-volatile; `thermo_service` gives it K = 0 exactly.
+
+Removing the leak moves the settled design seed:
+
+| quantity | before | after | change |
+|---|---|---|---|
+| stream 317 product | 92 748.9 kg/h | 92 850 kg/h | +101 kg/h (+0.11 %) |
+| 323F010 temperature | 99.0 °C (setpoint) | 99.89 °C | +0.89 °C |
+
+Four assertions pin the OLD seed and now fail. They are physical-band checks, not bit-exact ones,
+so widening them would destroy what they exist to catch (0.01 °C of seed drift):
+
+- `test_equation_audit_c10_live_cp::test_the_design_seed_is_undisturbed_by_any_of_it` — 0.89 vs 0.01 °C
+- `test_equation_audit_species::test_stream_331_is_published_and_loads_the_pre_evaporator` — 0.101 vs 6e-3 t/h
+- `test_equation_audit_species` — one further stream-317 assertion in the same family
+- `test_equation_audit_323_324::test_evap1_steam_cut_dilutes_product_and_never_cools` — compares
+  TT-324001 (99.4) against `R324_FEED_T_C = 99.0`, which is the now-stale 323F010 product temperature
+
+**The decision:** re-pinning `R323_F010_T_SP_C`, `R323_M317_DES` and `R324_FEED_T_C` onto the
+leak-free seed changes constants sourced from the PFD, which CLAUDE.md holds as the strict source.
+That is a change to the plant's declared design point and is not something to absorb into a test
+tolerance, so it is left for sign-off.
+
+**Caveat on the magnitude.** The MECHANISM is verified (alpha_Urea != 0 is unphysical; K = 0 now) and
+the direction of the product change is consistent with the retained urea. The full settled magnitude
+is a re-convergence of the whole 323 train and has not been decomposed term by term.
+
+## 1c. Phase 1 remainder — vacuum-condenser static enthalpy (report B-9)
+
+`vacuum_condenser_node` still converts duty to condensate through one design `h_eff_kjkg` per
+exchanger, so an NH3-rich vent and a water-rich vent condense at the same kJ/kg. Unlike the items
+above this is **not** envelope-blocked: `gap_g6_h0_enthalpy` already covers all nine species in both
+phases, so `Q = Σ ṅ_cond,i ΔH_cond,i(T,P) + ṁ c_p ΔT` is buildable now. Deferred from Phase 1 only
+to keep the 324 mass balance out of a change already touching the 323 species layer.
 
 ## 2. Minor cleanups
 

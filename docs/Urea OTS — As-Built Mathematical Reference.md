@@ -268,6 +268,172 @@ temperature, so the temperature response the controllers act on carries no grid 
 sites use the departure form `T_des + [T_bub(live) − T_bub(design)]`, so the residual model offset
 cancels identically at design and only the slope reaches the engine.
 
+## Unified Rigorous VLE / Flash Service (`backend/thermo_service.py`)
+
+**Phase 1 of the Heuristic Eradication Report.** The bubble-point work above gave the 323 stages a
+real activity model for *pressure*. It did not give them a *phase split*: the vapour composition
+leaving 323C003, 323F004 and 323F010 was still `sol_vapour_y`, a set of relative volatilities
+back-solved once from the PFD design rows and then held constant. The same frozen alpha vector
+governed 323C003 at 135 °C / 4.1 bar a and 323F010 at 99 °C / 0.46 bar a, so the vapour composition
+had a derivative of exactly zero in both temperature and pressure (report finding B-8).
+
+`thermo_service` is the single entry point that replaces it. It stands on four modules that already
+existed in this repository, three of which the engine had never called:
+
+| module | contributes |
+|---|---|
+| `vle_nh3co2h2o` | Extended UNIQUAC electrolyte activities, Henry constants, IF-97 water line |
+| `props_nh3co2h2o` | SRK vapour fugacity coefficients, k_ij = 0 (Thomsen 2005) |
+| `thermo_extended_uniquac` | neutral H2O/urea binary UNIQUAC (Voskov-Voronin) |
+| `gap_g6_h0_enthalpy` | absolute stream enthalpy, elements-at-298.15 K datum — this is what makes `flash_ph` possible |
+
+### The equations
+
+K-values are gamma-phi on an **apparent, total-species** basis — the electrolyte model speciates
+ammonia into NH3(aq)/NH4+/NH2COO- and CO2 into CO2(aq)/HCO3-/CO3--, but the engine's mass balance
+tracks total NH3 and total CO2, so the ratio the flowsheet needs is:
+
+```text
+K_i = p_i / (phi_i^V * P * x_i,total)        p_i from the activity model, phi_i^V from SRK
+```
+
+solved against Rachford-Rice by bisection, inside a damped successive-substitution outer loop on
+(x, y) because K depends on both:
+
+```text
+sum_i  z_i (K_i - 1) / (1 + psi (K_i - 1))  =  0
+```
+
+The bubble point uses the **same** phi, `P = sum_i p_i / phi_i(y, T, P)` by fixed-point iteration on
+y. With phi applied only inside `k_values` the two entry points sat on different surfaces and a
+flash *at* the computed bubble temperature returned psi = 1.5e-3 instead of ~0; they now agree to
+1e-9 or better. `bubble_p(..., srk=False)` still returns the ideal-vapour sum, which is what
+`vle_nh3co2h2o.bubble_p_bara` reports and what the PFD comparison below was measured on.
+
+| stage | T (°C) | ideal sum | gamma-phi | P PFD | gamma-phi error |
+|---|---|---|---|---|---|
+| 323C003 | 135 | 4.387 | 4.459 | 4.10 | +8.8 % |
+| 323F004 | 106 | 1.328 | 1.337 | 1.13 | +18.3 % |
+| 323F010 | 99 | 0.468 | 0.470 | 0.46 | +2.1 % |
+
+Three further details are load-bearing, and all three were wrong in the first cut:
+
+* **Non-volatiles stay in the Rachford-Rice sum at K = 0.** Their term is `-z_i/(1-psi)`, which
+  diverges as psi → 1 and is the only thing that bounds the vapour fraction below total
+  vaporisation. Filtering them out — the obvious move, since K = 0 contributes nothing at psi = 0 —
+  returned psi_mass = 1.0 at all three 323 stages, i.e. a 69 wt% urea liquor flashing completely.
+* **The substitution must be damped adaptively.** a_CO2 spans four decades across the envelope, so
+  the undamped map oscillates: measured non-convergent in 40 sweeps at both 323C003 and 323F004. A
+  fixed 0.5 factor converges but caps the contraction rate and dominates runtime. Full step while
+  the residual falls, halve only on a sweep that made it worse.
+* **The convergence test must include psi, not just the liquid.** Near the bubble point psi is tiny,
+  so x ≈ z and an x-only criterion is met while psi is still moving — measured psi = 1.4e-4 at a
+  state whose converged value is ~1e-10.
+
+### Two domains, because neither model covers the plant
+
+| domain | owns | why |
+|---|---|---|
+| `electrolyte_gamma_phi` | 323C003, 323F004, 323F010 | volatiles carry the bubble point |
+| `neutral_urea_water_uniquac` | 324E001, 324E003 (bubble point only) | at 94–98 wt% urea the electrolyte model's "urea is a diluent" assumption fails: +30.6 % and +65.7 % on bubble pressure, against +2.2 % for the neutral binary at 324E003 |
+
+### What it refuses, and why that matters more
+
+`vle_nh3co2h2o._bracket` **clamps** at the table edges rather than extrapolating. An out-of-envelope
+call therefore does not fail loudly and does not extrapolate wildly — it silently returns the edge
+node, i.e. *a frozen constant behind a call that looks like a solve*. That is strictly worse than an
+honest hardcoded split vector, because the heuristic becomes invisible.
+
+So the service raises `OutOfDomain` instead, and the caller keeps whatever anchored model it has —
+reported live in the tick packet as `SOL.vle_domain`, never assumed. Measured against the table
+envelope (T 80–170 °C, N ≤ 16, C ≤ 7 mol/kg water):
+
+| state | T | N load | C load | verdict |
+|---|---|---|---|---|
+| 322R001 overflow (stream 207) | 183 °C | 100.0 (6.2×) | 22.4 (3.2×) | refused |
+| 322E003 off-gas feed | 183 °C | 869.3 (54.3×) | 258.1 (36.9×) | refused |
+
+The 322E003 feed also carries N2, O2, CH4 and H2, for which this repository holds neither Henry
+constants nor SRK critical constants (`props_nh3co2h2o.SRK_CRIT` covers H2O, NH3, CO2 only). The
+reactor melt is not an aqueous solution at all; the underlying parameter set is a CO2-capture model
+fitted to dilute aqueous loadings below ~150 °C. Tracked as **G-VLE-3**.
+
+Likewise `flash()` is undefined on the neutral-urea domain: the binary carries no NH3/CO2, and in a
+97.7 wt% urea / 1.4 wt% water melt the electrolyte path is not in its dilute limit — the loading
+basis is *mol per kg of water*, so 0.04 wt% NH3 reads as 1.69 mol/kg and the flash returns an NH3
+vapour mole fraction of 0.24 for a melt whose vapour is essentially pure steam. `bubble_p` /
+`bubble_t` stay valid there. Tracked as **G-VLE-2**.
+
+### Cost, and why the memo is not a heuristic
+
+A converged flash costs ~12 ms: ~11 outer sweeps, each walking the electrolyte table and an SRK
+cubic. Three per tick at dt = 0.1 s and up to 60× real time is far over budget — the same wall
+`vle_nh3co2h2o` documents one level up for calling `speciate` inline.
+
+It is also unnecessary. A flash is a **state function** of (T, P, z), and those inputs move on stage
+residence times of 150–600 s, not on the 0.1 s tick. The result is therefore memoised against
+quantised inputs — 0.02 °C, 1e-4 bar a, 100 ppm mass fraction, each far below both instrument
+resolution and the model's own residual — so the solve repeats only once the state has actually
+moved. This bounds a numerical convenience, never a physical response; `_FLASH_CACHE_SIZE = 0`
+disables it and solves every call. Convergence tolerance is 1e-7 on liquid mass fraction, measured:
+
+| tol | iters | ms | max &#124;dy&#124; vs a 1e-12 solve |
+|---|---|---|---|
+| 1e-9 | 16 | 14.0 | 4.1e-09 |
+| 1e-7 | 11 | 8.6 | 5.3e-07 |
+| 1e-5 | 6 | 5.1 | 6.8e-05 |
+
+1e-7 sits seven orders below the model's own PFD residual, so tightening further buys nothing
+physical and costs 60 % more on every cache miss.
+
+### What the frozen alphas were actually doing: evaporating urea
+
+The `sol_vapour_y` alpha vectors were back-solved from the PFD design rows by `_sol_stage_anchor`,
+which infers a relative volatility for **every** species including urea. It did not come out zero:
+
+| stage | alpha_Urea | y_Urea (frozen) | y_Urea (flash) |
+|---|---|---|---|
+| 323C003 | 0.000792 | 0.000332 | 0 |
+| 323F010 | 0.001363 | 0.004887 | 0 |
+
+So 0.49 % of the 323F010 overhead was urea, and at the ~14 t/h design evaporation rate that is
+**≈68 kg/h of urea leaving as vapour**. Urea is non-volatile — it decomposes rather than boils at
+these temperatures — and `sol_advance` removes `m_vap * y[k]` from the holdup, so this was a real
+mass sink, not a reporting artefact. `thermo_service` gives every non-volatile K = 0 exactly, so the
+loss is gone.
+
+The measurable consequences at the design seed, all traceable to that one correction:
+
+| quantity | before | after | change |
+|---|---|---|---|
+| stream 317 product | 92 748.9 kg/h | 92 850 kg/h | +101 kg/h (+0.11 %) |
+| 323F010 temperature | 99.0 °C (setpoint) | 99.89 °C | +0.89 °C |
+
+The temperature rise follows the composition: with urea retained the liquor is richer and its
+bubble point and cp both move. **This means the 323F010 / 324 design anchors were calibrated with
+the urea leak present**, so three assertions that pinned the old seed now fail —
+`test_the_design_seed_is_undisturbed_by_any_of_it` (0.89 vs a 0.01 °C band),
+`test_stream_331_is_published_and_loads_the_pre_evaporator` (0.101 vs a 6e-3 t/h band), and
+`test_evap1_steam_cut_dilutes_product_and_never_cools`, which compares TT-324001 against the now
+stale `R324_FEED_T_C = 99.0`.
+
+These are **not** tolerance failures and have deliberately not been widened. Re-baselining
+`R323_F010_T_SP_C`, `R323_M317_DES` and `R324_FEED_T_C` onto the leak-free seed is a change to the
+plant's declared design point and needs sign-off, so it is recorded as **G-VLE-4** rather than
+absorbed silently into a tolerance.
+
+### Design-point identity short-circuits removed
+
+Two `if (at design) return design` branches are deleted (report finding A-15):
+
+* `vacuum_condenser_node` returned its spec verbatim when every argument equalled its design value.
+* `_hpcc_flash_split` returned `HPCC_FRAC_GAS_DES` when `p_rat == 1.0 and T_k == T_0`.
+
+Both now run their own solve at the design point and land on it by converging. Two further guards in
+`_hpcc_flash_split` are deliberately **kept** — they protect a division on the very next line (no
+distributing feed, or a feed already single-phase) and are degenerate-input answers, not a bypass of
+the maths at design.
+
 ## Consequence Transport Lag
 
 A consequence arrives when its fluid parcel arrives. `consequence.StreamPacket` carries one closed

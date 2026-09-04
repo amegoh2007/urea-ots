@@ -233,13 +233,22 @@ def loadings(w: dict):
     return n_load, c_load
 
 
-def bubble_p_bara(w: dict, t_c: float) -> float:
-    """Bubble-point pressure (bar a) of an NH3-CO2-H2O-urea liquor at temperature `t_c`.
+def partial_pressures_bara(w: dict, t_c: float) -> dict:
+    """Per-volatile partial pressures (bar a) of an NH3-CO2-H2O-urea liquor at `t_c`.
 
-    P = f_dil * [ a_NH3*H_NH3(T) + a_CO2*H_CO2(T) + a_H2O*Psat_H2O(T) ]
-    with the activities interpolated from the Extended UNIQUAC table and both Henry constants and
-    the water saturation line evaluated ANALYTICALLY at the live temperature."""
+    Returns {"NH3": p, "CO2": p, "H2O": p, "f_dil": f, "in_grid": bool} where each partial pressure
+    already carries the non-volatile dilution factor, so their SUM is exactly `bubble_p_bara`.
+    Splitting the sum out is what lets a flash form per-species K-values (K_i = p_i /(x_i P)) instead
+    of only a bubble point; `bubble_p_bara` is now the sum of this vector and cannot drift from it.
+
+    `in_grid` reports whether (t_c, N_load, C_load) fell INSIDE the tabulated envelope.  `_bracket`
+    CLAMPS at both ends rather than extrapolating, so an out-of-envelope call silently returns the
+    edge node -- a frozen constant wearing a rigorous-looking call.  Callers that would otherwise
+    mistake that for a solve must check this flag; `thermo_service` refuses on it."""
     n_load, c_load = loadings(w)
+    in_grid = (_T_NODES[0] <= t_c <= _T_NODES[-1]
+               and _N_NODES[0] <= n_load <= _N_NODES[-1]
+               and _C_NODES[0] <= c_load <= _C_NODES[-1])
     a_nh3, a_co2, a_h2o, n_sub_per_kgw = _interp(t_c, n_load, c_load)
     w_h2o = max(w.get("H2O", 0.0), 1e-9)
     # sub-system moles carried by this liquor's water, and the non-volatile moles alongside them
@@ -247,10 +256,21 @@ def bubble_p_bara(w: dict, t_c: float) -> float:
     n_nv = sum(w.get(k, 0.0) / MW[k] for k in NONVOLATILE)
     f_dil = n_sub / max(n_sub + n_nv, 1e-12)
     t_k = t_c + 273.15
-    p_nh3 = a_nh3 * _props.henry_nh3_MPa(t_k) * 10.0            # MPa -> bar
-    p_co2 = a_co2 * _props.henry_co2_MPa(t_k) * 10.0
-    p_h2o = a_h2o * iapws_if97.psat_bara(_clamp(t_c, 0.05, 370.0))
-    return max(f_dil * (p_nh3 + p_co2 + p_h2o), 1e-6)
+    return {"NH3": f_dil * a_nh3 * _props.henry_nh3_MPa(t_k) * 10.0,     # MPa -> bar
+            "CO2": f_dil * a_co2 * _props.henry_co2_MPa(t_k) * 10.0,
+            "H2O": f_dil * a_h2o * iapws_if97.psat_bara(_clamp(t_c, 0.05, 370.0)),
+            "f_dil": f_dil, "in_grid": in_grid}
+
+
+def bubble_p_bara(w: dict, t_c: float) -> float:
+    """Bubble-point pressure (bar a) of an NH3-CO2-H2O-urea liquor at temperature `t_c`.
+
+    P = f_dil * [ a_NH3*H_NH3(T) + a_CO2*H_CO2(T) + a_H2O*Psat_H2O(T) ]
+    with the activities interpolated from the Extended UNIQUAC table and both Henry constants and
+    the water saturation line evaluated ANALYTICALLY at the live temperature.  The three terms come
+    from `partial_pressures_bara` so the bubble point and the flash K-values cannot disagree."""
+    p = partial_pressures_bara(w, t_c)
+    return max(p["NH3"] + p["CO2"] + p["H2O"], 1e-6)
 
 
 #  Warm-start acceptance band, expressed on ln P.  A guess whose bubble pressure is within this

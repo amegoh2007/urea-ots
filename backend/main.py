@@ -40,6 +40,7 @@ from typing import Optional, Set
 
 import reactor  # 322R001 Modified Inoue-Kanai conversion kinetics (quarantined)
 import thermo_extended_uniquac as extended_uniquac
+import thermo_service                      # Phase 1 unified rigorous VLE / flash service
 import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-97)
 import gap_g6_h0_enthalpy as h0_enthalpy  # H0 stream enthalpy on the elements-at-298.15 K datum
 import consequence  # ISA-75.01.01 consequence physics + plug-flow line transport (StreamPacket)
@@ -2095,6 +2096,43 @@ def sol_vapour_y(w: dict, alpha: dict) -> dict:
     return {k: num[k] / tot for k in SOL_SPECIES}
 
 
+#  Live rigorous-VLE flag per stage, published in the telemetry so the UI and the audits can say
+#  which units are actually standing on the activity model and which are still on their anchored
+#  vector.  Keyed by the SOL_STAGES key; value is the thermo_service domain string or None.
+SOL_VLE_DOMAIN = {}
+
+
+def sol_vapour_y_vle(key: str, w: dict, t_c: float, p_bara: float, alpha: dict) -> dict:
+    """Vapour mass fractions leaving a solution stage, from the rigorous gamma-phi flash.
+
+    PHASE 1 (Heuristic Eradication Report, finding B-8).  The frozen `alpha` vector this replaces
+    was back-solved from the PFD design rows once and then held CONSTANT: the same numbers governed
+    323C003 at 135 C / 4.1 bar a and 323F010 at 99 C / 0.46 bar a, so the vapour composition had a
+    derivative of exactly zero with respect to both temperature and pressure.  `thermo_service.flash`
+    replaces it with an isothermal Rachford-Rice solve on Extended UNIQUAC activities, Rumpf-Maurer
+    Henry constants, the IAPWS-IF97 water line and SRK vapour fugacity.
+
+    Falls back to the anchored `alpha` -- and records that it did -- whenever the state leaves the
+    fitted envelope.  That is not a silent degrade: `thermo_service` REFUSES off-envelope rather than
+    returning a clamped edge lookup, and the fallback is reported in `SOL_VLE_DOMAIN` and published
+    in the tick packet, so a stage running on the anchored vector is visible rather than assumed.
+    """
+    try:
+        fr = thermo_service.flash(w, t_c, p_bara)
+    except (thermo_service.OutOfDomain, ValueError, ZeroDivisionError):
+        SOL_VLE_DOMAIN[key] = None
+        return sol_vapour_y(w, alpha)
+    if not fr.converged:
+        SOL_VLE_DOMAIN[key] = None
+        return sol_vapour_y(w, alpha)
+    y = fr.y
+    if sum(y.get(k, 0.0) for k in SOL_SPECIES) <= 1.0e-9:     # degenerate: no volatile left
+        SOL_VLE_DOMAIN[key] = None
+        return sol_vapour_y(w, alpha)
+    SOL_VLE_DOMAIN[key] = fr.domain
+    return {k: y.get(k, 0.0) for k in SOL_SPECIES}
+
+
 def sol_biuret_xi(key: str, M: float, w: dict, T_c: float) -> float:
     """Biuret formation extent (kmol/h), 2 Urea -> Biuret + NH3.  Anchored ratio form: every factor
     is exactly 1.0 at the design seed, so xi == xi_des there and the species balance is stationary.
@@ -2809,19 +2847,12 @@ def vacuum_condenser_node(spec, inlet_kgh, noncondensable_kgh, hot_in_c,
     inlet = max(inlet_kgh, 0.0)
     nc = clamp(noncondensable_kgh, 0.0, inlet)
 
-    if (inlet == spec["inlet_kgh"] and nc == spec["vent_kgh"]
-            and hot_in_c == spec["hot_in_c"] and cw_flow == spec["cw_flow_kgh"]
-            and cw_in == spec["cw_in_c"]):
-        return {
-            "tag": spec["tag"], "inlet_kgh": inlet,
-            "condensate_kgh": spec["condensate_kgh"], "vent_kgh": spec["vent_kgh"],
-            "q_kw": spec["q_kw"], "lmtd_k": spec["lmtd_k"],
-            "ua_kw_k": spec["ua_kw_k"], "ua_eff_kw_k": spec["ua_kw_k"],
-            "cw_flow_kgh": cw_flow, "cw_in_c": cw_in, "cw_out_c": spec["cw_out_c"],
-            "hot_in_c": hot_in_c, "hot_out_c": spec["hot_out_c"],
-            "mass_residual_kgh": 0.0, "energy_residual_kw": 0.0,
-        }
-
+    #  PHASE 1 (finding A-15): the design-point identity short-circuit that used to sit here --
+    #  `if inlet == spec[...] and nc == ... and cw_in == ...: return the spec verbatim` -- is DELETED.
+    #  It made this unit's headline design-point accuracy a lookup rather than a solve, and it hid
+    #  whatever residual the iteration below actually carries at that point.  The node now converges
+    #  to its own answer at design like it does everywhere else, and any residual is visible in
+    #  `mass_residual_kgh` / `energy_residual_kw` where it can be audited.
     if inlet <= 0.0 or cw_flow <= 0.0:
         return {
             "tag": spec["tag"], "inlet_kgh": inlet,
@@ -3747,10 +3778,16 @@ def _hpcc_flash_split(feed: dict, T_c: float, p_loop: float) -> dict:
     Sequential-Modular (EQUATION_AUDIT Q2)."""
     p_rat = SYN_P_DES_BARA / max(p_loop, 1e-6)
     T_k   = T_c + 273.15
-    if p_rat == 1.0 and T_k == _HPCC_BUB_T0_K:
-        return dict(HPCC_FRAC_GAS_DES)       # exactly at the calibration point -> phi IS the design
+    #  PHASE 1 (finding A-15): the `if p_rat == 1.0 and T_k == _HPCC_BUB_T0_K: return the design
+    #  vector` identity branch is DELETED.  At the calibration point the routine now runs the same
+    #  Rachford-Rice solve it runs everywhere else and lands on the design split by CONVERGING to
+    #  it, so the residual of the K-value model at that point is no longer invisible.
     dist = [k for k in MW_COMP if 0.0 < HPCC_FRAC_GAS_DES.get(k, 0.0) < 1.0]
     f_d  = sum(feed.get(k, 0.0) for k in dist)
+    #  The two guards below are NOT identity short-circuits and are deliberately kept: each protects
+    #  a division on the very next line (z = feed/f_d, and k_des = phi(1-psi)/(psi(1-phi))).  With no
+    #  distributing feed, or a feed already single-phase, there is no flash to solve -- returning the
+    #  design vector there is a degenerate-input answer, not a bypass of the maths at design.
     if f_d <= 1e-12:
         return dict(HPCC_FRAC_GAS_DES)       # no distributing feed -> nothing to flash
     z = {k: feed.get(k, 0.0) / f_d for k in dist}
@@ -6416,7 +6453,8 @@ def step_sim(dt: float) -> dict:
     # change in strip efficiency now propagates all the way to the product -- previously the whole
     # downstream train was blind to it.  y_305 follows the live liquid through the relative
     # volatilities (C6 normalisation); the biuret extent is the real 2 Urea -> Biuret + NH3.
-    y_305      = sol_vapour_y(s.w_c003, SOL_C003["alpha"])
+    y_305      = sol_vapour_y_vle("C003", s.w_c003, s.r323_c003_T, s.r323_c003_P,
+                                  SOL_C003["alpha"])
     xi_c003    = sol_biuret_xi("C003", M_c003_pre, s.w_c003, s.r323_c003_T)
     s.w_c003   = sol_advance(s.w_c003, M_c003_pre, s.r323_c003_M, m_feed_323, w_feed_323,
                              m_305, y_305, m_314, xi_c003, dt)
@@ -6479,7 +6517,8 @@ def step_sim(dt: float) -> dict:
     M_f004_pre = s.r323_f004_M
     s.r323_f004_T = s.r323_f004_T + P_f004 * dt / max(M_f004_pre * cp_f004, 1e-6)
     s.r323_f004_M = max(M_f004_pre + (m_314_in - m_701 - m_319) / 3600.0 * dt, 1.0)
-    y_701      = sol_vapour_y(s.w_f004, SOL_F004["alpha"])          # AUDIT F-8: flash vapour comp
+    y_701      = sol_vapour_y_vle("F004", s.w_f004, s.r323_f004_T, s.r323_f004_P,
+                                  SOL_F004["alpha"])   # AUDIT F-8 -> Phase 1 rigorous flash
     xi_f004    = sol_biuret_xi("F004", M_f004_pre, s.w_f004, s.r323_f004_T)
     s.w_f004   = sol_advance(s.w_f004, M_f004_pre, s.r323_f004_M, m_314_in, w_314_in,
                              m_701, y_701, m_319, xi_f004, dt)
@@ -6556,7 +6595,8 @@ def step_sim(dt: float) -> dict:
                   * (s.HIC_323605 / R323_HIC605_DES_PCT)
                   * (s.HIC_329605 / R324_HIC9605_DES_PCT))
     s.r323_f010_P = clamp(s.r323_f010_P + R323_F010_P_KP*(m_evap - pull_f010)/3600.0*dt, 0.05, 1.0)
-    y_evap     = sol_vapour_y(s.w_f010, SOL_F010["alpha"])          # AUDIT F-8: vacuum vapour comp
+    y_evap     = sol_vapour_y_vle("F010", s.w_f010, s.r323_f010_T, s.r323_f010_P,
+                                  SOL_F010["alpha"])   # AUDIT F-8 -> Phase 1 rigorous flash
     xi_f010    = sol_biuret_xi("F010", M_f010_pre, s.w_f010, s.r323_f010_T)
     s.w_f010   = sol_advance(s.w_f010, M_f010_pre, s.r323_f010_M, m_319_in, w_319_in,
                              m_evap, y_evap, m_317, xi_f010, dt, m_in2=m_331, w_in2=W_S331)
@@ -8781,6 +8821,13 @@ def step_sim(dt: float) -> dict:
                 ("E001", SOL_E001), ("E003", SOL_E003))},
             "urea_pct_species": {"E001": round(s.w_e001["Urea"] * 100.0, 2),
                                  "E003": round(s.w_e003["Urea"] * 100.0, 2)},
+            # PHASE 1: which stages are actually standing on the rigorous gamma-phi VLE this tick,
+            # and which fell back to their anchored alpha vector.  Published rather than assumed --
+            # a stage that silently reverts to the frozen split is the exact failure mode the
+            # Heuristic Eradication Report was written about, so it has to be visible in telemetry.
+            "vle_domain": {tag: SOL_VLE_DOMAIN.get(tag) for tag in ("C003", "F004", "F010")},
+            "vle_model": thermo_service.MODEL_NAME,
+            "vle_flash_cache": thermo_service.flash_cache_stats(),
             # AUDIT F-8: the desorption train's own species vectors.  The two ppm figures are now a
             # MASS-BALANCE result rather than the read-only ppm_infer_328701 soft sensor -- AI-328701
             # can finally be read against something the plant model actually computes.
@@ -9770,6 +9817,11 @@ _PIN_CACHE_PATH = os.path.join(_HERE, ".boot_pin_cache.json")
 _PIN_SRC_FILES  = (
     "main.py", "steam_system.py", "reactor.py", "controllers.py",
     "thermo_extended_uniquac.py",
+    #  PHASE 1: the rigorous VLE now sets the 323 vapour compositions during the settle, so the
+    #  pinned design constants depend on it.  Without these three a flash-model edit would leave a
+    #  STALE pin in place and the engine would boot on design constants that no longer match its own
+    #  thermodynamics -- silently, because the cache would still report a hit.
+    "thermo_service.py", "vle_nh3co2h2o.py", "props_nh3co2h2o.py",
 )
 
 
