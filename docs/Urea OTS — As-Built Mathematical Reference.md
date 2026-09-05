@@ -2401,6 +2401,331 @@ START stays green and clickable in all three cases -- availability follows the *
 spec -- and the interlock line is what tells the operator why a START did nothing. The 329P006 A/B
 CCW pumps carry no trip latch, so their line reads `n/a`.
 
+## Phase 4b — the CO2 Compressor Node, the HP Jet Pump, and the Unit-328 Remainder
+
+Three structural gaps closed together, and one measurement that turned out to underlie all three.
+
+### D-5 — 320K002 delivers into a line that has a volume, through a valve that is a diode
+
+**What it replaced.** The CO2 feed line carried two algebraic assertions. The line pressure was
+
+```text
+P_line = min(P_syn + dP_des, P_ceiling) - K_pv . theta_pv
+```
+
+— a statement about the desired process outcome, not about a machine — and the split between the
+HP loop and the PV-322203 vent was a normalised conductance ratio `g_HP / (g_HP + g_vent)` that
+forces the two branch flows to sum to the raw feed by construction. Phase 4a replaced the machine
+half of that with a real polytropic map and wrote the algebraic node solve
+(`machines.solve_node_pressure`), then measured the node solve **diverging** — 140.70 to 135.16
+bar a over 16 000 s, monotonic and accelerating — and shipped without it. The diagnosis recorded at
+the time was that a massless node is far stiffer than the plant.
+
+**Two things were missing, and both are physical.**
+
+*Line capacitance.* The discharge line holds gas, and that inventory is a state:
+
+```text
+dP_line/dt = (R . T_line / V_line) . (n_machine - n_check - n_vent)
+```
+
+through the same `hydraulics.vessel_dpdt` every vessel now uses. `T_line` is the aftercooled feed
+temperature, a boundary, so its thermal term is a literal 0.0, and the line holds no liquid, so the
+swell term is a literal 0.0. The volume is **not a new number.** The engine already carries this
+line's inventory — `FEED_CO2_LINE_KG`, back-solved in the D-8 block from the DCS-measured 345 s
+feed dead time at the design flow — and a line that holds *M* kg of gas has *both* a transit
+*M*/ṁ and a capacitance *RT*/(*V M̄*) with *V* = *M*/ρ. Deriving the two from one inventory is a
+**constraint between them**, not a second free parameter: `CO2_LINE_V_M3 = 5234.2 / 242.70 =
+21.566 m³` at the PFD's own design line density, and `test_hydraulics.py` pins the identity.
+
+*Check-valve resistance.* The HP branch was `m_des · sqrt(dP/dP_des)` behind a `min(1, ·)` delivery
+fraction — a resistance that saturates at design, so a line pushing harder than design could not
+pass more, and one with no seat, so at dP = 0⁺ it still passed flow. `hydraulics.check_valve_kgh`
+is the diode:
+
+```text
+w = w_des . sqrt( (p_up - p_down - p_crack) / (dP_des - p_crack) )   forward, disc lifted
+w = 0                                                                otherwise
+```
+
+Forward flow follows sqrt(dP) with no ceiling; the crack band and reverse flow are both **exactly**
+zero, and zero because the disc is seated rather than because a square root went imaginary. The
+check valve's own seat resistance and the 322E001 inlet resistance are in series and both follow
+sqrt(dP), so they lump into one anchored resistance and only their sum was ever observable from a
+single design point — the model carries one and says so. `p_crack` is a stated assumption of the
+same class as `FL_GLOBE` and `XT_GLOBE` (there is no check-valve datasheet in the repository),
+expressed as 2 % of the licensor's own design tie-in differential rather than as a fabricated
+absolute; it cancels exactly at design and moves the passed flow by under 0.1 % anywhere above half
+the design differential. What it fixes, and what nothing else fixes, is **where the valve slams
+shut**.
+
+**The steady state is now an outcome rather than an axiom.** The check valve passes the machine's
+delivery when *P*_line − *p*_syn is the design differential, so *P*_line tracks *p*_syn + 3.5 bar —
+the same statement the algebraic float used to assert. Three behaviours the axiom could not produce
+come with it: the line lags on its own time constant (τ ≈ 13 s, from the check valve's gain
+7962 kg/h/bar against the node's 0.0351 bar/(kg/s)); the tie-in shuts on reversal instead of merely
+passing zero; and the deliverable ceiling is the compressor running out of head rather than a
+`min()` against a process design pressure — which un-deadens the 151.2 bar a PIC-322203 line relief
+and the last two links of the loss-of-condensation chain.
+
+**Design closure is a literal zero.** Delivery 54 618, check valve 54 618 (its ratio is 1.0 at the
+design differential by construction), vent 0. `CO2_PV_DP_GAIN` is superseded: the vent now sags the
+line by taking mass out of the node, which is where the sag comes from on the plant.
+
+### D-6 — 322F001 is a constant-area jet pump, and the closure is provably single-rooted
+
+**What it replaced.**
+
+```text
+capacity = m_suc_des . phi_m . phi_sp . f_stall
+f_stall  = clamp((phi_m - 0.20)/(0.35 - 0.20), 0, 1) ** 2
+```
+
+The entrainment ratio asserted constant across the healthy band; an equal-percentage characteristic
+applied to the **answer** instead of to the nozzle; and stall a three-constant polynomial. The
+directions were right and nothing in it could be wrong in an interesting way, because nothing in it
+was derived.
+
+**Why the first constant-area attempt was bistable.** The previous incompressible form (recorded in
+the handoff, never committed) produced a discharge pressure whose ṁ_s² coefficient was
+
+```text
+1/(rho_s . A_s . A_m) - 0.625/(rho_m . A_m^2)
+```
+
+which is net positive for any sensible area ratio, so the recovered pressure eventually **rises**
+with entrainment, the closure has two roots and the characteristic degenerates to a step. The
+missing term is the **suction-inlet acceleration**: the entrained stream does not arrive at the
+throat entry plane at rest, it has been accelerated to *V*_s = ṁ_s/(ρ_s *A*_s), and that costs a
+velocity head −(1 + *K*_en)·ṁ_s²/(2 ρ_s *A*_s²) which enters with 1/*A*_s² where the cross term
+enters with 1/(*A*_s *A*_m). Since *A*_s < *A*_m the missing term is the larger of the two.
+
+**It is a theorem, not a tuning.** Write the closure as *p*_d − *p*_s = *C*₀ + *C*₁ṁ_s + *C*₂ṁ_s²
+from the nozzle, the suction inlet, the constant-area throat momentum balance and the diffuser. The
+positive part of *C*₂ is largest as *A*_s → *A*_m, where it is (1 − *K*_en)/(2ρ_s *A*_m²), and the
+negative part is at least (2 + *K*_th − η_d)/(2ρ_m *A*_m²). So
+
+```text
+rho_m / rho_s  <=  (2 + K_th - eta_d) / (1 - K_en)        =>  C2 <= 0 at EVERY area ratio
+```
+
+At the 322F001 anchors (ρ_m 877.9, ρ_s 1133.0, *K*_th 0.05, η_d 0.80, *K*_en 0.10) the margin is
+**1.79**. `jet_pump.monotonicity_margin` returns it and `main.py` asserts it at import, so a future
+change to either density that would re-open the degeneracy fails at import rather than shipping a
+step characteristic. With *C*₂ ≤ 0 and *C*₁ < 0 the parabola's vertex lies at negative entrainment,
+the discharge is strictly decreasing over the whole physical range, and the single non-negative root
+is available in closed form — no iteration, no branch to pick.
+
+**Agreement with the published form.** Non-dimensionalised at equal densities and zero losses
+(*b* = *A*_t/*A*_m, *M* = ṁ_s/ṁ_p, *K* = ṁ_p²/(ρ*A*_m²)), 2*b*²(*p*_d − *p*_s)/*K* is
+
+```text
+2b + 2b^2.M^2/(1-b) - b^2.M^2/(1-b)^2 - b^2.(1+M)^2
+```
+
+which is the Cunningham / ESDU 85032 numerator of *N* = (*p*_d − *p*_s)/(*p*_p − *p*_d) term for
+term. The convention difference is in the denominator only: the published form takes the nozzle
+velocity from the full (*p*_p − *p*_s), putting the suction acceleration entirely into the entry
+loss, where the form here carries it explicitly. At this duty the two differ by one suction velocity
+head, 0.27 bar against a 25 bar nozzle differential — about 1 %. `test_jet_pump.py` pins the
+identity across four area ratios and four flow ratios.
+
+**Geometry, and which root.** `References/Datasheets/322F001 Design Calculations.pdf` is a 12-page
+scan with no text layer, so the areas are back-solved from the licensor's design point through the
+same equations the model runs forward. The closure has **two** roots in the mixing area, and they
+separate on throat velocity rather than on anything numerical: the large-area-ratio root puts 96 t/h
+of carbamate through the throat at 96 m/s, which is an erosion rate. The root taken:
+
+| quantity | value |
+|---|---|
+| nozzle throat *A*_t | 2.199 × 10⁻⁴ m² (**16.73 mm** dia) |
+| mixing throat *A*_m | 2.028 × 10⁻³ m² (**50.81 mm** dia) |
+| area ratio *b* | **0.1085** |
+| nozzle velocity | 89.3 m/s |
+| throat velocity | **15.0 m/s** |
+| design *N* / *M*_vol / η | 0.2019 / 0.6662 / 13.45 % |
+
+Those four numbers are the model's falsifiable prediction of the geometry inside that scan.
+
+**The spindle acts on the nozzle, and the datasheet gives its law.** The 322F001 DDS (Remarks 3–5)
+states the nozzle free area directly — variable over 40–100 % on a linear instrument map
+*a*(θ) = 40 + 0.6θ, so the 74 % design opening sits at 84.4 % of full free area — and it is used
+unchanged. `EJ_SPINDLE_R` (2.1517) was **not** an independent measurement of the same thing: the
+engine's own comment records it as a suction-capacity rangeability back-solved from this same free
+area turndown through the linear-ish capacity relation the old model assumed, and that assumed
+relation is exactly what the momentum balance replaces. So a derived number is superseded by the
+measured one it was derived from. The direction the old law asserted — closing raises entrainment —
+is now derived, because a smaller area at constant motive mass raises ṁ_p²/(ρ_p *A*_t).
+
+**Stall is a consequence.** The jet's shutoff head scales with ṁ_p², so the motive fraction at which
+the pump can no longer make the design lift is √(lift/*C*₀). At this geometry *C*₀ = **4.988 bar**
+against a 4.2 bar lift, i.e. the machine runs at **84 % of its own shutoff head**, and
+`EJ_STALL_PHI_M` = **0.918**. That is far above the 0.20/0.35 knee `f_stall` carried, and it is a
+property of the licensor's own duty numbers rather than of any assumption here — see *Weak spots*
+below.
+
+**Wiring.** Suction and discharge ride the live loop, anchored on their own design offsets from
+PT-329201 (140.0 = 140.7 − 0.7 and 144.2 = 140.7 + 3.5), so the **lift** is the design 4.2 bar at
+design and moves only when the two ends move apart; the old call passed no pressure at all. The
+entrained stream carries the **live 322E003 sump composition** on a one-tick tear
+(`s.y_scrub_ovf`), the same convention the 328 columns use on `y_737`/`y_748`, instead of the frozen
+`EJ_CARB_FRAC`. The anchor is the licensor's design **pair** (`EJ_MOTIVE_NH3_DES`,
+`EJ_SUC_TOT_DES`) — the same pair the geometry is back-solved from — not the boot-pinned settled
+motive the retired `phi_m` normalised on; that choice decides where the residual ~0.1 % motive
+inconsistency lands, and it lands on the settled sump level rather than on the first tick from a
+fresh `State()`.
+
+`ej_spindle_phi(θ)` is a **spindle-only** characteristic — the entrainment at the live nozzle area
+over the entrainment at the design nozzle area, both at design motive. The domino terms that consume
+it (the forward-carbamate draw into 322R001, the scrubber's `chi_sp` duty scaling) are attributing
+an effect *to the spindle*, so feeding them the ejector's total capacity ratio would let a 0.1 %
+motive deviation appear as a spindle move.
+
+### A-6 — 328D001: the holdup did not fit the vessel
+
+The handoff deferred this vessel on a source conflict. The conflict is real but it is not
+symmetric. `References/328E004 328D001 328P002 Datasheets.md` gives the drum twice in one sentence:
+inside diameter 1684 mm with a 1950 mm tangent-to-tangent cylinder, *"which yields a nominal
+internal liquid capacity of 19 cubic meters"*. π/4 × 1.684² × 1.950 is **4.343 m³**. One of those is
+a measurement of the steel and the other is arithmetic about it, and the arithmetic is out by 4.4×.
+
+Two independent checks side with the dimensions:
+
+* **Residence.** The drum passes 9950 kg/h at 1095 kg/m³, i.e. 9.09 m³/h. Half a 4.343 m³ shell is
+  14.5 minutes of holdup, a normal reflux-drum inventory; half of 19 m³ would be 63 minutes.
+* **The level taps.** The same datasheet puts LT-328501 on N6A *"near the bottom tangent line"* and
+  N6B on the vertical shell. A DP cell reads the column between its taps, so 0–100 % of LT-328501
+  **is** the tangent-to-tangent cylinder — which is why the heads are excluded here rather than
+  guessed at. Their type is stated nowhere, so omitting them makes *V*_v a lower bound, i.e. the
+  modelled response is if anything slightly stiffer than the drum's.
+
+What was blocking A-6 was never the vessel: it was `R328_D001_M_FULL = 20 900 kg`, which is
+19.09 m³ at the stream density — the same 19 m³ claim carried through into the inventory. A holdup
+243 % of its own shell puts *V*_v on its 2 % floor, which is what made the coefficient come out 355×
+and look unusable. With the holdup taken off the shell, the drum holds 2.19 m³ in a 4.34 m³ vessel,
+*V*_v is an ordinary **2.150 m³**, and the coefficient is **≈15×** the shared 0.05 bar/(kg/s) it
+replaces, not 355×. **This is the second time a design holdup has failed to fit its own vessel**
+(322C001 was out by 69 % the other way).
+
+The design pin does not move by construction — level is *M*/*M*_des × 50.5 and the state seeds at
+*M*_des — and one tick from a fresh `State()` leaves `a328_d001_M` bit-identical and the node at
+2.6 bar a exactly. What changes is the transient: the drum is 4.4× smaller and therefore 4.4× faster.
+
+The node is self-regulating on two counts, which is why this stiffening is safe where the handoff
+had to measure 328C003's first: PV-328202 passes more as the drum rises, and the 737 inlet passes
+less, since its own driving differential is *P*_c002 − *P*_d001. Together those give a pole near
+−0.03 /s — a 30 s node against a 0.25 s tick.
+
+### D-2 — the four unit-328 vapour paths were all incompressible
+
+| stream | was | is |
+|---|---|---|
+| 737, 328C002 OVHD → 328E004 → 328D001 | `M_des · sqrt(dP/dP_des)` | ISA-75.01 gas, fixed restriction |
+| 748, PV-328203B relief → 328C002 | `M_des · (op/50)` | ISA-75.01 gas, linear trim |
+| 750, 328C004 OVHD → 328C002 | `M_des · sqrt(dP/dP_des)` | ISA-75.01 gas, fixed restriction |
+| 786, PV-328202 vent → 323E011 | `M_des · (op/50)` | ISA-75.01 gas, linear trim |
+
+Three terms the incompressible forms could not carry: the **expansion factor** *Y* (a vapour is less
+dense at the vena contracta than at the tap, so the same dP passes less mass than sqrt(dP) claims),
+the **choke** (once dP/*p*₁ reaches *F*_γ·*x*_T the flow stops responding to the downstream node at
+all — the property that matters if 328D001 is ever blown down; 786 runs at dP/*p*₁ = 0.57 against an
+*F*_γ·*x*_T of 0.70, not choked at design but close, and the incompressible form had no way to find
+that out), and the **composition** dependence ṁ ~ √*M*.
+
+That last one is why the design molar masses are passed explicitly rather than allowed to cancel,
+and why they are taken off the **back-solved** stage vectors `DES_C00x["y"]` rather than the PFD's
+tabulated rows: the states seed on the back-solved vectors, so anchoring the flow law on the
+tabulated ones would make the design point a slow leak. For the same reason `y_328_737`'s seed moved
+from pure steam to `DES_C002["y"]` — that seed was inert while the flow was sqrt(dP), because
+composition entered only through the molar accumulation term where generation and outflow are equal
+at design and it cancelled; with √*M* in the flow itself the seed has to be the design vapour.
+
+Both control valves take **linear** trim, which is the module's stated choice for vent duty and is
+also what keeps the two controllers' loop gains exactly where they were: at the design stroke the
+linear characteristic ratio *is* op/op_des, so PIC-328203 and PIC-328202 see the same first-order
+gain they were tuned against and everything the change adds is pressure feedback, expansion and
+choke. That resolves the handoff's specific worry about 328C003 in the opposite direction to the one
+it feared: d(ṁ_748)/dP was **identically zero**, which is why the hydrolyser was called a node with
+no self-regulation, and it now has some.
+
+### D-8 — the last static transit, and it was in unit 328
+
+`R3232_M718A_TAU_S = 45.0` was a flat first-order time constant on the 718A leg into 328D001,
+labelled a transport lag and motionless from turndown to trip. The 45 s is a measurement and stays
+exactly where it is; the line **inventory** is back-solved from it at the design flow
+(*M* = ṁ_des·τ_des/3600 = 44.5 kg) and the live constant is that inventory over the live flow, so a
+leg running at half rate lags twice as long. The first-order form is kept rather than swapped for a
+pure dead time because a well-mixed line of holdup *M* passing ṁ obeys d*y*/d*t* = (*u* − *y*)ṁ/*M*
+— which *is* this equation, with τ = *M*/ṁ. Making τ physical is the whole of D-8 here; changing the
+shape of the response would be a separate claim and is not made.
+
+With that, every transport path in the engine is flow-dependent: three `_delay` feed lines, five
+`PROCESS_ROUTES` on `ConsequenceRoute.dead_time_s`, and this leg. `_foptd` has no callers.
+
+### The harness step, and why it had to be fixed before any of this could be graded
+
+`main.STEP_CAP` is 0.25 s and `sim_task` bounds every physical sub-step by it whatever the wall tick
+or the speed multiplier; the constant's own comment records that 0.5 s *"is UNSTABLE"*. Two test
+harnesses were integrating at 1.0 s (`test_ejector_spindle._settle`) and 2.0 s
+(`_systest.run`) — four and eight times a step the engine declares unstable at two.
+
+The mechanism is not new and is not in anything Phase 4b touched. SIC-321951's actuator lag is
+`alpha = min(1, dt/2)`, so at dt ≥ 2 s the lag **collapses**, the speed loop becomes a pure
+algebraic feedback whose characteristic roots are {1, −2}, and the NH3 motive flow rings at ±20 % of
+stroke. That ringing was invisible while the CO2 feed and the ejector capacity were both pinned
+constants that could not propagate it. D-5 and D-6 make both live, and the jet-pump closure amplifies
+a motive deviation about tenfold at this machine's operating point, so it stopped being invisible.
+
+Measured on `test_3_scrubber_heat`'s own CCW-cut scenario:
+
+| step | 322E003 sump | PT-329201 after relax |
+|---|---|---|
+| 0.25 s (engine's own) | 50.0 → 45.8 → **49.8 %** — troughs and recovers, as report D-19 says | 140.75 |
+| 2.0 s (old harness) | 50.0 → **100.0 → 100.0 %** — saturated | 145.53 |
+
+Both harnesses now advance the same plant time in `STEP_CAP`-bounded sub-steps, exactly as
+`sim_task` does. No tolerance was relaxed.
+
+### Measured — 24 000 s free run from the design seed, dt = 0.25 s
+
+The loop's settled-attractor drift (open since Phase 3, handoff §1f) is **materially smaller**, not
+larger, with the whole of Phase 4b in:
+
+| tag | HEAD at 24 ks | Phase 4b at 24 ks | change |
+|---|---|---|---|
+| PT-329201 | 140.70 → **138.117** (−2.583) | 140.70 → **139.229** (−1.471) | drift **−43 %** |
+| 322R001 T_overflow | 183.00 → **185.605** (+2.605) | 183.00 → **184.614** (+1.614) | drift **−38 %** |
+| 322E002 level | 50.00 → 49.139 | 50.00 → 49.435 | drift −31 % |
+| 322E003 sump | 50.00 → 49.970 | 50.00 → 49.932 (at 8 ks) | comparable |
+| 322R001 level | 80.00 → 80.616 | 80.00 → 80.102 (at 8 ks) | comparable, same sign |
+
+No limit cycle appears anywhere in the 328 train despite the 15× stiffer 328D001 node and the four
+new compressible overheads: over the same run 328C002/C003/C004/D001 stay inside the same bounded
+±0.6 bar wander they had at HEAD.
+
+### Weak spots, stated
+
+* **322F001 runs at 84 % of its own shutoff head**, so it stalls below ~92 % motive flow unless
+  HV-322602 is closed to compensate — which is what the spindle is for, and the datasheet's 40–100 %
+  free-area band gives enough authority to hold it alive to about 80 % motive at a 41 % opening. This
+  is a *property of the licensor's design duty*, not of an assumption: *N* = 0.202 with
+  *M*_vol = 0.666 puts the machine low on its own flow curve and therefore high on its head curve,
+  and the ratio lift/*C*₀ comes out between 0.78 and 0.95 for every plausible motive pressure. It is
+  nonetheless a much more brittle machine than the `f_stall` knee at 0.35 implied, and any scenario
+  that reduces NH3 rate without closing the spindle will now stall the ejector. `EJ_STALL_PHI_M` is
+  published so a scenario can read it instead of discovering it.
+* The same operating point makes entrainment about **ten times** as sensitive to motive flow as the
+  linear `phi_m` was. The engine's seeded pump flow and its settled pump flow differ by ~0.1 %, which
+  used to be invisible and now shows as a ~0.7 % steady offset on the 322E003 sump level.
+* `p_crack` on the CO2 tie-in and the four jet-pump loss coefficients are stated representative
+  values, not vendor data. The geometry is back-solved *through* them, so a different set moves the
+  back-solved areas and leaves the design point exactly where it is.
+* 328D001's heads are excluded from *V*_v because their type is not stated. *V*_v is therefore a
+  lower bound.
+* The required jet-pump lift is held at the design 4.2 bar rather than split into static and
+  friction components, because no source gives the split. If it is largely friction it falls with
+  ṁ² on turndown and the stall margin above is pessimistic.
+
 ## Assumptions and Limits
 
 - The model is reduced order: calibrated design conductance scales with process flow because no off-design exchanger datasheet is available.

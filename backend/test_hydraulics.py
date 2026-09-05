@@ -175,19 +175,127 @@ def test_the_328_columns_run_mostly_empty_so_their_coefficients_are_large():
         assert k > 5.0 * kp, (k, kp)
 
 
-def test_328d001_is_left_on_its_constant_because_its_geometry_conflicts():
-    """NOT a gap -- a source conflict, pinned so nobody "fixes" it by inventing a volume.
-    The datasheet narrative gives ID 1684 mm and T/T 1950 mm and then calls that 19 m3; the
-    cylinder is 4.343 m3.  The engine's own design holdup is ~10.6 m3, which matches neither and is
-    243 % of the computed shell -- so V_v would sit on its floor and the coefficient would be ~355x
-    the present constant, far outside the unit circle at a 0.25 s tick."""
+def test_328d001_geometry_wins_over_the_narrative_that_contradicts_it():
+    """A-6, the last deferred vessel -- CLOSED, and in the opposite direction to the deferral.
+
+    The datasheet gives the vessel twice in one sentence: ID 1684 mm with a 1950 mm tangent-to-
+    tangent cylinder, "which yields a nominal internal liquid capacity of 19 cubic meters".  pi/4 x
+    1.684^2 x 1.950 is 4.343 m3.  One of those is a measurement of the steel and the other is
+    arithmetic about it, so the dimensions win and the claim is discarded.
+
+    What was blocking A-6 was never the vessel: it was the design HOLDUP, R328_D001_M_FULL = 20 900
+    kg, which is 19.09 m3 at the stream density -- the same 19 m3 claim, carried through into the
+    inventory.  A holdup 243 % of its own shell puts V_v on its 2 % floor, which is what made the
+    coefficient come out 355x and look unusable.  With the holdup taken off the shell instead, the
+    drum holds 2.19 m3 of liquid in a 4.34 m3 vessel and the vapour space is an ordinary 2.15 m3.
+    """
     main = _main()
     import math
     v_cyl = math.pi * 0.25 * 1.684 ** 2 * 1.950
     assert abs(v_cyl - 4.343) < 0.001                       # not the 19 m3 the same sentence claims
-    assert main.R328_D001_M_DES / 1000.0 > 2.0 * v_cyl      # design holdup exceeds the whole shell
-    assert not hasattr(main, "R328_D001_VOL_M3")            # so no geometry is asserted for it
-    assert main.R328_D001_P_KP == 0.05                      # and it stays on the lumped constant
+    assert abs(main.R328_D001_VOL_M3 - v_cyl) < 1e-9        # the model uses the dimensions
+    v_liq = main.R328_D001_M_DES / main.R328_D001_M776_RHO
+    assert 0.4 * v_cyl < v_liq < 0.6 * v_cyl                # the holdup now FITS, at ~half full
+    vv = hy.vapour_volume_m3(main.R328_D001_VOL_M3, main.R328_D001_M_DES, main.R328_D001_M776_RHO)
+    assert vv > 0.05 * main.R328_D001_VOL_M3                # ... so V_v is real, not on its floor
+    assert abs(vv - 2.150) < 0.01
+    assert not hasattr(main, "R328_D001_P_KP")              # and the shared constant is gone
+    #  ~15x the 0.05 bar/(kg/s) it replaces, on an NH3-rich vent of molar mass 17.15.
+    k = hy.vessel_dpdt(2.6, 334.15, vv, main.R328_D001_MW786_DES,
+                       3600.0 / main.R328_D001_MW786_DES, 0.0)
+    assert 10.0 * 0.05 < k < 25.0 * 0.05, k
+
+
+def test_328d001_level_is_still_50p5_at_the_seed():
+    """The holdup moved 4.4x and the design pin did not, by construction: LI-328501 is
+    M/M_DES*50.5 and the state seeds at M_DES."""
+    main = _main()
+    s = main.State()
+    assert s.a328_d001_M == main.R328_D001_M_DES
+    assert abs(s.a328_d001_M / main.R328_D001_M_DES * main.R328_D001_LVL_SP - 50.5) < 1e-12
+
+
+def test_the_328_overheads_are_compressible_and_bit_exact_at_design():
+    """D-2.  All four unit-328 vapour paths were incompressible: two sqrt(dP) orifice laws (737,
+    750) and two bare position gains (748, 786).  They now run the ISA-75.01 gas form, which is
+    bit-exact at the design condition because it is the ratio of one expression to itself."""
+    main = _main()
+    for w_des, p1, p2, t1, mw in ((main.R328_C002_M737_DES, main.R328_C002_P_TOP,
+                                   main.R328_D001_P_BARA, main.R328_C002_T_BOT_TOP + 273.15,
+                                   main.R328_M737_MW_DES),
+                                  (main.R328_C003_M748_DES, main.R328_C003_P_BARA,
+                                   main.R328_C002_P_TOP, main.R328_C003_T + 273.15,
+                                   main.R328_M748_MW_DES),
+                                  (main.R328_C004_M750_DES, main.R328_C004_P_BARA,
+                                   main.R328_C002_P_TOP, main.R328_C004_T + 273.15,
+                                   main.R328_M750_MW_DES),
+                                  (main.R328_D001_M786_DES, main.R328_D001_P_BARA,
+                                   main.R3232_E011_P_BARA, main.R328_D001_T + 273.15,
+                                   main.R328_D001_MW786_DES)):
+        assert hy.valve_gas_anchored(w_des, 1.0, p1, p2, t1, 1.0, p1, p2, t1, mw,
+                                     characteristic="linear", mw_des=mw) == w_des
+
+
+def test_the_328_overheads_now_carry_composition():
+    """The sqrt(dP) form could not: a lighter overhead through the same restriction at the same
+    pressures really does pass fewer kilograms, and w ~ sqrt(M) is the term that says so."""
+    f = lambda mw: hy.valve_gas_anchored(6665.0, 1.0, 3.5, 2.6, 390.15, 1.0, 3.5, 2.6, 390.15,
+                                         mw, characteristic="linear", mw_des=20.81)
+    assert f(18.0) < f(20.81) < f(26.0)
+    assert math.isclose(f(20.81 * 4.0) / f(20.81), 2.0, rel_tol=1e-12)
+
+
+def test_the_718a_leg_transit_moves_with_flow():
+    """D-8, the last static transit in unit 328.  45 s is the leg's residence AT DESIGN; at half
+    the flow the same line inventory takes twice as long to clear."""
+    main = _main()
+    tau_des = main._feed_transport_td_s(main.R3232_M718A_LINE_KG, main.R3232_M718A_DES)
+    assert abs(tau_des - main.R3232_M718A_TAU_S) < 1e-9              # exact at design
+    tau_half = main._feed_transport_td_s(main.R3232_M718A_LINE_KG, 0.5 * main.R3232_M718A_DES)
+    assert abs(tau_half - 2.0 * main.R3232_M718A_TAU_S) < 1e-9       # and doubles at half rate
+
+
+# ==================================================================================================
+#  D-5 -- the CO2 line node and its check valve
+# ==================================================================================================
+def test_check_valve_is_bit_exact_at_its_design_differential():
+    assert hy.check_valve_kgh(54618.0, 144.2, 140.7, 3.5, 0.07) == 54618.0
+    assert hy.check_valve_kgh(54618.0, 144.2, 140.7, 3.5, 0.0) == 54618.0
+
+
+def test_check_valve_is_a_diode_not_a_resistor():
+    """Three properties the `min(1, sqrt(dP/dP_des))` delivery fraction did not have."""
+    f = lambda p1, p2: hy.check_valve_kgh(54618.0, p1, p2, 3.5, 0.07)
+    assert f(139.0, 140.7) == 0.0            # reverse: exactly zero, not a small negative
+    assert f(140.7, 140.7) == 0.0            # zero differential: seated
+    assert f(140.75, 140.7) == 0.0           # inside the crack band: STILL seated
+    assert f(150.0, 140.7) > 54618.0         # forward: no ceiling at the design flow
+    assert f(148.2, 140.7) > f(144.2, 140.7) > f(142.2, 140.7) > 0.0    # monotone forward
+
+
+def test_the_co2_line_node_holds_the_design_pressure_exactly():
+    """The line is a capacitance, and at design the imbalance across it is a literal zero:
+    the machine delivers CO2_DES_KGH, the check valve passes CO2_DES_KGH, the vent passes 0."""
+    main = _main()
+    deliv = main.CO2_K001.delivery_kgh(main.CO2_K_SUCT_P_BARA, main.CO2_P_DES_BARA,
+                                       main.CO2_K_SUCT_T_K, main.CO2_FEED_MW, 1.0)["kgh"]
+    check = hy.check_valve_kgh(main.CO2_DES_KGH, main.CO2_P_DES_BARA, main.SYN_P_DES_BARA,
+                               main.CO2_DP_HP_DES, main.CO2_CHECK_CRACK_BAR)
+    assert deliv == main.CO2_DES_KGH
+    assert check == main.CO2_DES_KGH
+    assert hy.vessel_dpdt(main.CO2_P_DES_BARA, main.CO2_VENT_T_DES_K, main.CO2_LINE_V_M3,
+                          main.CO2_FEED_MW, deliv / main.CO2_FEED_MW,
+                          check / main.CO2_FEED_MW) == 0.0
+
+
+def test_the_co2_line_volume_and_its_dead_time_come_from_one_inventory():
+    """D-5/D-8 consistency: a line that holds M kg has BOTH a transit M/mdot and a capacitance
+    RT/(V.Mbar) with V = M/rho.  Deriving them from one inventory is a constraint, not a second
+    free parameter."""
+    main = _main()
+    assert abs(main.CO2_LINE_V_M3 * main.CO2_LINE_RHO_DES - main.FEED_CO2_LINE_KG) < 1e-9
+    assert abs(main._feed_transport_td_s(main.FEED_CO2_LINE_KG, main.CO2_DES_KGH)
+               - main.FEED_TD_S) < 1e-9
 
 
 def test_328c003_is_now_wired_and_its_controller_still_holds_the_node():
@@ -407,12 +515,14 @@ def test_the_ejector_suction_follows_the_gravity_head_again():
     correctly on a shut XV-322903 and then never came back.  At design the head fraction is a
     literal 1.0, so the fixed point does not move; the throat-choke ceiling caps a real flood."""
     main = _main()
-    # Call on the SETTLED live design motive, not the nameplate.  `phi_m` normalises on
-    # EJ_MOTIVE_DES_LIVE (the boot pin's settled value), so only that argument makes phi_m a
-    # literal 1.0 and the design entrainment exact.  The two happened to coincide until the
-    # reactor bulk-anchor reconciliation (Part A of Phase 4) moved the settled fixed point by
-    # 0.12 %; the assertion was riding on that coincidence, not on the design invariant.
-    mot_des = main.EJ_MOTIVE_DES_LIVE or main.EJ_MOTIVE_NH3_DES
+    # Call on the NAMEPLATE motive.  This flipped back with report D-6: the constant-area closure
+    # anchors on the licensor's design PAIR (EJ_MOTIVE_NH3_DES, EJ_SUC_TOT_DES) -- the same pair the
+    # nozzle and throat areas are back-solved from -- rather than on the boot-pinned settled motive
+    # the retired phi_m normalised on.  The settled loop runs 0.078 % under the nameplate, and the
+    # jet-pump closure amplifies that about tenfold, so the choice decides WHERE the ~1 % offset
+    # lands: on the first tick from a fresh State() (which is where the boot pin and every unit test
+    # measure the design point) or on the settled sump level.  It lands on the sump.
+    mot_des = main.EJ_MOTIVE_NH3_DES
     des = main.ejector_322f001(mot_des, main.EJ_MOTIVE_T_DES_C,
                                main.EJ_OPEN_DES, scrub_level_frac=1.0)
     assert abs(des["suction_kgh"] - main.EJ_SUC_TOT_DES) < 1e-6      # design untouched

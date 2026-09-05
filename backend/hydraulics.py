@@ -318,6 +318,59 @@ def vessel_dpdt(p_bara: float, t_k: float, v_v_m3: float, mw_vap: float,
 
 
 # ==================================================================================================
+#  Non-return (check) valve -- a hydraulic diode (report D-5)
+# ==================================================================================================
+#  A check valve is NOT a control valve with a sign test bolted on.  Three properties define it and
+#  all three matter to the CO2 tie-in this was written for:
+#
+#    * it is a fixed resistance in the forward direction, so the flow follows sqrt(dP) like any
+#      other orifice -- NOT the `min(1, sqrt(dP/dP_des))` DELIVERY FRACTION the engine used to
+#      carry, which saturates at the design differential and therefore cannot pass more than
+#      design however hard the line pushes;
+#    * it does not open until the differential lifts the disc off its seat.  The crack pressure is
+#      small but it is the whole reason the valve is a diode and not a resistor: between
+#      p_up = p_down and p_up = p_down + p_crack the line is SHUT, not merely passing very little;
+#    * reverse flow is exactly zero, not a small negative number.  A sign test on a sqrt law gives
+#      0 for the wrong reason (the argument goes imaginary); this returns 0 because the disc is on
+#      its seat, which is also true for the whole crack band above.
+#
+#  ANCHORING.  As everywhere else in this module the law is written as the RATIO of itself to its
+#  own design condition, so the vendor Cv/Kv that does not exist in this repository cancels
+#  algebraically and the design duty is reproduced BIT-EXACTLY.  What that anchor buys is also what
+#  it costs: the check valve's own seat resistance and the resistance of the line and equipment
+#  inlet downstream of it are in SERIES and both follow sqrt(dP), so they lump into one equivalent
+#  resistance and only their SUM is observable from a single design point.  The model therefore
+#  carries one resistance and says so, rather than inventing a split between them.
+#
+#  ON p_crack.  `References/Datasheets` holds no check-valve datasheet, so the crack pressure is a
+#  STATED modelling assumption of the same class as FL_GLOBE and XT_GLOBE above -- a representative
+#  value, applied openly, not a fitted one.  Its influence is confined to the last per cent of the
+#  differential: at the design point the anchor makes it cancel exactly, and in the normal band it
+#  shifts the passed flow by sqrt((dP - p_crack)/(dP_des - p_crack)) / sqrt(dP/dP_des), which for
+#  p_crack = 2 % of dP_des is under 0.1 % anywhere above half the design differential.  What it does
+#  fix, and what no other number in the model fixes, is exactly WHERE the valve slams shut.
+def check_valve_kgh(w_des_kgh: float, p_up_bara: float, p_down_bara: float,
+                    dp_des_bar: float, p_crack_bar: float = 0.0) -> float:
+    """Forward-only flow through a non-return valve, anchored on its design duty.
+
+        w = w_des . sqrt( (p_up - p_down - p_crack) / (dP_des - p_crack) )     forward, disc lifted
+        w = 0                                                                  otherwise
+
+    Bit-exact at p_up - p_down == dP_des: numerator and denominator are then the same expression on
+    the same operands and the bracket is a literal 1.0.
+    """
+    if w_des_kgh <= 0.0:
+        return 0.0
+    ref = dp_des_bar - p_crack_bar
+    if ref <= 0.0:
+        return 0.0
+    dp = p_up_bara - p_down_bara - p_crack_bar
+    if dp <= 0.0:
+        return 0.0                      # disc seated: reverse flow and the crack band are both ZERO
+    return w_des_kgh * math.sqrt(dp / ref)
+
+
+# ==================================================================================================
 #  Physical transport delay (D-8)
 # ==================================================================================================
 def transport_time_s(v_line_m3: float, rho_kgm3: float, mdot_kgh: float,

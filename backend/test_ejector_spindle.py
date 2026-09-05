@@ -17,7 +17,10 @@ import main
 
 
 def _mot_des():
-    return main.EJ_MOTIVE_DES_LIVE if main.EJ_MOTIVE_DES_LIVE is not None else main.EJ_MOTIVE_NH3_DES
+    # PHASE 4b, report D-6: the constant-area closure anchors on the licensor's design PAIR
+    # (EJ_MOTIVE_NH3_DES, EJ_SUC_TOT_DES), the same pair its nozzle and throat areas are
+    # back-solved from -- not on the boot-pinned settled motive the retired phi_m normalised on.
+    return main.EJ_MOTIVE_NH3_DES
 
 
 def test_spindle_design_anchor():
@@ -37,9 +40,25 @@ def test_spindle_negative_characteristic():
 
 
 def _settle(n):
+    """Advance n SECONDS of plant time in STEP_CAP-bounded sub-steps.
+
+    This used to call step_sim(1.0) n times, i.e. it integrated at FOUR TIMES the engine's own
+    maximum physical sub-step.  main.STEP_CAP is 0.25 s and `sim_task` bounds every sub-step by it
+    whatever the wall tick or the speed multiplier, so a 1.0 s step exercises a regime the engine
+    never runs in -- and the model has become stiffer since these tolerances were set: report D-6
+    puts 322F001 on a momentum closure whose gain around the design point is about tenfold what the
+    linear phi_m curve it replaces had, and report A-6 makes 328D001's drum 4.4x smaller.  Measured
+    over this file's own 800 s warm + 2500 s hold, the two design-HOLD checks below move
+    +0.4 / -0.5 at a 1.0 s step and +0.1 / -0.1 at 0.25 s, against a HEAD baseline of 0.0 / -0.1 at
+    0.25 s.  The tolerances are unchanged; what changed is that the test now integrates the way the
+    engine does.
+    """
     pkt = None
-    for _ in range(n):
-        pkt = main.step_sim(1.0)
+    remaining = float(n)
+    while remaining > 1e-12:
+        h = min(main.STEP_CAP, remaining)
+        pkt = main.step_sim(h)
+        remaining -= h
     return pkt
 
 

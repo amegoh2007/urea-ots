@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-04 (Phase 1 thermodynamic foundation: unified rigorous VLE / flash service)
+**Last updated:** 2026-09-05 (Phase 4b: CO2 compressor node, HP jet pump, unit-328 remainder)
 
 ---
 
@@ -87,7 +87,7 @@ above this is **not** envelope-blocked: `gap_g6_h0_enthalpy` already covers all 
 phases, so `Q = Σ ṅ_cond,i ΔH_cond,i(T,P) + ṁ c_p ΔT` is buildable now. Deferred from Phase 1 only
 to keep the 324 mass balance out of a change already touching the 323 species layer.
 
-## 1e. Phase 2 — hydraulic network, CLOSED except two vessels blocked on data
+## 1e. Phase 2 — hydraulic network, CLOSED except ONE vessel blocked on data
 
 `backend/hydraulics.py` carries the IEC 60534 / ISA-75.01 laws and the vapour-space pressure
 derivative. **A-6, D-1, D-2, D-8 and D-19/D-20/D-21 are closed.** Design seed bit-exact on every
@@ -99,8 +99,18 @@ vessel pressures, p_syn 140.699999913). Full write-up in the As-Built under *Pha
 | finding | site | what is missing |
 |---|---|---|
 | A-6 | `R324_F001_P_KP` | 324F001's CYLINDRICAL HEIGHT. The datasheet gives 4600 OD / 4570 ID, the melt density and the whole nozzle schedule but not the height, and a 4570 mm bore admits 33 to 164 m3 depending on it — a factor of five on the only term A-6 needs. Two closures were tried and rejected: backing the shell mass out of the 21 500 kg delivery weight needs the internals/skirt share (the same guess in a different hat), and 324F003's 0.62 H/D ratio is a similarity argument, not a measurement |
-| A-6 | `R328_D001_P_KP` | 328D001's real dimensions. Pre-existing source conflict, unchanged: datasheet says ID 1684 x T/T 1950 and calls it "19 cubic meters" when the cylinder is 4.343 m3, and the engine's own `R328_D001_M_DES` (~10.6 m3) matches neither at 243 % of the computed shell |
 | A-7 | `R323_F004_P_BARA` | a real line dP. Unchanged and still blocked: `R323_F004_P_BARA` and `R3232_E011_P_BARA` are both 1.13 bar a, so the model's design dP across that line is identically zero, and the PFD's 0.1 bar rounding is the same order as the dP itself |
+
+**328D001 IS NOW CLOSED** (Phase 4b) and the closure went the opposite way to the deferral: the
+vessel could always be sized, and what could not be trusted was the design HOLDUP. Full argument in
+the As-Built under *Phase 4b*; the short version is that `R328_D001_M_FULL` was 19.09 m3 at the
+stream density, i.e. the datasheet narrative's disputed "19 cubic meters" carried straight into the
+inventory, and a holdup 243 % of its own shell is what put V_v on its 2 % floor and made the
+coefficient look like 355x. Off the shell instead, the drum holds 2.19 m3 in a 4.34 m3 vessel, V_v
+is an ordinary 2.150 m3 and the coefficient is 15x. **That is the second time a design holdup has
+failed to fit its own vessel** (322C001 was out by 69 % the other way) — the standing advice to
+check any `_M_TAU_S`-style holdup against the shell before using it as an A-6 basis has now paid
+twice.
 
 **Also still open (not blocked, just not in this pass):**
 
@@ -114,7 +124,9 @@ vessel pressures, p_syn 140.699999913). Full write-up in the As-Built under *Pha
   qualitative limit without claiming a two-phase capacity. Closing it properly needs the IEC 60534
   two-phase sizing method, which does not exist in this repository. Same class of gap as the
   D-19 letdown guards below.
-* **D-12, `pull_f010`** — an ejector machine map, and Phase 4's.
+* **D-12, `pull_f010`** — an ejector machine map, and Phase 4's. NOT closed by the 322F001 work:
+  `jet_pump.py` is an INCOMPRESSIBLE liquid-liquid closure and 323F010's is a steam-jet vacuum
+  ejector, which is the compressible double-choking service `ejector_huang.py` was written for.
 
 ### Three findings from this pass worth not re-deriving
 
@@ -138,30 +150,13 @@ vessel pressures, p_syn 140.699999913). Full write-up in the As-Built under *Pha
   share of the envelope is the shell bore MINUS the bundle: 382 tubes at 25 mm OD over 5900 mm
   displace 37 % of the shell, and ignoring them overstates the free volume by 60 %.
 
-### Regression status after this pass
+### Regression status
 
-Verified green or baseline-identical:
-
-| file | result | note |
-|---|---|---|
-| `test_hydraulics.py` | **38 passed** | 24 -> 38; the four newly wired vessels, the three 328 bottoms valves, the steam chokes, the SM valve port, the transport delays and the guards all pinned |
-| `test_reactor.py` | 14 passed | |
-| `test_reactor_kinetics_phase3.py` | 10 passed | |
-| `test_stripper_reaction_inventory.py` | 4 passed | |
-| `test_thermo_service.py` | 27 passed | |
-| `test_equation_audit_c10_live_cp.py` | 7 passed | |
-| `test_startup_stability.py` | 5 passed | |
-| `test_process_transport.py` | 7 passed | D-8 |
-| `test_3_scrubber_heat.py` | **8/8** | was 1 error; root-caused and the test strengthened, see above |
-| `test_consequence_propagation.py` | **8 passed, 2 xfailed** | was 10 failures |
-| `test_equation_audit_322e002.py` | 1 failed, 7 passed | identical to baseline |
-| `test_c003_pressure_coupling.py` | 1 failed, 19 passed | identical to baseline, verified by running HEAD in a side worktree |
-| `test_ejector_spindle.py` | **11 passed** | the D-19 head term drives LT-329501 and LT-322504 here |
-| `test_foptd_fingerprint.py` | 3 passed | D-8 |
-| `test_equation_audit_322e001_enthalpy.py` | 13 passed | |
-| `test_equation_audit_322e001_flood.py` | 11 passed | |
-| `test_g8_lp_turbine_export.py` | 2 failed, 4 passed | identical to baseline (section 3 red list) |
-| `test_equation_audit_desorption.py` | 2 failed, 8 passed | identical to baseline; this is the file that exercises the three 328 bottoms valves |
+SUPERSEDED by the Phase 4b table in section 1g, which re-ran every one of these files against a HEAD
+side worktree on the corrected harness step. Two entries there differ from what this section used to
+record, and both are the harness rather than the physics: `test_hydraulics.py` is 56 passed (was 38,
+then 47+1 once the 328D001 deferral pin went stale), and `test_c003_pressure_coupling.py` is
+20 passed on BOTH trees at 0.25 s where it read 1 failed / 19 passed at the old step.
 
 ### test_ccw_loss_chain.py was ALREADY failing at dae861d, every gate -- measured, not assumed
 
@@ -477,6 +472,11 @@ feeding terms that were correctly anchored. Two causes:
 
 **Chain: 28/36 -> 35/36** (39/41 with the new PSV checks). The one gap left is the 3000 s design
 hold, improved 3.4x: PT-329201 140.71826 -> **140.70544** against a 1e-3 tolerance. Still open.
+[Phase 4b re-measured this on the corrected 0.25 s harness step, where HEAD itself reads 140.5408
+and this branch 140.4768 — the chain scores **36/41 on both**, with the same five gaps. The four
+gaps besides the design hold are the Phase 1b "new terms inert at design" set, and all three of
+their numbers are about 10x closer to zero than the values section 1e quotes: cool_frac 0.9995
+against 0.9951, uncondensed 0.008 t/h against 0.08, retained vapour 0.5 kg against 5.2.]
 
 Design seed verified bit-identical to HEAD across all 29 probed states after every step of this
 work. The boot pin DID move on the settled live references (EJ_MOTIVE_DES_LIVE -0.12 %, REACT_X_DES
@@ -493,51 +493,116 @@ whenever open. Capacity vs the linear ramp it replaces: **0 -> 181.8 t/h at the 
 97.2 -> **190.7 t/h** at the 168.84 bar a the chain reaches (x1.96), identical at rated accumulation
 by construction. Chain Phase 4 relief 99.0 -> 190.8 t/h, NH3 to atmosphere 27 082 -> 52 174 kg/h.
 
-### Part B, D-5 — PARTIAL: the map is wired, the node solve is NOT
+### Part B, D-5 and D-6 — CLOSED in Phase 4b
 
-`machines.py` (new): polytropic thermodynamics, intercooled staged head, normalised centrifugal
-characteristic with surge/stonewall, and `solve_node_pressure`. 320K002 now has a real curve
-(4 intercooled sections -- one uncooled section would discharge above 870 C), returns `CO2_DES_KGH`
-bit-exactly at design, publishes `K002_SURGE` / `K002_STONEWALL`, and runs on a speed governor.
+Both are wired, both are bit-exact at the design seed, and the write-ups are in the As-Built under
+*Phase 4b*. What is worth carrying forward is only what is still OPEN, and that is one thing:
 
-**The node solve is written, unit-tested, and left unwired -- OPEN.** Measured over 16 000 s on the
-2 s harness tick with everything else held constant:
+* **322F001 runs at 84 % of its own shutoff head, so it stalls below ~92 % motive flow.** This is a
+  property of the licensor's design duty and not of any assumption in the model: N = 0.202 with
+  M_vol = 0.666 puts the machine low on its own flow curve and therefore high on its head curve, and
+  the ratio lift/C0 comes out between 0.78 and 0.95 for EVERY plausible motive pressure and suction
+  head that was tried. It is nonetheless a far more brittle machine than the retired `f_stall` knee
+  at phi_m 0.35 implied. HV-322602 has the authority to hold it alive — the DDS free-area band
+  (40-100 %, a = 40 + 0.6.theta) keeps it running to about 80 % motive at a 41 % opening — but
+  **any scenario that reduces NH3 rate without closing the spindle will now stall the ejector**, and
+  none of them close it. `EJ_STALL_PHI_M` (0.918) is published so a scenario can read it instead of
+  discovering it. Two things could move it if a source ever turns up: the 322E003 seal-leg height
+  (which would raise the suction pressure and shorten the lift) and a static/friction split of the
+  4.2 bar design lift (friction falls with mdot^2 on turndown, so the margin above is pessimistic if
+  the lift is mostly friction).
 
-| configuration | PT-329201 at 16 000 s | character |
+* The same operating point makes entrainment about **ten times** as sensitive to motive flow as the
+  retired linear `phi_m` was. The engine's seeded pump flow and its settled pump flow differ by
+  ~0.1 %, which used to be invisible; it now shows as a ~0.7 % steady offset on the 322E003 sump
+  level. The anchor is deliberately on the licensor's design PAIR rather than on the boot-pinned
+  settled motive, so that offset lands on the settled sump rather than on the first tick from a
+  fresh `State()` — which is where the boot pin and every unit test measure the design point.
+
+* `p_crack` on the CO2 tie-in (2 % of the design differential) and the four jet-pump loss
+  coefficients are stated representative values in the class of `FL_GLOBE` / `XT_GLOBE`, not vendor
+  data. The geometry is back-solved THROUGH them, so a different set moves the back-solved areas and
+  leaves the design point exactly where it is. The geometry the back-solve predicts — a 16.73 mm
+  nozzle in a 50.81 mm throat, b = 0.1085, 89.3 m/s and 15.0 m/s — is the model's falsifiable claim
+  about what is inside `References/Datasheets/322F001 Design Calculations.pdf`, which is a 12-page
+  scan with no text layer. If that scan is ever OCR'd, check those four numbers first.
+
+* 328D001's heads are excluded from V_v because their type is stated nowhere, so V_v is a LOWER
+  bound and the modelled pressure response is if anything slightly stiffer than the drum's.
+
+### The harness step was wrong, and it had to be fixed before any of this could be graded
+
+`main.STEP_CAP` is 0.25 s and `sim_task` bounds every physical sub-step by it; the constant's own
+comment records that 0.5 s "is UNSTABLE". Three test harnesses were integrating ABOVE it —
+`_systest.run` at 2.0 s, `test_ejector_spindle._settle` at 1.0 s, and
+`test_equation_audit_c10_live_cp`'s seed hold at 1.0 s — i.e. four and eight times a step the engine
+declares unstable at two. All three now advance the same plant time in STEP_CAP-bounded sub-steps.
+**No tolerance was relaxed anywhere.**
+
+The mechanism is PRE-EXISTING and is in none of the code Phase 4b touched: SIC-321951's actuator lag
+is `alpha = min(1, dt/2)`, so at dt >= 2 s the lag COLLAPSES, the pump-speed loop becomes a pure
+algebraic feedback whose characteristic roots are {1, -2}, and the NH3 motive flow rings at +/-20 %
+of stroke. It was invisible while the CO2 feed and the ejector capacity were pinned constants that
+could not propagate it. Measured on `test_3_scrubber_heat`'s own CCW cut:
+
+| step | 322E003 sump | PT-329201 after relax |
 |---|---|---|
-| HEAD baseline | 140.70 -> 142.54 | bounded +-2 bar wander |
-| with node solve | 140.70 -> **135.16** | monotonic, accelerating (-0.81 bar/ks) |
-| node solve out (shipped) | 140.70 -> 142.26 | back on the baseline curve |
+| 0.25 s (the engine's own) | 50.0 -> 45.8 -> **49.8 %**, troughs and recovers as report D-19 says | 140.75 |
+| 2.0 s (the old harness) | 50.0 -> **100.0 -> 100.0 %**, saturated | 145.53 |
 
-The third row isolates the cause to the node solve itself, through
-`m_HP = m_des.sqrt((P_node - p_syn)/dP_des)`, which makes the CO2-line differential a live function
-of the loop pressure. **To finish D-5** the branch needs the rest of the real network: the check
-valve's own resistance, the 322E001 inlet resistance, and the line inventory as a capacitance rather
-than a massless node. Without those the branch is far stiffer than the plant and the loop's pressure
-integrator picks up a slow one-way term.
+**If a test ever shows a new instability, check its integration step before checking the physics.**
+Three of the four regressions this pass produced were this and nothing else.
 
-### Part B, D-6 — NOT ATTEMPTED, and the reason is not scheduling
+### Phase 4b regression status — every file at or better than HEAD, measured on the same harness
 
-322F001 is a LIQUID-liquid jet ejector. `ejector_huang.py` is a compressible double-choking gas
-ejector -- Mach numbers, isentropic area ratios, normal shocks -- and its `entrainment_ratio` RAISES
-on any motive/suction ratio below choking. Wiring it in would raise on the first tick.
+HEAD was re-run in a side worktree with the corrected `_systest` so the comparison is like for like.
 
-The incompressible constant-area jet-pump form (Cunningham / ESDU 85032) was written and exercised
-against the plant design point. It reproduces the design duty exactly, and the directions are right
-(closing the spindle raises entrainment, motive loss stalls it) with no `f_stall` polynomial. It was
-NOT committed because its closure is **non-monotonic and therefore bistable**: the mixing-chamber
-momentum balance gives a discharge pressure whose m_s^2 coefficient is
+| file | HEAD | Phase 4b |
+|---|---|---|
+| `test_hydraulics.py` | 47 passed, 1 failed | **56 passed** |
+| `test_jet_pump.py` | — | **19 passed** (new) |
+| `test_ejector_spindle.py` | 11 passed | 11 passed |
+| `test_3_scrubber_heat.py` | 8/8 | 8/8 |
+| `test_reactor.py` | 14 passed | 14 passed |
+| `test_reactor_kinetics_phase3.py` | 10 passed | 10 passed |
+| `test_stripper_reaction_inventory.py` | 4 passed | 4 passed |
+| `test_thermo_service.py` | 27 passed | 27 passed |
+| `test_equation_audit_c10_live_cp.py` | 7 passed | 7 passed |
+| `test_startup_stability.py` | 5 passed | 5 passed |
+| `test_process_transport.py` | 7 passed | 7 passed |
+| `test_consequence_propagation.py` | 8 passed, 2 xfailed | 8 passed, 2 xfailed |
+| `test_foptd_fingerprint.py` | 3 passed | 3 passed |
+| `test_equation_audit_322e001_enthalpy.py` | 13 passed | 13 passed |
+| `test_equation_audit_322e001_flood.py` | 11 passed | 11 passed |
+| `test_c003_pressure_coupling.py` | 20 passed | 20 passed |
+| `test_equation_audit_desorption.py` | 2 failed, 8 passed | identical, same two names |
+| `test_equation_audit_322e002.py` | 1 failed, 7 passed | identical |
+| `test_g8_lp_turbine_export.py` | 2 failed, 4 passed | identical |
+| `test_ccw_loss_chain.py` | 36/41 | **36/41, the same five gaps** |
+| `test_1_nc_shift.py` | 1/4 | 1/4 |
+| `test_2_ejector_stall.py` | 1/4 | 1/4 |
+| `test_4_water_penalty.py` | 1/3 | 1/3 |
 
-    1/(rho_s.A_s.A_m) - 0.625/(rho_2.A_m^2)
+The one test that was DELETED rather than fixed is
+`test_hydraulics.py::test_328d001_is_left_on_its_constant_because_its_geometry_conflicts`, which
+pinned the deferral this pass closes. It is replaced by two that pin the closure instead.
 
-and with the anchored densities (rho_s 1340, rho_2 878) and any sensible area ratio that group is
-NET POSITIVE, so the recovered pressure eventually RISES with entrainment, the solve has two roots,
-and the characteristic degenerates to a step -- zero below a motive threshold, railed above it. A
-real jet pump's N-M curve is monotonic. **To finish D-6**: carry the mixture density live through
-the mixing section instead of holding it at the design blend, and check the area convention against
-a published N-M curve before trusting the closure. Also note the geometry inputs are not available:
-`References/Datasheets/322F001 Design Calculations.pdf` is a 12-page SCAN with no text layer, so the
-nozzle and mixing-throat areas had to be back-solved from the motive line dP and the design duty.
+`test_4_water_penalty`'s LEVER had to be re-pointed: it perturbed `EJ_CARB_FRAC`, which used to BE
+the entrained composition and is now only its seed, because the ejector entrains the live 322E003
+sump vector. It perturbs `state.y_scrub_ovf` instead and gets its PASS back.
+
+### Two things measured that are worth not re-deriving
+
+* **The 24 000 s free-run drift is 43 % SMALLER, not larger.** The settled-attractor drift that
+  section 1f records as open moves PT-329201 140.70 -> 138.117 at HEAD and 140.70 -> **139.229** with
+  the whole of Phase 4b in; the reactor overflow temperature moves +2.605 C against +1.614 C. That
+  was not the expected direction and it is worth knowing before anyone attributes a future drift to
+  this work.
+* **The design seed after one tick is BIT-IDENTICAL to HEAD** on every probed state except the one
+  deliberately re-derived: p_syn 140.69999999999902, T_ovf 183.00001718447572, react level
+  79.99999971759262, all four 328 node pressures, both 328 column holdups, scrub level 50.0.
+  `a328_d001_M` moves 10554.5 -> 2401.674596319621, which IS the A-6 closure, and it holds its own
+  M_DES exactly so LI-328501 still reads 50.5.
 
 ## 2. Minor cleanups
 

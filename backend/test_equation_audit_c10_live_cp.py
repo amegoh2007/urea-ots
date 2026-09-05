@@ -87,9 +87,22 @@ def test_the_carbamate_train_is_deliberately_left_alone():
 
 # --------------------------------------------------------------------------- the seed still holds
 def test_the_design_seed_is_undisturbed_by_any_of_it():
+    """1200 s of plant time, integrated in STEP_CAP-bounded sub-steps.
+
+    This used to call step_sim(1.0) 1200 times, i.e. FOUR TIMES the engine's own maximum physical
+    sub-step (main.STEP_CAP = 0.25 s, and its comment records that 0.5 s "is UNSTABLE").  The plant
+    time is identical; only the integration changed, and no tolerance moved.  Measured on
+    TIC-323012's stage: at 0.25 s this branch holds 323F010 to 0.0013 C of its 99.0 C setpoint
+    against a HEAD baseline of 0.0009 C; at 1.0 s the same branch shows 0.024 C, because reports
+    D-5 and D-6 make the CO2 feed and the ejector capacity live and the truncation error of an
+    over-long step now has a path into them.
+    """
     main.state = main.State()
-    for _ in range(1200):
-        main.step_sim(1.0)
+    remaining = 1200.0
+    while remaining > 1e-12:
+        h = min(main.STEP_CAP, remaining)
+        main.step_sim(h)
+        remaining -= h
     s = main.state
     assert abs(s.r323_c003_T - main.R323_C003_T_SP_C) < 0.01
     assert abs(s.r323_f004_T - main.R323_F004_T_SP_C) < 0.01

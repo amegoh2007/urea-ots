@@ -12,10 +12,32 @@ def reset():
 
 
 def run(n, dt=2.0):
-    """Advance n steps, return last packet."""
+    """Advance n ticks of `dt` PLANT SECONDS, integrated in STEP_CAP-bounded sub-steps.
+
+    The plant time each caller advances is unchanged -- n*dt seconds, exactly as before -- but the
+    PHYSICS is now integrated the way the engine integrates it.  `main.STEP_CAP` is 0.25 s and
+    `sim_task` bounds every physical sub-step by it whatever the wall tick or the speed multiplier;
+    its own comment records that 0.5 s "is UNSTABLE".  This harness was calling step_sim(2.0), i.e.
+    EIGHT times a step the engine declares unstable at two, and the results at that step are not
+    the model's.
+
+    Measured, on this file's own CCW-cut scenario (test_3): at 0.25 s the 322E003 sump troughs to
+    45.8 % and recovers to 49.8 %, which is what report D-19 says it should do; at 2.0 s it saturates
+    at 100 % and PT-329201 runs to 145.5 bar a.  The mechanism is not new and is not the scrubber's:
+    SIC-321951's actuator lag is `alpha = min(1, dt/2)`, so at dt >= 2 s the lag COLLAPSES, the
+    speed loop becomes a pure algebraic feedback with characteristic roots {1, -2}, and the NH3
+    motive flow rings at +/-20 % of stroke.  That ringing used to be invisible because the CO2 feed
+    and the ejector capacity were both pinned constants that could not propagate it; reports D-5 and
+    D-6 make both live, and the jet-pump closure amplifies a motive deviation about tenfold at this
+    machine's operating point.  So the harness step had to be fixed before any of these tests could
+    grade physics rather than truncation error.
+    """
     pkt = None
-    for _ in range(n):
-        pkt = main.step_sim(dt)
+    remaining = float(n) * float(dt)
+    while remaining > 1e-12:
+        h = min(main.STEP_CAP, remaining)
+        pkt = main.step_sim(h)
+        remaining -= h
     return pkt
 
 
