@@ -46,21 +46,40 @@ def test_324_melts_are_on_the_neutral_urea_domain():
     assert ts.classify(W_E003, 140.0, 0.131) == ts.DOMAIN_NEUTRAL_UREA
 
 
-def test_hp_synthesis_loop_is_refused_not_extrapolated():
-    """The 322 loop is 6-54x outside the loading grid; `_bracket` CLAMPS, so a silent answer there
-    would be a frozen edge node wearing a rigorous-looking call.  It must refuse instead."""
-    assert ts.classify(W_R207, 183.0, 144.9) is None
-    with pytest.raises(ts.OutOfDomain):
-        ts.flash(W_R207, 183.0, 144.9)
-    with pytest.raises(ts.OutOfDomain):
-        ts.bubble_p(W_R207, 183.0)
+def test_the_hp_synthesis_loop_is_owned_now_but_only_through_the_ratio():
+    """G-VLE-3, replacing `test_hp_synthesis_loop_is_refused_not_extrapolated`.
+
+    That test pinned the refusal, and the refusal was right at the time: the table was indexed in
+    mol per kg of WATER, the loop has almost none, `_bracket` CLAMPS, and a silent answer would have
+    been a frozen edge node wearing a rigorous-looking call.  Both halves of that are now fixed --
+    bounded mole-fraction coordinates, and a speciation solver that reaches the loading -- so the
+    service ANSWERS here.
+
+    What has not changed is that the parameter set is extrapolated in this loop, so the test that
+    replaces the refusal pins the two things that keep it honest: the state is genuinely solved
+    rather than clamped, and no absolute number from it reaches the engine.  See
+    test_gvle3_hp_loop.py for the ratio machinery itself."""
+    assert ts.classify(W_R207, 183.0, 144.9) == ts.DOMAIN_ELECTROLYTE
+    assert vle.partial_pressures_bara(W_R207, 183.0)["in_grid"] is True
+    fr = ts.flash(W_R207, 183.0, 144.9)
+    assert fr.converged and 0.0 <= fr.psi_mole <= 1.0
+    #  ... and the absolute answer is several-fold off the loop's real pressure, which is the whole
+    #  reason the engine takes only the RATIO from here.
+    assert ts.bubble_p(W_R207, 183.0) < 0.5 * 144.2
 
 
 def test_domain_report_names_the_bound_that_failed():
-    rep = ts.domain_report(W_R207, 183.0, 144.9)
+    """Off-envelope reporting still has to name WHICH bound failed.  The molality is retained in the
+    report even though nothing interpolates on it any more, because "N = 869 against a 16 top node"
+    is the most legible statement of the failure this gap was about."""
+    dry = {"NH3": 0.8, "CO2": 0.2, "H2O": 0.0}                        # no water at all
+    rep = ts.domain_report(dry, 183.0, 144.9)
     assert rep["domain"] is None
-    assert rep["n_load_mol_per_kg_water"] > rep["n_envelope"][1]      # NH3 loading off the top
-    assert rep["t_c"] > rep["t_envelope_c"][1]                        # and above the top T node
+    assert rep["in_grid"] is False
+    assert rep["s_volatile_mole_frac"] > rep["s_envelope"][1]         # off the top of the s axis
+    assert rep["n_load_mol_per_kg_water"] > 1e8                       # the old coordinate: divergent
+    hot = ts.domain_report(W_C003, 260.0, 4.10)
+    assert hot["domain"] is None and hot["t_c"] > hot["t_envelope_c"][1]
 
 
 def test_flash_refuses_a_volatile_split_on_a_urea_melt():
@@ -224,13 +243,22 @@ def test_cache_misses_when_the_state_actually_moves():
 
 def test_partial_pressure_split_did_not_move_the_legacy_bubble_point():
     """`vle_nh3co2h2o.bubble_p_bara` was refactored to sum `partial_pressures_bara`.  Its documented
-    323C003 value must be unchanged."""
-    assert math.isclose(vle.bubble_p_bara(W_C003, 135.0), 4.387, abs_tol=1e-3)
+    323C003 value was 4.387 on the molality grid and is 4.3516 on the G-VLE-3 mole-fraction grid --
+    a 0.8 % move, TOWARD the 4.10 bar a PFD value, from re-indexing and re-grading the same nodes of
+    the same model.  That number is the whole evidence that the re-index is a coordinate change:
+    the interpolation weighting is provably identical in the dilute limit (see
+    test_gvle3_hp_loop.py::test_the_s_axis_weighting_is_the_old_log_molality_weighting) and what
+    is left is the node placement."""
+    assert math.isclose(vle.bubble_p_bara(W_C003, 135.0), 4.3516, abs_tol=2e-3)
 
 
 def test_out_of_grid_is_flagged_by_the_underlying_module():
+    """The flag now carries strictly more than an axis test: it is False if any of the eight corner
+    nodes the interpolation actually uses failed to converge, so a clamp can no longer hide."""
     assert vle.partial_pressures_bara(W_C003, 135.0)["in_grid"] is True
-    assert vle.partial_pressures_bara(W_R207, 183.0)["in_grid"] is False
+    assert vle.partial_pressures_bara(W_R207, 183.0)["in_grid"] is True        # G-VLE-3: was False
+    assert vle.partial_pressures_bara({"NH3": 0.8, "CO2": 0.2, "H2O": 0.0},
+                                      183.0)["in_grid"] is False               # no water: off the top
 
 
 # ------------------------------------------------------------------------------------- dew point

@@ -3706,6 +3706,126 @@ def _f_flow(T: float, T_cryst: float, dT_mush: float = 5.0) -> float:
     return clamp((T - T_cryst) / dT_mush, 0.0, 1.0)
 
 
+# ==================================================================================================
+#  G-VLE-3 -- the anchored thermodynamic ratio the 322 loop runs on
+# ==================================================================================================
+#  Every split in the HP synthesis loop used to be a FROZEN vector: `HPCC_FRAC_GAS_DES`,
+#  `REACT_THETA_OG`, `STRIP_FRAC_DES` and `SCRUB_OFFGAS_KMOLH_DES` were calibrated at one point and
+#  responded to temperature, pressure and composition with a derivative of exactly zero (the HPCC
+#  had already been given a Clausius-Clapeyron slope by AUDIT F-6; the other three had nothing).
+#  They stayed frozen because `thermo_service` REFUSED the loop -- see the G-VLE-3 note there: the
+#  activity table was indexed in mol per kg of WATER and the loop has almost none, so every 322 call
+#  landed on a clamped edge node, and the four inerts had no property data at all.
+#
+#  Both blockers are gone.  What has NOT gone is the fact that the Extended UNIQUAC parameter set is
+#  EXTRAPOLATED here: it puts the 322R001 overflow's bubble pressure at 40.4 bar a at 183 C against
+#  a loop that runs at 144.2.  So the absolute number is never used.  Every wiring below keeps the
+#  licensor's calibrated split and multiplies it by a RATIO of the model to itself,
+#
+#       alpha_live,i = alpha_PFD,i * [ K_i,model(live) / K_i,model(reference) ]
+#
+#  which cancels a systematic offset in an extrapolated activity coefficient and keeps only the
+#  SLOPE -- the thing the frozen vectors reported as zero.  `thermo_service.k_ratio` evaluates the
+#  reference on the same composition as the live point unless a constant design composition is
+#  given, so at the design (T, P) every argument of the two K-value calls is identical, the ratio is
+#  exactly 1.0, and the design point is untouched to the last bit.
+#
+#  Two transforms consume that ratio, and they are the same algebra at two limits, not two models:
+#
+#    `_ratio_shift_frac`  a per-species split fraction at a FIXED phase ratio.  Back-solving K from
+#                         theta = K.psi/(1+psi(K-1)) and re-inserting K.r, the (1-psi) cancels and
+#                         psi drops out entirely, leaving theta' = r.theta/(1 + (r-1).theta).  Used
+#                         where the unit is not a flash -- a stripping column, an absorber -- so no
+#                         phase-ratio closure is invented for it.
+#    `_anchored_split`    the same back-solve followed by a RE-SOLVE of Rachford-Rice, so psi moves
+#                         and the species are coupled through the overall balance.  Used where the
+#                         unit IS a flash: the condenser and the reactor's vapour disengagement.
+#
+#  Both are exact identities at r == 1.0 with no branch: (r-1.0) is exactly 0.0 there, so the first
+#  returns theta/1.0 and the second multiplies K_des by exactly 1.0.
+def _ratio_shift_frac(theta: float, r: float) -> float:
+    """Move a split fraction by a K-value ratio at fixed phase ratio: theta' = r.theta/(1+(r-1)theta).
+
+    Monotone in r, maps [0,1] onto [0,1] for any r > 0 (so it can never produce the >1 fraction a
+    raw `theta*r` multiply produces), and returns `theta` EXACTLY at r == 1.0 -- by the arithmetic,
+    not by a short-circuit."""
+    if theta <= 0.0 or theta >= 1.0 or r <= 0.0:
+        return theta                       # non-distributing species: 0 and 1 are structural
+    return r * theta / (1.0 + (r - 1.0) * theta)
+
+
+def _anchored_split(frac_des: dict, feed: dict, ratio: dict, iters: int = 60) -> dict:
+    """Rachford-Rice split anchored on a calibrated design vector and moved by K-value ratios.
+
+    `frac_des` is the licensor's split (fraction of each component leaving in the VAPOUR), `feed`
+    is the live molar feed, `ratio` is the per-species K multiplier.  The design K-values are
+    back-solved from `frac_des` against the LIVE feed every call, so the activity coefficients of
+    this strongly non-ideal melt stay baked into the K-values exactly as measured; only the
+    DEVIATION from the calibration is model-driven.  Components whose calibrated split is exactly 0
+    or exactly 1 are structurally non-distributing and stay out of the flash.
+
+    Bisection, not Newton: g(psi) is strictly decreasing on [0,1], so a fixed sweep count is exact
+    to 2^-iters at bounded cost with no possible convergence failure.  An OTS tick must never miss
+    its deadline -- the same argument that keeps the flowsheet Sequential-Modular (EQUATION_AUDIT
+    Q2)."""
+    dist = [k for k in MW_COMP if 0.0 < frac_des.get(k, 0.0) < 1.0]
+    f_d = sum(feed.get(k, 0.0) for k in dist)
+    #  Both guards protect a division on the next line (z = feed/f_d, and k_des = ...), and neither
+    #  is an identity short-circuit: with no distributing feed, or a feed already single-phase,
+    #  there is no flash to solve and the design vector is the degenerate-input answer.
+    if f_d <= 1e-12:
+        return dict(frac_des)
+    z = {k: feed.get(k, 0.0) / f_d for k in dist}
+    psi_des = sum(z[k] * frac_des[k] for k in dist)
+    if not (1e-9 < psi_des < 1.0 - 1e-9):
+        return dict(frac_des)
+    K = {}
+    for k in dist:
+        phi_d = frac_des[k]
+        k_des = phi_d * (1.0 - psi_des) / (psi_des * (1.0 - phi_d))
+        K[k] = max(k_des * max(ratio.get(k, 1.0), 0.0), 0.0)
+
+    def _g(ps):                               # Rachford-Rice residual, strictly decreasing in psi
+        return sum(z[k] * (K[k] - 1.0) / (1.0 + ps * (K[k] - 1.0)) for k in dist)
+
+    lo, hi = 1e-12, 1.0 - 1e-12
+    if _g(hi) >= 0.0:      psi = hi           # above the dew point -> everything leaves as gas
+    elif _g(lo) <= 0.0:    psi = lo           # below the bubble point -> everything condenses
+    else:
+        for _ in range(iters):
+            mid = 0.5 * (lo + hi)
+            if _g(mid) > 0.0: lo = mid
+            else:             hi = mid
+        psi = 0.5 * (lo + hi)
+    out = dict(frac_des)
+    for k in dist:
+        out[k] = clamp(K[k] * psi / (1.0 + psi * (K[k] - 1.0)), 0.0, 1.0)
+    return out
+
+
+def _kmolh_to_w(n: dict) -> dict:
+    """Molar flow vector (kmol/h over MW_COMP) -> mass fractions, for the thermo service."""
+    m = {k: max(n.get(k, 0.0), 0.0) * MW_COMP[k] for k in MW_COMP}
+    tot = sum(m.values())
+    if tot <= 0.0:
+        return {k: (1.0 if k == "H2O" else 0.0) for k in MW_COMP}
+    return {k: v / tot for k, v in m.items()}
+
+
+def _hp_k_ratio(feed_kmolh: dict, t_c: float, p_bara: float,
+                t_ref_c: float, p_ref_bara: float) -> dict:
+    """The G-VLE-3 ratio for an HP-loop stream, from its live molar feed.
+
+    The composition handed to the service is the OVERALL feed, not the equilibrium liquid, which is
+    what a first-pass flash uses anyway.  It is also the reason that choice is safe here: the same
+    vector goes into both the live and the reference call, so a basis error is common to numerator
+    and denominator and cancels in the ratio, exactly as the activity-coefficient offset does.
+    `k_ratio` bounds each species to [0.02, 50] and falls back to 1.0 -- the licensor's own split --
+    on any refusal, non-convergence or non-finite value, so an extreme transient degrades to the
+    calibrated vector rather than freezing or producing a NaN."""
+    return thermo_service.k_ratio(_kmolh_to_w(feed_kmolh), t_c, p_bara, t_ref_c, p_ref_bara)
+
+
 def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
                      overflow_kmolh: dict = None, L_feed: float = None,
                      W_feed: float = None, T_feed_C: float = None,
@@ -3851,7 +3971,20 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     #    (=1.0 at design).  The N/C+H/C choke does NOT cut the thermal split; instead it forces
     #    volatile NH3/CO2 BREAKTHROUGH to the overhead (slip), raising the vapour load back to HPCC.
     eta_co2 = clamp(0.5 + 0.5 * co2_scale, 0.4, 1.05)
-    eta_P   = clamp(2.0 - P_bara / STRIP_P_DES_BARA, 0.85, 1.15)
+    #  G-VLE-3.  `eta_P = clamp(2 - P/P_des, 0.85, 1.15)` was a linear, SPECIES-BLIND surrogate for
+    #  the pressure dependence of the strip split: one number applied to NH3, CO2, H2O and the four
+    #  inerts alike.  It is replaced -- not stacked on -- by the real per-species K-value ratio at
+    #  the live tube-side pressure, because the two model the same physics and multiplying both
+    #  would count it twice.  Both are exactly 1.0 at P == STRIP_P_DES_BARA, so the swap is
+    #  bit-exact at design.
+    #  ONLY the pressure moves in this ratio.  The thermal response of the split is already carried,
+    #  and carried better, by `eta_T_steam` and the duty chain above it: the stripper is a steam-
+    #  driven contactor, not an adiabatic flash, and its bottoms temperature is an OUTPUT of that
+    #  duty.  Putting the live bottoms temperature into the ratio as well would double-count the
+    #  same steam heat.  So the reference temperature IS the live temperature and the T terms of
+    #  the two K-values cancel identically, leaving the pressure derivative alone.
+    _strip_ratio = _hp_k_ratio(avail, STRIP_FEED207_T_C, P_bara,
+                               STRIP_FEED207_T_C, STRIP_P_DES_BARA)
     # Feed-load (flood) choke g_T<1 CUTS the split -- steam-limited stripping leaves the volatiles in
     # the BOTTOMS (NH3 slip to LP via LV-322501), it does NOT lift them overhead.  min(g_T,1) keeps the
     # feed-lean branch (g_T>1, already rewarded through eta_T) and the design point (g_T=1) bit-exact.
@@ -3860,11 +3993,16 @@ def stripper_322e001(co2_feed_th: float, T_steam_C: float, P_bara: float,
     # film"), so hydrolysis and biuret go UP, not down.  Since C-3 that rise is carried EXPLICITLY:
     # V_liq below tracks the live sump level, and dT_flood raises T_bot into the Arrhenius k(T).
     # Folding g_flood into the reaction extents would cut hydrolysis, i.e. the wrong sign.
-    mod = clamp(eta_T_steam * eta_co2 * eta_P, 0.0, 1.12) * min(g_T, 1.0) * g_flood
+    mod = clamp(eta_T_steam * eta_co2, 0.0, 1.12) * min(g_T, 1.0) * g_flood
     slip = max(1.0 - g_NC, 0.0) + max(1.0 - g_HC, 0.0)   # composition (N/C, H/C) breakthrough only
     top = {}; bot = {}
     for k in MW_COMP:
-        f = clamp(STRIP_FRAC_DES.get(k, 0.0) * mod, 0.0, 0.999)
+        #  The pressure ratio is applied through `_ratio_shift_frac`, which maps [0,1] onto [0,1]
+        #  for any ratio.  The old `* eta_P` multiply could not: at eta_P = 1.15 the N2 split went
+        #  to 1.148 before the clamp caught it, i.e. the column was asked to strip more nitrogen
+        #  than it was fed and the excess was silently truncated.
+        f = clamp(_ratio_shift_frac(STRIP_FRAC_DES.get(k, 0.0) * mod,
+                                    _strip_ratio.get(k, 1.0)), 0.0, 0.999)
         if k in ("NH3", "CO2"):
             f = clamp(f + STRIP_SLIP_GAIN * slip * (1.0 - f), 0.0, 0.999)  # volatile breakthrough
         top[k] = avail[k] * f
@@ -4560,6 +4698,35 @@ def _disturbance_gate(s) -> float:
     return clamp((dev - GATE_DEADBAND) / GATE_RAMP, 0.0, 1.0)
 
 
+#  G-VLE-3 -- 322E002 is the ONE of the four HP-loop sites that stays on its calibrated
+#  Clausius-Clapeyron K-multiplier, and the reason is measured.  Note first that this vector was
+#  never frozen: unlike REACT_THETA_OG and SCRUB_OFFGAS_KMOLH_DES it already carried a live T and P
+#  response, so wiring the rigorous ratio here REPLACED one slope with another rather than adding a
+#  derivative where none existed.  The replacement was tamer in every magnitude measure -- traced
+#  over the CCW-cut scenario (15 120 samples, 169.8-179.8 C, 140.6-141.8 bar a) the rigorous form
+#  spanned 0.062 in total vapour fraction against this form's 0.683, with a largest tick-to-tick
+#  step of 3.3e-2 against 6.5e-1, and left the grid on 3 samples out of 15 120.  It still broke the
+#  loop, and the reason is visible per species rather than in aggregate.  At 175.7 C / 141.2 bar a:
+#
+#      form                   NH3 mult   CO2 mult
+#      Clausius-Clapeyron       1.1990     1.1990      <- common mode: composition preserved
+#      rigorous K-ratio         1.1540     0.4829      <- differential: composition re-ordered
+#
+#  HPCC_FLASH_DH carries the same enthalpy for NH3 and CO2, so this form moves HOW MUCH vapour
+#  leaves the condenser and not WHAT leaves it.  The rigorous ratio halves the CO2 multiplier while
+#  raising NH3, which changes the N/C of the carbamate recycle returning to 322R001, which changes
+#  reactor conversion, which feeds back to loop pressure.  The loop has a restoring force against an
+#  inventory shift and none against a composition shift, so it settles on a NEW operating point
+#  instead of returning: test_3_scrubber_heat's CCW-restore leg went from +0.200 -> +0.100 bar
+#  (decaying) to +0.400 -> +1.200 bar (still climbing).  Bisected to this site alone -- with the
+#  reactor, stripper and scrubber ratios all live and only this one inert, the scenario is 8/8.
+#
+#  The differential is also the least trustworthy number the new surface produces.  The Extended
+#  UNIQUAC set is extrapolated in the synthesis loop -- it puts the 322R001 overflow bubble pressure
+#  3.6x low -- and a ratio cancels a systematic offset only where that offset is multiplicative and
+#  T-independent.  For CO2 over a carbamate melt at 140 bar it is neither, and a factor-2 change in
+#  the CO2 multiplier across 5.7 C is the extrapolation talking, not the chemistry.  So this site
+#  keeps the calibration whose selectivity was measured, and HPCC_FLASH_DH stays load-bearing.
 def _hpcc_flash_split(feed: dict, T_c: float, p_loop: float) -> dict:
     """AUDIT F-6 / TD-007 -- isothermal (T,P) flash of the 322E002 tube-side feed; returns phi_i.
 
@@ -4953,8 +5120,23 @@ def react_322r001(hpcc: dict, co2_feed_th: float, hic_322605_pct: float,
     xi_urea = max(min(xi_urea, fc.get("CO2", 0.0), 0.5 * fc.get("NH3", 0.0)), 0.0)
     xi_biu  = max(min(xi_biu, 0.5 * (fc.get("Urea", 0.0) + xi_urea)), 0.0)
     out_total = _react_delta(fc, xi_urea, xi_biu)
-    overflow = {k: out_total[k] * (1.0 - REACT_THETA_OG[k]) for k in MW_COMP}
-    offgas   = {k: out_total[k] * REACT_THETA_OG[k]         for k in MW_COMP}
+    #  G-VLE-3.  REACT_THETA_OG is the calibrated vapour/liquid disengagement at the reactor top,
+    #  derived from the published design vectors so the design point is bit-exact.  It was FROZEN:
+    #  the reactor could run 20 C hot or 10 bar low and not one mole moved between the overflow and
+    #  the off-gas, which is the wrong sign of "no response" for a vessel whose whole job is to hold
+    #  NH3 and CO2 in the liquid.  It is now the anchored ratio -- the design split re-flashed at
+    #  the live overflow temperature and the live loop pressure, against the same design pair the
+    #  vector was calibrated at (183 C / 140.7 bar a).  At those two values the ratio is exactly
+    #  1.0 and the split is the published one.
+    #  The inerts stay OUT of this flash by construction, not by exception: N2/O2/CH4/H2 have
+    #  REACT_OVERFLOW_DES == 0, so their theta is exactly 1.0 and `_anchored_split` leaves every
+    #  structurally non-distributing species untouched.  A reactor that dissolved its own nitrogen
+    #  would be a new claim, and there is no datum for one.
+    _react_ratio = _hp_k_ratio(out_total, REACT_OVERFLOW_T_C, state.p_syn_bara,
+                               REACT_OVERFLOW_T_C, SYN_P_DES_BARA)
+    _theta_og = _anchored_split(REACT_THETA_OG, out_total, _react_ratio)
+    overflow = {k: out_total[k] * (1.0 - _theta_og[k]) for k in MW_COMP}
+    offgas   = {k: out_total[k] * _theta_og[k]         for k in MW_COMP}
     # AT-322701 excess-NH3 partition (CONSERVATIVE: NH3 overflow<->off-gas only; total N & C held).
     # Anchored to boot-pinned design L_feed (NOT reactor.L0_DES) so H-1 seed creep cannot unpin it.
     L_ref = REACT_L_FEED_DES if REACT_L_FEED_DES is not None else reactor.L0_DES
@@ -5047,6 +5229,70 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     d_nh3 = max(min(2.0 * d_co2, 0.5 * offgas.get("NH3", 0.0)), -0.5 * offgas.get("NH3", 0.0))  # 2 NH3:1 CO2
     offgas["CO2"] -= d_co2;  overflow["CO2"] += d_co2                          # mass-conserving gas->liquid
     offgas["NH3"] -= d_nh3;  overflow["NH3"] += d_nh3
+    # --- G-VLE-3: the vent COMPOSITION responds to the scrubber state ------------------------------
+    # `offgas` and `overflow` are the two pinned design vectors scaled by one scalar s, so the vent
+    # COMPOSITION was frozen: every species left in exactly the design proportion whatever the
+    # scrubber did.  That is the stream where it matters most, because it is the only route the four
+    # inerts have out of the plant -- and until G-VLE-3 they had no property data at all in this
+    # repository, so nothing could have moved them even in principle.
+    #
+    # The correction is a CONSERVATIVE RE-PARTITION in this routine's own idiom (the same shape as
+    # d_co2/d_nh3 above, and nh3_shift in the reactor): per species, theta = offgas/(offgas+overflow)
+    # is shifted by the anchored K ratio and the delta is moved between the two vectors.  The
+    # combined discharge and every element balance are untouched; only the SPLIT moves, so
+    # `closure_resid` below is unchanged by construction.
+    #
+    # PT-329201 is the ONE live state it rides, and the temperature deliberately does NOT enter.
+    # That is not caution, it is a measured result.  TT-322011 in this model is not a state: it is a
+    # correlation, `114 + 120*(AT-322701 - N/C_des) + 20*theta_dev`, whose 120 C per N/C unit is a
+    # FITTED gain.  Feeding it into a rigorous K-ratio multiplies that fitted gain by a
+    # thermodynamic derivative, and the product is not a better model of anything -- measured, it
+    # drove the 322C001 design liquor's stationarity residual from 8.1e-9 to 3.7e-4 (45 000x) and
+    # REVERSED the sign of the vent NH3 slip against off-gas throughput
+    # (test_c001_species_layer.py::test_vent_nh3_slip_tracks_offgas_throughput).  A derivative is
+    # only as good as the input it differentiates, and a correlated input is the wrong one.
+    # PT-329201 is a real measurement, so the vent split rides that and nothing else.
+    #  This re-partition sets the vent COMPOSITION and nothing else.  `offgas` is the only stream in
+    #  the four G-VLE-3 wirings that LEAVES the HP loop (HV-322604 -> 322C001); the other three --
+    #  the HPCC flash, the reactor disengagement, the stripper split -- partition material that
+    #  recirculates, so a ratio may move them freely.  Here it may not.  Letting the ratio move the
+    #  vented TOTAL closes a positive feedback through the loop inventory: a higher PT-329201 lowers
+    #  every K, lowers the vented moles, retains more inventory, and raises PT-329201 again.  It is a
+    #  weak loop per tick (-0.41 % of vent per bar, measured) but it INTEGRATES, and it cost this
+    #  branch test_3_scrubber_heat's relaxation leg -- CCW-attributable excess GREW +0.400 -> +1.200
+    #  bar over the 1000 s relax window instead of decaying to +0.100.
+    #  The vent rate is not a thermodynamic quantity in the first place: it is set by HV-322604 and
+    #  the pressure controller, and a real valve passes MORE at higher upstream pressure, not less --
+    #  the opposite sign to the one an equilibrium K supplies.  So the total is renormalised back to
+    #  the licensor's pinned value and only the composition rides the ratio.
+    #  At design every ratio is exactly 1.0, so every `_d` is 0.0, the two totals are bit-identical,
+    #  `_sc_norm` is exactly 1.0, and `x * 1.0 == x` leaves the pinned vent untouched.
+    _sc_ratio = _hp_k_ratio(feed, SCRUB_OFFGAS_T_C, state.p_syn_bara,
+                            SCRUB_OFFGAS_T_C, SYN_P_DES_BARA)
+    _og_tot_before = sum(offgas.get(k, 0.0) for k in MW_COMP)
+    for k in MW_COMP:
+        _tot_k = offgas.get(k, 0.0) + overflow.get(k, 0.0)
+        if _tot_k <= 0.0:
+            continue
+        _th = offgas.get(k, 0.0) / _tot_k
+        _d = _tot_k * (_ratio_shift_frac(_th, _sc_ratio.get(k, 1.0)) - _th)
+        #  Bounded like every other re-partition in this routine: at most half of either side moves
+        #  in one tick, so a transient ratio can neither empty a stream nor drive one negative.
+        _d = max(min(_d, 0.5 * overflow.get(k, 0.0)), -0.5 * offgas.get(k, 0.0))
+        offgas[k] = offgas.get(k, 0.0) + _d
+        overflow[k] = overflow.get(k, 0.0) - _d
+    #  Renormalise the vented total back to the pinned value (see the note above the ratio call).
+    #  Per species the pair sum is untouched -- whatever leaves `offgas` is handed to `overflow` --
+    #  so the component balance closes exactly, and each `_new` is clamped into [0, _tot_k] so the
+    #  rescale can no more drive a stream negative than the per-species bound above it could.
+    _og_tot_after = sum(offgas.get(k, 0.0) for k in MW_COMP)
+    if _og_tot_before > 0.0 and _og_tot_after > 0.0:
+        _sc_norm = _og_tot_before / _og_tot_after
+        for k in MW_COMP:
+            _old_k = offgas.get(k, 0.0)
+            _new_k = min(max(_old_k * _sc_norm, 0.0), _old_k + overflow.get(k, 0.0))
+            offgas[k] = _new_k
+            overflow[k] = overflow.get(k, 0.0) + (_old_k - _new_k)
     # --- Phase A: reactor OFF-GAS-LINE LIQUID CARRYOVER (flood entrainment) -------------------------
     # On reactor flood (holdup at PHYSICAL vessel-full; LT-322504 narrow-band already pegged 100%) the
     # un-passable melt spills the off-gas line into 322E003 as

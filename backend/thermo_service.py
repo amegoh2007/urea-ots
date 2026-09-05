@@ -55,22 +55,40 @@ So this service refuses instead.  `classify()` returns None and `flash()` raises
 whenever the state leaves the tabulated envelope, and callers keep whatever anchored model they
 have.  The HP synthesis loop is entirely in that category today -- see DOMAIN NOTES below.
 
-DOMAIN NOTES -- the HP synthesis loop (322) is NOT covered
-----------------------------------------------------------
-Measured against the electrolyte table envelope (T 80-170 C, N <= 16, C <= 7 mol/kg water):
+DOMAIN NOTES -- the HP synthesis loop (322), and what closing G-VLE-3 did and did not buy
+------------------------------------------------------------------------------------------
+This section used to say the synthesis loop was outside every fitted envelope and would stay there.
+Two things blocked it and both are now removed:
 
-    322R001 overflow (stream 207, 183 C):   N = 100.0  (6.2x the top node)   C = 22.4  (3.2x)
-    322E003 off-gas feed        (183 C):    N = 869.3  (54.3x)               C = 258.1 (36.9x)
+    the COORDINATE.  The activity table was indexed in mol per kg of WATER, and in the HP loop the
+    water is the trace: the 322R001 overflow reads N = 100 against a top node of 16, and the 322E003
+    feed reads N = 869 -- 54x -- not because the liquor is exotic but because the denominator is
+    vanishing.  The table is now indexed by two BOUNDED mole-fraction coordinates (s, f) and both
+    states sit comfortably inside it.  See the re-index note in `vle_nh3co2h2o`.
 
-and the 322E003 feed additionally carries N2, O2, CH4 and H2, for which this repository holds
-neither Henry constants nor SRK critical constants -- `props_nh3co2h2o.SRK_CRIT` covers H2O, NH3 and
-CO2 only.  The reactor melt is not an aqueous solution at all; the underlying parameter set is a
-CO2-capture model fitted to dilute aqueous loadings below ~150 C.
+    the SOLVER.  `props_nh3co2h2o.speciate` stopped converging above N ~ 40 mol/kg water -- a
+    basin-of-attraction failure of its dilute initial guess, not a domain limit: seeded from a
+    converged neighbour the identical solver reaches N = 869 in five Newton steps at a residual of
+    8.5e-14.  Every node of the rebuilt table is a converged solve (1215/1215), and any node that
+    were not would be stored with its flag cleared so the interpolator refuses cells touching it.
 
-Putting 322R001 / 322E001 / 322E002 / 322E003 on this service would replace a calibrated,
-clearly-labelled split vector with a clamped edge lookup plus four species the model cannot see.
-That is a regression dressed as rigour, so it is not done.  Closing it needs a rebuilt grid over a
-molten-carbamate envelope and inert Henry/SRK data -- new source material, not new wiring.
+    the INERTS.  N2, O2, CH4 and H2 now have SRK critical constants and IAPWS G7-04 Henry constants
+    in `props_nh3co2h2o`, so the loop's four permanent gases generate real K-values instead of
+    forcing a refusal.
+
+What did NOT change is the FIT.  The Extended UNIQUAC interaction parameters are a CO2-capture set
+regressed on dilute aqueous loadings below ~150 C, and at x_H2O = 0.047 and 183 C they are being
+extrapolated hard.  The measurement that says so plainly: the model puts the 322R001 overflow's
+bubble pressure at 40.4 bar a at 183 C, against a loop that actually runs at 144.2 -- a factor of
+3.6 low.  Nothing in this service pretends otherwise, and the engine does not use the absolute
+number.  Every 322 split runs on the anchored ratio form
+
+    alpha_live = alpha_PFD * [ alpha_model(live) / alpha_model(reference) ]
+
+(`k_ratio` below), so the licensor's absolute split is preserved BIT-EXACTLY at the design point and
+the model supplies only the derivative -- how the split moves when T, P or composition move.  A
+systematic offset in an extrapolated activity coefficient cancels in that ratio.  Its SLOPE does
+not, and the slope is what the frozen split vectors reported as exactly zero.
 
 BASIS CONVENTIONS
 -----------------
@@ -95,11 +113,18 @@ import vle_nh3co2h2o as _vle
 MODEL_NAME = "unified gamma-phi (Extended UNIQUAC electrolyte + neutral urea/water) with SRK vapour"
 
 MW = {"Urea": 60.056, "Biuret": 103.081, "NH3": 17.0304,
-      "CO2": 44.0098, "H2O": 18.0152, "HCHO": 32.031}
+      "CO2": 44.0098, "H2O": 18.0152, "HCHO": 32.031,
+      "N2": 28.0134, "O2": 31.9988, "CH4": 16.0425, "H2": 2.01588}
 SPECIES = tuple(MW)
 NONVOLATILE = ("Urea", "Biuret", "HCHO")
+#  The CONDENSABLE volatiles -- the three the electrolyte model speciates and gives activities to.
 VOLATILE = ("NH3", "CO2", "H2O")
-_SRK_SPECIES = ("H2O", "NH3", "CO2")          # props_nh3co2h2o.SRK_CRIT keys
+#  G-VLE-3: the permanent gases.  They distribute (and overwhelmingly to the vapour) but they are
+#  not UNIQUAC species: their liquid side is Henry's law with a gamma* = 1 infinite-dilution
+#  reference, which is the standard state itself and not a placeholder for a missing parameter.
+INERTS = _vle.INERTS
+DISTRIBUTING = VOLATILE + INERTS
+_SRK_SPECIES = tuple(_props.SRK_CRIT)         # H2O, NH3, CO2 + the four inerts
 
 DOMAIN_ELECTROLYTE = "electrolyte_gamma_phi"
 DOMAIN_NEUTRAL_UREA = "neutral_urea_water_uniquac"
@@ -174,13 +199,25 @@ def classify(w: dict, t_c: float, p_bara: float = None) -> str | None:
             if not (p_lo <= p_bara <= p_hi):
                 return None
         # trace volatiles still ride the electrolyte dilute limit -> its grid must also hold them
-        if n_load > _vle._N_NODES[-1] or c_load > _vle._C_NODES[-1]:
+        if not _vle.in_grid(w, t_c):
             return None
         return DOMAIN_NEUTRAL_UREA
-    if not (_vle._T_NODES[0] <= t_c <= _vle._T_NODES[-1]):
+    #  G-VLE-3: the envelope test is now the table's OWN `in_grid`, not a pair of axis comparisons
+    #  restated here.  That flag is stricter than the box: it is False if any of the eight corner
+    #  nodes the interpolation actually uses failed to converge, so a corner of the envelope that
+    #  the continuation could not reach cannot be classified as owned.  It is also the single place
+    #  the bound lives, so a re-graded grid cannot leave this function testing the old one.
+    if not _vle.in_grid(w, t_c):
         return None
-    if not (n_load <= _vle._N_NODES[-1] and c_load <= _vle._C_NODES[-1]):
-        return None
+    #  The pressure bound is stated rather than tabulated, because the activity model carries no
+    #  pressure dependence at all -- see `vle_nh3co2h2o.VALID_PRESSURE_BARA`.  It is enforced here
+    #  so that the loop's 144 bar a is inside a DECLARED band instead of inside no band, and so that
+    #  a wild transient pressure refuses (and `k_ratio` falls back to the licensor's split) rather
+    #  than being answered by a model with no opinion about pressure.
+    if p_bara is not None:
+        p_lo, p_hi = _vle.VALID_PRESSURE_BARA
+        if not (p_lo <= p_bara <= p_hi):
+            return None
     return DOMAIN_ELECTROLYTE
 
 
@@ -188,12 +225,17 @@ def domain_report(w: dict, t_c: float, p_bara: float = None) -> dict:
     """Diagnostic companion to `classify` -- says WHICH bound failed, for telemetry and tests."""
     w = _norm_mass(w)
     n_load, c_load = _vle.loadings(w)
+    s, f = _vle.coords(w)
+    env = _vle.envelope()
     return {"domain": classify(w, t_c, p_bara),
             "t_c": t_c, "p_bara": p_bara,
+            #  molalities are RETAINED here even though nothing interpolates on them any more:
+            #  "N = 869 against a 16 top node" is the most legible statement of what used to be
+            #  wrong, and it stays visible in telemetry.
             "n_load_mol_per_kg_water": n_load, "c_load_mol_per_kg_water": c_load,
-            "t_envelope_c": (_vle._T_NODES[0], _vle._T_NODES[-1]),
-            "n_envelope": (_vle._N_NODES[0], _vle._N_NODES[-1]),
-            "c_envelope": (_vle._C_NODES[0], _vle._C_NODES[-1]),
+            "s_volatile_mole_frac": s, "f_co2_of_volatiles": f,
+            "t_envelope_c": env["t_c"], "s_envelope": env["s"], "f_envelope": env["f"],
+            "in_grid": _vle.in_grid(w, t_c),
             "urea_like_mass_frac": w.get("Urea", 0.0) + w.get("Biuret", 0.0),
             "model": MODEL_NAME}
 
@@ -215,7 +257,7 @@ def partial_pressures(w: dict, t_c: float, domain: str = None) -> dict:
     if domain is None:
         raise OutOfDomain(f"no fitted model owns this state: {domain_report(w, t_c)}")
     p = _vle.partial_pressures_bara(w, t_c)
-    out = {"NH3": p["NH3"], "CO2": p["CO2"], "H2O": p["H2O"]}
+    out = {s: p[s] for s in DISTRIBUTING}
     if domain == DOMAIN_NEUTRAL_UREA:
         t_k = t_c + 273.15
         # urea/water binary on a water-free-of-volatiles basis: the traces do not shift the binary
@@ -230,8 +272,13 @@ def partial_pressures(w: dict, t_c: float, domain: str = None) -> dict:
 def vapour_fugacity(y_mole: dict, t_c: float, p_bara: float) -> dict:
     """SRK vapour fugacity coefficients for the volatile vapour, k_ij = 0 (Thomsen 2005).
 
-    Species outside `props_nh3co2h2o.SRK_CRIT` (HCHO, and the inerts if a caller ever supplies them)
-    are returned ideal, phi = 1.0, which is stated rather than hidden."""
+    G-VLE-3: `_SRK_SPECIES` is now the whole of `props_nh3co2h2o.SRK_CRIT`, which since this gap
+    includes N2, O2, CH4 and H2 -- so the parenthetical that used to say "and the inerts if a caller
+    ever supplies them are returned ideal" no longer applies to them.  It still applies to HCHO,
+    which has no critical constants here and is non-volatile anyway.  The correction is not
+    cosmetic in this loop: at 144.2 bar a and 183 C the SRK coefficients of the light gases are
+    phi_N2 = 1.22 and phi_H2 = 1.29, i.e. 20-30 % from ideal in the direction that makes them LESS
+    soluble, and every one of those percent lands directly on an inert K-value."""
     y = {s: max(y_mole.get(s, 0.0), 0.0) for s in _SRK_SPECIES}
     tot = sum(y.values())
     phi = {s: 1.0 for s in SPECIES}
@@ -262,12 +309,120 @@ def k_values(w_liq: dict, t_c: float, p_bara: float,
     x = mass_to_mole(w_liq)
     phi = vapour_fugacity(y_mole, t_c, p_bara) if y_mole else {s: 1.0 for s in SPECIES}
     k = {s: 0.0 for s in SPECIES}
-    for s in VOLATILE:
+    for s in DISTRIBUTING:
         xs = x.get(s, 0.0)
         if xs <= 1e-14:
             continue
         k[s] = max(p_i[s] / (max(phi[s], 1e-9) * max(p_bara, 1e-9) * xs), 0.0)
     return k
+
+
+# ==================================================================================================
+#  G-VLE-3: the anchored ratio the HP loop runs on
+# ==================================================================================================
+
+def _k_srk(w: dict, t_c: float, p_bara: float, domain: str) -> dict:
+    """K-values with the SRK vapour fugacity actually applied, in one pass.
+
+    `k_values(..., y_mole=None)` returns phi = 1.0 -- documented, and correct as the FIRST pass of
+    the flash's successive substitution, which then feeds the converged vapour back in.  `k_ratio`
+    has no such loop, so calling `k_values` bare would have silently made the pressure leg of the
+    ratio the naive P_ref/P: measured, it reproduced 144.2/130 to the last bit, i.e. the SRK term
+    was not present at all.  It matters here more than anywhere: at 144 bar a and 183 C the light
+    species are 20-30 % from ideal.
+
+    So the vapour is seeded from the partial pressures themselves (y_i proportional to p_i, the
+    ideal-vapour composition -- the same seed `bubble_p` uses) and the fugacity taken once on it.
+    One pass, not a loop: the composition of the vapour barely moves under phi, and a ratio of two
+    single-pass evaluations is what is wanted, not two separately-converged fixed points."""
+    p_i = partial_pressures(w, t_c, domain)
+    x = mass_to_mole(w)
+    tot = sum(p_i[s] for s in DISTRIBUTING)
+    y = {s: p_i[s] / tot for s in DISTRIBUTING} if tot > 0.0 else None
+    phi = vapour_fugacity(y, t_c, p_bara) if y else {s: 1.0 for s in SPECIES}
+    k = {}
+    for s in DISTRIBUTING:
+        xs = x.get(s, 0.0)
+        k[s] = (max(p_i[s] / (max(phi[s], 1e-9) * max(p_bara, 1e-9) * xs), 0.0)
+                if xs > 1e-14 else 0.0)
+    return k
+
+
+def k_ratio(z_mass: dict, t_c: float, p_bara: float,
+            t_ref_c: float, p_ref_bara: float, z_ref_mass: dict = None,
+            species=None, lo: float = 0.02, hi: float = 50.0) -> dict:
+    """Per-species K-value RATIO K_i(live) / K_i(reference) -- the alpha_model/alpha_design factor.
+
+    This is the only way the 322 loop is allowed to touch this service, and the reason is measured
+    rather than asserted: the Extended UNIQUAC parameter set is extrapolated in the synthesis loop
+    and puts the 322R001 overflow's bubble pressure 3.6x low in ABSOLUTE terms.  Its DERIVATIVES are
+    the part that survives that extrapolation, because a systematic offset in an activity
+    coefficient divides out of a ratio and a slope does not.  So the engine keeps the licensor's
+    absolute split and takes only the movement from here:
+
+        alpha_live,i = alpha_PFD,i * k_ratio_i
+
+    BIT-EXACTNESS.  With `z_ref_mass=None` the reference is evaluated on the SAME composition as the
+    live point, so at t_c == t_ref_c and p_bara == p_ref_bara every argument of the two calls is
+    identical, the two K-values are the same float, and the ratio is exactly 1.0 -- not 1.0 within a
+    tolerance, and with no identity short-circuit to hide a residual.  That is why this is the
+    default: the HP splits are anchored to design vectors that were calibrated at a stated (T, P),
+    and their design COMPOSITION is assembled from live streams and is not a constant anywhere.
+    Passing an explicit `z_ref_mass` adds the composition derivative too, and is used only where the
+    caller genuinely owns a constant design composition to anchor against.
+
+    SAFETY.  Off-envelope, non-convergent or non-finite -> the species falls back to 1.0, i.e. to
+    the licensor's own split.  The state is never frozen and the ratio is never NaN.  `lo`/`hi`
+    bound the excursion: a ratio outside them is the model leaving its useful range, not a real
+    50x move in a condenser split, and the anchored vector is the better answer there.
+    """
+    keys = tuple(species) if species is not None else DISTRIBUTING
+    out = {s: 1.0 for s in keys}
+    #  DELIBERATELY NOT MEMOISED -- and this is the one place in this module where the quantised
+    #  memo `flash` and `bubble_t` both use is the WRONG answer.  It was written, measured (9.6 us
+    #  warm against 176 us cold, a 6.7 % tick saving across the four wired sites) and then removed,
+    #  because it is a correctness hazard specific to a RATIO:
+    #
+    #  every one of these calls has a reference point that must return exactly 1.0, and the engine
+    #  spends thousands of ticks NEAR that point -- the entire boot settle does.  On the quantisation
+    #  grid (0.02 C, 1e-4 bar, 100 ppm) a settle tick 60 ppm away in composition keys IDENTICALLY to
+    #  the design state, so whichever of the two ran first answered for both.  Measured: it moved the
+    #  pinned 322E003 vent vector by 1.1e-4 kmol/h, and it did so ONLY when the boot-pin cache missed
+    #  and the full settle ran -- i.e. it was invisible on a warm tree and appeared on a cold one.
+    #  A memo that silently breaks a design pin depending on whether a cache file exists is worse
+    #  than 700 us a tick, so the memo is gone rather than tuned.
+    #
+    #  If this ever needs to be fast, the correct fix is an EXACT-argument key (which hits every tick
+    #  at a fixed point and misses honestly during a transient), not a finer quantum -- a finer
+    #  quantum shrinks the window without closing it.
+    try:
+        z = _norm_mass(z_mass)
+        z_r = z if z_ref_mass is None else _norm_mass(z_ref_mass)
+        #  Classify ONCE per composition and hand the answer to both K-value calls.  `k_values`
+        #  otherwise re-derives the domain, and each derivation is a full grid interpolation -- this
+        #  is a ratio, so it would pay for four of them where two will do.
+        dom = classify(z, t_c, p_bara)
+        if dom is None:
+            return out
+        #  The reference is only the same classification when it is the same ARGUMENTS.  It usually
+        #  is not -- the reference temperature is the design temperature -- and the envelope is
+        #  bounded in T, so reusing `dom` there would let an off-envelope reference borrow the live
+        #  point's domain.  It is reused only in the stripper's case, where t_ref_c IS t_c.
+        dom_r = (dom if (z_ref_mass is None and t_ref_c == t_c)
+                 else classify(z_r, t_ref_c, p_ref_bara))
+        if dom_r is None:
+            return out
+        k_live = _k_srk(z, t_c, p_bara, dom)
+        k_ref = _k_srk(z_r, t_ref_c, p_ref_bara, dom_r)
+    except (OutOfDomain, ValueError, ZeroDivisionError, OverflowError, KeyError):
+        return out
+    for s in keys:
+        a, b = k_live.get(s, 0.0), k_ref.get(s, 0.0)
+        if b <= 0.0 or a <= 0.0 or not (math.isfinite(a) and math.isfinite(b)):
+            continue
+        r = a / b
+        out[s] = r if lo <= r <= hi else (lo if r < lo else hi)
+    return out
 
 
 # ==================================================================================================
@@ -289,7 +444,7 @@ def bubble_p(w: dict, t_c: float, srk: bool = True, iters: int = 30) -> float:
     bubble point and the flash sat on two different surfaces, and a flash AT the computed bubble
     temperature returned psi = 1.5e-3 instead of ~0.  Both entry points now use the same phi."""
     p = partial_pressures(w, t_c)
-    p_ideal = max(p["NH3"] + p["CO2"] + p["H2O"], 1.0e-9)
+    p_ideal = max(sum(p[s] for s in DISTRIBUTING), 1.0e-9)
     if not srk:
         return p_ideal
     p_bub = p_ideal
@@ -298,11 +453,11 @@ def bubble_p(w: dict, t_c: float, srk: bool = True, iters: int = 30) -> float:
         #  y_i is proportional to p_i/phi_i, NOT to p_i: with per-species phi the vapour composition
         #  itself shifts, so it has to be recomputed each sweep alongside the pressure.  (p_i are
         #  already mole-basis partial pressures, so no molar-mass conversion enters here.)
-        num = {s: p[s] / max(phi[s], 1e-9) for s in VOLATILE}
+        num = {s: p[s] / max(phi[s], 1e-9) for s in DISTRIBUTING}
         tot = sum(num.values())
-        y_mole = {s: (num[s] / tot if tot > 0.0 else 0.0) for s in VOLATILE}
+        y_mole = {s: (num[s] / tot if tot > 0.0 else 0.0) for s in DISTRIBUTING}
         phi = vapour_fugacity(y_mole, t_c, p_bub)
-        p_new = sum(p[s] / max(phi[s], 1e-9) for s in VOLATILE)
+        p_new = sum(p[s] / max(phi[s], 1e-9) for s in DISTRIBUTING)
         if abs(p_new - p_bub) <= 1e-12 * max(p_new, 1.0):
             p_bub = p_new
             break
@@ -356,12 +511,12 @@ def _bubble_t_solve(w: dict, p_bara: float, t_lo: float = None, t_hi: float = No
     Brackets default to the owning model's own envelope, so the answer can never be reported from
     outside the fitted range."""
     w = _norm_mass(w)
-    dom = classify(w, 0.5 * (_vle._T_NODES[0] + _vle._T_NODES[-1]), p_bara)
+    dom = classify(w, 0.5 * sum(_vle.envelope()['t_c']), p_bara)
     if dom == DOMAIN_NEUTRAL_UREA:
         lo_d, hi_d = (_neutral.VALID_TEMPERATURE_K[0] - 273.15,
                       _neutral.VALID_TEMPERATURE_K[1] - 273.15)
     else:
-        lo_d, hi_d = _vle._T_NODES[0], _vle._T_NODES[-1]
+        lo_d, hi_d = _vle.envelope()['t_c'][0], _vle.envelope()['t_c'][1]
     lo = lo_d if t_lo is None else max(t_lo, lo_d)
     hi = hi_d if t_hi is None else min(t_hi, hi_d)
     if lo >= hi:
@@ -395,7 +550,7 @@ def dew_t(y_mass: dict, p_bara: float, tol: float = 1.0e-5) -> float:
     sum_i z_i / K_i(T) = 1 with the liquid taken as the incipient drop.  Bisection on the residual
     keeps it inside the owning model's envelope, same as `bubble_t`."""
     z = _norm_mass(y_mass)
-    lo, hi = _vle._T_NODES[0], _vle._T_NODES[-1]
+    lo, hi = _vle.envelope()['t_c']
 
     def _resid(t_c):
         # incipient liquid: iterate x until self-consistent at vapour-fraction -> 1
@@ -545,6 +700,7 @@ def flash_cache_clear() -> None:
     _bubble_t_cache.clear()
     _bubble_t_stats["hit"] = 0
     _bubble_t_stats["miss"] = 0
+
 
 
 #  Convergence tolerance on the liquid mass fraction.  MEASURED cost/accuracy at 323C003:
@@ -705,12 +861,12 @@ def flash_ph(z_mass: dict, h_kj_per_kg: float, p_bara: float,
     cannot disagree.  Bisection on h(T) - h, which is monotone increasing in T.
     """
     z = _norm_mass(z_mass)
-    dom_mid = classify(z, 0.5 * (_vle._T_NODES[0] + _vle._T_NODES[-1]), p_bara)
+    dom_mid = classify(z, 0.5 * sum(_vle.envelope()['t_c']), p_bara)
     if dom_mid == DOMAIN_NEUTRAL_UREA:
         lo_d, hi_d = (_neutral.VALID_TEMPERATURE_K[0] - 273.15,
                       _neutral.VALID_TEMPERATURE_K[1] - 273.15)
     else:
-        lo_d, hi_d = _vle._T_NODES[0], _vle._T_NODES[-1]
+        lo_d, hi_d = _vle.envelope()['t_c'][0], _vle.envelope()['t_c'][1]
     lo = lo_d if t_lo is None else max(t_lo, lo_d)
     hi = hi_d if t_hi is None else min(t_hi, hi_d)
     if lo >= hi:

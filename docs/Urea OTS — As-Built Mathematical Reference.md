@@ -1296,6 +1296,11 @@ relaxation term and a real letdown sensible load, and only the second one goes i
   ten that were differ by at most $1.5\times10^{-6}$ °C and $3\times10^{-8}$ bar — last-digit motion
   on states that already carry a small non-zero $\dot P$ at the settled attractor, not a moved
   design point.
+* **`test_3_scrubber_heat` is 8/8**, the CCW-restore leg relaxing $+0.300 \to +0.100$ bar against
+  HEAD's $+0.200 \to +0.100$. This is the check that caught the HPCC wiring, and it is the reason
+  the design seed alone is not an acceptance criterion for this work: the seed was 103/103
+  bit-identical in the failing configuration too. Any future change to an HP-loop split should be
+  judged on a transient, not on $t = 0$.
 
 ## 322R001 Reactor Kinetics: Rate Laws, Not Load Multipliers (`backend/reactor.py`)
 
@@ -2726,12 +2731,420 @@ new compressible overheads: over the same run 328C002/C003/C004/D001 stay inside
   friction components, because no source gives the split. If it is largely friction it falls with
   ṁ² on turndown and the stall margin above is pessimistic.
 
+## Phase 5 — G-VLE-3: the rigorous thermodynamic boundary reaches the HP synthesis loop
+
+Phase 1 built a unified gamma-phi VLE service and then explicitly refused to put the 322 loop on it.
+That refusal was correct at the time and is documented in `thermo_service`'s own module note: the
+activity table was indexed in molalities, `_bracket` clamps rather than extrapolates, and the four
+inerts had no property data at all — so a 322 call would have returned a frozen edge node wearing a
+rigorous-looking call, which is strictly worse than an honest hardcoded vector.
+
+This phase removes both blockers and wires the loop, and it separates very carefully what that does
+and does not buy. Two things limited the old table. **One of them is fixed here and one is not.**
+
+### The coordinate: a molality grid can never be wide enough
+
+The loading basis was mol per kg of **water**, and the synthesis loop is where the water runs out:
+
+| state | *T* | *N* (mol/kg water) | *C* (mol/kg water) |
+|---|---|---|---|
+| 322R001 overflow (stream 207) | 183 °C | 100.0 — 6.2× the top node | 22.4 — 3.2× |
+| 322E003 off-gas feed | 183 °C | 869.3 — **54.3×** | 258.1 — 36.9× |
+
+Those numbers are not large because the liquor is exotic. They are large because the denominator is
+vanishing: a liquor with no water in it has an *infinite* molality. No finite molality grid can
+cover that, and every one of them clamps silently at the edge.
+
+In mole fractions the same two states are unremarkable — *x*<sub>H2O</sub> = 0.312 and 0.047 — so
+the table is re-indexed on two **bounded** coordinates over the water + volatile sub-system:
+
+$$s=\frac{n_{\mathrm{NH_3}}+n_{\mathrm{CO_2}}}{n_{\mathrm{NH_3}}+n_{\mathrm{CO_2}}+n_{\mathrm{H_2O}}}
+\qquad f=\frac{n_{\mathrm{CO_2}}}{n_{\mathrm{NH_3}}+n_{\mathrm{CO_2}}}$$
+
+with the molalities recovered exactly as *N* = 55.508·*s*(1−*f*)/(1−*s*) and *C* = 55.508·*s f*/(1−*s*).
+The (*s*, *f*) rectangle is **full** — every physically realisable liquor maps into it — which an
+(*x*<sub>NH3</sub>, *x*<sub>CO2</sub>) pair is not, since its upper triangle is unreachable and its
+interpolation cells would straddle the hypotenuse.
+
+`s` is bracketed on **logit**(*s*) = ln(*s*/(1−*s*)), and that is not an arbitrary choice:
+
+$$\operatorname{logit}(s)=\ln (N+C)-\ln 55.508$$
+
+identically. In the dilute limit — the only region where the old grid was ever valid — the new table
+interpolates on **exactly the old coordinate**. That identity is what makes the re-index reviewable
+as a coordinate transform rather than a new model, and it is pinned as a test.
+
+The evidence that it *is* a coordinate transform is the module's own published validation, which
+survives it and at two of three stages moves *toward* the plant:
+
+| stage | *T* | *P*<sub>PFD</sub> | before (molality grid) | after (mole-fraction grid) |
+|---|---|---|---|---|
+| 323C003 | 135 °C | 4.10 bar a | 4.387 (+7.0 %) | **4.3516 (+6.1 %)** |
+| 323F004 | 106 °C | 1.13 bar a | 1.328 (+17.5 %) | **1.2993 (+15.0 %)** |
+| 323F010 | 99 °C | 0.46 bar a | 0.468 (+1.7 %) | **0.4683 (+1.8 %)** |
+
+Envelope: *T* ∈ [80, 210] °C (was [80, 170]), *s* ∈ [10⁻⁵, 0.98], *f* ∈ [0.002, 0.78] — i.e. N/C from
+500 down to 0.28. 9 × 15 × 9 = **1215 nodes**.
+
+The two composition axes are bounded from **above only**, and that asymmetry is the physics rather
+than a slip. Clamping at the top of *s* or *f* fabricates a frozen constant — the true activity keeps
+rising past the last node and the table hands back the node instead, which is the exact failure mode
+this whole phase exists to remove. Clamping at the bottom lands in the dilute limit, where every
+volatile term is vanishing anyway: at the floor nodes the tabulated CO2 loading is 1.1 × 10⁻⁶ mol per
+kg of water and *a*<sub>CO2</sub> is of order 10⁻⁸, so treating a liquor with less CO2 than that as
+though it had exactly that much moves its bubble pressure far below anything this plant resolves.
+Refusing there instead would put pure steam — and every 324 melt whose volatiles are traces — outside
+every fitted model in the repository, which is not what the fit says and is not what the
+pre-G-VLE-3 envelope test said either. **Temperature stays bounded on both sides**: below 80 °C the
+activities are not vanishing, merely untabulated, and `_bubble_t_solve` already refuses there.
+
+**Pressure is a declared band, not an axis**, and deliberately so: the Extended UNIQUAC activity
+model has no pressure dependence at all, and the one term that would give it one — the Poynting
+factor exp(*v*<sub>∞</sub>(*P* − *P*<sub>sat</sub>)/*RT*) — needs infinite-dilution partial molar
+volumes this repository holds from no source. `VALID_PRESSURE_BARA = (0.02, 180.0)` therefore covers
+the 144.2 bar synthesis loop and the 0.05 bar vacuum stages, and `classify` enforces it so that a
+wild transient pressure **refuses** — and `k_ratio` degrades to the licensor's split — rather than
+being answered by a model that has no opinion about pressure. The vapour side genuinely is valid
+across that band: SRK returns *Z* = 0.80 and φ<sub>N2</sub> = 1.31 at 144 bar a, so it is doing real
+work up there.
+
+### The solver: it was an initial guess, not a domain limit
+
+This is the finding that unlocked the gap, and it is worth not re-deriving.
+`props_nh3co2h2o.speciate` is a damped log-space Newton on the R1–R5 speciation. Measured at 183 °C
+along the N/C = 4.46 ray:
+
+| *N* (mol/kg water) | residual from the stock guess |
+|---|---|
+| 16 – 40 | 10⁻¹² … 10⁻¹⁵ — converged |
+| 50 | **9.9** |
+| 100 | 17.5 |
+| 869 | 122.6 |
+
+and 200, 2 000 and 20 000 iterations return the **identical** non-solution at *N* = 50. That is a
+basin-of-attraction failure of the dilute-solution ansatz, not a tolerance, not an iteration budget,
+and not the model refusing. Seeded from a converged neighbour, the same solver — same equations,
+same damping, same tolerance — reaches *N* = 869 / *C* = 195 in **five Newton steps at a residual of
+8.5 × 10⁻¹⁴**.
+
+So `speciate` gained one optional argument, `m_guess`, and `_build_table` marches:
+
+* temperature outermost, seeding each node from the same (*s*, *f*) node one step back in *T*;
+* then the *s*-neighbour, then the *f*-neighbour, then cold;
+* with a **temperature bisection** fallback that halves the *T* step up to six times.
+
+Marching order matters and was measured. A naive *s*-first march leaves 22 of 960 probe nodes
+unconverged at 84 ms/node; temperature-first carries 958 of 960 at 15 ms/node, and the bisection
+fallback takes it to 959. On the final graded grid the build is **1215/1215 converged**.
+
+A node that fails is **stored with its flag cleared**, not dropped, and `_interp` reports
+`corners_ok = False` if any of the eight corners it actually uses carries a cleared flag. That is
+what turns the clamp from invisible into reportable: `in_grid` is now stricter than an axis test.
+
+### The inerts: SRK constants and IAPWS G7-04 Henry constants
+
+N2, O2, CH4 and H2 have no Extended UNIQUAC rows and never will — they are not electrolytes and
+they do not speciate. They enter the only way a permanent gas can, and both halves are established
+standard-state data rather than fitted parameters:
+
+* **SRK critical constants** (`SRK_CRIT`) — the same class of public NIST/DIPPR values as the three
+  rows already there, under the same *k*<sub>ij</sub> = 0 mixing rule that was already the stated
+  choice precisely because no binary interaction data exists.
+* **Henry's constants** — IAPWS Guideline **G7-04**, ln(*k*<sub>H</sub>/*p*₁\*) = *A*/*T*<sub>R</sub> +
+  *B*(1−*T*<sub>R</sub>)<sup>0.355</sup>/*T*<sub>R</sub> + *C* e<sup>1−*T*R</sup>*T*<sub>R</sub><sup>−0.41</sup>,
+  mole-fraction scale — the same scale as the existing Rumpf & Maurer NH3/CO2 constants, so they drop
+  into the same partial-pressure sum with no basis conversion.
+
+A van't Hoff fit was **refused** for a specific reason: permanent-gas solubility in water passes
+through a minimum near 80–100 °C and rises again above it. A two-parameter fit anchored at 25 °C has
+the solubility falling monotonically and is badly wrong by 183 °C — the loop's own temperature.
+G7-04's three-term form reproduces the turn, which is why it exists.
+
+**Validation, twice, neither of it circular:**
+
+| gas | *k*<sub>H</sub> at 25 °C, model | literature (mole-fraction, bar) | error |
+|---|---|---|---|
+| N2 | 85 598 | 86 500 | −1.0 % |
+| O2 | 43 640 | 44 000 | −0.8 % |
+| CH4 | 39 479 | 41 300 | −4.4 % |
+| H2 | 70 960 | 71 200 | −0.3 % |
+
+and — the load-bearing one, because there is no direct inert datum at 183 °C anywhere in this
+repository — CO2 is in the **same published table**, and this repository holds an **independent**
+Rumpf & Maurer fit for it:
+
+| *T* | G7-04 | Rumpf & Maurer (in-repo) | ratio |
+|---|---|---|---|
+| 25 °C | 165.6 MPa | 165.4 MPa | 1.0015 |
+| 140 °C | 599.0 | 585.4 | 1.023 |
+| 183 °C | 595.9 | 567.6 | **1.050** |
+| 210 °C | 555.5 | 521.3 | 1.065 |
+
+Two unrelated correlations agreeing to 5 % at the synthesis temperature is what licenses the four
+inert rows at that temperature. The gap growing monotonically with *T* is the honest statement of
+where the extrapolation begins to matter.
+
+The SRK correction is not cosmetic here. At 144.2 bar a and 183 °C, φ<sub>N2</sub> = 1.224 and
+φ<sub>H2</sub> = 1.291 against φ<sub>NH3</sub> = 0.758 and φ<sub>CO2</sub> = 0.889 (*Z* = 0.866) —
+the light gases are 20–30 % from ideal *in the direction that makes them less soluble*, and every one
+of those percent lands directly on an inert K-value.
+
+### What is NOT fixed: the fit
+
+The Extended UNIQUAC interaction parameters are a CO2-capture set regressed on **dilute aqueous
+loadings below ~150 °C**. At *x*<sub>H2O</sub> = 0.047 and 183 °C the model is being evaluated far
+outside its regression data, and the extended Debye–Hückel term in particular is being asked for an
+ionic strength of ~130 mol/kg. The numbers it returns there are a smooth, thermodynamically
+consistent **extrapolation**, not a prediction.
+
+The measurement that says so plainly, and the one number in this section worth remembering:
+
+> The model puts the 322R001 overflow's bubble pressure at **40.4 bar a at 183 °C**, against a loop
+> that actually runs at **144.2**. A factor of 3.6 low.
+
+Nothing in the engine uses that number, and the test suite deliberately pins the *fact* of the error
+as a band rather than the value, so that a test never becomes an endorsement of an extrapolation.
+
+### How the loop is wired: the anchored ratio
+
+Every 322 split keeps the licensor's calibrated vector and multiplies it by a ratio of the model to
+itself:
+
+$$\alpha_{\text{live},i}=\alpha_{\mathrm{PFD},i}\cdot\frac{K_{i,\text{model}}(\text{live})}{K_{i,\text{model}}(\text{reference})}$$
+
+A systematic offset in an extrapolated activity coefficient **divides out** of that ratio. Its slope
+does not — and the slope is exactly what the frozen vectors reported as zero.
+
+`thermo_service.k_ratio` evaluates the reference on the **same composition** as the live point unless
+a constant design composition is supplied. So at the reference (*T*, *P*) every argument of the two
+K-value calls is identical, the two K-values are the same IEEE double, and the quotient is **exactly
+1.0** — not 1.0 within a tolerance, and with no identity short-circuit hiding a residual. That is
+what carries the design seed, and it is the reason this default was chosen: the HP splits are
+anchored to vectors calibrated at a stated (*T*, *P*), and their design *composition* is assembled
+from live streams and is not a constant anywhere in the engine.
+
+`k_ratio` does **not** call `k_values` bare. That was a defect caught in this phase: `k_values` with
+no vapour composition returns φ = 1.0 — documented, and correct as the first pass of the flash's
+successive substitution, which then feeds the converged vapour back in. `k_ratio` has no such loop,
+so calling it bare silently made the pressure leg the naive *P*<sub>ref</sub>/*P*; measured, it
+reproduced 144.2/130 **to the last bit**. `_k_srk` seeds the vapour from the partial pressures
+themselves (the same ideal seed `bubble_p` uses) and takes the fugacity once on it.
+
+Two transforms consume the ratio. They are the same algebra at two limits, not two models:
+
+| transform | form | where |
+|---|---|---|
+| `_ratio_shift_frac` | θ′ = *r*θ/(1 + (*r*−1)θ) | units that are not flashes — a stripping column, an absorber |
+| `_anchored_split` | back-solve *K* from θ, scale by *r*, **re-solve Rachford–Rice** | units that are flashes — the condenser, the reactor top |
+
+The first is the second with the phase ratio cancelled: back-solving *K* from θ = *K*ψ/(1+ψ(*K*−1))
+and re-inserting *K r*, the (1−ψ) cancels and ψ drops out entirely. Both are exact identities at
+*r* = 1.0 **with no branch** — (*r*−1.0) is exactly 0.0 there, so the first returns θ/1.0.
+
+`_ratio_shift_frac` also fixes a real defect it inherited: it maps [0,1] onto [0,1] for any *r* > 0,
+where the `× eta_P` multiply it replaces could not. At η<sub>P</sub> = 1.15 the N2 strip fraction
+went to **1.148** before the clamp caught it — the column was asked to strip more nitrogen than it
+was fed, and the excess was silently truncated.
+
+### The three wirings, and the one that was refused
+
+Four sites were nominated. Three are wired; 322E002 is not, and the reason is in the next section.
+
+| target | was | now | reference pair |
+|---|---|---|---|
+| `REACT_THETA_OG` | frozen vector | `_anchored_split` at the live overflow *T* and loop *P* | (183 °C, 140.7 bar a) |
+| `STRIP_FRAC_DES` | scalar `eta_P = clamp(2 − P/P_des, 0.85, 1.15)` | per-species pressure ratio through `_ratio_shift_frac` | (183 °C, 144.0 bar a) |
+| `SCRUB_OFFGAS_KMOLH_DES` | frozen vector × one scalar | composition-only re-partition on PT-329201 | (114 °C, 140.7 bar a) |
+| `_hpcc_flash_split` | Clausius–Clapeyron `exp[(ΔH/R)Δ(1/T)] × P_des/P` | **unchanged — see below** | — |
+
+Two of the four were not frozen vectors at all. `_hpcc_flash_split` already carried a live
+Clausius–Clapeyron response in both *T* and *P*, and `STRIP_FRAC_DES` was already modulated by
+`eta_T_steam · eta_co2 · eta_P` with `eta_P` an explicit pressure law. On those two sites the work
+was replacing one slope with another, not connecting a constant to thermodynamics — which matters,
+because a replacement can be *worse* in a way that adding a derivative to a constant cannot.
+
+**The design seed cannot audit this work.** Every form involved, old and new, at all four sites, is
+exactly 1.0 at the design point by construction. The boot pin stayed 103/103 bit-identical through
+every configuration tried, including the one that broke the loop. Bit-exactness at *t* = 0 is a
+necessary condition here and an almost uninformative one; the transient is what carries the signal.
+
+* **The scrubber re-partition is composition-only.** `offgas` is the sole stream among these sites
+  that *leaves* the HP loop (HV-322604 → 322C001); the others partition material that recirculates.
+  Letting a K-ratio move the vented **total** closes a positive feedback through loop inventory — a
+  higher PT-329201 lowers every *K*, lowers the vented moles, retains more inventory, and raises
+  PT-329201 again. Measured at −0.41 % of vent per bar: weak per tick, but it integrates. The vent
+  rate is not a thermodynamic quantity in any case — HV-322604 and the pressure controller set it,
+  and a real valve passes *more* at higher upstream pressure, the opposite sign to the one an
+  equilibrium *K* supplies. So the total is renormalised back to the licensor's pinned value and
+  only the composition rides the ratio.
+* **`eta_P` is replaced, not stacked.** Both it and the ratio model the pressure dependence of the
+  strip split; multiplying both would count the loop pressure twice. Both are exactly 1.0 at
+  `STRIP_P_DES_BARA`, so the swap is bit-exact.
+* **The scrubber vent rides PT-329201 and deliberately not TT-322011**, and that is a measured
+  result rather than caution. TT-322011 in this model is not a state: it is the correlation
+  `114 + 120·(AT-322701 − N/C_des) + 20·θ_dev`, whose 120 °C per N/C unit is a *fitted* gain.
+  Feeding it into a rigorous K-ratio multiplies that fitted gain by a thermodynamic derivative, and
+  the product is not a better model of anything. It was tried first, and it drove the 322C001 design
+  liquor's stationarity residual from 8.1 × 10⁻⁹ to 3.7 × 10⁻⁴ — 45 000× — and **reversed the sign**
+  of the vent NH3 slip against off-gas throughput. A derivative is only as good as the input it
+  differentiates; a correlated input is the wrong one. PT-329201 is a real measurement, so the vent
+  split rides that and nothing else.
+* **Only the pressure moves in the stripper's ratio.** Its reference temperature *is* its live
+  temperature, so the *T* terms of the two K-values cancel identically. The stripper is a
+  steam-driven contactor whose bottoms temperature is an **output** of the duty chain; that thermal
+  response is already carried by `eta_T_steam`, and putting the live temperature into the ratio as
+  well would double-count the same steam heat.
+
+Structurally non-distributing species are never moved by either transform. θ of exactly 0 (urea:
+never boils) or exactly 1 (O2/CH4/H2 at the reactor top: never dissolve) are *structural*, not
+calibrated, and moving them would be a new claim with no datum behind it.
+
+### Why 322E002 keeps its calibration: common mode versus selectivity
+
+The HPCC was wired to the rigorous ratio first, and it broke the synthesis loop's ability to
+recover from a disturbance. `test_3_scrubber_heat` cuts CCW to 322E003, lets PT-329201 rise, then
+restores CCW and requires the excess over a matched no-cut control to decay. It went from
+`+0.200 → +0.100 bar` (decaying) to `+0.400 → +1.200 bar` — still climbing after the disturbance
+had been removed. The cause was isolated by running the scenario with each wiring individually
+inert:
+
+| configuration | excess₁ → excess₂ | verdict |
+|---|---|---|
+| HEAD | +0.200 → +0.100 | 8/8 |
+| all four wirings live | +0.400 → +1.200 | 7/8 |
+| reactor inert | +0.400 → +1.300 | 7/8 |
+| scrubber vent total conserved | +0.400 → +1.200 | 7/8 |
+| all four inert | +0.300 → +0.100 | 8/8 |
+| **HPCC inert, other three live** | **+0.300 → +0.000** | **8/8** |
+
+The rigorous form is not *rougher* than the one it replaced. Traced over the scenario — 15 120
+samples spanning 169.8–179.8 °C and 140.6–141.8 bar a — it moved total vapour fraction over a span
+of 0.062 against Clausius–Clapeyron's 0.683, with a largest tick-to-tick step of 3.3 × 10⁻² against
+6.5 × 10⁻¹, and left the grid on 3 samples out of 15 120. It is an order of magnitude gentler on
+every aggregate measure and it is the one that fails. The difference is per species. At
+175.7 °C / 141.2 bar a:
+
+| form | NH3 multiplier | CO2 multiplier |
+|---|---|---|
+| Clausius–Clapeyron | 1.1990 | 1.1990 |
+| rigorous *K*-ratio | 1.1540 | 0.4829 |
+
+`HPCC_FLASH_DH` carries the same enthalpy for NH3 and CO2, so the calibrated form is **common
+mode**: it changes *how much* vapour leaves the condenser and not *what* leaves it. The rigorous
+ratio is **differential**: it halves the CO2 multiplier while raising NH3, which changes the N/C of
+the carbamate recycle returning to 322R001, which changes reactor conversion, which feeds back to
+loop pressure. The loop has a restoring force against an inventory shift and none against a
+composition shift, so it settles on a new operating point instead of returning.
+
+The differential is also the least defensible number this surface produces. The Extended UNIQUAC
+set is extrapolated in the synthesis loop — it puts the 322R001 overflow bubble pressure 3.6× low —
+and a ratio cancels a systematic offset only where that offset is multiplicative and
+*T*-independent. For CO2 over a carbamate melt at 140 bar it is neither. A factor-2 change in the
+CO2 multiplier across 5.7 °C is the extrapolation talking, not the chemistry. So 322E002 keeps the
+calibration whose selectivity was measured, `HPCC_FLASH_DH` stays load-bearing, and this site is
+the first candidate to revisit if the parameter set is ever refitted for the loop (§ *What is NOT
+fixed: the fit*).
+
+### The K-values the inerts actually generate
+
+Apparent *K*<sub>i</sub> = *y*<sub>i</sub>/*x*<sub>i</sub> on the total-species basis, at each wired
+unit's design state, through `_k_srk` (i.e. with the SRK fugacity applied):
+
+| state | *T* °C | *P* bar a | *K*<sub>N2</sub> | *K*<sub>O2</sub> | *K*<sub>CH4</sub> | *K*<sub>H2</sub> | *K*<sub>NH3</sub> | *K*<sub>CO2</sub> | *K*<sub>H2O</sub> |
+|---|---|---|---|---|---|---|---|---|---|
+| 322R001 product (reactor top) | 183 | 140.7 | 499.4 | 354.2 | 323.9 | 307 | 0.560 | 0.125 | 0.184 |
+| 322E001 feed (stripper) | 183 | 144.0 | — | — | — | — | 0.658 | 0.141 | 0.308 |
+| 322E002 feed (HPCC) | 170 | 140.7 | 601.8 | 419.4 | — | — | 0.365 | 0.375 | 0.197 |
+| 322E003 feed (scrubber) | 114 | 140.7 | 815.9 | 523 | 494.6 | 484 | 0.071 | 0.416 | 0.022 |
+
+A dash is a species absent from that feed vector — *x*<sub>i</sub> = 0 makes *K* undefined and the
+guard returns 0 — not a solver failure. Stream 207 carries no inerts at all, which is why the
+stripper row is empty.
+
+Three things in that table are worth reading rather than skipping:
+
+* the inerts sit **three orders of magnitude** above the condensables (300–800 against 0.07–0.66),
+  which is the whole point: a permanent gas over a hot carbamate melt goes to the vapour and stays
+  there. Before this phase they had no *K*-value at all;
+* they get **more** volatile as the temperature falls (*K*<sub>N2</sub> 499 at 183 °C against 816 at
+  114 °C), because the Henry constant is still on the far side of its own maximum — this is the
+  solubility turn that a van't Hoff fit would have got backwards;
+* the ordering N2 > O2 > CH4 > H2 follows the Henry constants at 183 °C (68 740 / 46 958 / 42 155 /
+  42 474 bar), with CH4 and H2 nearly tied, exactly as the correlation puts them.
+
+The supporting SRK coefficients on a representative loop vapour at 183 °C and 144.2 bar a are
+φ<sub>N2</sub> = 1.310, φ<sub>O2</sub> = 1.201, φ<sub>CH4</sub> = 1.084, φ<sub>H2</sub> = 1.399, at
+*Z* = 0.801.
+
+### Safeties
+
+`k_ratio` falls back to **1.0 per species** — i.e. to the licensor's own split — on `OutOfDomain`, a
+non-convergent solve, a non-finite value, or any of `ValueError` / `ZeroDivisionError` /
+`OverflowError` / `KeyError`. It never raises into the tick and never returns a NaN, so a true
+non-convergent transient degrades to the calibrated vector rather than freezing the state. Each
+species is additionally bounded to [0.02, 50]: a 50× move in a condenser split is the model leaving
+its useful range, not a real event, and the anchored vector is the better answer there.
+
+### Cost
+
+| | before | after |
+|---|---|---|
+| activity-table nodes | 800 | **1215** (+52 %) |
+| table build (cold) | 26.7 s | **19.8 s** |
+| ms per node | 33.4 | **16.3** |
+| cached load at boot | 0.004 s | 0.044 s |
+| cache file | 67.4 kB | 107.7 kB |
+| `k_ratio` | — | 176 µs, three sites per tick |
+| engine tick | 10.51 ms (24× real time) | ≤ ~11.2 ms (+6.7 %) |
+
+The tick figure was measured with all four sites calling `k_ratio`; 322E002 no longer does, so
++6.7 % is now an upper bound rather than the current cost.
+
+**The boot penalty is negative.** The rebuilt grid is 52 % larger and builds 6.9 s *faster*, because
+continuation seeding replaces the cold dilute ansatz at every node: 16.3 ms/node against 33.4. The
+module's own docstring had claimed "~5 s" for the old build; it was 26.7 s.
+
+### The memo that was written, measured, and then removed
+
+`k_ratio` is the obvious candidate for the quantised memo `flash` and `bubble_t` both use — the
+engine calls it once per wired unit per tick with arguments that have barely moved. It was written,
+and it worked: 9.6 µs warm against 176 µs cold, a 6.7 % tick saving. **It is gone, and the reason it
+is gone matters more than the microseconds.**
+
+A ratio is not a flash. Every one of these calls has a reference point that must return exactly 1.0,
+and the engine spends *thousands* of consecutive ticks near that point — the entire boot settle does.
+On the quantisation grid (0.02 °C, 10⁻⁴ bar, 100 ppm) a settle tick 60 ppm away in composition keys
+**identically** to the design state, so whichever of the two ran first answered for both.
+
+Measured: it moved the pinned 322E003 vent vector by 1.1 × 10⁻⁴ kmol/h on CO2 — and it did so **only
+when the boot-pin cache missed and the full settle ran**. On a warm tree the design pin was exact and
+the test passed; on a cold tree it failed. A memo that silently breaks a design pin depending on
+whether a cache file exists on disk is worse than 700 µs a tick, so it was removed rather than tuned.
+
+If this ever needs to be fast, the correct fix is an **exact-argument key** — which hits every tick at
+a fixed point and misses honestly during a transient — not a finer quantum. A finer quantum shrinks
+the window without closing it.
+
+### Verification
+
+* Design seed after one tick: **103 of 103 probed state fields bit-identical to HEAD**.
+* Grid: 1215/1215 nodes converged, residual ≤ 10⁻⁸.
+* The three validated 323 bubble pressures survive the re-index (table above).
+* `k_ratio` identity at all three wired HP design states is the exact IEEE 1.0 (and was also
+  exact at the HPCC state before that site was reverted — see § *Why 322E002 keeps its
+  calibration*; the identity holding is what makes the design seed unable to audit this).
+
 ## Assumptions and Limits
 
 - The model is reduced order: calibrated design conductance scales with process flow because no off-design exchanger datasheet is available.
 - LP steam is saturated at live header pressure; detailed two-phase bundle hydraulics are outside scope.
 - PV-329207B uses a lumped incompressible square-root pressure-drop law.
 - Ejector and scrubber relationships preserve the design point and reproduce training-response direction, not nozzle-resolved CFD.
+- **G-VLE-3**: the Extended UNIQUAC parameter set is *extrapolated* in the 322 loop (a dilute-aqueous CO2-capture regression, below ~150 °C, evaluated at *x*<sub>H2O</sub> = 0.047 and 183 °C). Absolute HP-loop VLE numbers are not used anywhere; only the anchored ratio is.
+- **G-VLE-3**: inert Henry constants are for water as the solvent, applied to a solvent that in the synthesis loop is mostly ammonia and carbamate. No published inert solubility in molten carbamate exists in this repository.
+- **G-VLE-3**: 322E002 is deliberately NOT on the rigorous boundary. The extrapolated set's per-species *T*-derivative reorganises the HPCC vapour composition rather than its quantity, and the synthesis loop has no restoring force against a composition shift. Measured, isolated and recorded in § *Why 322E002 keeps its calibration*.
+- **G-VLE-3**: the stripper's pressure sensitivity is now ~8.6× weaker than the `eta_P` law it replaced (−0.081 %/bar on the design NH3 split against −0.694 %/bar). This is the correct behaviour for an equilibrium split fraction — at φ = 0.85 a −0.69 % change in *K* moves the split by −0.09 %, and the old form applied the full −0.69 % straight onto φ regardless of saturation, which is how N2 reached 1.148 before the 0.999 clamp caught it. But 322E001 is a rate-limited falling-film contactor, not an equilibrium stage, so the true sensitivity is likely between the two. The loop's damping is correspondingly lighter than at HEAD; `test_3_scrubber_heat` still relaxes (+0.300 → +0.100 bar against HEAD's +0.200 → +0.100).
+- **G-VLE-3**: no Poynting correction is applied. At 144 bar the partial-molar-volume term is worth roughly +15 % on an NH3 or CO2 partial pressure, and no sourced infinite-dilution partial molar volumes are held here to compute it with. It is very nearly constant across the loop's operating band, so it is absorbed by the ratio form.
 
 ## Source Anchors
 
@@ -2750,5 +3163,6 @@ new compressible overheads: over the same run 328C002/C003/C004/D001 stay inside
 - `References/Combined_1750_MTPD_100% load_PFD TablesProcess_Data.md`: design mass, pressure, and temperature points.
 - `References/HPCC description.md`: carbamate exotherm and shell-side nucleate boiling.
 - `References/Stamicarbon_Steam_Condensate_Network.md`: steam generation, control, and turbine-export topology.
+- IAPWS Guideline G7-04, *Guideline on the Henry's Constant and Vapor-Liquid Distribution Constant for Gases in H2O and D2O at High Temperatures* (2004) — the four inert Henry correlations, and the CO2 row used to cross-validate them against the in-repo Rumpf & Maurer fit.
 - Voskov and Voronin, *J. Chem. Eng. Data* 61 (2016) 4110–4125, DOI `10.1021/acs.jced.6b00557`.
 - Zhang et al., *Computers & Chemical Engineering* 29 (2005) 983–992, DOI `10.1016/j.compchemeng.2004.10.004`.
