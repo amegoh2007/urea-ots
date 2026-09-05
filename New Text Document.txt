@@ -1,0 +1,17 @@
+Instructions to migrate to new UI pages:
+
+Replace UI pages with slide in power point files with the same file name as the UI page.
+
+Indicators and controller tags are written in red to identify their position, replace them with their dynamic values.
+
+Pumps tags are in the icons comment. Replace the icon with the icon in the folder: D:\Work\Urea Simulation Docs\Equipment Drawing\Comon Icons\Pumps . Make the icon dynamic according to its ON/OFF position. Icons replacement should be the same size and position and rotation of the original icon in the slide. When clicking on pump icon, faceplate should pop-up with start/stop options to start/stop the pump. Pump faceplate should have same layout as other faceplates.
+
+Hand switches having the same tag number as XV's, are used to open their corresponding XV when it is closed. Squares with comments of the HS's tag no. controls the corresponding XV. clicking on that square will popup a faceplate with the same layout as other faceplates to open the corresponding XV if in closed position.
+
+XV's icons should be replaced by icons from the folder:D:\Work\Urea Simulation Docs\Equipment Drawing\Comon Icons\XV. according to their open/close position. The icon should change if the XV position changed. The replaced icon should be of the same size, position and rotation so it perfectly overlaps the icon in the powerpoint slide.
+
+Rectangles with comment "LT-*, display bar" should display a dynamic vertical green graphical display bar of the level indicator value.
+
+Follow instructions in the comments of the icons as widgets positions and link to other UI pages and all other instructions in comments regarding .
+
+Always keep the rotation of the replaced pumps and XV's as the original from the slide.
