@@ -964,6 +964,195 @@ sites was checked for which kind it is.
 * **The 328 bottoms valves are flashing services on a single-phase law.** See D-1 above.
 * **D-12, `pull_f010`** — a machine map, and Phase 4's.
 
+## Phase 4a: the CCW chain's design seed, and two of the three machines
+
+### Part A — eight design-seed gaps that were one gap and a stale anchor
+
+`test_ccw_loss_chain.py` recorded eight places where a term introduced by the CCW wiring was not
+inert at the design seed: `cool_frac` reading 0.9951 instead of 1, 0.08 t/h of uncondensed off-gas,
+5.2 kg of retained loop vapour, 0.1 % of level swell, an indication reading 50.0 % against a true
+49.9 %, the composite "every new term stays zero for 6000 s" flag, `cool_frac` failing to reach
+exactly 0 at total CCW loss, and the loop failing to hold 140.700 bar a over a 3000 s design run.
+
+Measured at $t = 0$ every one of them is exactly zero. They are not seed leakage; they are what a
+**drifting** seed does to terms that are correctly anchored. Two causes, and neither is a tolerance.
+
+#### The condensation gate had the pressure dependence backwards
+
+$$\rho_{cond} = \frac{\dot m_{CCW}}{\dot m_{CCW,des}}\cdot\frac{f_{th}}{s\cdot\nu},
+\qquad \nu = \frac{P_{329201}}{P_{des}}$$
+
+The $\nu$ divisor says a **higher** loop pressure makes the 322E003 shell a **weaker** condenser.
+For a condensing service that is the wrong sign: raising the pressure raises the condensing
+temperature and therefore the driving force $T_{cond} - T_{ccw}$. It also double-counted the
+throughput demand, which $s$ (the CO₂ scale) already carries.
+
+With the sign wrong, the term closed a positive-feedback loop around the loop's own settled-attractor
+drift: $P \uparrow \Rightarrow \rho_{cond} \downarrow \Rightarrow$ off-gas goes uncondensed
+$\Rightarrow$ the retained vapour pushes $P$ higher $\Rightarrow \rho_{cond}$ falls further. Six of
+the eight gaps were that one loop, in series.
+
+The fix puts the pressure where it belongs — in the condensing temperature — through
+Clausius–Clapeyron on the carbamate-formation exotherm the model already carries
+(`SCRUB_DH_CARB_KJMOL` = 160 kJ/mol):
+
+$$\frac{1}{T_{cond}(P)} = \frac{1}{T_{des}} - \frac{R}{\Delta H_{carb}}\ln\!\frac{P}{P_{des}}$$
+
+written as an increment on $T_{des}$ so that $P = P_{des}$ gives a literal $\ln(1) = 0$, an identical
+reciprocal, and a bracket of exactly $0.0$. The slope at the anchor is
+$RT^2/(\Delta H\,P) = 0.0754$ K/bar, so the 0.7 bar the loop wanders over 6000 s is worth +0.05 °C of
+driving force — a $10^{-4}$ effect on $\rho_{cond}$, floored out by `SCRUB_COOL_FRAC_EPS`, against
+the $-5\times10^{-3}$ the wrong-signed term was producing. And the sign is now stabilising.
+
+The eighth-gap mirror image, `cool_frac` = 0.0033 rather than 0 at total CCW loss, was the same
+term read off the wrong quantity: the capacity was taken from `FIC-329409["pv"]`, which is the
+**transmitter** reading and carries a 25 s plant lag. The circulation itself stops with the pumps —
+the 329P006 discharge check valves shut — so the capacity is now gated on `ccw_pump_frac`, a literal
+1.0 at design. `cool_frac` reaches exactly 0.0000 on the first tick after both pumps stop.
+
+#### A design anchor that was solved against a superseded profile
+
+`REACT_NODE_SS_DES` is assigned three times: an import-time seed from `node_profile_ss`, the A-8
+`thermal_kinetic_fixed_point`, and the boot-pin cache restore. The bulk-melt anchors derived from
+it — `REACT_T_BULK_DES`, `REACT_RHO_BULK_DES`, `REACT_WEIR_CW` and `REACT_M_LIQ_DES` — were computed
+once, against the **first** of the three, and never re-solved. They have to be defined there because
+the weir geometry must exist before the A-8 point can be solved; nothing then went back.
+
+So `State()` seeded `react_m_liq` = $\rho(T_{bulk,seed})\,A\,L_{des}$ while seeding `react_T_node`
+from the *pinned* profile, and the two disagree by 0.9 °C of bulk temperature. On the first tick
+`level_from_holdup` evaluated that holdup at the pinned temperature and the level **stepped**
+−0.156 % of span. Not a drift — a one-tick reconciliation of two different design points.
+
+Since Phase 3 the reactor runs on residence time, so the step went straight into $X_{conv}$
+(−0.15 %) and from there into
+
+$$\delta_X = \max\!\left(1 - \frac{X_{conv}}{X_{ref}},\ 0\right)$$
+
+which is **one-sided**. A rectifier turns a zero-mean numerical wobble into a strictly non-negative
+bias, and $\delta_X$ feeds TIC-329005's load term at a gain of 10 °C per unit — so the CCW supply
+temperature could only ratchet one way. `_rederive_react_bulk_anchors()` re-solves the derived block
+against whichever profile is current, on both the fresh-pin and cache-restore paths.
+
+Result: at tick 1 `X_conv` equals `X_ref` to the last bit and $\delta_X$ is exactly 0; the reactor
+level holds 79.999998 % and moves $6\times10^{-5}$ % over 40 ticks where it used to step 0.156 % in
+one. The chain goes from **28/36 to 35/36**, with all five Phase-1b inertness checks and the Phase-2
+total-loss check passing. The one that remains is the 3000 s design hold, and it improved 3.4×
+(140.71826 → 140.70544 bar a against a 1e-3 tolerance).
+
+### Part B, D-9 — SV-32201 on API 520 Part I
+
+The synthesis-loop PSV was a linear over-pressure ramp,
+`m_psv = CAP · min(over/accum, 1)`: zero at the set pressure, rated capacity at 10 % accumulation.
+A spring relief valve does neither of those things. It is a fixed orifice with a **pop** action — it
+passes nothing below set, pops at set, and from there passes a **choked** jet whose capacity is
+linear in the *absolute* upstream pressure, not in the over-pressure.
+
+API 520 Part I §5.6.3.1 in the USC form solves for the area,
+$A = W\sqrt{TZ/M}\,/\,(C\,K_d K_b K_c P_1)$ with
+$C = 520\sqrt{k\,(2/(k+1))^{(k+1)/(k-1)}}$. That $C$ is the isentropic choked mass-flux group
+carried in USC units; `hydraulics.psv_api520_choked_kgh` evaluates the same equation in SI:
+
+$$W = K_d K_b K_c\,A\,P_1 \sqrt{\frac{k M}{Z R T}\left(\frac{2}{k+1}\right)^{\frac{k+1}{k-1}}}$$
+
+The orifice is **back-solved from the documented 200 t/h rating through the same function**, which
+is the ISA-ratio methodology applied to a relief valve: every coefficient that does not move during
+an event ($K_d$, $K_b$, $K_c$, $k$, $Z$) cancels, so the rated point is reproduced exactly whatever
+is assumed for them, and only $P_1$, $M$ and $T$ change the answer. The area it returns on the
+design relief composition (MW 27.48) is **2.558 in²** — 90 % of API letter orifice "L" (2.853 in²)
+and 1.4× letter "K". An L-orifice valve carrying ~10 % sizing margin is exactly what a DN 100 relief
+valve on this service is, and landing *between* two adjacent letter orifices rather than on a round
+number is the check that the rating was documented rather than invented.
+
+Lift is a discrete mechanical state with a 7 % blowdown (API 527, conventional spring valve): it
+latches open on pop and relatches shut only below $0.93 \times$ set, so a loop parked at the set
+pressure chatters the way the real valve does instead of settling into a throttled equilibrium.
+
+**Capacity against the ramp it replaces**, at the loop conditions the chain actually reaches:
+
+| $P_1$ (bar a) | accumulation | old linear ramp | API 520 choked | ratio |
+|---|---|---|---|---|
+| 161.01 (set) | 0 % | **0 t/h** | 181.8 t/h | — |
+| 165.0 | 2.5 % | 49.5 t/h | 186.3 t/h | 3.76× |
+| 168.84 (chain Phase 4) | 4.9 % | 97.2 t/h | **190.7 t/h** | **1.96×** |
+| 177.11 (rated) | 10 % | 200.0 t/h | 200.0 t/h | 1.00× |
+
+The two ends are the point. At rated accumulation the two agree by construction — that is the
+anchor. At the set pressure the ramp credits the valve with **nothing**, which is the one number a
+relief study can least afford to get wrong: it is the capacity available at the moment the device
+first opens. In the chain's own Phase 4 the relieved rate roughly doubles, 99.0 → 190.8 t/h, and the
+ammonia carried to atmosphere with it goes 27 082 → 52 174 kg/h.
+
+### Part B, D-5 — 320K002 has a curve; the node solve is written but NOT wired
+
+`machines.py` carries the polytropic thermodynamics and a normalised centrifugal characteristic:
+
+$$H_{poly} = N_s\,\frac{Z_1 R T_1}{M}\,\frac{n}{n-1}
+\left[\left(\frac{P_2}{P_1}\right)^{\frac{n-1}{n N_s}} - 1\right],
+\qquad \frac{n-1}{n} = \frac{k-1}{k\,\eta_p}$$
+
+evaluated over $N_s = 4$ equal-ratio intercooled sections. The stage count is not cosmetic: a 90:1
+machine on one uncooled section discharges above **870 °C**, which is correct arithmetic about a
+machine that does not exist. Four sections put the last-stage discharge at 160 °C and the
+aftercooler takes it to the 120 °C feed anchor.
+
+The map is the standard head-rise-to-surge parabola in fan-law-reduced coordinates,
+$q = (Q_{in}/Q_{des})/(N/N_{des})$ and $\psi = (H/H_{des})/(N/N_{des})^2$, fitted to the two numbers
+a datasheet states even without a full curve — the surge flow (0.68) and the head rise to surge
+(12 %). The design point is $(q, \psi) = (1, 1)$ by construction and the machine returns
+`CO2_DES_KGH` **bit-exactly** there. It now surges when the head demand passes the peak and
+stonewalls at $q = 1.20$, and both flags are published. A **speed governor** closes the flow loop,
+because 320K002 is flow-controlled: the governor trims speed to hold the demanded rate against
+whatever discharge pressure the loop presents.
+
+**The pressure-node solve is written, unit-tested and deliberately left unwired.** It replaces
+`f_{HP} = g_{HP}/(g_{HP}+g_{vent})` with a real node balance — machine delivery = HP-loop draw +
+vent draw, bisected on a strictly monotonic residual, returning a zero-residual design seed
+untouched so the pin cannot move. Its design residual here is a literal 0.0. It is not wired because
+it is measurably worse than the heuristic on the thing that matters most. Measured over 16 000 s on
+the 2 s harness tick, everything else in this commit held constant:
+
+| configuration | PT-329201 at 16 000 s | character |
+|---|---|---|
+| HEAD baseline | 140.70 → **142.54** | bounded ±2 bar wander |
+| with the node solve | 140.70 → **135.16** | monotonic, accelerating (−0.81 bar/ks) |
+| node solve out (this commit) | 140.70 → **142.26** | back on the baseline curve |
+
+The third row is this code path, and it isolates the cause: not the map, not the governor, not the
+API 520 valve, not the Part A work — all of those are present in all three runs. It is the node
+solve, through the branch law $\dot m_{HP} = \dot m_{des}\sqrt{(P_{node}-P_{syn})/\Delta P_{des}}$,
+which makes the CO₂-line differential a live function of the loop pressure where it used to be
+pinned at the design 3.5 bar. That is the right physics and it is what D-5 asks for; what is missing
+is the rest of the network the real line has — the check valve's own resistance, the 322E001 inlet,
+and the line inventory as a capacitance rather than a massless node. Without those the branch is far
+stiffer than the plant and the loop's pressure integrator picks up a slow one-way term from it.
+Wiring it in that state would trade an honest heuristic for a dishonest first-principles model.
+
+### Part B, D-6 — not attempted, and why
+
+322F001 is a **liquid-liquid** jet ejector. `ejector_huang.py` is a compressible double-choking gas
+ejector: it computes Mach numbers, isentropic area ratios and normal shocks, and its
+`entrainment_ratio` raises on any motive/suction ratio below choking. There is no Mach number in a
+liquid jet and nothing chokes, so that module cannot describe 322F001 as it stands — wiring it in
+would raise on the first tick.
+
+The right answer is the same three control-volume balances in their incompressible form (the
+standard constant-area jet-pump analysis, Cunningham / ESDU 85032), and that was written and
+exercised against the plant design point. It reproduces the design duty exactly and gives the right
+qualitative directions — closing the spindle raises entrainment, losing motive stalls it, with no
+`f_stall` polynomial anywhere. It was **not** committed, because the closure it produces is
+non-monotonic in the entrained flow and therefore bistable. The mixing-chamber momentum balance
+gives a discharge pressure whose $\dot m_s^2$ coefficient is
+
+$$\frac{1}{\rho_s A_s A_m} - \frac{0.625}{\rho_2 A_m^2}$$
+
+and with the anchored densities ($\rho_s = 1340$, $\rho_2 = 878$ kg/m³) and any physically sensible
+area ratio that group is **net positive**: the recovered discharge pressure eventually *rises* with
+entrainment, so the solve has two roots and the characteristic degenerates into a step — zero below
+a motive threshold, railed above it. A jet pump's real $N$–$M$ curve is monotonic; getting there
+needs the mixture density carried live through the mixing section and the area convention checked
+against a published $N$–$M$ curve, which is more than a wiring job. Shipping the step function would
+have been strictly worse than the `f_stall` polynomial it was meant to delete.
+
 ## Melt-Temperature Integration in Unit 324: Why a Draining Evaporator Killed the Engine
 
 Both 324 stages advanced their melt temperature with an explicit Euler step over the liquid

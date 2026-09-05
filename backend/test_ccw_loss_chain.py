@@ -283,6 +283,47 @@ t += 1; n += H.check("SV-32201 lifts above its set pressure", psv_th > 0.0, f"re
 t += 1; n += H.check("SV-32201 lift flags a toxic release",   psv_flag, "SYN_PSV_LIFT / TOXIC_RELEASE clear")
 t += 1; n += H.check("the release carries ammonia",           psv_nh3 > 0.0, f"NH3 {psv_nh3} kg/h")
 
+# API 520 Part I (report D-9).  SV-32201 is a fixed orifice passing a CHOKED jet once it pops, so
+# its capacity is linear in the ABSOLUTE upstream pressure -- it does not ramp up from zero at the
+# set point the way the linear-accumulation characteristic it replaces did.  Grade against the
+# equation directly, and against what the old ramp would have credited at the same pressure.
+psv_api = H.main.hydraulics.psv_api520_choked_kgh(
+    H.main.SYN_PSV_AREA_M2, st.p_syn_bara, H.main.SYN_PSV_T_REL_K, H.main.SCRUB_HV604_MW_DES,
+    k=H.main.SYN_PSV_K_GAMMA, z=H.main.SYN_PSV_Z, kd=H.main.SYN_PSV_KD,
+    kb=H.main.SYN_PSV_KB, kc=H.main.SYN_PSV_KC) / 1000.0
+psv_ramp = H.main.SYN_PSV_CAP_KGH * min(
+    max(st.p_syn_bara - PSV_PT, 0.0) / H.main.SYN_PSV_ACCUM_BAR, 1.0) / 1000.0
+print(f"  API 520 choked capacity      {psv_api:.1f} t/h   (old linear ramp {psv_ramp:.1f} t/h,"
+      f" x{psv_api / max(psv_ramp, 1e-9):.2f})")
+# 0.5 t/h (0.3 %) because the reported figure comes off the packet two ticks earlier than this
+# recomputation, and the loop pressure moves in between -- the capacity is linear in P1, so a few
+# millibar of drift is worth ~0.1 t/h.  The point of the check is the LEVEL, not the last digit.
+t += 1; n += H.check("relief IS the API 520 choked rate", abs(psv_th - psv_api) <= 0.5,
+                     f"reported {psv_th} t/h vs equation {psv_api:.3f} t/h")
+t += 1; n += H.check("choked capacity beats the old ramp at 5 % accumulation",
+                     psv_th > 1.5 * psv_ramp, f"{psv_th} t/h vs ramp {psv_ramp:.1f} t/h")
+
+# Pop / blowdown hysteresis: the lift is a DISCRETE mechanical state.  Inside the blowdown band an
+# already-open valve stays open and a shut valve stays shut -- the same pressure, two answers.
+st.p_syn_bara = PSV_PT - 0.5 * (PSV_PT - H.main.SYN_PSV_RESEAT_BARA)     # mid-blowdown band
+pk = H.run(2)
+psv_band_open = bool(cw(pk)["SV_32201_open"])
+st.syn_psv_open = False
+st.p_syn_bara = PSV_PT - 0.5 * (PSV_PT - H.main.SYN_PSV_RESEAT_BARA)
+pk = H.run(2)
+psv_band_shut = bool(cw(pk)["SV_32201_open"])
+st.p_syn_bara = H.main.SYN_PSV_RESEAT_BARA - 0.5
+pk = H.run(2)
+psv_reseated = not bool(cw(pk)["SV_32201_open"])
+print(f"  blowdown band {H.main.SYN_PSV_RESEAT_BARA:.2f}-{PSV_PT:.2f} bar a:"
+      f" latched-open {psv_band_open}, latched-shut {not psv_band_shut}")
+t += 1; n += H.check("an open SV-32201 stays open inside the blowdown band", psv_band_open,
+                     "reseated at the set pressure -- no blowdown")
+t += 1; n += H.check("a shut SV-32201 stays shut inside the blowdown band", not psv_band_shut,
+                     "lifted below the set pressure -- no pop action")
+t += 1; n += H.check("SV-32201 reseats below the blowdown", psv_reseated,
+                     "still latched open below the reseat pressure")
+
 H.verdict(n, t)
 
 # hard gate (non-zero exit on regression)
@@ -317,4 +358,7 @@ assert latched and co2_cut and pumps_cut, "trip 22.2 must latch and cut CO2 + bo
 assert held,    "trip 22.2 must not reset inside the hysteresis band"
 assert cleared, "trip 22.2 must clear on an operator reset below the hysteresis band"
 assert psv_th > 0.0 and psv_flag and psv_nh3 > 0.0, "SV-32201 must lift and flag an ammonia release"
+assert abs(psv_th - psv_api) <= 0.5,   "SV-32201 must pass the API 520 choked rate, not a ramp fraction"
+assert psv_band_open and not psv_band_shut, "SV-32201 must show pop/blowdown hysteresis"
+assert psv_reseated,                   "SV-32201 must reseat below its blowdown"
 print("\n  test_ccw_loss_chain: PASS\n")

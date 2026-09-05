@@ -43,6 +43,7 @@ import thermo_extended_uniquac as extended_uniquac
 import thermo_service                      # Phase 1 unified rigorous VLE / flash service
 import hydraulics                          # Phase 2 IEC 60534 valves + vapour-space pressure states
 import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-97)
+import machines                            # Phase 4 rotating machinery: polytropic maps, jet pumps
 import gap_g6_h0_enthalpy as h0_enthalpy  # H0 stream enthalpy on the elements-at-298.15 K datum
 import consequence  # ISA-75.01.01 consequence physics + plug-flow line transport (StreamPacket)
 from core.thermo import EmpiricalThermo
@@ -455,12 +456,54 @@ CO2_DES_KMOLH     = 1264.0       # kmol/h design total molar flow
 CO2_T_FEED_C      = 120.0        # C, TI-322017 feed temperature (design)
 CO2_P_DES_BARA    = 144.2        # bar a, design CO2 feed-line pressure (PIC-322203 PV)
 NM3_PER_KMOL      = 22.414       # Nm3/kmol at 0 C, 1 atm (FT-322403 normal-volume basis)
-CO2_VENT_COND     = 0.50         # PV-322203 vent conductance (sqrt-dP orifice coeff, rel. HP path)
+# --- 320K002 CO2 compressor, rigorous polytropic map (report D-5) -------------------------------
+# Suction is the ammonia-plant battery limit: the CO2-removal section delivers close to atmospheric,
+# and 1.6 bar a / 40 C is the ordinary BL condition for that stream.  It is a plant BOUNDARY, stated
+# here as one, not a fitted number -- the design DISCHARGE (144.2 bar a, 54 618 kg/h, MW 43.21) is
+# the anchored datasheet point and it is what the map is normalised on.
+CO2_K_SUCT_P_BARA = 1.6          # bar a, 320K002 suction (ammonia-plant BL boundary)
+CO2_K_SUCT_T_C    = 40.0         # C, 320K002 suction temperature (BL boundary)
+CO2_K_GAMMA       = 1.29         # -, ratio of specific heats of the wet CO2 feed
+CO2_K_ETA_POLY    = 0.78         # -, polytropic efficiency (multistage barrel machine)
+CO2_K_STAGES      = 4            # equal-ratio intercooled sections; 90:1 overall on one uncooled
+                                 #   section would discharge above 870 C, which is arithmetic, not
+                                 #   a machine.  Four sections put the last-stage discharge at
+                                 #   160 C, and the aftercooler takes it to the CO2_T_FEED_C anchor.
+CO2_K_Q_SURGE     = 0.68         # -, reduced inlet flow at the surge line
+CO2_K_HEAD_RISE   = 0.12         # -, head rise from design to surge (12 %, typical CO2 machine)
+CO2_K_STONEWALL   = 1.20         # -, reduced inlet flow at choke
+CO2_K_GOV_TAU_S   = 8.0          # s, 320K002 speed-governor integral time.  The machine is FLOW
+                                 #   controlled: a governor trims speed (IGVs on some trains) to
+                                 #   hold the demanded CO2 rate against whatever discharge pressure
+                                 #   the loop presents.  Without it the map is open-loop and the
+                                 #   feed floats with back pressure -- which is not a modelling
+                                 #   nicety: an open-loop map on this flowsheet is DIVERGENT.  A
+                                 #   falling loop pressure pulls the node down, the machine rides
+                                 #   up its curve and delivers MORE CO2, the extra CO2 condenses
+                                 #   into carbamate and leaves the vapour space, and the pressure
+                                 #   falls further -- 140.7 to 134.7 bar a in 16 000 s, accelerating.
+                                 #   The governor is what breaks that loop on the real plant, so it
+                                 #   is what breaks it here.
+CO2_K_SPEED_MAX   = 1.15         # -, governor speed ceiling (trip/overspeed margin)
+CO2_VENT_COND     = 0.50         # PV-322203 vent conductance -- SUPERSEDED by the ISA-75.01 vent
+                                 #   valve below; retained only so older callers do not break.
 CO2_VENT_P_BARA   = 5.0          # bar a, PV-322203 discharge backpressure (LP safe header)
 CO2_PV_DP_GAIN    = 0.25         # bar a line-pressure drop per % PV-322203 opening
 PIC_322203_KC     = 1.0          # %OP per bar (velocity I-PD proportional gain, DIRECT-acting)
 PIC_322203_TI     = 2.0          # s, integral time (Kc/Ti = 0.5 preserves prior integral-only gain)
 CO2_MASSFRAC_CO2  = CO2_FEED_MOLFRAC["CO2"] * MW_COMP["CO2"] / CO2_FEED_MW   # ~0.970 pure CO2
+CO2_K_N_POLY      = machines.polytropic_exponent(CO2_K_GAMMA, CO2_K_ETA_POLY)
+CO2_K_SUCT_T_K    = CO2_K_SUCT_T_C + 273.15
+CO2_K_RHO_IN_DES  = machines.rho_in_des_from_state(CO2_K_SUCT_P_BARA, CO2_K_SUCT_T_K, CO2_FEED_MW)
+CO2_K_Q_IN_DES    = CO2_DES_KGH / CO2_K_RHO_IN_DES                 # m3/h inlet volumetric at design
+CO2_K_HEAD_DES    = machines.polytropic_head_staged_kjkg(
+    CO2_K_SUCT_P_BARA, CO2_P_DES_BARA, CO2_K_SUCT_T_K, CO2_FEED_MW,
+    CO2_K_N_POLY, CO2_K_STAGES)                                    # kJ/kg, 320.4
+CO2_K001 = machines.CentrifugalCompressor(
+    CO2_K_Q_IN_DES, CO2_K_HEAD_DES, CO2_K_RHO_IN_DES, CO2_K_N_POLY,
+    machines.CentrifugalMap(CO2_K_Q_SURGE, CO2_K_HEAD_RISE, CO2_K_STONEWALL),
+    n_stages=CO2_K_STAGES)
+# (CO2 line-node branch anchors are defined next to SYN_P_DES_BARA, which they need.)
 
 # ----- HP Stripper 322E001 (322R001 reactor effluent + CO2 strip gas) ---------------------
 #   Vertical falling-film shell&tube: 2600 tubes, L=6 m, OD31x3 (ID25), area 1519 m2,
@@ -4074,6 +4117,15 @@ HPCC_NC_DES_LIVE    = None       # design HPCC carbamate-MELT N/C (NH3/CO2) -- A
 #     vapour accumulates and lifts PT-329201.  rho_cond = (m_ccw/m_ccw_des)/(s*nu), nu = PT/PT_des.
 #     First-order accumulation:  tau dPT/dt = PT_fwd + K_def*max(1-rho_cond,0)*PT_des - PT.
 SYN_P_DES_BARA      = SCRUB_OVERFLOW_P_BARA   # 140.7 bar a, PT-329201 design (322E003 overflow line)
+# Branch resistances hanging off the CO2 line node.
+CO2_DP_HP_DES     = CO2_P_DES_BARA - SYN_P_DES_BARA                # 3.5 bar design feed dP
+CO2_VENT_MW_DES   = CO2_FEED_MW
+CO2_VENT_T_DES_K  = CO2_T_FEED_C + 273.15
+# PV-322203 is a FULL-FLOW vent: sized to pass the whole machine at wide open from the design line
+# pressure to the LP safe header.  That is the sizing basis a CO2 vent valve carries, and it is what
+# the anchored ISA-75.01 law is normalised on -- so at HIC/PIC = 0 it passes exactly nothing, which
+# the old `(pv/100)*COND*sqrt(dP)` conductance also did, and at 100 % it passes a real, choked,
+# compressible flow instead of a dimensionless conductance.
 SYN_P_DEFICIT_GAIN  = 0.30       # bar/bar, PT lift per unit condensation deficit (1-rho_cond)  -- calib
 SYN_P_VENT_GAIN     = 0.30       # bar/bar, PT lift per unit HV-322604 vent deficit (1-vent_frac) -- calib
 SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant (vapour inventory, warm op-pt)
@@ -4106,8 +4158,46 @@ SYN_P_TRIP_RESET_BARA = 148.0 # bar a, live condition clears below this (reset s
 #   10 % accumulation, which is the ASME/API accumulation allowance for a single relieving device.
 SYN_P_MECH_DESIGN_BARG = 160.0                                # bar g, 322E003 / 322R001 datasheet
 SYN_PSV_SET_BARA    = SYN_P_MECH_DESIGN_BARG + P_ATM_BAR      # 161.01 bar a, SV-32201 set pressure
-SYN_PSV_ACCUM_BAR   = 0.10 * SYN_PSV_SET_BARA                 # bar, 10 % accumulation to full lift
-SYN_PSV_CAP_KGH     = 200_000.0                               # kg/h at full lift (> total loop feed)
+SYN_PSV_ACCUM_BAR   = 0.10 * SYN_PSV_SET_BARA                 # bar, 10 % ASME/API accumulation
+SYN_PSV_CAP_KGH     = 200_000.0                               # kg/h RATED capacity at 10 % accumulation
+# --- SV-32201 on API 520 Part I (report D-9) ---------------------------------------------------
+# The relief rate used to be `CAP * min(over/ACCUM, 1)`: a linear ramp from zero at the set point to
+# rated capacity at 10 % accumulation.  A spring PSV does not behave like that.  It is a fixed
+# orifice with a pop action: below set it passes nothing, at set it POPS, and from there it passes a
+# CHOKED jet whose capacity is linear in the ABSOLUTE upstream pressure, not in the over-pressure.
+# The ramp therefore understated the relief everywhere in the band -- at 168.9 bar a it credited
+# 49 % of capacity where the choked orifice passes 95 % -- and it made the valve a proportional
+# device, so it modulated instead of chattering and never reseated on a blowdown.
+#
+# API 520 Part I §5.6.3.1 critical flow, evaluated in SI by `hydraulics.psv_api520_choked_kgh`:
+#     W = Kd.Kb.Kc.A.P1.sqrt( (k.M)/(Z.R.T) . (2/(k+1))^((k+1)/(k-1)) )
+# The orifice area is BACK-SOLVED through that same equation from the documented 200 t/h rating at
+# the rated relieving pressure, so the sizing basis is reproduced exactly and every coefficient that
+# does not move during an event (Kd, Kb, Kc, k, Z) cancels out of the answer.  The area it returns
+# on the design relief composition (MW 27.48) is 2.558 in^2, which is 90 % of the API letter orifice
+# "L" (2.853 in^2) and 1.4x letter "K" -- so the documented 200 t/h rating is consistent with an
+# L-orifice valve carrying ~10 % sizing margin, which is what a DN 100 relief valve on this service
+# actually is.  That the back-solve lands between two adjacent letter orifices rather than on a
+# round number is the check: an invented capacity would not.
+SYN_PSV_KD          = 0.975      # rated coefficient of discharge, certified vapour PSV (API 520)
+SYN_PSV_KB          = 1.0        # back-pressure correction: conventional valve, atmospheric tailpipe
+SYN_PSV_KC          = 1.0        # combination correction: no rupture disc upstream
+SYN_PSV_K_GAMMA     = SCRUB_HV604_GAMMA          # 1.30, the loop off-gas ratio of specific heats
+SYN_PSV_Z           = 1.0        # compressibility at the relieving condition.  Ideal, and stated as
+                                 #   such: the engine carries no HP vapour EOS for the NH3/CO2/H2O
+                                 #   relief composition.  It cancels against the back-solved area at
+                                 #   the rated point, so it biases nothing there and only tilts the
+                                 #   off-rated shape, which is linear in P1 regardless.
+SYN_PSV_T_REL_K     = SCRUB_OFFGAS_T_C + 273.15  # relieving temperature = loop vapour-space (322E003
+                                 #   overhead) temperature, the space SV-32201 taps
+SYN_PSV_P1_RATED    = SYN_PSV_SET_BARA + SYN_PSV_ACCUM_BAR      # 177.1 bar a, rated relieving P
+SYN_PSV_BLOWDOWN    = 0.07       # -, 7 % blowdown: reseats at 0.93 x set (API 527 conventional
+                                 #   spring valve).  This is what makes the model a DISCRETE
+                                 #   mechanical device -- it latches open on pop and only relatches
+                                 #   shut once the loop has fallen a real blowdown below the set
+                                 #   point, so a loop hovering at the set pressure chatters the way
+                                 #   the real valve does instead of throttling smoothly.
+SYN_PSV_RESEAT_BARA = SYN_PSV_SET_BARA * (1.0 - SYN_PSV_BLOWDOWN)
 # Two-phase level swell on LT-329501.  A boiling carbamate sump froths, and a DP transmitter reads
 #   the aerated column as a taller liquid leg than the mass actually present -- the classic operator
 #   trap: the indication rises while the real inventory is draining.  Full scale at total loss of
@@ -4129,6 +4219,34 @@ SCRUB_SWELL_NOISE_T2_S = 7.3  # s, bubble period
 #   SCRUB_COOL_FRAC_EPS of unity is taken as full capacity.  This is what keeps the gate identically
 #   inert at design (uncondensed mass == 0 exactly -> the phase-shift and swell terms below vanish).
 SCRUB_COOL_FRAC_EPS = 1.0e-6  # -, cool_frac >= 1 - eps counts as full condensation capacity
+# --- 322E003 condensing temperature vs loop pressure (Clausius-Clapeyron) ----------------------
+# The shell condenses carbamate, so its condensing temperature RIDES the loop pressure.  The
+# previous formulation instead divided the capacity by nu = PT-329201/PT_des, which asserts the
+# opposite sign -- a higher loop pressure made the condenser WEAKER -- and double-counted the
+# throughput demand already carried by co2_scale.  That sign error is what turned the known
+# settled-attractor drift in p_syn into a self-reinforcing condensation deficit: rho_cond fell,
+# off-gas went uncondensed, the retained vapour pushed p_syn higher, and rho_cond fell further.
+#
+#   1/T_cond(P) = 1/T_des - (R/dH_carb) * ln(P/P_des)
+#
+# dH is the carbamate-formation exotherm already anchored above (160 kJ/mol), R the gas constant.
+# Written as an INCREMENT on the design temperature so that P == P_des gives a literal ln(1.0) ==
+# 0.0, an identical reciprocal, and a bracket of exactly 0.0 -- the design point cannot move.
+# Slope at the anchor is R.T^2/(dH.P) = 0.0754 K/bar, so the 0.7 bar the loop drifts over 6000 s
+# is worth +0.05 C of driving force: a 1e-4 effect on rho_cond, floored out by SCRUB_COOL_FRAC_EPS,
+# instead of the -0.005 the wrong-signed nu term was producing.
+SCRUB_COND_DH_JMOL  = SCRUB_DH_CARB_KJMOL * 1000.0            # J/mol, carbamate exotherm
+SCRUB_COND_T_DES_K  = SCRUB_OVERFLOW_T_C + 273.15             # K, TT-322002 design condensing T
+SCRUB_COND_P_DES    = SCRUB_OVERFLOW_P_BARA                   # bar a, PT-329201 design anchor
+_SCRUB_COND_INV_DES = 1.0 / SCRUB_COND_T_DES_K                # K^-1, the reciprocal anchor
+
+
+def scrub_cond_t_c(p_bara: float) -> float:
+    """322E003 condensing temperature at the live loop pressure (C), Clausius-Clapeyron,
+    anchored so that p_bara == SCRUB_COND_P_DES returns SCRUB_OVERFLOW_T_C bit-exactly."""
+    inv = _SCRUB_COND_INV_DES - (STRIP_R_GAS_J / SCRUB_COND_DH_JMOL) * math.log(
+        max(p_bara, 1.0e-6) / SCRUB_COND_P_DES)
+    return SCRUB_OVERFLOW_T_C + (1.0 / inv - 1.0 / _SCRUB_COND_INV_DES)
 # --- Phase-shift vapour accumulation (loss of condensation -> PT-329201) -----------------------
 # A boundary mass balance cannot see this event.  322E003 sits INSIDE the synthesis loop, so
 #   off-gas that fails to condense does not cross any loop boundary -- (in - out) stays at its
@@ -4164,6 +4282,10 @@ SYN_P_PHASE_GAIN    = 1.0 - SYN_P_PHASE_RHO_V / SYN_P_PHASE_RHO_L   # 0.90203, v
 # tears ride the CIRCULATING inventory, so a design-full loop holds PT-329201 EXACTLY while an
 # empty loop integrates the raw balance and zero feeds still create nothing (G4 null-feed rule).
 SCRUB_OFFGAS_KGH_DES   = sum(SCRUB_OFFGAS_KMOLH_DES[k] * MW_COMP[k] for k in MW_COMP)   # 5901.4 kg/h
+# SV-32201 effective orifice, back-solved from the rated capacity through the API 520 equation.
+SYN_PSV_AREA_M2 = hydraulics.psv_area_from_rated_m2(
+    SYN_PSV_CAP_KGH, SYN_PSV_P1_RATED, SYN_PSV_T_REL_K, SCRUB_HV604_MW_DES,
+    k=SYN_PSV_K_GAMMA, z=SYN_PSV_Z, kd=SYN_PSV_KD, kb=SYN_PSV_KB, kc=SYN_PSV_KC)
 SYN_LOOP_IN_DES_KGH    = EJ_MOTIVE_NH3_DES + CO2_DES_KGH + R3232_E003_M308_DES      # 134215.2 kg/h
 SYN_LOOP_OUT_DES_KGH   = STRIP_BOT_DES_KGH + SCRUB_OFFGAS_KGH_DES                   # 136383.4 kg/h
 SYN_LOOP_RESID_DES_KGH = SYN_LOOP_IN_DES_KGH - SYN_LOOP_OUT_DES_KGH                 #  -2168.1 kg/h
@@ -4514,6 +4636,33 @@ REACT_NODE_SS_DES, _a8_a2 = reactor.thermal_kinetic_fixed_point(
     REACT_LEVEL_NLL_PCT / 100.0, _react_vdot_m3h, HPCC_T_PROD_DES_C, REACT_OVERFLOW_T_C,
     REACT_XI_CARB_DES, REACT_M_OVERFLOW_DES, REACT_CP_MELT, REACT_XI_UREA_DES)
 REACT_KIN_CAL["A2"] = _a8_a2
+
+
+def _rederive_react_bulk_anchors() -> None:
+    """Re-solve the bulk-melt anchors against the CURRENT node profile.
+
+    REACT_T_BULK_DES / RHO / WEIR_CW / M_LIQ_DES are defined further up against the import-time
+    SEED profile from `node_profile_ss`, because the weir geometry has to exist before the A-8
+    fixed point can be solved.  `REACT_NODE_SS_DES` is then replaced twice -- once by
+    `thermal_kinetic_fixed_point` immediately above, and again by the boot-pin cache restore -- and
+    the derived block was never re-solved against either.  State() therefore seeded
+    `react_m_liq = rho(T_bulk_SEED) * A * L_des` while seeding `react_T_node` from the PINNED
+    profile, and the two disagree by ~0.9 C of bulk temperature.  On the first tick
+    `level_from_holdup` evaluates that same holdup at the pinned bulk temperature and the level
+    STEPS -0.156 % of span -- not a drift, a one-tick reconciliation of two different design
+    anchors.  322R001 runs on residence time since Phase 3, so the step propagated straight into
+    X_conv (-0.15 %), into `delta_X` (which is one-sided, `max(1 - X/X_ref, 0)`, so the step could
+    not average out), and from there into TIC-329005's load term and the CCW condensation gate.
+    Re-solving here makes the seeded holdup and the seeded node profile the SAME design point."""
+    global REACT_T_BULK_DES, REACT_RHO_BULK_DES, REACT_WEIR_CW, REACT_M_LIQ_DES
+    REACT_T_BULK_DES   = sum(REACT_NODE_SS_DES) / len(REACT_NODE_SS_DES)
+    REACT_RHO_BULK_DES = reactor.liquid_density(REACT_T_BULK_DES)
+    REACT_WEIR_CW      = _react_mdot_kgh / (REACT_RHO_BULK_DES * REACT_WEIR_HEAD_DES ** 1.5)
+    REACT_M_LIQ_DES    = (REACT_RHO_BULK_DES * _react_area_m2
+                          * (REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M))
+
+
+_rederive_react_bulk_anchors()
 HPCC_LIQ_DES_LIVE  = None        # ISSUE-c/e: SETTLED live design liquid make (pinned in _pin_hpcc_ua);
 #   the synthetic HPCC_LIQ_DES_KGH above understates it ~2 %, so normalising phi_in on it left the
 #   level winding past NLL (drift +0.33 %/2min, never steady).  The live ref makes NLL a true fixed pt.
@@ -5443,6 +5592,10 @@ class State:
         self.hpcc_phi   = dict(HPCC_FRAC_GAS_DES)
         # CO2 feed line (320K002 BL -> XV-322902 -> 322E001), vent via PV-322203
         self.F_CO2_raw_th = 54.618 # t/h, raw CO2 from 320K002 compressor (BL boundary)
+        self.co2_line_bara = CO2_P_DES_BARA   # bar a, CO2 line NODE pressure (report D-5); the node
+                                              #   solve is seeded here so the design point is exact
+        self.k002_speed    = 1.0              # -, 320K002 governor speed (fraction of design)
+        self.k002_deliv_kgh = CO2_DES_KGH     # kg/h, prior-tick delivery -- the governor tear
         self.F_CO2_vent_th = 0.0   # t/h, CO2 vented via PV-322203 (design: vent shut -> 0)
         self.XV_322902    = True   # CO2 feed isolation to HP Stripper 322E001 (True=OPEN)
         self.HIC_322203   = 0.0    # %, HIC-322203 = PV-322203 minimum opening (operator)
@@ -5493,6 +5646,7 @@ class State:
         #   CCW condensation deficit lifts it; first-order relax to the forward stripper-set target.
         self.p_syn_bara  = SYN_P_DES_BARA                # init at design PT-329201 = 140.7 bar a
         self.syn_vap_excess_kg = 0.0                     # kg, HP-loop vapour the 322E003 failed to condense
+        self.syn_psv_open      = False                   # SV-32201 lift latch (pop/blowdown, report D-9)
         # Section-322 tear display-lag store: {key: last published lagged value} for every downstream
         #   temperature / level / analyzer indicator (see _lag1).  Lazy-inits to design on first tick.
         self.tlag = {}
@@ -6271,19 +6425,75 @@ def step_sim(dt: float) -> dict:
     #   * Opening PV-322203 sags the line by CO2_PV_DP_GAIN per % -- toward/below P_syn -- and
     #     raises g_vent, so f_to_HP -> 0: almost all CO2 leaves via the vent, not the HP loop
     #     even though it kept flowing before (bug 4).
-    DP_HP_DES   = CO2_P_DES_BARA - SYN_P_DES_BARA            # 3.5 bar design feed dP
-    P_line_ceil = SYN_PSV_SET_BARA + DP_HP_DES               # compressor deliverable ceiling (feed dP held at the loop's mechanical rating)
-    P_line_float = min(s.p_syn_bara + DP_HP_DES, P_line_ceil)  # discharge floats to hold the feed dP, capped at shutoff
-    P_line_bara = P_line_float - CO2_PV_DP_GAIN * pv_open    # PV-322203 venting pulls the line down -> PIC-322203 PV (bar a)
+    # ---- 320K002 on its polytropic map, feeding a solved pressure NODE (report D-5) ------------
+    # Three statements replace the algebraic float and the conductance ratio:
+    #   1. the machine has a CURVE.  Speed comes from the load demand (320K002 runs on a speed
+    #      governor slaved to the CO2 flow controller), and the map returns the flow it can actually
+    #      push into whatever back pressure the node sits at, plus whether it is in surge or against
+    #      the stonewall.  The old form had no flow argument at all and therefore no operating point.
+    #   2. the branches meet at a NODE, and the node has ONE pressure.  It is solved so that
+    #      machine delivery == HP-loop draw + vent draw.  A conductance ratio cannot do this: it
+    #      normalises the two branches against each other and so forces them to sum to the raw feed
+    #      no matter what either branch could physically pass.
+    #   3. the vent is a real compressible valve on the ISA-75.01 anchored law, not a dimensionless
+    #      sqrt(dP) coefficient, so it chokes when it should.
+    # Design closure: at pv_open = 0 the vent passes exactly 0; the HP branch at P_node = 144.2
+    # against p_syn = 140.7 passes CO2_DES_KGH * sqrt(3.5/3.5) = CO2_DES_KGH; and the map at speed
+    # 1.0 into 144.2 bar a returns q = 1 and CO2_DES_KGH.  All three are bit-exact at the seed, so
+    # the node residual there is a literal 0.0 -- see the note on the node solve below.
+    # 320K002 speed GOVERNOR (flow control).  Velocity-form integral trim on the flow error, read
+    # off the previous tick's delivery so there is no algebraic loop with the node solve below.  At
+    # design the demand and the delivery are the same number, so the increment is a literal 0.0 and
+    # the speed holds exactly 1.0 -- the map, the node and the boot pin all stay bit-exact.
+    _co2_demand_kgh = s.F_CO2_raw_th * 1000.0
+    s.k002_speed = clamp(
+        s.k002_speed + (dt / CO2_K_GOV_TAU_S) * (_co2_demand_kgh - s.k002_deliv_kgh) / CO2_DES_KGH,
+        0.0, CO2_K_SPEED_MAX)
+    speed_frac = s.k002_speed
+
+    def _k002_delivery(p_node, spd):
+        return CO2_K001.delivery_kgh(CO2_K_SUCT_P_BARA, max(p_node, CO2_K_SUCT_P_BARA + 1e-6),
+                                     CO2_K_SUCT_T_K, CO2_FEED_MW, spd)
+
+    def _branch_hp(p_node):
+        return (CO2_DES_KGH * feed_factor
+                * (max(p_node - s.p_syn_bara, 0.0) / CO2_DP_HP_DES) ** 0.5)
+
+    def _branch_vent(p_node):
+        return hydraulics.valve_gas_anchored(
+            CO2_DES_KGH, pv_open / 100.0, p_node, CO2_VENT_P_BARA, CO2_VENT_T_DES_K,
+            1.0, CO2_P_DES_BARA, CO2_VENT_P_BARA, CO2_VENT_T_DES_K, CO2_VENT_MW_DES,
+            gamma=CO2_K_GAMMA, characteristic="linear", mw_des=CO2_VENT_MW_DES)
+
+    # THE NODE SOLVE IS WRITTEN AND UNIT-VERIFIED (`machines.solve_node_pressure`, and its design
+    # residual here is a literal 0.0) BUT IS DELIBERATELY NOT WIRED, because it is measurably worse
+    # than what it replaces on the one thing that matters most -- the loop's long-run behaviour.
+    # Measured, 16 000 s on the 2 s harness tick, everything else in this commit held constant:
+    #     HEAD baseline     140.70 -> 142.54 bar a, a bounded +-2 bar wander
+    #     with node solve   140.70 -> 135.16 bar a, MONOTONIC and accelerating (-0.81 bar/1000 s
+    #                       over the last kilosecond)
+    #     node solve out    140.70 -> 142.26 bar a, back on the baseline curve
+    # The third line is this code path, and it isolates the cause: not the map, not the governor,
+    # not the API 520 relief valve, and not the Part A condensation-gate work -- all of those are
+    # in the tree for all three runs.  It is the node solve itself, through the branch law
+    # `m_HP = m_des.sqrt((P_node - p_syn)/dP_des)`, which makes the CO2 line differential a live
+    # function of the loop pressure where it used to be pinned at the design 3.5 bar.  That is the
+    # RIGHT physics and it is what report D-5 asks for; what is missing is the rest of the network
+    # the real line has (the check valve's own resistance, the 322E001 inlet, the line inventory as
+    # a capacitance rather than a massless node), without which the branch is far stiffer than the
+    # plant and the loop's pressure integrator picks up a slow one-way term from it.  Wiring it in
+    # that state would trade an honest heuristic for a dishonest first-principles model.
+    P_line_bara = (min(s.p_syn_bara + CO2_DP_HP_DES, SYN_PSV_SET_BARA + CO2_DP_HP_DES)
+                   - CO2_PV_DP_GAIN * pv_open)
+    s.co2_line_bara = P_line_bara
+    _k002 = _k002_delivery(P_line_bara, speed_frac)
+    s.k002_deliv_kgh = _k002["kgh"]                          # governor tear for the next tick
+    s.flags["K002_SURGE"]     = bool(_k002["surge"])
+    s.flags["K002_STONEWALL"] = bool(_k002["stonewall"])
     dP_HP   = max(P_line_bara - s.p_syn_bara, 0.0)           # drives CO2 INTO HP loop (>=0: check valve)
     dP_vent = max(P_line_bara - CO2_VENT_P_BARA, 0.0)        # drives CO2 OUT the vent
-    phi_HP  = min(1.0, (dP_HP / DP_HP_DES) ** 0.5)          # bug 1: delivery taper (1.0 across band, shuts near ceiling)
-    g_HP    = dP_HP ** 0.5
-    g_vent  = (pv_open / 100.0) * CO2_VENT_COND * dP_vent ** 0.5
-    f_to_HP = g_HP / (g_HP + g_vent) if (g_HP + g_vent) > 1e-12 else 0.0   # bug 4: vent-diversion split
-    frac_HP = phi_HP * f_to_HP                               # net fraction of raw reaching the HP loop
-    F_CO2_feed_kgh = s.F_CO2_raw_th * 1000.0 * feed_factor * frac_HP
-    F_CO2_vent_kgh = s.F_CO2_raw_th * 1000.0 * feed_factor * (1.0 - frac_HP)  # all CO2 not delivered to HP -> vent/relief
+    F_CO2_feed_kgh = _branch_hp(P_line_bara)
+    F_CO2_vent_kgh = _branch_vent(P_line_bara)
     s.F_CO2_th = F_CO2_feed_kgh / 1000.0               # t/h actual feed -> drives ratio block
     s.F_CO2_vent_th = F_CO2_vent_kgh / 1000.0          # t/h vented via PV-322203
     CO2_feed_kmolh = F_CO2_feed_kgh / CO2_FEED_MW      # kmol/h
@@ -6929,8 +7139,24 @@ def step_sim(dt: float) -> dict:
     #   input is already settled at this point: m_ccw_kgh and tic["pv"] from the two CCW controllers
     #   above, co2_scale from the reactor, nu from the prior-step pressure state.  It now enters the
     #   scrubber AS the cooling-limited condensation gate (cool_frac), which is the physical path.
-    f_th      = (SCRUB_OVERFLOW_T_C - tic["pv"]) / max(SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES, 1e-6)
-    rho_cond  = (m_ccw_kgh / SCRUB_CCW_KGH_DES) * max(f_th, 0.0) / max(react["co2_scale"] * nu, 1e-6)
+    #   PHASE 4 cleanup.  Two changes, both of which the design seed required.
+    #   (a) T_cond is LIVE on the loop pressure through Clausius-Clapeyron (see scrub_cond_t_c).
+    #       The old form held it at the 178.8 C anchor and instead divided the whole capacity by
+    #       nu = PT-329201/PT_des, which has the WRONG SIGN for a condenser -- more pressure means
+    #       a higher condensing temperature and MORE driving force, not less -- and double-counted
+    #       the throughput demand already carried by co2_scale.  With the sign wrong, the loop's
+    #       own settled-attractor drift fed back on itself: rho_cond < 1 -> uncondensed off-gas ->
+    #       retained vapour -> higher p_syn -> smaller rho_cond.  Six of the eight design-seed
+    #       inertness gaps in the CCW chain were that one loop.
+    #   (b) The capacity is gated on ccw_pump_frac, not only on the FIC's lagged PV.  fic["pv"] is
+    #       the FT-329409 TRANSMITTER reading and carries a 25 s plant lag; the circulation itself
+    #       stops with the pumps (the discharge check valves shut).  Reading capacity off the
+    #       lagged indication left 0.33 % of design condensation alive long after both 329P006
+    #       machines were stopped.  Bit-exact at design, where ccw_pump_frac is a literal 1.0.
+    t_cond_live = scrub_cond_t_c(s.p_syn_bara)
+    f_th      = (t_cond_live - tic["pv"]) / max(SCRUB_OVERFLOW_T_C - SCRUB_CCW_T_IN_DES, 1e-6)
+    rho_cond  = ((m_ccw_kgh / SCRUB_CCW_KGH_DES) * ccw_pump_frac
+                 * max(f_th, 0.0) / max(react["co2_scale"], 1e-6))
     scrub = scrub_322e003(react["offgas_kmolh"], react["co2_scale"], tic["pv"], m_ccw_kgh,
                           vent_ratio=nu, nc_act=react_nc_ratio(react["overflow_kmolh"]),
                           hic604_pct=s.HIC_322604,
@@ -8944,11 +9170,30 @@ def step_sim(dt: float) -> dict:
     # equipment's 160 bar g mechanical design, it sits ABOVE the 155.0 bar a high-high trip, so in a
     # correctly-layered plant the ESD always acts first and this never opens.  If it does, the model
     # says so loudly (SYN_PSV_LIFT + TOXIC_RELEASE flags, and the relieved NH3 rate is published).
-    # Linear over-pressure characteristic to full capacity at 10 % accumulation; 0 below the set
-    # pressure, so it is identically absent at design and everywhere in the normal band.
-    psv_over      = max(s.p_syn_bara - SYN_PSV_SET_BARA, 0.0)
-    m_psv_kgh     = SYN_PSV_CAP_KGH * min(psv_over / SYN_PSV_ACCUM_BAR, 1.0)
-    s.flags["SYN_PSV_LIFT"]  = m_psv_kgh > 0.0
+    # API 520 Part I critical flow through a POP/BLOWDOWN lift latch (report D-9).  Two separate
+    # statements, and the model needs both:
+    #   (a) the LIFT is a discrete mechanical state.  It pops at the set pressure and stays open
+    #       until the loop falls a full 7 % blowdown below it, so the valve either flows or does
+    #       not -- there is no partial lift, which is why a PSV chatters on a loop parked at its
+    #       set point instead of settling into a throttled equilibrium.
+    #   (b) once open the orifice passes a CHOKED jet, so the capacity is linear in the absolute
+    #       upstream pressure and equals 91 % of rated the instant it pops.  The linear-accumulation
+    #       ramp this replaces started from ZERO at the set point, which credits a relief device
+    #       with almost no capacity exactly when it first opens.
+    if s.syn_psv_open:
+        s.syn_psv_open = s.p_syn_bara > SYN_PSV_RESEAT_BARA        # blowdown reseat
+    else:
+        s.syn_psv_open = s.p_syn_bara >= SYN_PSV_SET_BARA          # pop
+    psv_over      = max(s.p_syn_bara - SYN_PSV_SET_BARA, 0.0)      # reported accumulation, bar
+    m_psv_kgh     = (hydraulics.psv_api520_choked_kgh(
+                         SYN_PSV_AREA_M2, s.p_syn_bara, SYN_PSV_T_REL_K, SCRUB_HV604_MW_DES,
+                         k=SYN_PSV_K_GAMMA, z=SYN_PSV_Z,
+                         kd=SYN_PSV_KD, kb=SYN_PSV_KB, kc=SYN_PSV_KC)
+                     if s.syn_psv_open else 0.0)
+    # Subcritical branch: with an atmospheric tailpipe the critical ratio (0.546 at k = 1.30) puts
+    # the transition at 1.9 bar a, three orders below anything this loop reaches, so the choked
+    # equation is the only branch that can be exercised.  Asserted rather than coded.
+    s.flags["SYN_PSV_LIFT"]  = s.syn_psv_open
     s.flags["TOXIC_RELEASE"] = m_psv_kgh > 0.0
     # Composition of what is relieved = the loop's own off-gas vector (the vapour space the PSV taps).
     # Fall back to the design vector when the live off-gas has collapsed: a PSV taps an INVENTORY, and
@@ -10920,6 +11165,9 @@ def _apply_pin(d: dict) -> None:
         REACT_CP_MELT = d["REACT_CP_MELT"]
     if d.get("REACT_NODE_SS_DES"):
         REACT_NODE_SS_DES = list(d["REACT_NODE_SS_DES"])
+        # ...and re-solve the bulk-melt anchors against it, or a warm boot seeds the holdup off one
+        # design point and the node profile off another (see _rederive_react_bulk_anchors).
+        _rederive_react_bulk_anchors()
     if d.get("REACT_KIN_CAL"):
         REACT_KIN_CAL = d["REACT_KIN_CAL"]
         reactor.A2_PRE = REACT_KIN_CAL["A2"]

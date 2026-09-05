@@ -4,6 +4,7 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydraulics as hy
+import machines
 
 def test_liquid_design_is_bit_exact():
     for wd, h, p1, p2, rho in ((101490.0, 0.60, 4.10, 1.13, 1180.0),
@@ -406,16 +407,22 @@ def test_the_ejector_suction_follows_the_gravity_head_again():
     correctly on a shut XV-322903 and then never came back.  At design the head fraction is a
     literal 1.0, so the fixed point does not move; the throat-choke ceiling caps a real flood."""
     main = _main()
-    des = main.ejector_322f001(main.EJ_MOTIVE_NH3_DES, main.EJ_MOTIVE_T_DES_C,
+    # Call on the SETTLED live design motive, not the nameplate.  `phi_m` normalises on
+    # EJ_MOTIVE_DES_LIVE (the boot pin's settled value), so only that argument makes phi_m a
+    # literal 1.0 and the design entrainment exact.  The two happened to coincide until the
+    # reactor bulk-anchor reconciliation (Part A of Phase 4) moved the settled fixed point by
+    # 0.12 %; the assertion was riding on that coincidence, not on the design invariant.
+    mot_des = main.EJ_MOTIVE_DES_LIVE or main.EJ_MOTIVE_NH3_DES
+    des = main.ejector_322f001(mot_des, main.EJ_MOTIVE_T_DES_C,
                                main.EJ_OPEN_DES, scrub_level_frac=1.0)
     assert abs(des["suction_kgh"] - main.EJ_SUC_TOT_DES) < 1e-6      # design untouched
-    low = main.ejector_322f001(main.EJ_MOTIVE_NH3_DES, main.EJ_MOTIVE_T_DES_C,
+    low = main.ejector_322f001(mot_des, main.EJ_MOTIVE_T_DES_C,
                                main.EJ_OPEN_DES, scrub_level_frac=0.4)
     assert low["suction_kgh"] < des["suction_kgh"]                   # head drives it down
-    empty = main.ejector_322f001(main.EJ_MOTIVE_NH3_DES, main.EJ_MOTIVE_T_DES_C,
+    empty = main.ejector_322f001(mot_des, main.EJ_MOTIVE_T_DES_C,
                                  main.EJ_OPEN_DES, scrub_level_frac=0.0)
     assert empty["suction_kgh"] == 0.0                               # zero head, zero flow
-    flood = main.ejector_322f001(main.EJ_MOTIVE_NH3_DES, main.EJ_MOTIVE_T_DES_C,
+    flood = main.ejector_322f001(mot_des, main.EJ_MOTIVE_T_DES_C,
                                  main.EJ_OPEN_DES, scrub_level_frac=2.0)
     assert flood["suction_kgh"] <= des["suction_kgh"] * main.EJ_HYD_FRAC_MAX + 1e-6
 
@@ -489,3 +496,97 @@ def test_hv322604_carries_the_offgas_molecular_weight():
                                          0.5, 140.7, 4.0, 387.15, mw, mw_des=27.4768)
     assert math.isclose(f(33.0) / f(27.4768), (33.0 / 27.4768) ** 0.5, rel_tol=1e-12)
     assert f(27.4768) == 5901.35
+
+
+# ==================================================================================================
+#  API 520 Part I relief (report D-9)
+# ==================================================================================================
+def test_api520_capacity_is_linear_in_the_absolute_upstream_pressure():
+    """A relief valve is a fixed orifice passing a choked jet, so W scales with P1 -- NOT with the
+    over-pressure.  The linear-accumulation ramp this replaced started from zero at the set point,
+    which credits the device with no capacity at the moment it first opens."""
+    a = 1.0e-3
+    w1 = hy.psv_api520_choked_kgh(a, 100.0, 400.0, 28.0)
+    w2 = hy.psv_api520_choked_kgh(a, 200.0, 400.0, 28.0)
+    assert abs(w2 / w1 - 2.0) < 1e-9
+
+
+def test_api520_area_backsolve_reproduces_the_rated_capacity_exactly():
+    """The orifice is anchored on the documented rating through the same equation, so every
+    coefficient that does not move during an event cancels."""
+    a = hy.psv_area_from_rated_m2(200_000.0, 177.114, 387.15, 27.4768, k=1.30)
+    w = hy.psv_api520_choked_kgh(a, 177.114, 387.15, 27.4768, k=1.30)
+    assert abs(w - 200_000.0) < 1e-6
+
+
+def test_api520_critical_ratio_matches_the_gas_table():
+    """(2/(k+1))^(k/(k-1)): 0.5283 at k = 1.4, 0.5457 at the loop off-gas k = 1.30."""
+    assert abs(hy.psv_choked_ratio(1.4) - 0.5283) < 5e-4
+    assert abs(hy.psv_choked_ratio(1.30) - 0.5457) < 5e-4
+
+
+def test_sv32201_is_sized_between_two_api_letter_orifices():
+    """The back-solve lands at 2.558 in^2, 90 % of letter "L" -- an L-orifice valve carrying about
+    10 % sizing margin, which is what a DN 100 relief valve on this service is.  A capacity that
+    had been invented rather than documented would not land there."""
+    main = _main()
+    in2 = main.SYN_PSV_AREA_M2 * 1550.0031
+    assert 1.838 < in2 < 2.853          # between API letters K and L
+    assert abs(in2 - 2.558) < 0.01
+
+
+def test_sv32201_pops_and_reseats_on_a_real_blowdown():
+    main = _main()
+    assert main.SYN_PSV_RESEAT_BARA < main.SYN_PSV_SET_BARA
+    assert abs(main.SYN_PSV_RESEAT_BARA
+               - main.SYN_PSV_SET_BARA * (1.0 - main.SYN_PSV_BLOWDOWN)) < 1e-12
+
+
+# ==================================================================================================
+#  320K002 polytropic map (report D-5)
+# ==================================================================================================
+def test_the_compressor_map_reproduces_the_design_duty_bit_exactly():
+    main = _main()
+    d = main.CO2_K001.delivery_kgh(main.CO2_K_SUCT_P_BARA, main.CO2_P_DES_BARA,
+                                   main.CO2_K_SUCT_T_K, main.CO2_FEED_MW, 1.0)
+    assert d["kgh"] == main.CO2_DES_KGH
+    assert abs(d["q"] - 1.0) < 1e-12
+    assert not d["surge"] and not d["stonewall"]
+
+
+def test_the_compressor_surges_when_the_head_demand_passes_the_peak():
+    main = _main()
+    d = main.CO2_K001.delivery_kgh(main.CO2_K_SUCT_P_BARA, 240.0,
+                                   main.CO2_K_SUCT_T_K, main.CO2_FEED_MW, 1.0)
+    assert d["surge"]
+    assert d["q"] <= main.CO2_K_Q_SURGE + 1e-12
+
+
+def test_the_intercooled_head_is_not_the_single_section_head():
+    """A 90:1 machine on one uncooled section discharges above 870 C.  Four intercooled sections
+    put it at 160 C, which is what the aftercooler then takes to the 120 C feed anchor."""
+    main = _main()
+    t2 = machines.discharge_t_k(main.CO2_K_SUCT_T_K, main.CO2_K_SUCT_P_BARA,
+                                main.CO2_P_DES_BARA, main.CO2_K_N_POLY, main.CO2_K_STAGES) - 273.15
+    assert 150.0 < t2 < 170.0
+    one = machines.discharge_t_k(main.CO2_K_SUCT_T_K, main.CO2_K_SUCT_P_BARA,
+                                 main.CO2_P_DES_BARA, main.CO2_K_N_POLY, 1) - 273.15
+    assert one > 800.0
+
+
+def test_the_node_solve_returns_a_zero_residual_seed_untouched():
+    """`solve_node_pressure` returns the design seed unchanged when the residual there is exactly
+    zero, which is what a design-anchored flowsheet needs from any iterative solver."""
+    seed = 144.2
+    p = machines.solve_node_pressure(lambda x: 100.0 - x, (lambda x: 100.0 - seed,),
+                                     p_lo=1.0, p_hi=300.0, p_seed=seed)
+    assert p == seed
+
+
+def test_the_k002_governor_holds_the_demanded_flow_not_the_curve_flow():
+    """320K002 is flow controlled.  Open loop the map would let the feed float with back pressure,
+    and on this flowsheet that is divergent -- see the note in step_sim."""
+    main = _main()
+    st = main.state
+    assert st.k002_speed == 1.0
+    assert st.k002_deliv_kgh == main.CO2_DES_KGH

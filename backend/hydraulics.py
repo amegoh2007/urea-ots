@@ -355,3 +355,64 @@ def gravity_outflow_kgh(cv_max: float, h_valve: float, level_m: float, rho_kgm3:
     p1 = p_vessel_bara + head_bar
     return valve_flow_liquid(cv_max, h_valve, p1, p_dest_bara, rho_kgm3,
                              characteristic=characteristic, fl=fl)
+
+
+# ==================================================================================================
+#  API 520 Part I — pressure-relief valve, vapour service (D-9)
+# ==================================================================================================
+#  The sizing equation for a PSV in CRITICAL (choked) vapour flow, API 520 Part I §5.6.3.1:
+#
+#      A = W / (C . Kd . Kb . Kc . P1) . sqrt(T . Z / M)      (USC: A in^2, W lb/h, P1 psia, T degR)
+#
+#  with C = 520 . sqrt( k . (2/(k+1))^((k+1)/(k-1)) ).  That C is nothing but the isentropic
+#  choked mass-flux group carried in USC units; written in SI the same equation is
+#
+#      W = Kd . Kb . Kc . A . P1 . sqrt( (k . M) / (Z . R . T) . (2/(k+1))^((k+1)/(k-1)) )
+#
+#  which is what `psv_api520_choked_kgh` evaluates.  Two properties matter for how it is used here:
+#
+#   * it is LINEAR in P1, not in the over-pressure.  A relief valve is a fixed orifice passing a
+#     choked jet, so its capacity rises with the absolute upstream pressure and does NOT ramp from
+#     zero at the set point.  The linear-accumulation ramp it replaces had the valve passing a few
+#     per cent of capacity just above set, which is not how a spring PSV behaves: it pops, and once
+#     open it flows choked.
+#   * every coefficient except P1, M and T cancels when the orifice is BACK-SOLVED from a documented
+#     rated capacity through this same function (`psv_area_from_rated_m2`).  So the rated point is
+#     reproduced exactly whatever is assumed for Kd, Kb, Kc, k and Z, and only the quantities that
+#     actually move during a relief event change the answer.
+def psv_choked_ratio(k: float) -> float:
+    """Critical (choked) pressure ratio P_crit/P1 for an ideal gas of ratio of specific heats k."""
+    return (2.0 / (k + 1.0)) ** (k / (k - 1.0))
+
+
+def psv_api520_choked_kgh(area_m2: float, p1_bara: float, t1_k: float, mw: float,
+                          k: float = 1.30, z: float = 1.0,
+                          kd: float = 0.975, kb: float = 1.0, kc: float = 1.0) -> float:
+    """API 520 Part I critical-flow vapour capacity of a relief orifice, kg/h.
+
+    area_m2  effective (API letter) orifice area
+    p1_bara  relieving pressure, absolute — the ACTUAL upstream pressure, not the set pressure
+    t1_k     relieving temperature
+    mw       relieving-stream molar mass, kg/kmol
+    k        ratio of specific heats;  z  compressibility at the relieving condition
+    kd       rated coefficient of discharge (0.975 for a certified vapour PSV, API 520 §5.6.3.1)
+    kb       back-pressure correction (1.0 for a conventional valve on an atmospheric tailpipe)
+    kc       combination correction (1.0 with no rupture disc upstream)
+    """
+    if area_m2 <= 0.0 or p1_bara <= 0.0 or t1_k <= 0.0 or mw <= 0.0:
+        return 0.0
+    flux = math.sqrt(max((k * mw) / (z * R_GAS * t1_k)
+                         * (2.0 / (k + 1.0)) ** ((k + 1.0) / (k - 1.0)), 0.0))   # sqrt(kg.mol/(J.kmol))
+    # p1 in Pa, area in m2 -> kg/s; mw is kg/kmol so the group carries a 1e-3 to reach kg/mol.
+    w_kgs = kd * kb * kc * area_m2 * (p1_bara * _BAR_TO_PA) * flux * math.sqrt(1.0e-3)
+    return w_kgs * 3600.0
+
+
+def psv_area_from_rated_m2(w_rated_kgh: float, p1_rated_bara: float, t1_rated_k: float,
+                           mw_rated: float, k: float = 1.30, z: float = 1.0,
+                           kd: float = 0.975, kb: float = 1.0, kc: float = 1.0) -> float:
+    """Effective orifice area that reproduces a documented rated capacity through
+    `psv_api520_choked_kgh` at the rated relieving condition.  Anchoring this way makes the sizing
+    basis exact and leaves only P1, MW and T live."""
+    unit = psv_api520_choked_kgh(1.0, p1_rated_bara, t1_rated_k, mw_rated, k, z, kd, kb, kc)
+    return w_rated_kgh / unit if unit > 0.0 else 0.0

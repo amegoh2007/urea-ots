@@ -453,6 +453,92 @@ bundle + sump — it would need a liquid fraction of 7.33 against a physical max
 and predicts the DEPARTURE; anyone tempted to "finish the job" by back-solving a rate constant to
 reach 88.1 would be fitting to the wrong reaction.
 
+## 1g. Phase 4a — CCW seed cleanup, API 520 relief, 320K002 map
+
+### Part A — CLOSED: 7 of the 8 CCW design-seed gaps
+
+At t = 0 all eight terms were already exactly zero. What the chain was recording was a drifting seed
+feeding terms that were correctly anchored. Two causes:
+
+* **`rho_cond` divided by `nu = PT-329201/PT_des`** -- the WRONG SIGN for a condenser (more pressure
+  means a higher condensing temperature and MORE driving force) and a double count of the throughput
+  demand `s` already carries. It closed a positive-feedback loop on the settled-attractor drift.
+  Replaced with the live condensing temperature through Clausius-Clapeyron on the carbamate exotherm
+  already in the model (`scrub_cond_t_c`, 0.0754 K/bar at the anchor, bit-exact at P_des). The
+  capacity is also gated on `ccw_pump_frac` rather than the FIC's 25 s-lagged transmitter reading,
+  so a total CCW loss gives `cool_frac` exactly 0 on the first tick instead of 0.0033.
+* **`REACT_M_LIQ_DES` and the bulk-melt block were solved against a SUPERSEDED node profile.**
+  `REACT_NODE_SS_DES` is assigned three times (import seed, A-8 fixed point, cache restore) and the
+  derived anchors were computed once against the first. `State()` seeded the holdup off one design
+  point and the node temperatures off another -- 0.9 C apart -- so the first tick STEPPED the reactor
+  level -0.156 % of span. Since Phase 3 the reactor runs on residence time, so that went into
+  `X_conv` and then into `delta_X = max(1 - X/X_ref, 0)`, which is one-sided and therefore ratchets.
+  `_rederive_react_bulk_anchors()` re-solves the block on both pin paths.
+
+**Chain: 28/36 -> 35/36** (39/41 with the new PSV checks). The one gap left is the 3000 s design
+hold, improved 3.4x: PT-329201 140.71826 -> **140.70544** against a 1e-3 tolerance. Still open.
+
+Design seed verified bit-identical to HEAD across all 29 probed states after every step of this
+work. The boot pin DID move on the settled live references (EJ_MOTIVE_DES_LIVE -0.12 %, REACT_X_DES
+-0.024 %, HPCC_UA +0.016 %) -- correct, since the reconciliation moved the settled fixed point;
+`test_hydraulics.py::test_the_ejector_suction_follows_the_gravity_head_again` was riding on
+EJ_MOTIVE_DES_LIVE happening to equal the nameplate and now calls with the live value.
+
+### Part B, D-9 — CLOSED: SV-32201 on API 520 Part I
+
+`hydraulics.psv_api520_choked_kgh` / `psv_area_from_rated_m2` / `psv_choked_ratio`. Orifice
+back-solved from the documented 200 t/h rating through the same equation, so Kd/Kb/Kc/k/Z cancel:
+**2.558 in^2**, 90 % of API letter "L". Pop at set, 7 % blowdown reseat (API 527), full choked flow
+whenever open. Capacity vs the linear ramp it replaces: **0 -> 181.8 t/h at the set pressure**,
+97.2 -> **190.7 t/h** at the 168.84 bar a the chain reaches (x1.96), identical at rated accumulation
+by construction. Chain Phase 4 relief 99.0 -> 190.8 t/h, NH3 to atmosphere 27 082 -> 52 174 kg/h.
+
+### Part B, D-5 — PARTIAL: the map is wired, the node solve is NOT
+
+`machines.py` (new): polytropic thermodynamics, intercooled staged head, normalised centrifugal
+characteristic with surge/stonewall, and `solve_node_pressure`. 320K002 now has a real curve
+(4 intercooled sections -- one uncooled section would discharge above 870 C), returns `CO2_DES_KGH`
+bit-exactly at design, publishes `K002_SURGE` / `K002_STONEWALL`, and runs on a speed governor.
+
+**The node solve is written, unit-tested, and left unwired -- OPEN.** Measured over 16 000 s on the
+2 s harness tick with everything else held constant:
+
+| configuration | PT-329201 at 16 000 s | character |
+|---|---|---|
+| HEAD baseline | 140.70 -> 142.54 | bounded +-2 bar wander |
+| with node solve | 140.70 -> **135.16** | monotonic, accelerating (-0.81 bar/ks) |
+| node solve out (shipped) | 140.70 -> 142.26 | back on the baseline curve |
+
+The third row isolates the cause to the node solve itself, through
+`m_HP = m_des.sqrt((P_node - p_syn)/dP_des)`, which makes the CO2-line differential a live function
+of the loop pressure. **To finish D-5** the branch needs the rest of the real network: the check
+valve's own resistance, the 322E001 inlet resistance, and the line inventory as a capacitance rather
+than a massless node. Without those the branch is far stiffer than the plant and the loop's pressure
+integrator picks up a slow one-way term.
+
+### Part B, D-6 — NOT ATTEMPTED, and the reason is not scheduling
+
+322F001 is a LIQUID-liquid jet ejector. `ejector_huang.py` is a compressible double-choking gas
+ejector -- Mach numbers, isentropic area ratios, normal shocks -- and its `entrainment_ratio` RAISES
+on any motive/suction ratio below choking. Wiring it in would raise on the first tick.
+
+The incompressible constant-area jet-pump form (Cunningham / ESDU 85032) was written and exercised
+against the plant design point. It reproduces the design duty exactly, and the directions are right
+(closing the spindle raises entrainment, motive loss stalls it) with no `f_stall` polynomial. It was
+NOT committed because its closure is **non-monotonic and therefore bistable**: the mixing-chamber
+momentum balance gives a discharge pressure whose m_s^2 coefficient is
+
+    1/(rho_s.A_s.A_m) - 0.625/(rho_2.A_m^2)
+
+and with the anchored densities (rho_s 1340, rho_2 878) and any sensible area ratio that group is
+NET POSITIVE, so the recovered pressure eventually RISES with entrainment, the solve has two roots,
+and the characteristic degenerates to a step -- zero below a motive threshold, railed above it. A
+real jet pump's N-M curve is monotonic. **To finish D-6**: carry the mixture density live through
+the mixing section instead of holding it at the design blend, and check the area convention against
+a published N-M curve before trusting the closure. Also note the geometry inputs are not available:
+`References/Datasheets/322F001 Design Calculations.pdf` is a 12-page SCAN with no text layer, so the
+nozzle and mixing-throat areas had to be back-solved from the motive line dP and the design duty.
+
 ## 2. Minor cleanups
 
 - `backend/core/thermo.py` still carries a dead `EmpiricalThermo.bubble_p` placeholder with no
