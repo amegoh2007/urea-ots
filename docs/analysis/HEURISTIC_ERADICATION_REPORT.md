@@ -8,6 +8,19 @@
 **Excluded:** `main.py.bak`, `main_backup.py`, `main_debug.py`, `main_orig.py`, `main_test_fix.py`
 (dead snapshots), `backend/test_*.py`, `backend/gap_g*.py` (offline studies), `.claude/worktrees/`.
 
+**Traceability note (added during the continuation audit):** line references below were checked
+against the live files on 2026-09-14 with `rg`/PowerShell source reads. This note is included so a
+future auditor can distinguish a finding in the running engine from a historical snapshot. The
+`backend/core` package was inspected module by module (`ejector.py`, `flowsheet.py`, `hpcc.py`,
+`lp.py`, `mp.py`, `reactor.py`, `scrubber.py`, `stream.py`, `stripper.py`, `thermo.py`, `unit.py`,
+`vacuum.py`, and `valve.py`); where a module duplicates or delegates to `main.py`, the finding is
+reported at the live implementation and the duplication is called out in Section F. This keeps
+the inventory complete without double-counting one heuristic implemented twice.
+
+**Change rationale (added during the continuation audit):** this traceability block closes the
+audit's documentation gap. It does not alter simulation behaviour; it records the verification
+method and the reason for the module-level scope so reviewers can reproduce the exact evidence.
+
 ---
 
 ## 0. Executive summary
