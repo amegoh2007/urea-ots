@@ -1,6 +1,6 @@
 # Heuristic Eradication Report — Urea OTS Backend Physics Engine
 
-**Audit date:** 2026-09-03
+**Audit date:** 2026-09-14
 **Auditor role:** Lead Process Simulation Auditor / Chemical Engineer
 **Scope:** `backend/main.py` (9 869 lines, the live engine), `backend/core/*.py`, `backend/reactor.py`,
 `backend/consequence.py`, `backend/steam_system.py`, `backend/controllers.py`,
@@ -22,6 +22,18 @@ audit's documentation gap. It does not alter simulation behaviour; it records th
 method and the reason for the module-level scope so reviewers can reproduce the exact evidence.
 
 ---
+
+### Audit closure and evidence standard
+
+<!-- Change rationale: records how the catalog was verified against the live backend, preventing
+     archived snapshots or test fixtures from being mistaken for executable evidence. -->
+The findings below were rechecked against the current working tree after independent solver,
+thermodynamics, kinetics, and hydraulics passes. Verification used repository-wide `rg` symbol
+searches followed by direct reads of every referenced source region; archived snapshots and tests
+were excluded from the violation count. A finding is retained when the live path assigns a state
+from a design or calibration quantity, bypasses a thermodynamic or hydraulic closure, or creates or
+removes material through a scripted branch. Line numbers are anchors to the current files and must
+be regenerated after source edits.
 
 ## 0. Executive summary
 
