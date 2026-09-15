@@ -53,14 +53,15 @@ FRONTEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "front
 # replaced the unbound TIC-328013 white frame) and TT-323009.  It also retagged two 323-1 boxes,
 # TT-323004 -> TT-323002 and TT-323103 -> TT-323008.
 #
-# ONE measurement is now absent from the HMI: LPCC_3232.E003.TT_323003 (TT-323003, the 323D001
-# temperature), which no revision of 323-2 has drawn.  Five other paths read as missing but are
-# same-value twins of something on screen: RECIRC_323.D002.T_C (TT-323008 binds .TI_323008, the
+# No measurement is absent from the HMI any more.  The last one was the 323E003 shell-liquid
+# temperature, which the packet published as LPCC_3232.E003.TT_323003 while 323-2 draws it as
+# TT-323006; the key was renamed to TT_323006 and the box bound (203 -> 204).
+# Five other paths read as missing but are same-value twins of something on screen: RECIRC_323.D002.T_C (TT-323008 binds .TI_323008, the
 # same s.r323_d002_T), STEAM_SYSTEM.LP.TI_sat (TT-329001 binds HPCC_322E002.TT_329001, the same
 # T_shell_lp), EVAP_324.E003.LI_324F003 (LT-324501 binds LIC_324501.pv, whose PV *is* lvl_f003),
 # DESORB_328.D001.FIC_328404.vol_m3h (the unlagged twin of the FIC-328404 .pv shown in m3/h) and
 # DESORB_328.C004.FFIC_329401.pv (displayed as the SP/MV readout pair on 328-1).
-BOUND_TAG_FLOOR = 203
+BOUND_TAG_FLOOR = 204
 
 
 def parse_ov():
@@ -156,11 +157,11 @@ def test_unbound_slots_are_the_known_white_frame_set():
     """White frames are unmodelled units, not trend defects. Flag any NEW ones."""
     unbound = sorted({e["tag"] for e in ENTRIES
                       if e["t"] in ("ind", "avalve") and not e["bind"] and e["tag"] not in BINDS})
-    # 2026-09-15: 19 after the slide re-seeds — 16 are the Unit-335 finishing side on 324-1b
-    # plus FIC-335407/FV-335407 on 323-1, which have no model behind them, and TT-323006,
-    # TIC-328013, FIC-328401 and FQI-321401, which the drawings carry but the packet does not.
-    assert len(unbound) <= 19, \
-        f"{len(unbound)} unbound indicator slots, was 19 — a bind was dropped: {unbound}"
+    # 2026-09-15: 16 -- the 13 unmodelled Unit-335 slots on 324-1b, FIC-335407/FV-335407 on
+    # 323-1, and FQT-321401 on 321-1.  FQT-321401 is NOT unmodelled: the packet already
+    # publishes the running NH3 total as top-level `totalizer`; the overlay just has no bind.
+    assert len(unbound) <= 16, \
+        f"{len(unbound)} unbound indicator slots, was 16 — a bind was dropped: {unbound}"
 
 
 def test_packet_exposes_both_clocks_for_the_trend_axis():

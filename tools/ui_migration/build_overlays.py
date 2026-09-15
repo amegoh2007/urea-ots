@@ -27,6 +27,10 @@ EXTRA = {
  # the same number, so bind the tag-named leaf and nothing is lost by TT-323103 going away.
  'TT-323008': {'bind': 'RECIRC_323.D002.TI_323008', 'u': 'C', 'dec': 1,
                'note': '323D002 Comp-I bulk temperature (TAL: a falling tank walks the 80 % liquor toward crystallisation and blocks the 323P003 suction)'},
+ # 2026-09-15: the packet published the 323E003 shell-liquid temperature as TT_323003 while
+ # 323-2 labels that instrument TT-323006.  Key renamed in main.py; this row binds the box.
+ 'TT-323006': {'bind': 'LPCC_3232.E003.TT_323006', 'u': 'C', 'dec': 1,
+               'note': '323E003 shell liquid temperature (hold 74 C); packet key was TT_323003 until 2026-09-15'},
 }
 for k, v in EXTRA.items():
     B.setdefault(k, {}).update(v)

@@ -24,7 +24,7 @@ test('classifies every documented instrument service', () => {
   assert.strictEqual(dynamics.profile('AT-322701').deadTimeS, 600);
   assert.strictEqual(dynamics.profile('SIC-321950').service, 'speed/current');
   assert.strictEqual(dynamics.profile('HIC-322605').service, 'valve/hand station');
-  assert.strictEqual(dynamics.profile('FQI-321401').service, 'totalizer');
+  assert.strictEqual(dynamics.profile('FQT-321401').service, 'totalizer');
   assert.strictEqual(dynamics.profile('LOAD').service, 'generic');
 });
 

@@ -5956,7 +5956,7 @@ class State:
         self.tank_T_C        = 25.0
         self.tank_P_top_barG = 12.3
         self.F_in_BL_th      = 42.762   # t/h, BL NH3 makeup (seed; set live by LIC-321501 = pump draw)
-        self.totalizer_t     = 0.0       # FQI-321401: NH3 delivered this run; starts at zero every program init
+        self.totalizer_t     = 0.0       # FQT-321401: NH3 delivered this run; starts at zero every program init
         # Plant clock (s since program init), advanced by step_sim in lock-step with the
         # physics. Distinct from wall clock: FAST pacing advances this 60x faster than
         # real time, and the historian/trends are keyed to it so a "1 hour" trend always
@@ -7047,7 +7047,7 @@ def step_sim(dt: float) -> dict:
     dm_kg = (s.F_in_BL_th - F_pump_total_th) * 1000.0 / 3600.0 * dt
     V_new = clamp(s.tank_level_frac * TANK_VOL + dm_kg / NH3_RHO, 0.0, TANK_VOL)
     s.tank_level_frac = V_new / TANK_VOL
-    s.totalizer_t += F_pump_total_th * dt / 3600.0          # FQI-321401: delivered NH3
+    s.totalizer_t += F_pump_total_th * dt / 3600.0          # FQT-321401: delivered NH3
 
     # 321D003 NH3 feed-drum energy balance -> TT-321001/TT-321002.
     #   M*cp*dT/dt = F_BL_in*cp*(T_BL - T_tank)   (adiabatic drum, Q_env ~ 0)
@@ -10031,7 +10031,7 @@ def step_sim(dt: float) -> dict:
         },
         "LPCC_3232": {                           # Screen 323-2 : LP Carbamate Condenser train
             "E003": {                            # 323E003 LPCC + 323D001 carbamate separator (74°C)
-                "TT_323003":  round(s.r3232_e003_T, 1),                    # shell liquid temp (C, hold 74)
+                "TT_323006":  round(s.r3232_e003_T, 1),                    # shell liquid temp (C, hold 74)
                 "P_bara":     round(s.r3232_d001_P, 2),                    # 323D001 pressure (bar a)
                 "LI_323502":  round(s.r3232_d001_M / R3232_D001_M_FULL * 100.0, 1),
                 "in305_th":   round(m_305 / 1000.0, 2),                    # 323C003 vapour in (t/h)

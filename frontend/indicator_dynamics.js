@@ -36,7 +36,7 @@
     if (TURBULENT_LEVEL_TAGS.has(normalized)) return PROFILES.turbulentLevel;
     if (/^(AT|AI|AY)$/.test(prefix)) return PROFILES.analyzer;
     if (/^(TT|TI|TIC|TDY)$/.test(prefix)) return PROFILES.temperature;
-    if (/^(FQI)$/.test(prefix)) return PROFILES.totalizer;
+    if (/^(FQI|FQT)$/.test(prefix)) return PROFILES.totalizer;
     if (/^(FT|FI|FIC|FFIC|FY|FFY)$/.test(prefix)) return PROFILES.flow;
     if (/^(PT|PI|PIC|PY|IPY|PDY)$/.test(prefix)) return PROFILES.pressure;
     if (/^(LT|LI|LIC|LSL|LDY)$/.test(prefix)) return PROFILES.calmLevel;

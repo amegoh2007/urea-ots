@@ -420,7 +420,7 @@ document.getElementById('s-close').onclick = ()=> document.getElementById('strea
 // Map internal packet keys -> P&ID tag numbers. Loop/level/pressure tags are
 // real; tank-top, discharge, current/ratio/override tags are assigned for the OTS.
 const TAG_MAP = {
-  FI_321401:'FT-321401', totalizer:'FQI-321401',
+  FI_321401:'FT-321401', totalizer:'FQT-321401',
   TI_top1:'TT-321001', TI_top2:'TT-321002', PI_top1:'PI-321001', PI_top2:'PI-321002', PI_header:'PI-321003',
   PI_321201:'PT-321201', PI_321202:'PT-321202',
   PY_321201:'PY-321201', PY_321202:'PY-321202',

@@ -62,7 +62,7 @@
       { k: 'ft',   t: 'ind', x: 211,  y: 353, tag: 'FT-321401', bind: 'FI_321401',   u: 'T/H',   dec: 2 },
       { k: 'pt1',  t: 'ind', x: 582,  y: 373, tag: 'PT-321201', bind: 'PI_321201',   u: 'BAR G', dec: 1 },
       { k: 'pt2',  t: 'ind', x: 794,  y: 396, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
-      { k: 'fqi',  t: 'ind', x: 210,  y: 424, tag: 'FQI-321401' },   // Totalizer - backend binding TBD
+      { k: 'fqi',  t: 'ind', x: 210,  y: 424, tag: 'FQT-321401' },   // Totalizer - backend binding TBD
       // Feed-ratio panel rows A/B: the per-pump NH3/CO2 molar ratio.  Left-click opens that
       // pump's speed faceplate, which is where the N/C bias is editable (CAS only).
       { k: 'ffa',  t: 'ind', x: 159,  y: 547, tag: 'FFIC-321404A', bind: 'ratio.PV', u: 'N/C', dec: 3, fp: 'SIC_321950' },
@@ -316,7 +316,7 @@
       { k: 'fic328405', t: 'ind', x: 902, y: 357, tag: 'FIC-328405', bind: 'LPCC_3232.C005.FIC_328405.pv', u: 'M3/H', dec: 2, mode: 'LPCC_3232.C005.FIC_328405.mode', note: 'Ammonia-water stream 793, normally-closed spare off the 328D003 Comp-I discharge header, via FV-328405; loop PV/SP are VOLUMETRIC (PFD des 0 m3/h = 0 kg/h; full stroke 1.55 m3/h = 1534 kg/h at rho 992.4)' },
       { k: 'tic328002', t: 'ind', x: 661, y: 368, tag: 'TIC-328002', bind: 'DESORB_328.D001.TIC_328002.pv', u: 'C', dec: 1, mode: 'DESORB_328.D001.TIC_328002.mode', note: '328D001 reflux temp via TV-328002' },
       { k: 'lt323502', t: 'ind', x: 94, y: 400, tag: 'LT-323502', bind: 'LPCC_3232.E003.LI_323502', u: '%', dec: 1 },
-      { k: 'tt323006', t: 'ind', x: 290, y: 412, tag: 'TT-323006' },
+      { k: 'tt323006', t: 'ind', x: 290, y: 412, tag: 'TT-323006', bind: 'LPCC_3232.E003.TT_323006', u: 'C', dec: 1 },
       { k: 'ft328401', t: 'ind', x: 580, y: 494, tag: 'FT-328401', bind: 'DESORB_328.D001.flow776_m3h', u: 'M3/H', dec: 1, note: '328D001 bottoms draw (stream 776) via LV-328501, des 7.6 m3/h' },
       { k: 'lic323503', t: 'ind', x: 1014, y: 517, tag: 'LIC-323503', bind: 'LPCC_3232.C005.LIC_323503.pv', u: '%', dec: 1, mode: 'LPCC_3232.C005.LIC_323503.mode', note: 'holds 323C005 bottoms level via LV-323503 drain' },
       { k: 'tt323011', t: 'ind', x: 988, y: 553, tag: 'TT-323011', bind: 'LPCC_3232.E011.TT_323011', u: 'C', dec: 1 },
