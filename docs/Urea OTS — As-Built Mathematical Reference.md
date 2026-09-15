@@ -2265,12 +2265,15 @@ balances would double-count inertia.
 
 ## HMI Page Geometry and the Level Bargraph
 
-Screens 321-1, 322-1 and 322-2 are generated from the PowerPoint page drawings in
-`Urea Simulation Docs/Equipment Drawing/UI Pages`. Each background PNG is that slide with the
-overlay-supplied shapes deleted (indicator tag boxes, pump and XV icons, hand-switch buttons,
-level bargraphs) and exported at exactly 1366x720. Overlay coordinates are the deleted shapes'
-own centres, so an overlay always lands where its symbol was drawn. The slide canvas is
-12192000 x 6858000 EMU, giving
+All ten screens are generated from the PowerPoint page drawings in
+`Urea Simulation Docs/Equipment Drawing/UI Pages` - 321-1, 322-1 and 322-2 from the 2026-09-02
+revision, 324-1 and 324-1b from 2026-09-05, 323-2 and 329-1 from the first 2026-09-15 reissue,
+and 323-1, 328-1 and 328-2 from the second.  The two reissues together restored twenty
+previously undrawn indicators.
+Each background PNG is that slide with the overlay-supplied shapes deleted (indicator tag boxes,
+pump and XV icons, hand-switch buttons, level bargraphs, nav blocks) and exported at exactly
+1366x720. Overlay coordinates are the deleted shapes' own centres, so an overlay always lands
+where its symbol was drawn. The slide canvas is 12192000 x 6858000 EMU, giving
 
 ```text
 x_stage = (x_emu + cx_emu/2) * 1366 / 12192000
@@ -2281,25 +2284,33 @@ The 16:9 slide is stretched, not letterboxed, onto the 1366x720 stage (`backgrou
 which is why the two axes carry different scale factors. Nested group shapes are resolved through
 the group's `chOff`/`chExt` child-space transform before the mapping is applied.
 
-Icon overlays (pumps, XVs) also carry the slide's rotation. The slide is rendered rotate-then-
-stretch, so the overlay reproduces that order rather than rotating the already-stretched box:
-the image is drawn at its un-stretched size `(w/R, h)`, rotated, then scaled back in x by
+Icon overlays (pumps, XVs) also carry the slide's rotation and mirror. The slide is rendered
+mirror-then-rotate-then-stretch, so the overlay reproduces that order rather than rotating the
+already-stretched box: the image is drawn at its un-stretched size `(w/R, h)` and carries
+`scaleX(R) rotate(theta) scale(+-1, +-1)`, right-most first, with
 `R = (1366/12192000)/(720/6858000) = 1.06719`. For a 90-degree icon this yields an on-stage
-footprint of `cy*sx` by `cx*sy`, which is what PowerPoint exports; at 0 degrees it collapses to the
-plain `w` by `h` box. 322-2's XV-322901 is drawn at 90 degrees on the vertical leg and the two
-329P006 pumps at 180 degrees.
+footprint of `cy*sx` by `cx*sy`, which is what PowerPoint exports; at 0 degrees with no flip it
+collapses to the plain `w` by `h` box. 322-2's XV-322901 is drawn at 90 degrees on the vertical
+leg and the two 329P006 pumps at 180 degrees; 323-2 draws six pumps at 90 and two at 180, and
+328P006, 322P002 and 335P002 A/B are mirrored (`flipH`) rather than rotated.
 
-`t: 'bar'` renders the vertical level bargraph drawn on 322R001, 322E001 and 322E003. It is a pure
+`t: 'bar'` renders the vertical level bargraph the drawings slot into a vessel. It is a pure
 display of an already-published percentage - it introduces no state and no equation of its own:
 
 ```text
 h_fill / h_box = clamp(PV, 0, 100) / 100
 ```
 
-`PV` is the same packet leaf its paired numeric indicator reads (`REACT_322R001.LT_322504`,
-`STRIP_322E001.LIC_322501.pv`, `SCRUB_322E003.LT_329501`), so the bar and the number can never
-disagree, and both inherit the turbulent-level FOPDT constants tabulated above. An unresolved or
+`PV` is the same packet leaf its paired numeric indicator reads, so the bar and the number can
+never disagree, and both inherit the FOPDT constants tabulated above. An unresolved or
 non-numeric bind renders the empty white frame at zero fill rather than a misleading full bar.
+Twenty-two bargraphs are drawn across the ten screens: 322R001 (`LT-322504`), 322E001
+(`LIC-322501`), 322E003 (`LT-329501`), 323C003 (`LIC-323501`), 323F004 (`LIC-323505`), 323D002
+(`LT-323504`, `LIC-323507`), 323D001 (`LT-323502`), 323C005 (`LIC-323503`), 328D001
+(`LIC-328501`), 328C002/C003/C004 (`LIC-328503`, `LIC-328504`, `LIC-328505`), 322C001
+(`LIC-322502`), 328D003 compartments I and II (`LT-328507`, `LT-328508`), 324F003
+(`LIC-324501`), 324E001 (`LIC-329505`), 329D005/D009/322D001 (`LIC-329502`, `LIC-329503`,
+`LIC-329504`), and 335D004 (`LT-335507`, unbound - Unit 335 is not modelled).
 
 ## 329P006 A/B: CCW Circulation Availability
 

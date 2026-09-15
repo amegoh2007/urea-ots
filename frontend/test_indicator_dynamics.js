@@ -57,7 +57,16 @@ test('clears stale history when the simulation clock rewinds', () => {
 test('assigns positive dynamics to every overlay indicator tag', () => {
   const source = fs.readFileSync(path.join(__dirname, 'overlays.js'), 'utf8');
   const records = [...source.matchAll(/\{[^{}]*\bt:\s*'ind'[^{}]*\}/g)];
-  assert.ok(records.length >= 227, `found only ${records.length} indicator records`);
+  // Sanity floor only — the real assertion is the per-tag loop below. The count follows the
+  // equipment drawings, not the code: it read 227 when written, was already 221 before this
+  // change (the 2026-08 re-seed of 321-1/322-1/322-2 left it stale and red), and the 2026-09
+  // re-seed of the remaining seven screens took it to 191 because those slides draw fewer
+  // tags and type every PV/LV/FV/TV as 'avalve' rather than 'ind'. Raise it, never silently,
+  // whenever a drawing revision adds instruments back -- which 2026-09-15 did twice, reissuing
+  // 328-1 / 328-2 / 323-2 / 329-1 with sixteen forgotten indicators and then 323-1 / 328-1 /
+  // 328-2 with four more. It holds at 199 because the second pass added FV-328402 as an
+  // 'avalve' and the other three replaced existing boxes rather than adding new ones.
+  assert.ok(records.length >= 199, `found only ${records.length} indicator records`);
   for (const record of records) {
     const tag = record[0].match(/\btag:\s*'([^']+)'/);
     assert.ok(tag, `indicator record lacks tag: ${record[0]}`);

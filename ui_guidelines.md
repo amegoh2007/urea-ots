@@ -11,6 +11,8 @@
 ## 2. Coordinate Mapping
 Map native image `(px, py)` to stretched stage: `sx = px * 1366 / imgW`, `sy = py * 720 / imgH`. Store as `x,y`. Bump local storage key (e.g., `_v4`) if background changes to discard stale coords.
 
+**All ten screens are now seeded from the PowerPoint equipment drawings, not from screenshots** — the background PNG is the slide minus the shapes the overlay supplies, so `imgW,imgH` is always `1366,720` and a coordinate is the deleted shape's own centre. Slides are `12192000 × 6858000` EMU, so the mapping is anisotropic (`sx = 1366/12192000`, `sy = 720/6858000`, ratio `SLIDE_RX = 1.06719`); `sizeIcon()` undoes that squash for rotated/mirrored icons with `scaleX(SLIDE_RX) rotate(θ) scale(±1,±1)`. Procedure and scripts: `UI pages migration.md` + `tools/ui_migration/`. Do not hand-place a coordinate that the deck already gives you.
+
 ## 3. Element Types
 * **`ind` (Process Indicator):** Live value over baked value. Unbound = WHITE FRAME.
 * **`pump` (Dynamic Pump):** Clickable icon over symbol (ON=green, OFF=grey). Sends `pump_toggle{id}`.

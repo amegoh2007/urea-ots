@@ -849,67 +849,115 @@ Four are not, and are worth a look: `TT-328011`/`TT-328012`, `TT-323009`/`TT-323
 different points, both drawing the same modelled temperature. They will always read identically,
 so any scenario that should separate them cannot. That is a modelling gap, not an HMI choice.
 
-## 8. UI-page migration — open items on 321-1 / 322-1 / 322-2
+## 8. UI-page migration — open items
 
-The three screens are generated from `Urea Simulation Docs/Equipment Drawing/UI Pages/*.pptx`
-(background = the slide minus the overlay-supplied shapes; overlay coords, sizes and rotations =
-those shapes' own transforms). 322-1 and 322-2 were re-cut from the 2026-09-02 16:29/16:34 revision.
+All ten screens are now generated from `Urea Simulation Docs/Equipment Drawing/UI Pages/*.pptx`:
+the background is the slide minus the shapes the overlay supplies, and every overlay's position,
+size, rotation and mirror are that shape's own transform. 321-1 / 322-1 / 322-2 came off the
+2026-09-02 revision; 324-1 / 324-1b off the 2026-09-05 revision; 323-2 and 329-1 off the
+2026-09-15 15:43-16:10 reissue that restored sixteen forgotten indicators; 323-1, 328-1 and
+328-2 off the 2026-09-15 16:36-16:44 reissue that added four more. The procedure and the scripts
+that run it are in `UI pages migration.md`.
 
-**Closed since the first pass:** XV-322903 is now a real backend valve (§ As-Built); the CCW pumps
-carry the 329P006 A/B tags the updated slide prints, with A running and B standby; HIC-322203 is
-back on 322-1 as the slide-drawn HS-322203 button; every icon overlay now lands exactly on its
-symbol.
-
-**Pump clicks now open a faceplate, they do not command the machine.** Every pump symbol in the OTS
-— the 321P002 A/B button and icon on 321-1, and the 329P006 A/B overlays on 322-1 — opens one shared
-START/STOP faceplate. Exactly one button is live (START while stopped, STOP while running); the
-other is transparent, dim and carries a real `disabled` attribute, so the operator can never command
-the state the plant is already in. The buttons send an explicit
-`{"type":"pump_toggle","id":...,"on":true|false}`; `handle_cmd` reads a present `on` as START/STOP
-and an absent one as the legacy toggle, so every existing caller and probe is unchanged. A third
-line shows the interlock, mirroring exactly what a START will do (`CLEAR` / `TRIP 21.4 LATCHED
-(clears on START)` / `TRIP 21.4 ACTIVE`). Equations and the state table are in the As-Built under
-*Pump Faceplate*.
+**Closed since the last pass:** two 2026-09-15 drawing reissues put twenty previously undrawn
+indicators back, and every one recovered its original binding without being retyped --
+`harvest_binds.py` takes ordered sources, so the live `overlays.js` supplies current bindings and
+`git show HEAD:frontend/overlays.js` fills in tags an earlier revision had dropped. The 15:43-16:10
+pass restored sixteen (`PV-322201`, `FV-328404`, `FV-328406`, `FV-329401`, `FV-329402`,
+`LV-328504`, `LV-329502`, `TT-328004/5/6/9`, `TT-323005`, `TT-323015`, `AI-328701`, `FT-329407`,
+`LIC-328504`), fixed 328-1 shape 214 (it printed `LIC-328503` on the 328C003 leg) and retagged the
+duplicate `TT-328007` to `TT-328009`; the generator's `RETAG` table is empty again. The 16:36-16:44
+pass added `FIC-328402` + `FV-328402` (the 323E003 Comp-II wash draw, PFD stream 744), turned the
+`TIC-328013` white frame into a bound `TT-328013`, and gave 328-2 a `TT-323009`. It also retagged
+two 323-1 boxes: `TT-323004` -> `TT-323002` and `TT-323103` -> `TT-323008`, the latter needing one
+`EXTRA` row because `RECIRC_323.D002` publishes the same `s.r323_d002_T` under both `.T_C` and
+`.TI_323008`. `BOUND_TAG_FLOOR` is 203, the `t:'ind'` floor 199, the avalve floor 46 and the
+white-frame ceiling 17 -- all four guard again rather than sitting stale.
+`test_328d003_compartments.py` no longer pins an overlay key that the generator owns; icon
+overlays honour `flipH`/`flipV` as well as rotation. Measured in the live page after every
+reissue: **zero overlay-on-overlay collisions on all ten screens**, zero tag mismatches.
 
 Still open:
 
-- **The 322E003 sump does not drain after an XV-322903 excursion — CLOSED** in the Phase 2
-  remainder (report D-19). `ejector_322f001` computed `scrub_level_frac` and then did not apply it
-  (`m_suc = capacity  # no head multiplier`), so the sump was a pure integrator. Restored, along
-  with the `EJ_HYD_FRAC_MAX` throat-choke ceiling the same block comment specifies and which had
-  also never been applied. The worry recorded here — that it would change the design fixed point —
-  did not materialise: at design the head fraction is a literal 1.0, so the seed is bit-exact.
-  **What it DID do is break `test_3_scrubber_heat.py`, and that test was passing on the strength of
-  the defect.** Under the -30 % CCW throttle the old sump drained 50.0 -> 27.2 % and then sat at
-  26.7 % for ever with entrainment frozen at 53 368 kg/h; the corrected one troughs at 45.5 % and
-  recovers to 49.9 %. That dumped inventory was what powered the >= 0.15 bar PT-329201 relaxation
-  the test asserted. With the sump behaving, the CCW-attributable excursion is smaller -- correctly
-  -- and no longer clears the `_systest` harness's own dt = 2.0 s Euler walk (~+0.10 bar per 1000 s
-  at that point in the trajectory, and rising; section 9 below). The test now measures PT-329201
-  against a MATCHED NO-CUT CONTROL of identical length, so the walk cancels and the relaxation is
-  plainly visible: excess +0.400 bar at the end of the cut -> +0.300 bar after the relax window.
-  It also asserts the sump's trough-and-recovery, which is the new physics. 8/8 checks pass.
+- **One measurement is absent from the HMI: `TT-323003`** (`LPCC_3232.E003.TT_323003`, the
+  323D001 temperature). It was on the pre-migration 323-2 and no revision of that slide has
+  drawn it since. That is the whole remaining list -- down from 26 after the first re-seed.
 
-- **Six stream hotspots were dropped from 322-1**, because the new drawing does not show the lines
-  they sat on: `NH3_FEED`, `HP_DISCH`, `CARB_RECYCLE`, `HPCC_PROD` plus two with no identifiable
-  line. The eight that remain each sit on a line carrying a tag that proves its identity.
-  `HPCC_STEAM` (red, y 294) vs `HPCC_COND` (green, y 329) was resolved from `TT-329001`, which
-  `main.py` documents as the shell BFW/condensate feed temperature and which leads onto the green
-  line — worth a second pair of eyes.
+  Five other paths read as missing against the pre-migration table but are same-value twins of
+  something already on screen, so nothing is actually hidden:
+  `RECIRC_323.D002.T_C` (the old `TT-323103`; `TT-323008` binds `.TI_323008`, and both leaves
+  publish `round(s.r323_d002_T, 1)`), `STEAM_SYSTEM.LP.TI_sat` (`TT-329001` binds
+  `HPCC_322E002.TT_329001`, the same `T_shell_lp`), `EVAP_324.E003.LI_324F003` (`LT-324501`
+  binds `LIC_324501.pv`, and `_ctrl_ipd` is fed `lvl_f003` -- the identical percentage),
+  `DESORB_328.D001.FIC_328404.vol_m3h` (the raw unlagged twin of the `FIC-328404` `.pv` that
+  328-1 and 323-2 both show in m3/h) and `DESORB_328.C004.FFIC_329401.pv` (displayed as the
+  SP/MV readout pair on 328-1).
 
-- **The 322-1 compressor-speed widget does not sit on its marker.** The slide reserves a 63 x 54 box
-  centred (96.7, 421.5); the widget is 196 x 53 and at that origin its right edge lands on the
-  `AT-322701` indicator (187..266) and its bottom on the `AE-322801` chip (441..465). It is placed
-  at (6, 352) instead. Either widen the marker on the slide or narrow the widget.
+- **Seventeen slots are white frames** -- drawn on a slide, no packet path behind them. Fifteen
+  are the unmodelled Unit-335 finishing side: `FT`/`FY`/`FQ-335401`, `FT`/`FY`/`FQ-335405`,
+  `HIC`/`HV-335602`, `HIC-335609`, `HIC-335610`, `FIC-335405B`, `LT-335507` and its bargraph and
+  `FFY-335406` on 324-1b, plus `FIC-335407` / `FV-335407` on 323-1. The other two are tags the
+  drawings carry but the packet does not: `TT-323006` (323-2) and `FQI-321401` (321-1, a
+  totaliser with no backend accumulator).
 
-- **`BOUND_TAG_FLOOR` is still 217 against a live 210.** The full 212 -> 210 accounting is in the
-  header comment of `backend/test_trend_coverage.py`; every difference is a slide-driven tag rename,
-  nothing was lost. The floor is left untouched for the same reason as §6 — reconcile once, with
-  that test's other failures.
+- **`FFIC-329401`'s own faceplate is no longer reachable.** The 2026-09 slide replaced the ratio
+  controller box with a two-field `SP` / `MV` readout inside the DESORBER STEAM / FEED RATIO
+  panel, and a tag of `FFIC-329401 SP` would reach `handle_cmd` as an unknown controller and be
+  silently discarded, so both fields are read-only. The ratio setpoint therefore cannot be
+  changed from the HMI. `FIC-329401`'s faceplate still names FFIC-329401 as its master, which is
+  guidance, not a control path. Either the deck should keep a controller box, or the SP field
+  needs a bespoke faceplate route.
 
-Not a gap, but worth knowing: `ots_ov_pos` went v4 -> v5 and `ots_ov_tags` v3 -> v4, with a
-carry-over that keeps operator drag positions and tag edits for the seven screens this migration did
-not touch and drops them only for the three that moved (`carryOver()` in `overlays.js`).
+- **324-1b lost its four external-override pushbuttons** (`EXT-OVR LV-324501A`, `EXT-OVR
+  LV-324501B`, `TRIP_35_3`, `EXT-OVR HV-335602`): the 2026-09 slide draws no squares for them, so
+  they would have floated over empty background. The exclusive A/B discharge-route selector is
+  unaffected — it lives on the `LV-324501A` / `LV-324501B` overlays, which still carry
+  `route:'A'` / `route:'B'` and still drive `OTS_LV324501_ROUTE`.
+
+- **Eleven of the thirteen pump pairs have no backend state**, so their icons are display-only:
+  A is drawn running, B stopped (`def:false`), and a click does nothing. They are
+  `323P001`, `323P003`, `323P008`, `328P002`, `328P003`, `328P006`, `328P007`, `329P003`,
+  `322P002`, `335P001`, `335P002`. Only `321P002 A/B` and `329P006 A/B` are commandable. The
+  deck also never annotated the two 328-2 pumps (shape ids 119/120); they are recognised from
+  the identical picture and the labels beside them, via the generator's `ADD_PUMP` table.
+
+- **`img/pump-off.png` is dark green, not grey.** `ui_guidelines.md` §11 says OFF is grey; the
+  asset measures RGB 38/90/2 against ON's 83/192/2. At the 26 x 24 px the drawings use, a running
+  and a stopped pump are nearly indistinguishable. Replacing the asset would fix every screen at
+  once — nothing in the code needs to change.
+
+- **Three overlays on 323-2 are nudged off their slide centres**, because an `.ov.ind` is sized
+  by its value rather than by the label it replaces: `PIC-323203` (1189 -> 1183, it clipped the
+  323F004 nav block), `SIC-323901` (128,573 -> 120,578) and `SIC-323902` (261,574 -> 266,578),
+  both of which sat on the 323P001 A/B pump icons. The offsets and their reasons live in the
+  generator's `NUDGE` table so a re-seed cannot silently undo them.
+
+- **Six stream hotspots were dropped from 322-1**, because the 2026-08 drawing does not show the
+  lines they sat on: `NH3_FEED`, `HP_DISCH`, `CARB_RECYCLE`, `HPCC_PROD` plus two with no
+  identifiable line. The eight that remain each sit on a line carrying a tag that proves its
+  identity. `HPCC_STEAM` (red, y 294) vs `HPCC_COND` (green, y 329) was resolved from
+  `TT-329001` — worth a second pair of eyes. **No stream hotspots exist on the seven 2026-09
+  screens at all**: the deck gives no way to identify which drawn line is which stream, and
+  guessing would put a composition popup on the wrong pipe.
+
+- **The 322-1 compressor-speed widget does not sit on its marker.** The slide reserves a 63 x 54
+  box centred (96.7, 421.5); the widget is 196 x 53 and at that origin its right edge lands on
+  the `AT-322701` indicator (187..266) and its bottom on the `AE-322801` chip (441..465). It is
+  placed at (6, 352) instead. Either widen the marker on the slide or narrow the widget.
+
+- **322-1 and 322-2 carry overlay-on-overlay collisions that predate this pass** and were left
+  alone rather than changed without being asked. Four are permanent: on 322-1 the `LP STEAM` and
+  `BFW/COND` stream hotspots each overlap `STRIP TOP GAS` (14 x 14 px) and `STRIP BOTTOM SOLN`
+  overlaps the `323C003` nav block (31 x 16); on 322-2 the `OFF-GAS LP` hotspot overlaps the
+  `322C001` nav block (11 x 16). Those four steal clicks from each other. Two more come and go
+  with the plant state, because an `.ov.ind` is sized by its value: at some operating points
+  `LV-322501` grows into `PT-323201` (7 x 9) and the `AE-322802` chip (3 x 9). Measured 6 at one
+  sample and 4 at another, on the same build.
+
+Not a gap, but worth knowing: `ots_ov_pos` went v5 -> v6 and `ots_ov_tags` v4 -> v5. Element keys
+on the seven re-seeded screens are now derived from the DCS tag (`lt8508` -> `lt328508`), so their
+stored drag positions and tag edits are dropped; 321-1 / 322-1 / 322-2 keep theirs, via the same
+`carryOver()` rule the previous bump used.
 
 ## 9. 322E003 CCW-loss consequence chain — closed end to end
 

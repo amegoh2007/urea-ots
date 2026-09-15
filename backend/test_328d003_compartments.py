@@ -138,14 +138,16 @@ def test_open_loop_level_tags_follow_the_approved_compartment_assignments():
 
 def test_level_overlays_bind_to_the_approved_open_loop_tags():
     overlay = (PROJECT_ROOT / "frontend" / "overlays.js").read_text(encoding="utf-8")
-    lt_328508 = next(line for line in overlay.splitlines() if "k: 'lt8508'" in line)
-    lt_328507_lines = [line for line in overlay.splitlines() if "tag: 'LT-328507'" in line]
+    lines = overlay.splitlines()
+    # Match on the DCS tag, never on an overlay key or a trailing comment: keys are derived
+    # from the tag by the slide-migration generator and move whenever a screen is re-seeded
+    # (2026-09-09 turned 'lt8508' into 'lt328508' and added a bargraph carrying the same tag).
+    # What this test guards is the BINDING -- both compartments must read the open-loop tag,
+    # never the shared accumulation level LI_328III.
+    lt_508 = [l for l in lines if "tag: 'LT-328508'" in l]
+    lt_507 = [l for l in lines if "tag: 'LT-328507'" in l]
 
-    assert "bind: 'ABSORB_328.D003.LT_328508_open_loop'," in lt_328508
-    assert "LI_328III" not in lt_328508
-    assert lt_328508.rstrip().endswith("// compartment II")
-    assert len(lt_328507_lines) == 2
-    assert all(
-        "bind: 'ABSORB_328.D003.LT_328507_open_loop'" in line
-        for line in lt_328507_lines
-    )
+    assert lt_508 and lt_507, "the 328D003 compartment levels are not on any screen"
+    assert all("bind: 'ABSORB_328.D003.LT_328508_open_loop'" in l for l in lt_508), lt_508
+    assert all("bind: 'ABSORB_328.D003.LT_328507_open_loop'" in l for l in lt_507), lt_507
+    assert not any("LI_328III" in l for l in lt_508 + lt_507)

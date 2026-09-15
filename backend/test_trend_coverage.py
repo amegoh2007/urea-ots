@@ -30,7 +30,37 @@ FRONTEND = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "front
 #     HS-322203 hand-switch button instead, so CO2_FEED.HIC_322203 is back in the map under the
 #     HS-322203 tag (t:'btn' -> 210) and the forced-minimum faceplate is reachable from both that
 #     button and PV-322203 (face:'hic2').  Nothing is lost; only the tag name changed.
-BOUND_TAG_FLOOR = 217
+#
+# 2026-09-09, UI-page migration part 2 (the remaining seven screens re-seeded from the 2026-09
+# deck): 210 -> 184.  The floor had also been stale since 2026-09-02 -- it still read 217 while
+# the map held 210, so this test was already red.  Both are settled here.
+# The -26 is NOT a lost bind: it is the 2026-09 drawing revision carrying fewer tags than the
+# screenshots the old layout was traced from.  Six of them are pure retags whose value is still
+# on screen (LI-323504 -> LT-323504, AY-324701 -> PY-324701, PI-329207 -> PT-329207,
+# TT-329001 keeps HPCC_322E002.TT_329001 which is the same T_shell_lp as STEAM_SYSTEM.LP.TI_sat,
+# FFIC-329401 -> its SP/MV readout pair, LT-323507 -> LIC-323507).  The rest are genuinely no
+# longer drawn -- the eight FV-/LV-/PV- openings on 328-1/328-2/329-1, the 328C003/C004 tray
+# thermocouples, AI-328701, FIC-328402, LI-324F003, TT-323002/3/5/15 and TI-323008.  They are
+# listed in handoff.md; put them back the moment a drawing revision draws them again.
+#
+# 2026-09-15: two drawing revisions did exactly that.  The 15:43-16:10 reissue of 328-1, 328-2,
+# 323-2 and 329-1 restored sixteen forgotten indicators (184 -> 199): PV-322201, FV-328404,
+# FV-328406, FV-329401, FV-329402, LV-328504, LV-329502 (seven of the eight dropped valve
+# openings), TT-328004/5/6/9, TT-323005, TT-323015, AI-328701, FT-329407 and LIC-328504 -- the
+# last of which the same revision also fixed, so the generator's RETAG entry for 328-1 shape 214
+# is gone.  The 16:36-16:44 reissue of 323-1, 328-1 and 328-2 added four more (199 -> 203):
+# FIC-328402 and FV-328402 (the 323E003 Comp-II wash draw, PFD stream 744), TT-328013 (which
+# replaced the unbound TIC-328013 white frame) and TT-323009.  It also retagged two 323-1 boxes,
+# TT-323004 -> TT-323002 and TT-323103 -> TT-323008.
+#
+# ONE measurement is now absent from the HMI: LPCC_3232.E003.TT_323003 (TT-323003, the 323D001
+# temperature), which no revision of 323-2 has drawn.  Five other paths read as missing but are
+# same-value twins of something on screen: RECIRC_323.D002.T_C (TT-323008 binds .TI_323008, the
+# same s.r323_d002_T), STEAM_SYSTEM.LP.TI_sat (TT-329001 binds HPCC_322E002.TT_329001, the same
+# T_shell_lp), EVAP_324.E003.LI_324F003 (LT-324501 binds LIC_324501.pv, whose PV *is* lvl_f003),
+# DESORB_328.D001.FIC_328404.vol_m3h (the unlagged twin of the FIC-328404 .pv shown in m3/h) and
+# DESORB_328.C004.FFIC_329401.pv (displayed as the SP/MV readout pair on 328-1).
+BOUND_TAG_FLOOR = 203
 
 
 def parse_ov():
@@ -99,7 +129,15 @@ def test_valve_openings_are_trendable():
     avalves = [e for e in ENTRIES if e["t"] == "avalve"]
     assert avalves, "no avalve elements found"
     bound = [e for e in avalves if e["bind"] or e["tag"] in BINDS]
-    assert len(bound) >= 40, f"only {len(bound)} of {len(avalves)} valve openings are trendable"
+    # 2026-09-09: how many avalve elements exist is set by how many valves the equipment
+    # drawings draw (47 -> 39 when the seven remaining screens were re-seeded), so an absolute
+    # floor tracks the deck rather than the code.  What must hold is that every valve whose
+    # unit the backend models is trendable; the only openings allowed to be blank are the
+    # Unit-335 finishing valves on 324-1b, which have no model behind them.
+    blank = sorted(e["tag"] for e in avalves if not (e["bind"] or e["tag"] in BINDS))
+    assert all(t.split("-")[-1].startswith("335") for t in blank), \
+        f"modelled valve openings with no bind: {blank}"
+    assert len(bound) >= 46, f"only {len(bound)} of {len(avalves)} valve openings are trendable"
     for e in bound:
         path = e["bind"] or BINDS[e["tag"]]
         assert path in FLAT, f"valve opening {e['tag']} does not resolve ({path})"
@@ -118,8 +156,11 @@ def test_unbound_slots_are_the_known_white_frame_set():
     """White frames are unmodelled units, not trend defects. Flag any NEW ones."""
     unbound = sorted({e["tag"] for e in ENTRIES
                       if e["t"] in ("ind", "avalve") and not e["bind"] and e["tag"] not in BINDS})
-    assert len(unbound) <= 31, \
-        f"{len(unbound)} unbound indicator slots, was 31 — a bind was dropped: {unbound}"
+    # 2026-09-15: 19 after the slide re-seeds — 16 are the Unit-335 finishing side on 324-1b
+    # plus FIC-335407/FV-335407 on 323-1, which have no model behind them, and TT-323006,
+    # TIC-328013, FIC-328401 and FQI-321401, which the drawings carry but the packet does not.
+    assert len(unbound) <= 19, \
+        f"{len(unbound)} unbound indicator slots, was 19 — a bind was dropped: {unbound}"
 
 
 def test_packet_exposes_both_clocks_for_the_trend_axis():
