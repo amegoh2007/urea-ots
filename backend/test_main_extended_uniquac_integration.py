@@ -47,12 +47,29 @@ def test_legacy_fahmy_thermodynamic_path_is_retired() -> None:
     assert not hasattr(main, "_fahmy_Cu")
 
 
-def test_steam_chest_tracks_the_connected_live_header() -> None:
-    low_header = main.steam_chest_pressure(50.0, 4.0)
-    high_header = main.steam_chest_pressure(50.0, 8.0)
+def _e002_chest(op_pct: float, header_bara: float, t_process_c: float) -> float:
+    return main.steam_chest_pressure(
+        op_pct, header_bara, main.R323_E002_OP_DES, main.R323_E002_PCHEST_DES,
+        main.R323_E002_UA_KW, t_process_c, main.R323_E002_Q_DES_KW, main.R323_P_STEAM_SUP)
 
-    assert low_header == pytest.approx(2.0)
-    assert high_header == pytest.approx(4.0)
+
+def test_steam_chest_is_steam_admitted_equals_steam_condensed() -> None:
+    """Report A-5: the chest is no longer opening x header; it is where valve inflow meets wall duty."""
+    design = _e002_chest(main.R323_E002_OP_DES, main.R323_P_STEAM_SUP, main.R323_C003_T_SP_C)
+    assert design == pytest.approx(main.R323_E002_PCHEST_DES, abs=1e-8)
+
+    # A richer header at the same opening lifts the chest, but never to the header itself.
+    rich = _e002_chest(main.R323_E002_OP_DES, main.R323_P_STEAM_SUP + 1.0, main.R323_C003_T_SP_C)
+    assert main.R323_E002_PCHEST_DES < rich < main.R323_P_STEAM_SUP + 1.0
+
+    # A hotter process takes less steam, so the chest pressure RISES -- the old law could not move.
+    hot = _e002_chest(main.R323_E002_OP_DES, main.R323_P_STEAM_SUP, main.R323_C003_T_SP_C + 3.0)
+    assert hot > design
+
+
+def test_shut_steam_valve_leaves_the_chest_at_process_saturation() -> None:
+    shut = _e002_chest(0.0, main.R323_P_STEAM_SUP, main.R323_C003_T_SP_C)
+    assert main.tsat_steam(shut) == pytest.approx(main.R323_C003_T_SP_C, abs=1e-6)
 
 
 def test_f010_gravity_outlet_has_independent_holdup_response() -> None:

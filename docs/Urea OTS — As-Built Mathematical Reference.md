@@ -1804,6 +1804,103 @@ and a `vapour_collapse` term carrying bar/h-per-K gains on the live header satur
 That work was reverted at 2ce4869 and is not in the build; residual 1 above is the same defect it
 diagnosed, closed here without the extra gains.
 
+### Where `R_des` actually comes from (heuristic re-audit, 2026-09-15)
+
+`R_des` is not itself a mass source. It is the loop-level **mirror** of one. Against the PFD rows the
+boundary pins decompose exactly:
+
+| Term | Pin (kg/h) | PFD (kg/h) | Δ |
+|---|---|---|---|
+| Motive NH3 | 42 762.05 | 40 756 | +2 006.05 |
+| CO2 feed | 54 618.0 | 54 618 | 0 |
+| m308 | 36 835.15 | 36 915 | −79.85 |
+| LV-322501 bottoms | 130 482.0 | 130 582 | −100.0 |
+| HV-322604 vent | 5 901.4 | 1 708 | +4 193.4 |
+| in − out | −2 168.2 | −1 | |
+
+At steady state the loop's internal units must therefore **create** 2 168.2 kg/h. The creation site
+is the reactor recycle tear, applied as `fc_i = feed_i − REACT_TEAR_DES_i · s` inside `react_322r001`.
+Multiplied through by molar mass, the boot-pinned tear gives +2 085.7 kg/h, 96.2 % of the residual:
+
+```text
+CO2 +2416.3   Urea +283.9   H2O +122.5   CH4 +61.9   H2 +4.1   O2 +0.8
+NH3  -795.9   N2   -7.9                                         sum +2085.7 kg/h
+```
+
+The CH4 and H2 it creates (3.86 and 2.02 kmol/h) equal the reconciled vent vector's CH4 and H2 to the
+last digit, and no feed carries either species. The remaining 82.5 kg/h has not been located.
+
+**Deleting `R_des` alone is wrong, and was measured.** With the credit removed and nothing else
+changed, a fresh design seed at `STEP_CAP` gives PT-329201 = 140.700 → 139.477 bar a after 2 750 s.
+That is −1.45 bar/h, which is `R_des/C_loop` exactly, and the reactor and HPCC levels bleed with it.
+The credit stays until the 322E003 vent is re-reconciled on its PFD row and the re-pin drives
+`REACT_TEAR_DES` to zero.
+
+### Loop-fill multiplier removed (report A-3)
+
+The reactor, stripper-sump and HPCC holdups integrated `k_loop_fill·(in − out)` with
+`k_loop_fill = 0.06 + 0.94·m_loop_frac^8`, a gate Smith-fitted so that the cold-start
+pressurisation τ landed inside the DCS FOPTD band. At `k = 0.06` it deleted 94 % of every net inflow.
+Each holdup now integrates its actual net flow:
+
+```text
+dM_react/dt = m_in − m_out + m_fwd        dL_strip/dt ∝ m_bot,delayed − m_drain        dL_hpcc/dt ∝ φ_in − φ_out
+```
+
+At design `m_loop_frac = 1` gave `k = 1` exactly, so the design seed does not move. The 3 000 s hold
+reads 140.479560 bar a, against HEAD's 140.479578. PT-329201 itself was never multiplied by `k`: it
+integrates the lumped boundary balance above, so the cold-start pressure response is governed by
+`C_loop` and the feed ramp (report A-1), not by the holdup fill rate.
+
+### Steam-chest pressure solved, not assigned (report A-5)
+
+The four condensing-steam chests (323E002, 323E010, 324E001, 324E003) used
+`P_chest = (op/100)·P_header`. The chest is now the pressure at which the steam the valve admits equals
+the steam the tube wall condenses:
+
+```text
+R(P) = Q_des · [Phi_gas(h, P_hdr, P, Tsat(P_hdr)) / Phi_gas(h_des, P_hdr,des, P_des, Tsat(P_hdr,des))]
+             · lambda(P)/lambda(P_des)  −  UA·(Tsat(P) − T_process) = 0
+
+Phi_gas = P1 · Y · sqrt(x·M/(T1·Z)),  x = min(dP/P1, F_gamma·x_T),  Y = 1 − x/(3·F_gamma·x_T)
+```
+
+The valve law is ISA-75.01 compressible with a linear trim, anchored on the DDS chest pressure and
+design duty. λ comes from IAPWS-IF97.
+
+`R` is written without a floor, so it decreases strictly in P and the root is unique. A shut valve
+puts the chest on the process saturation pressure (`Q = 0`, replacing the old AUDIT F-10 floor
+physically). A process hotter than the header's saturation drives the chest to the header. The
+solver is a bracketed Newton from the previous tick's chest; at an unchanged operating point the
+first residual is zero and the stored value returns unchanged.
+
+**Quasi-steady, and why.** The chest holds about V·ρ_g ≈ 10 m³ × 2.2 kg/m³ against about 2.8 kg/s,
+a few seconds of residence, while the melts it heats have 100–400 s. The shell volumes that would
+size a dynamic state are not legible: the four exchanger datasheets in `References/Datasheets` are
+image-only scans (0 fonts, 15 images each). The V → 0 limit needs no volume, and it is the correct
+limit at this separation of time scales.
+
+**The PICs now read their own chest.** Previously PIC-329202/208/203/212 read `op·P_hdr/100`, a PV
+computed from their own output. Against the physical chest the plant gain is much smaller, because
+the wall condenses more as the pressure rises:
+
+```text
+dP/d(op) = −(∂R/∂op)/(∂R/∂P)
+Kc_new = Kc_old · (P_hdr,des/100) / (dP/d(op))_des        (IMC: Kc ∝ 1/K_p)
+```
+
+The scale factor is computed at import from the closure itself: 5.87 (PIC-329202), 1.86 (329208),
+4.23 (329203), 5.46 (329212). This keeps each slave's loop gain Kc·K_p, and so its speed against its
+TIC master, exactly where it was tuned.
+
+**Measured.** Design hold over 3 000 s: identical to HEAD within 1.8e-5 bar on PT-329201 and 0.01 °C
+on every stage temperature. On a step of all four TIC masters (+2/+2/+1/+1 °C), neither tree
+oscillates, the settled temperatures agree within 0.03 °C, and 324E001 overshoots less (131.07 °C
+against 131.21). The physical chests need more stroke for the same chest pressure: PV-329202 settles
+at 87.0 % against 83.5 %, and PV-329212 peaks at 99.7 % against 92 %. That is a real finding. With
+324E003's design stroke at 90 %, the loop has almost no authority above design duty.
+`test_equation_audit_323_324::test_design_fixed_point_holds` goes from failing on HEAD to passing.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

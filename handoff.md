@@ -1,8 +1,44 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-05 (Phase 5 / G-VLE-3: mole-fraction activity grid, inert thermodynamics, 322 HP-loop wiring)
+**Last updated:** 2026-09-15 (heuristic re-audit: report ledger corrected; A-3 and A-5 closed; A-2 traced and kept)
 
 ---
+
+## 0. Heuristic Eradication Report — open after the 2026-09-15 re-audit
+
+`docs/analysis/HEURISTIC_ERADICATION_REPORT.md` §0a is now the authoritative per-finding status:
+19 closed, 10 partial, 2 blocked, 2 reclassified, 40 open. The original body still carries
+pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical copy sits in
+`References/Gaps Closure/`.
+
+* **A-2: do NOT delete `SYN_LOOP_RESID_DES_KGH` on its own.** A previous session did. Measured:
+  PT-329201 140.700 → 139.477 bar a in 2 750 s (−1.45 bar/h = R_des/C_loop). The credit mirrors
+  `REACT_TEAR_DES`, applied as `fc = feed − tear·s` in `react_322r001`, which injects +2 085.7 kg/h;
+  that is 96.2 % of the −2 168.2 kg/h. Its CH4/H2 are exactly the vent vector's, and no feed carries
+  them. The remaining 82.5 kg/h is unlocated. Closure order: re-reconcile the 322E003 vent on its PFD
+  row (1 708 kg/h, not 5 901.4), re-pin until the tear is ≡ 0, then delete the credit.
+* **A-5 leaves a real authority finding.** PV-329212 peaks at 99.7 % on a +1 °C TIC-324002 step
+  (HEAD: 92 %). With a physical chest, 324E003's 90 % design stroke has almost no headroom. Check
+  against the DCS before tuning around it. A dynamic chest inventory is blocked: the four exchanger
+  datasheets are image-only scans with no legible shell volume.
+* **`_sm_flowsheet` is built twice** (`main.py` two identical blocks), and only `_valve_unit.solve()`
+  is ever stepped. `core/mp.py` (never imported) still calls the retired two-argument
+  `steam_chest_pressure`.
+* **Dead code the ledger found:** `T_conv_c` (`react_322r001` never reads `T_overflow_c`),
+  `SYN_P_DEFICIT_GAIN` / `SYN_P_VENT_GAIN`, `R323_F010_P_KP` / `R328_C002_P_KP` / `R328_C004_P_KP`.
+  All have no reader.
+* **Regression, measured against HEAD in a side worktree.**
+  `test_equation_audit_323_324.py`: HEAD 3 failed, this tree 2 failed
+  (`test_design_fixed_point_holds` now passes). `test_equation_audit_td014.py`: 3 failed / 8 passed
+  on BOTH trees, same names, so the recorded 4/7 was stale. Its PIC-329202 walk grows −0.035 → −0.185 %,
+  but that is the ×5.87 slave Kc: in chest pressure both are ≈0.0017 bar. The harness also runs at
+  DT = 1.0 s, above STEP_CAP. `test_transient_coldstart.py`: 3 failed / 2 passed on both trees. With
+  A-3 removed, τ moves 504.7 → 2 318 s (band 2 884–4 055). P_f is ~30 barg on both, so the loop never
+  pressurises from cold, and that predates this work. Unchanged green: hydraulics 56, c003 coupling
+  20, startup 5, reactor 14, kinetics 10, stripper 4, foptd 3, trend 9, totalizer 5.
+* **Python on this machine** now lives at `%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe`
+  (PyManager, 3.14.7) with the requirements and pytest installed. Bare `python` on PATH may still
+  resolve to the Store stub.
 
 ## 1. Documentation reconciliation — `project.md` §5.1 — partially closed
 
@@ -879,9 +915,10 @@ reissue: **zero overlay-on-overlay collisions on all ten screens**, zero tag mis
 
 Still open:
 
-- **One measurement is absent from the HMI: `TT-323003`** (`LPCC_3232.E003.TT_323003`, the
-  323D001 temperature). It was on the pre-migration 323-2 and no revision of that slide has
-  drawn it since. That is the whole remaining list -- down from 26 after the first re-seed.
+- **No measurement is absent from the HMI.** The last one was the 323E003 shell-liquid
+  temperature: the packet published it as `LPCC_3232.E003.TT_323003` while 323-2 labels the
+  instrument `TT-323006`. The key is now `TT_323006` and the 323-2 box is bound, so it is no
+  longer a white frame either. Down from 26 after the first re-seed.
 
   Five other paths read as missing against the pre-migration table but are same-value twins of
   something already on screen, so nothing is actually hidden:
@@ -893,12 +930,13 @@ Still open:
   328-1 and 323-2 both show in m3/h) and `DESORB_328.C004.FFIC_329401.pv` (displayed as the
   SP/MV readout pair on 328-1).
 
-- **Seventeen slots are white frames** -- drawn on a slide, no packet path behind them. Fifteen
+- **Sixteen slots are white frames** -- drawn on a slide, nothing bound behind them. Fifteen
   are the unmodelled Unit-335 finishing side: `FT`/`FY`/`FQ-335401`, `FT`/`FY`/`FQ-335405`,
   `HIC`/`HV-335602`, `HIC-335609`, `HIC-335610`, `FIC-335405B`, `LT-335507` and its bargraph and
-  `FFY-335406` on 324-1b, plus `FIC-335407` / `FV-335407` on 323-1. The other two are tags the
-  drawings carry but the packet does not: `TT-323006` (323-2) and `FQI-321401` (321-1, a
-  totaliser with no backend accumulator).
+  `FFY-335406` on 324-1b, plus `FIC-335407` / `FV-335407` on 323-1. The sixteenth, `FQT-321401`
+  on 321-1 (retagged from `FQI-321401`), is not unmodelled at all: the packet already publishes
+  the running NH3 total as top-level `totalizer` (`s.totalizer_t`, t). The overlay was simply
+  never given `bind: 'totalizer'`.
 
 - **`FFIC-329401`'s own faceplate is no longer reachable.** The 2026-09 slide replaced the ratio
   controller box with a two-field `SP` / `MV` readout inside the DESORBER STEAM / FEED RATIO

@@ -3326,14 +3326,96 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
-def steam_chest_pressure(valve_open_pct: float, header_pressure_bara: float) -> float:
-    """Valve-position chest pressure driven by the connected live header."""
+STEAM_CHEST_P_MIN_BARA = 0.02      # bar a, lower bracket of the chest solve (tsat 17.5 C)
 
-    return clamp(
-        valve_open_pct / 100.0 * header_pressure_bara,
-        0.02,
-        header_pressure_bara,
-    )
+
+def _steam_chest_residual_kw(p_chest: float, valve_open_pct: float, p_hdr: float, op_des: float,
+                             p_chest_des: float, p_hdr_des: float, UA_kw: float, T_process: float,
+                             Q_des_kw: float) -> float:
+    """Latent heat the steam valve admits minus the heat the tube wall takes, kW, at a trial P_chest.
+
+        m_valve = m_des . Phi_gas(h, P_hdr, P_chest, Tsat(P_hdr)) / Phi_gas(design)      (ISA-75.01)
+        R(P)    = m_valve . lambda(P) - UA . (Tsat(P) - T_process)
+
+    Written UNFLOORED so it is strictly decreasing in P (the valve passes less, the wall condenses
+    more), which makes the root unique: a shut valve lands the chest on the process saturation
+    pressure (Q = 0), a process hotter than the header's saturation drives it to the header."""
+    m_ratio = hydraulics.valve_gas_anchored(
+        1.0, valve_open_pct / 100.0, p_hdr, p_chest, tsat_steam(p_hdr) + 273.15,
+        op_des / 100.0, p_hdr_des, p_chest_des, tsat_steam(p_hdr_des) + 273.15,
+        steam_system.STEAM_MW, gamma=steam_system.STEAM_GAMMA, characteristic="linear")
+    ts = tsat_steam(p_chest)
+    lam_ratio = iapws_if97.hvap_kjkg(ts) / iapws_if97.hvap_kjkg(tsat_steam(p_chest_des))
+    return Q_des_kw * m_ratio * lam_ratio - UA_kw * (ts - T_process)
+
+
+def steam_chest_pressure(valve_open_pct: float, header_pressure_bara: float, op_des: float,
+                         p_chest_des: float, UA_kw: float, T_process: float, Q_des_kw: float,
+                         header_pressure_des_bara: float, p_prev: float = None) -> float:
+    """Condensing-steam chest pressure (bar a) from steam admitted = steam condensed (report A-5).
+
+    Was `clamp(opening/100 * P_header)`: a 50 % open valve halved the chest pressure whatever the
+    tube wall was doing, so the chest could not rise when the process got hotter, and every PIC on
+    these chests controlled a number it had computed from its own output.
+
+    QUASI-STEADY by construction.  The chest vapour inventory is V.rho_g ~ 10 m3 x 2.2 kg/m3 against
+    ~2.8 kg/s through the valve, a few seconds of residence; the shell volumes that would size a
+    dynamic state are not legible in `References/Datasheets` (the four exchanger PDFs are image-only
+    scans).  The inventory limit V -> 0 needs no volume and is the right limit while the chest is
+    this much faster than the melt it heats.
+
+    Bracketed Newton from the previous tick's chest pressure; at an unchanged operating point the
+    first residual is already zero and the previous value is returned unchanged."""
+    p_lo = STEAM_CHEST_P_MIN_BARA
+    p_hi = max(header_pressure_bara, p_lo)
+    args = (valve_open_pct, header_pressure_bara, op_des, p_chest_des, header_pressure_des_bara,
+            UA_kw, T_process, Q_des_kw)
+    tol_kw = 1.0e-9 * max(Q_des_kw, 1.0)
+    lo, hi = p_lo, p_hi
+    p = clamp(p_chest_des if p_prev is None else p_prev, p_lo, p_hi)
+    for _ in range(60):
+        r = _steam_chest_residual_kw(p, *args)
+        if abs(r) <= tol_kw:
+            return p
+        if r > 0.0:
+            lo = p            # admitting more than the wall takes: the root is at a higher pressure
+        else:
+            hi = p
+        if hi - lo <= 1.0e-12:
+            return p
+        h = max(1.0e-7, 1.0e-7 * p)
+        p2 = p - h if p - h > p_lo else p + h
+        slope = (_steam_chest_residual_kw(p2, *args) - r) / (p2 - p)
+        p_new = p - r / slope if slope < 0.0 else 0.5 * (lo + hi)
+        p = p_new if lo < p_new < hi else 0.5 * (lo + hi)
+    return p
+
+
+def _chest_slave_kc_scale(op_des: float, p_chest_des: float, UA_kw: float, T_des: float,
+                          Q_des_kw: float, p_hdr_des: float) -> float:
+    """Kc multiplier that keeps a chest PIC's design closed-loop speed now that its PV is physical.
+
+    The PICs were tuned against PV = op/100 . P_hdr, a plant gain of P_hdr/100 bar per %.  The real
+    chest moves by dP/d(op) = -(dR/d op)/(dR/dP), roughly a fifth of that because the wall condenses
+    more as the chest pressure rises.  Scaling Kc by the gain ratio (IMC: Kc ~ 1/K_p) leaves the loop
+    gain Kc.K_p -- and so the slave's speed against its TIC master -- where it was tuned."""
+    dop = 0.5
+    p_up = steam_chest_pressure(op_des + dop, p_hdr_des, op_des, p_chest_des, UA_kw, T_des, Q_des_kw,
+                                p_hdr_des)
+    p_dn = steam_chest_pressure(op_des - dop, p_hdr_des, op_des, p_chest_des, UA_kw, T_des, Q_des_kw,
+                                p_hdr_des)
+    return (p_hdr_des / 100.0) / ((p_up - p_dn) / (2.0 * dop))
+
+
+PIC_329202_KC_SCALE = _chest_slave_kc_scale(R323_E002_OP_DES, R323_E002_PCHEST_DES, R323_E002_UA_KW,
+                                            R323_C003_T_SP_C, R323_E002_Q_DES_KW, R323_P_STEAM_SUP)
+PIC_329208_KC_SCALE = _chest_slave_kc_scale(R323_E010_OP_DES, R323_E010_PCHEST_DES, R323_E010_UA_KW,
+                                            R323_F010_T_SP_C, R323_E010_Q_DES_KW, R323_P_STEAM_SUP)
+PIC_329203_KC_SCALE = _chest_slave_kc_scale(R324_E001_OP_DES, R324_E001_PCHEST_DES, R324_E001_UA_KW,
+                                            R324_E001_T_SP_C, R324_E001_Q_DES_KW, R323_P_STEAM_SUP)
+PIC_329212_KC_SCALE = _chest_slave_kc_scale(R324_E003_OP_DES, R324_E003_PCHEST_DES, R324_E003_UA_KW,
+                                            R324_E003_T_SP_C, R324_E003_Q_DES_KW,
+                                            steam_system.P_MP_BARA)
 
 
 def gravity_outflow_323f010(holdup_kg: float) -> float:
@@ -4615,7 +4697,7 @@ SYN_LOOP_OUT_DES_KGH   = STRIP_BOT_DES_KGH + SCRUB_OFFGAS_KGH_DES               
 SYN_LOOP_RESID_DES_KGH = SYN_LOOP_IN_DES_KGH - SYN_LOOP_OUT_DES_KGH                 #  -2168.1 kg/h
 SYN_LOOP_C_KG_PER_BAR  = 1500.0  # kg/bar, lumped HP-loop mass capacity (reactor + stripper + HPCC +
 #   scrubber vapour space and dissolved-gas compressibility); sets the emergent cold-start
-#   pressurisation rate together with k_loop_fill.
+#   pressurisation rate (report A-1: still a lumped constant, not a vapour-space EOS).
 SCRUB_Q_CCW_DES_KW   = SCRUB_CCW_KGH_DES * SCRUB_CCW_CP * (SCRUB_CCW_T_OUT_DES - SCRUB_CCW_T_IN_DES) / 3600.0  # ≈5329 kW
 # 322E003 shell-side effective conductance (ε-NTU). Back-calibrated so the design
 # carbamate-condensation duty pins BOTH the design overflow temp and CCW outlet EXACTLY:
@@ -6203,7 +6285,7 @@ class State:
         self.PIC_329202 = {"mode": "CAS", "op": R323_E002_OP_DES,
                            "sp": R323_E002_PCHEST_DES, "pv": R323_E002_PCHEST_DES,
                            "pv1": R323_E002_PCHEST_DES, "pv2": R323_E002_PCHEST_DES,
-                           "Kc": 0.65, "Ti": 30.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.65 * PIC_329202_KC_SCALE, "Ti": 30.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": R323_P_STEAM_SUP}
         # -- Stage 1/2 level loops -> LV-323501 / LV-323505 (DIRECT: level above SP -> drain more).
         self.LIC_323501 = {"mode": "AUTO", "op": R323_LV501_OP_DES,
@@ -6225,7 +6307,7 @@ class State:
         self.PIC_329208 = {"mode": "CAS", "op": R323_E010_OP_DES,
                            "sp": R323_E010_PCHEST_DES, "pv": R323_E010_PCHEST_DES,
                            "pv1": R323_E010_PCHEST_DES, "pv2": R323_E010_PCHEST_DES,
-                           "Kc": 0.2, "Ti": 60.0, "Td": 0.0, "act": +1.0,
+                           "Kc": 0.2 * PIC_329208_KC_SCALE, "Ti": 60.0, "Td": 0.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0, "sp_lo": 0.0, "sp_hi": R323_P_STEAM_SUP}
         # -- Stage 4 cascade: LIC-323507 (tank Comp I level, DIRECT) -> FIC-324401 -> FV-324401 (to 324).
         #    LIC-323507 faceplate missing: Ti = hydraulic settling time V_I/Q = 80/(92.75/1.3) ~ 4030 s.
@@ -6282,7 +6364,7 @@ class State:
         self.PIC_329203 = {"mode": "CAS", "op": R324_E001_OP_DES,
                            "sp": R324_E001_PCHEST_DES, "pv": R324_E001_PCHEST_DES,
                            "pv1": R324_E001_PCHEST_DES, "pv2": R324_E001_PCHEST_DES,
-                           "Kc": 0.3, "Ti": 75.0, "Td": -1.0, "act": +1.0,
+                           "Kc": 0.3 * PIC_329203_KC_SCALE, "Ti": 75.0, "Td": -1.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0,
                            "sp_lo": 0.0, "sp_hi": R323_P_STEAM_SUP}
         # ---- Stage 2 steam : TIC-324002 (140 C) -> PIC-329212 (steam chest) ----
@@ -6296,9 +6378,15 @@ class State:
         self.PIC_329212 = {"mode": "CAS", "op": R324_E003_OP_DES,
                            "sp": R324_E003_PCHEST_DES, "pv": R324_E003_PCHEST_DES,
                            "pv1": R324_E003_PCHEST_DES, "pv2": R324_E003_PCHEST_DES,
-                           "Kc": 0.65, "Ti": 130.0, "Td": -1.0, "act": +1.0,
+                           "Kc": 0.65 * PIC_329212_KC_SCALE, "Ti": 130.0, "Td": -1.0, "act": +1.0,
                            "op_lo": 0.0, "op_hi": 100.0,
                            "sp_lo": 0.0, "sp_hi": steam_system.P_MP_BARA}
+        # Report A-5: the four condensing-steam chests are solved states (steam admitted == steam
+        # condensed), seeded on their DDS design pressures; each PIC above reads its own chest.
+        self.r323_e002_chest_P = R323_E002_PCHEST_DES
+        self.r323_e010_chest_P = R323_E010_PCHEST_DES
+        self.r324_e001_chest_P = R324_E001_PCHEST_DES
+        self.r324_e003_chest_P = R324_E003_PCHEST_DES
         # ---- Vacuum : PIC-324202 (324F001) / PIC-324203 (324F003) false air ----
         #      REVERSE acting: pressure below SP -> admit more false air (op up).
         self.PIC_324202 = {"mode": "AUTO", "op": R324_PV202_OP_DES,
@@ -7207,24 +7295,12 @@ def step_sim(dt: float) -> dict:
     f_drain = _f_flow(strip["T_bot"], 132.7)
     drain_kgh *= f_drain
     s.flags["STRIPPER_SOLIDIFICATION"] = (f_drain < 1.0)
-    # --- cold-start HP-loop fill-rate scaling (SS-NEUTRAL).  Field PT-329201 pressurises over ~58 min
-    #   (06-03 Section 1.2 FOPTD, tau=3469.5 s); the model's native mass-balance fills the three HP
-    #   holdups in ~10 min, so the emergent tau under-shoots the Section 6.4 band.  Per the report's
-    #   Section 6.1 mandate (tau must EMERGE from the physical inventory, never a fudge lag on the
-    #   pressure state) we slow the loop-fill itself: scale each HP holdup's NET accumulation by
-    #   k_loop_fill, tied to the aggregate loop-mass fraction so it -> 1.0 as the loop fills.  At/near
-    #   design m_loop_frac == 1 -> k_loop_fill == 1 (fill untouched) AND every net rate == 0 (in==out),
-    #   so the steady-state hold and the warm-start audits stay bit-exact regardless of the scaling.
-    _mf_prev    = clamp((s.react_level_pct + s.hpcc_level_pct + s.strip_level)
-                        / (REACT_LEVEL_NLL_PCT + HPCC_LEVEL_NLL_PCT + STRIP_LEVEL_SP_DES), 0.0, 1.0)
-    #   _fc / _fe calibrated so the emergent cold-start pressurisation tau (model-free Smith 63.2%
-    #   two-point ID in tests/coldstart_probe.py) lands inside the DCS-anchored FOPTD band
-    #   tau in [2884, 4055] s (center 3469.5 s == SYN_P_TAU_FILL_MIN 57.8 min; dcs_anchor_dynamics
-    #   Section 1.2).  _fe == 8 holds k_loop_fill ~= _fc (near-uniform slow fill) across most of the
-    #   empty-loop transient; both revert to 1.0 as m_loop_frac -> 1 (design SS bit-exact, SS-neutral).
-    _fc         = 0.06     # empty-loop net-rate scale (Smith-calibrated to Section 6.4 band)
-    _fe         = 8.0      # gate exponent (Smith-calibrated to Section 6.4 band)
-    k_loop_fill = _fc + (1.0 - _fc) * _mf_prev ** _fe
+    # Report A-3.  The reactor, stripper-sump and HPCC holdups used to integrate k_loop_fill*(in - out)
+    #   with k_loop_fill = 0.06 + 0.94*m_loop_frac**8 -- a gate Smith-fitted so the cold-start
+    #   pressurisation tau landed in the DCS FOPTD band.  At k = 0.06 it deleted 94 % of every net
+    #   inflow, i.e. mass.  Each holdup now integrates its real net flow; at design m_loop_frac == 1
+    #   gave k == 1 exactly, so the design seed is untouched.  If the emergent fill tau disagrees with
+    #   the 3.6.2025 trend, the defect is in the vessel volumes or the fill hydraulics, not here.
     # PHASE 2, report D-8.  Was a flat 60 s FIFO on the 322E001 bottoms, labelled empirical and
     # motionless from turndown to trip.  Same treatment as the two feed lines: the 60 s is kept as
     # the DESIGN transit, the line inventory is back-solved from it at the design bottoms flow, and
@@ -7248,7 +7324,7 @@ def step_sim(dt: float) -> dict:
     if s.strip_level <= 0.0 and drain_kgh > delayed_bot_kgh:
         drain_kgh = delayed_bot_kgh
     s.strip_level = clamp(s.strip_level
-                          + k_loop_fill * (delayed_bot_kgh - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
+                          + (delayed_bot_kgh - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
                           0.0, 100.0)
     lic["pv"] = s.strip_level
     # L3-7 bottoms-sump ENERGY BALANCE -> TT-322004 (stream 322E001 falling-film exit -> LV-322501):
@@ -7507,7 +7583,7 @@ def step_sim(dt: float) -> dict:
     _a_fwd           = dt / (REACT_FWD_TAU_MIN * 60.0)
     s.react_fwd_wash += _a_fwd * (_fwd_drive_kgh - s.react_fwd_wash)            # low-pass (sustained part)
     m_fwd_carb_kgh   = REACT_FWD_GAIN * (_fwd_drive_kgh - s.react_fwd_wash)     # high-pass: transient pulse, ->0 steady
-    s.react_m_liq += k_loop_fill * (m_in_kgh - m_out_kgh + m_fwd_carb_kgh) * (dt / 3600.0)
+    s.react_m_liq += (m_in_kgh - m_out_kgh + m_fwd_carb_kgh) * (dt / 3600.0)
     s.react_m_liq  = max(s.react_m_liq, reactor.M_HOLDUP_MIN)  # holdup floor -> guards level_from_holdup
     # DOMINO: the hydraulic take-off m_out IS this step's stripper liquid feed — scale the split-fraction
     #   overflow composition to the live outlet mass (f_strip=1 at design -> bit-exact).  The 322E001 native
@@ -7576,7 +7652,7 @@ def step_sim(dt: float) -> dict:
     # negative, so the branch was unreachable on every path.  That is exactly the report's argument
     # made concrete: once the discharge is driven by head, the head takes the flow to zero on its
     # own and the manual limiter has nothing left to do.
-    dL_hpcc      = k_loop_fill * (phi_in_hpcc - phi_out_hpcc) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
+    dL_hpcc      = (phi_in_hpcc - phi_out_hpcc) * 100.0 * dt / (HPCC_TAU_FILL_MIN * 60.0)
     s.hpcc_level_pct = clamp(s.hpcc_level_pct + dL_hpcc, 0.0, 100.0)
 
     # ----- 322E003 HP Scrubber: reactor off-gas + weak carbamate (323P001 A/B) -> off-gas line
@@ -7841,7 +7917,7 @@ def step_sim(dt: float) -> dict:
     # ---- Stage 1: Rectifying Column 323C003 + Recirc Heater 323E002  (hold 135 C) ------------
     #  Cascade  TIC-323007 (temp master, EU) -> PIC-329202 (LP-steam chest-P slave) -> heater duty.
     tic07_op  = _ctrl_ipd(s.TIC_323007, s.r323_c003_T, dt)                        # steam-P demand (bar a)
-    pic02_pv  = clamp(s.PIC_329202["op"] / 100.0 * s.steam.P_LP, 0.0, s.steam.P_LP)  # live LP-header chest P
+    pic02_pv  = s.r323_e002_chest_P                                               # 323E002 chest P (bar a), report A-5
     pic02_op  = _ctrl_ipd(s.PIC_329202, pic02_pv, dt, cas_sp=tic07_op)            # steam valve stroke (%)
     # AUDIT THERMO-3: Apply transport lag to steam header pressure before thermal calc.
     # Same rationale as 324E001 — steam header responds in ~1 s, but column liquid inventory
@@ -7849,7 +7925,10 @@ def step_sim(dt: float) -> dict:
     # The lag constant is the LIQUID residence time R323_C003_M_TAU_S (120 s), not the 1 s gas-space
     # pressure constant: it is the liquid thermal capacitance that sets how fast TI-323003 moves.
     p_lp_lagged_c003 = _lag1(s.tlag, "323C003_P_LP_thermal", s.steam.P_LP, R323_C003_M_TAU_S, dt)
-    p_chest_e002 = steam_chest_pressure(pic02_op, p_lp_lagged_c003)
+    p_chest_e002 = steam_chest_pressure(pic02_op, p_lp_lagged_c003, R323_E002_OP_DES,
+                                        R323_E002_PCHEST_DES, R323_E002_UA_KW, s.r323_c003_T,
+                                        R323_E002_Q_DES_KW, R323_P_STEAM_SUP, s.r323_e002_chest_P)
+    s.r323_e002_chest_P = p_chest_e002
     # AUDIT F-10 — a CONDENSING-STEAM chest can only ADD heat.  Un-floored, shutting PV-329202
     # clamps p_chest to 0.02 bar a (tsat ~17.5 C) and UA·(tsat − T) becomes a large NEGATIVE duty,
     # i.e. the heater turns into a refrigerator and drags the column to ~14 C.  Physically the
@@ -8048,13 +8127,16 @@ def step_sim(dt: float) -> dict:
     #  feeds the vacuum vapour; without it the stage could not reach the PFD's 80 % product.
     m_331     = R323_M331_DES                                                     # kg/h, PFD stream 331
     tic12_op  = _ctrl_ipd(s.TIC_323012, s.r323_f010_T, dt)                        # steam-P demand (bar a)
-    pic08_pv  = clamp(s.PIC_329208["op"] / 100.0 * s.steam.P_LP, 0.0, s.steam.P_LP)
+    pic08_pv  = s.r323_e010_chest_P                                               # 323E010 chest P (bar a), report A-5
     pic08_op  = _ctrl_ipd(s.PIC_329208, pic08_pv, dt, cas_sp=tic12_op)            # steam valve stroke (%)
     # AUDIT THERMO-3: the LP header moves in ~1 s, but the 323F010 liquid inventory (240 s residence)
     # cannot follow it that fast.  Same treatment as 323C003 and 324E001: lag the chest-supply
     # pressure through the stage's own liquid residence time before it becomes a duty.
     p_lp_lagged_f010 = _lag1(s.tlag, "323F010_P_LP_thermal", s.steam.P_LP, R323_F010_M_TAU_S, dt)
-    p_chest_e010 = steam_chest_pressure(pic08_op, p_lp_lagged_f010)
+    p_chest_e010 = steam_chest_pressure(pic08_op, p_lp_lagged_f010, R323_E010_OP_DES,
+                                        R323_E010_PCHEST_DES, R323_E010_UA_KW, s.r323_f010_T,
+                                        R323_E010_Q_DES_KW, R323_P_STEAM_SUP, s.r323_e010_chest_P)
+    s.r323_e010_chest_P = p_chest_e010
     Q_e010_kw = max(R323_E010_UA_KW * (tsat_steam(p_chest_e010) - s.r323_f010_T), 0.0)  # heater duty (kW, F-10 floored)
     # AUDIT F-3 — same energy limit as Stage 1: the pre-evaporator cannot evaporate more water
     # than its live LP-steam duty (plus the feed's sensible surplus) can supply.
@@ -9135,7 +9217,7 @@ def step_sim(dt: float) -> dict:
     cp_feed1   = urea_soln_cp(w_feed1, T_feed1)
     cp_hold1   = urea_soln_cp(s.w_e001.get("Urea", R324_W_EV1), s.r324_e001_T)
     tic1_op    = _ctrl_ipd(s.TIC_324001, s.r324_e001_T, dt)                   # steam chest-P demand (bar a)
-    pic203_pv  = clamp(s.PIC_329203["op"]/100.0*s.steam.P_LP, 0.0, s.steam.P_LP)
+    pic203_pv  = s.r324_e001_chest_P                                         # 324E001 chest P (bar a), report A-5
     pic203_op  = _ctrl_ipd(s.PIC_329203, pic203_pv, dt, cas_sp=tic1_op)       # steam valve stroke (%)
     # AUDIT THERMO-3: Apply transport lag to steam header pressure before thermal calc.
     # The shared steam header (s.steam.P_LP) responds in ~1 s to header-wide load changes,
@@ -9143,7 +9225,10 @@ def step_sim(dt: float) -> dict:
     # Lag the steam-side pressure seen by the thermal calculation to prevent instantaneous
     # liquid-temperature response via the steam path while the material path correctly lags 28-72 s.
     p_lp_lagged = _lag1(s.tlag, "324E001_P_LP_thermal", s.steam.P_LP, R324_F001_M_TAU_S, dt)
-    p_chest_e001 = steam_chest_pressure(pic203_op, p_lp_lagged)
+    p_chest_e001 = steam_chest_pressure(pic203_op, p_lp_lagged, R324_E001_OP_DES,
+                                        R324_E001_PCHEST_DES, R324_E001_UA_KW, s.r324_e001_T,
+                                        R324_E001_Q_DES_KW, R323_P_STEAM_SUP, s.r324_e001_chest_P)
+    s.r324_e001_chest_P = p_chest_e001
     Q_e001_kw  = max(R324_E001_UA_KW*(tsat_steam(p_chest_e001) - s.r324_e001_T), 0.0)
     # AUDIT F-4 — evaporation is DUTY-LIMITED, and the melt strength FOLLOWS it (was pinned at
     # R324_W_EV1 by construction, so no operator action could dilute the product).  q1_avail is
@@ -9292,14 +9377,18 @@ def step_sim(dt: float) -> dict:
     cp_hold2   = urea_soln_cp(s.w_e003.get('Urea', R324_W_EV2), s.r324_e003_T)
     urea2_in   = w1_live * feed2_m                                            # urea into Stage 2 (kg/h, LIVE frac)
     tic2_op    = _ctrl_ipd(s.TIC_324002, s.r324_e003_T, dt)                   # steam chest-P demand (bar a)
-    pic212_pv  = clamp(s.PIC_329212["op"]/100.0*s.steam.P_9, 0.0, s.steam.P_9)
+    pic212_pv  = s.r324_e003_chest_P                                         # 324E003 chest P (bar a), report A-5
     pic212_op  = _ctrl_ipd(s.PIC_329212, pic212_pv, dt, cas_sp=tic2_op)       # steam valve stroke (%)
     # AUDIT THERMO-3: the 9-bar header moves in ~1 s; the 324F003 liquid inventory (180 s residence)
     # cannot.  Same treatment as 324E001 -- lag the chest-supply pressure through the stage's own
     # liquid residence time before it becomes a duty, so TT-324002 cannot answer a header transient
     # faster than the melt it is measuring.
     p_9_lagged_e003 = _lag1(s.tlag, "324E003_P_9_thermal", s.steam.P_9, R324_F003_M_TAU_S, dt)
-    p_chest_e003 = steam_chest_pressure(pic212_op, p_9_lagged_e003)
+    p_chest_e003 = steam_chest_pressure(pic212_op, p_9_lagged_e003, R324_E003_OP_DES,
+                                        R324_E003_PCHEST_DES, R324_E003_UA_KW, s.r324_e003_T,
+                                        R324_E003_Q_DES_KW, steam_system.P_MP_BARA,
+                                        s.r324_e003_chest_P)
+    s.r324_e003_chest_P = p_chest_e003
     Q_e003_kw  = max(R324_E003_UA_KW*(tsat_steam(p_chest_e003) - s.r324_e003_T), 0.0)  # Evap-II duty (kW, F-10 floored)
     # AUDIT TD-016 — Evaporator II, same smooth-equilibrium closure as Evaporator I: the melt
     # strength follows the continuous Extended-UNIQUAC departure at 0.131 bar a, so the
@@ -9793,6 +9882,13 @@ def step_sim(dt: float) -> dict:
         _y_nh3 = (SCRUB_OFFGAS_KMOLH_DES.get("NH3", 0.0) * MW_COMP["NH3"]
                   / max(SCRUB_OFFGAS_KGH_DES, 1e-9))
     psv_nh3_kgh = m_psv_kgh * _y_nh3
+    # Report A-2 (re-audited 2026-09-15): the credit below is NOT the mass source, it is the loop-level
+    # MIRROR of one.  The source is REACT_TEAR_DES, subtracted from the reactor feed in react_322r001
+    # (fc = feed - tear*s), which puts +2085.7 kg/h into 322R001 that never arrived; the balance of the
+    # -2168.2 kg/h is the 322E003 vent re-solve (+4193.4 kg/h of forced NH3/CO2 slip over the PFD
+    # row) net of the motive NH3 re-pin (+2006.05).  Deleting only this credit was measured: PT-329201
+    # 140.700 -> 139.477 bar a in 2750 s (-1.45 bar/h = R_des/C_loop) with the reactor and HPCC levels
+    # bleeding behind it.  It comes out together with the tear, not before it.
     m_net_loop = ((m_in_loop - m_out_loop) - m_loop_frac * SYN_LOOP_RESID_DES_KGH
                   + m_phase_shift - m_psv_kgh)
 
@@ -11831,3 +11927,4 @@ if HPCC_UA is None:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000, reload=False)
+
