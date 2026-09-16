@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 23 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 40 OPEN.**
+**Totals: 25 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 38 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -70,7 +70,7 @@ and the third was not a missing number at all. See *What the archive supplied* b
 | A. Algebraic state | 10 | 0 | 0 | 0 | 9 |
 | B. Phase splits | 0 | 5 | 0 | 0 | 9 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
-| D. Hydraulics | 8 | 3 | 0 | 0 | 11 |
+| D. Hydraulics | 10 | 3 | 0 | 0 | 9 |
 | E. Gains / signals | 1 | 0 | 0 | 1 | 10 |
 
 Status key. **CLOSED**: the live path now solves the first-principles relationship. Where it is written
@@ -171,8 +171,8 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | D-11 | OPEN | [main.py:8420](../../backend/main.py#L8420) | Fixed vent split |
 | D-12 | OPEN | [main.py:8192](../../backend/main.py#L8192) | Linear in suction P; `ejector_huang.py` is the candidate |
 | D-13 | OPEN | [steam_system.py:74](../../backend/steam_system.py#L74) | K back-sized at a 50 % opening |
-| D-14 | OPEN | [steam_system.py:89](../../backend/steam_system.py#L89) | `C_MP = C_LP = 25` |
-| D-15 | OPEN | [steam_system.py:95](../../backend/steam_system.py#L95) | ×30 `F_lump` |
+| D-14 | **CLOSED** (2026-09-16) | `_header_capacitance` in `steam_system.py` | Each header is V_vapour·dρ_sat/dP with dρ/dP from IAPWS-IF97 and volumes from the datasheets (329D005 13.00 m³, 322D001A/B 2 × 50.13 m³). The LP constant was right by accident — the physical value is 25.20 against the calibrated 25.0 — while the MP header is 3.19, not 25. Vapour share (half the shell) is a stated assumption, flagged in the source |
+| D-15 | **CLOSED** (2026-09-16) | as D-14 | The ×30 `F_lump` is deleted: 329D009's 8.16 m³ gives 2.01 kg/bar, not 53.2. The factor existed to keep an EXPLICIT step stable, which is a property of the integrator, so the header pressures now step semi-implicitly — `P' = P + res·dt/(C + g·dt)` with g = −∂res/∂P evaluated from the same valve laws. Amplification C/(C + g·dt) ∈ (0,1] for any dt, and every residual is zero at design so the seed is bit-exact |
 | D-16 | OPEN | [steam_system.py:287](../../backend/steam_system.py#L287) | `m_des × op/op_des` |
 | D-17 | OPEN | [main.py:6013](../../backend/main.py#L6013) | Constant η_v |
 | D-18 | OPEN | [main.py:6022](../../backend/main.py#L6022) | Current linear in rpm |
@@ -216,9 +216,17 @@ visually verified; the routing is TOC row → Document ID → file.
 Two consequences for findings still open. **D-14's LP value is vindicated, not fudged**: two 3.47 m
 drums give V·dρ/dP ≈ 24 kg/bar against the calibrated 25, so what needs replacing is the MP figure
 (13 m³ says ≈3 kg/bar, not 25) and **D-15's ×30 `F_lump`** (8.16 m³ says ≈0.9 kg/bar, not 53.2).
-Both are now data-complete; what blocks them is the integrator, not the number — at the true
-capacitance the header ODE is stiff at STEP_CAP, so closing them means making that integration
-semi-implicit the way the 324 melt temperatures already are.
+Both were closed the same day this was written, by doing exactly that: the capacitances are now
+physical and the header integration is semi-implicit. Measured: `test_lp_steam_4barg` 1 passed,
+`test_steam_consumption_surge` 1 passed, `test_steam_system_pfd_mass_paths` 6 passed,
+`steam_system.py`'s own four-scenario self-check OVERALL PASS, `test_g8_lp_turbine_export` unchanged
+at its 2-failed baseline.
+
+**A discrepancy found on the way and NOT acted on.** `steam_system.MSPAN_504` builds the 322D001
+level span from a 1.600 m diameter × 2.000 m shell. The datasheet (UD-AU-322-EC-0009 p2) gives ID
+3470 mm × 5300 mm cylindrical, two drums — about 25× the volume per drum. The level span feeds a
+level controller whose design reading would move with it, so correcting it means re-deriving the
+design holdup at the same time; it is recorded here rather than changed in passing.
 
 **Measured this revision** (engine run, dt = STEP_CAP 0.25 s, fresh `State()`, HEAD in a side worktree):
 the 3 000 s design hold matches HEAD to 1.8e-5 bar on PT-329201 and 0.01 °C on every stage

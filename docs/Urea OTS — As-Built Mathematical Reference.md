@@ -2004,6 +2004,66 @@ PT-324201 0.330000000, PT-323204 0.460000000. Regression: `test_equation_audit_3
 referenced deleted constants, one pinned the 324F001 deferral the drawing closes);
 `test_scenario_lag_table` all checks pass with the flash-drum lag check replaced by a structural one.
 
+## Phase 5c — the steam headers get their real capacitance (D-14 / D-15)
+
+The three header pressures integrated `dP/dt = residual/C` on constants that were openly labelled:
+`C_MP = C_LP = 25.0` ("lumped, calibrated" -- one number for two different headers) and
+`C_9 = 8.16 * 0.2174 * 30.0`, a derived capacitance multiplied by a stated x30 lumping factor whose
+own comment gave the reason: it "keeps the 9-bar node ... Euler-stable at the host dt".
+
+That reason is a property of the INTEGRATOR, not of the drum, so the closure is two independent
+pieces.
+
+### The capacitance
+
+```text
+C = V_vapour . drho_sat/dP |_P        (IAPWS-IF97 on the saturation line)
+```
+
+| header | vessel | volume | source | C (kg/bar) | was |
+|---|---|---|---|---|---|
+| MP | 329D005 | 13.00 m3 nominal | UD-AU-329-EC-0001 p2, DDS line 19 | **3.19** | 25.0 |
+| 9-bar | 329D009 | 8.16 m3 | `References/329-1 mapping and description.md` | **2.01** | 53.2 |
+| LP | 322D001A/B | 2 x 50.13 m3 (ID 3470 x 5300 mm, QTY 2) | UD-AU-322-EC-0009 p2 | **25.20** | 25.0 |
+
+The LP number is the interesting one: the calibrated 25.0 was RIGHT, and right for a reason nobody
+had written down -- two 3.47 m drums really do hold about 25 kg of steam per bar. The MP header is
+eight times stiffer than its constant claimed and the 9-bar drum twenty-five times.
+
+One assumption remains and is flagged in the source: each drum is taken as half full, because all
+three datasheets leave "max. fill lev. in oper. cond." blank. C scales linearly with that fraction.
+
+### The integration
+
+Every term that resists a header pressure change is a valve whose flow depends on that same
+pressure, so the resisting conductance is available from the laws already in the module:
+
+```text
+g = -d(residual)/dP            (evaluated by re-running the same _valve_flow calls at P + 1e-3 bar)
+(C/dt)(P' - P) = res(P) - g.(P' - P)   ->   P' = P + res.dt/(C + g.dt)
+```
+
+Amplification is C/(C + g.dt), in (0, 1] for any dt and any C, so the stability limit that forced
+the lumping ceases to exist -- the same argument, and the same fix, as the unit-324 melt
+temperatures. At the design seed every residual is zero, so P' == P whatever the denominator is and
+all three headers stay bit-exact.
+
+### Measured
+
+`steam_system.py`'s own four-scenario self-check: OVERALL PASS (including the HPCC-generation-to-zero
+case, where P_LP lands on 4.913 against its 3.5 floor). `test_lp_steam_4barg` 1 passed,
+`test_steam_consumption_surge` 1 passed, `test_steam_system_pfd_mass_paths` 6 passed,
+`test_equation_audit_c10_live_cp` 7 passed, `test_startup_stability` 5 passed,
+`test_g8_lp_turbine_export` unchanged at its recorded 2 failed / 4 passed. Design hold over 3 000 s:
+PT-329201 140.475724 bar a against 140.476115 with the lumped constants.
+
+### Found, recorded, not changed
+
+`MSPAN_504` builds the 322D001 level span from a 1.600 m x 2.000 m vessel; the datasheet says ID
+3470 mm x 5300 mm and QTY 2. That is roughly 25x the volume per drum. It feeds a level loop whose
+design indication would move with it, so it needs the design holdup re-derived in the same pass and
+is left for one.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

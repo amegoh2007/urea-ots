@@ -48,7 +48,7 @@ BIT-EXACT DESIGN ANCHOR
 from dataclasses import dataclass, field
 
 import hydraulics                    # PHASE 2 report D-2: ISA-75.01 compressible valve law
-from iapws_if97 import tsat_c        # shared pure-water saturation line (same call main uses)
+from iapws_if97 import tsat_c, v_vapour_sat_m3kg   # shared pure-water saturation line + sat vapour v
 
 # ---------------------------------------------------------------- saturated-steam enthalpies (kJ/kg)
 #   Standard IAPWS/IF97 saturation table (sourced), used only for let-down desuperheat trims.
@@ -86,13 +86,44 @@ K_LD9 = 2.0         # PV-329205B  : 329D009 (9) -> 4-bar header let-down (split-
 #   329D009 8.16 m3); drho/dP from the PFD-26 process densities (25:9.48, 19.7:7.4, 9:3.37, 4.4:2.37
 #   kg/m3).  The HP/LP capacitances are held at the calibrated lumped value that pins the existing
 #   HP-stripper/HPCC transient (design fixed point is C-independent); the 9-bar node is derived.
-C_MP = 25.0         # HP saturator 329D005 header (lumped, calibrated)      -> P_MP field
-C_LP = 25.0         # LP 322D001A/B header (lumped, calibrated)
-#   329D009: drho/dP ~= (3.37-2.37)/(9-4.4) = 0.2174 kg/m3/bar ; C_9 = 8.16 * 0.2174 * F_lump
-#   A x30 lumping factor (matching the HP/LP calibrated convention, which sits ~x5 above the bare
-#   vapour-inventory value) keeps the 9-bar node on the same slow-accumulation timescale as the
-#   other headers and Euler-stable at the host dt.
-C_9 = 8.16 * 0.2174 * 30.0   # ~= 53.2 (kg/s)/bar
+#  PHASE 5b, reports D-14 / D-15.  These were `C_MP = C_LP = 25.0` ("lumped, calibrated", the same
+#  number for two different headers) and `C_9 = 8.16 * 0.2174 * 30.0` -- a derived capacitance
+#  multiplied by a stated x30 "lumping factor".  The factor was there to keep the node Euler-stable
+#  at the host dt, which is a property of the INTEGRATOR, not of the drum; the fix is therefore a
+#  stable integration (see the semi-implicit step in `step`), not a fictitious volume.
+#
+#  Each capacitance is now V_vapour * drho_sat/dP, with drho/dP from IAPWS-IF97 on the saturation
+#  line at that header's own pressure and the volumes from the vendor datasheets:
+#    329D005  13.00 m3 nominal   (UD-AU-329-EC-0001 p2, DDS line 19; ID 1760 x 5000 mm horizontal)
+#    329D009   8.16 m3           (References/329-1 mapping and description.md)
+#    322D001A/B  2 x 50.13 m3    (UD-AU-322-EC-0009 p2: ID 3470 mm, cyl height 5300 mm, QTY 2)
+#  STATED ASSUMPTION: each drum runs half full, so half the shell is vapour.  The DDS leaves
+#  "max. fill lev. in oper. cond." blank on all three, and C scales linearly with that fraction --
+#  it is the one number here that is an assumption rather than a datum, and it is worth revisiting
+#  if a level datum ever turns up.
+#
+#  What this changes: the LP value is VINDICATED (two 3.47 m drums give ~24 kg/bar against the
+#  calibrated 25, i.e. the old constant was right for the wrong reason), while the MP header is
+#  ~8x and the 9-bar drum ~25x stiffer than the constants claimed.
+VAP_FRACTION = 0.50          # -, vapour share of each drum shell at normal level (stated assumption)
+V_D005_M3 = 13.00            # m3, 329D005 nominal volume (datasheet)
+V_D009_M3 = 8.16             # m3, 329D009 capacity (mapping document)
+V_D001_M3 = 2.0 * (0.78539816 * 3.470 ** 2 * 5.300)   # m3, 322D001A + B shells (datasheet)
+
+
+def _rho_vapour_sat(p_bara: float) -> float:
+    """Saturated-steam density [kg/m3] at a header pressure, IAPWS-IF97."""
+    return 1.0 / v_vapour_sat_m3kg(tsat_c(p_bara))
+
+
+def _header_capacitance(v_vapour_m3: float, p_bara: float, dp: float = 0.5) -> float:
+    """dm/dP of a saturated vapour space [kg/bar] -- the physical meaning of the old constants."""
+    return v_vapour_m3 * (_rho_vapour_sat(p_bara + dp) - _rho_vapour_sat(p_bara - dp)) / (2.0 * dp)
+
+
+C_MP = _header_capacitance(VAP_FRACTION * V_D005_M3, P_HP_BARA)    # ~3 kg/bar (was 25.0)
+C_LP = _header_capacitance(VAP_FRACTION * V_D001_M3, P_LP_BARA)    # ~24 kg/bar (was 25.0)
+C_9  = _header_capacitance(VAP_FRACTION * V_D009_M3, P_MP_BARA)    # ~2 kg/bar (was 53.2)
 
 # ---------------------------------------------------------------- LP header floor (site LP-main tie-in)
 #   Make-up import holds the header when local generation (HPCC steam raising + 9->4 let-down)
@@ -494,9 +525,48 @@ def step_steam(state: SteamState, dt: float,
     residual_lp_vapor = m_hpcc_gen + m_ld9 + m_water + m_963 - M_USERS_LP - m_vent - m_turbine
     dP_LP = residual_lp_vapor / C_LP
 
-    state.P_MP = max(0.0, state.P_MP + dt * dP_MP)
-    state.P_9  = max(0.0, state.P_9 + dt * dP_9)
-    state.P_LP = max(P_LP_MIN_BARA, state.P_LP + dt * dP_LP)
+    #  SEMI-IMPLICIT, reports D-14 / D-15.  On the real capacitances above, an explicit step is
+    #  unstable at the host dt -- which is exactly what the retired x30 `F_lump` was compensating
+    #  for.  Every term that resists a pressure change is a valve whose flow depends on that same
+    #  pressure, so the resisting conductance g = -d(residual)/dP is computable by re-evaluating the
+    #  same laws one perturbation away, and the step becomes
+    #
+    #      (C/dt)(P' - P) = res(P) - g.(P' - P)   ->   P' = P + res.dt/(C + g.dt)
+    #
+    #  Amplification is C/(C + g.dt), in (0, 1] for ANY dt and ANY C, so the stability limit that
+    #  forced the lumping ceases to exist.  Same scheme and same reason as the melt temperatures in
+    #  unit 324 (As-Built, *Melt-Temperature Integration in Unit 324*).  BIT-EXACT at the design
+    #  seed: every residual is zero there, so P' == P whatever the denominator is.
+    _DP_PROBE = 1.0e-3      # bar, perturbation for the resisting conductance
+
+    def _res_mp(p):
+        return (_valve_flow(K_902, state.valve_supply_pct, state.P_SUP, p, P_SUP_BARA, P_HP_BARA)
+                - m_strip_consume
+                - _valve_flow(K_902, state.hv_vent_hp_pct, p, 1.01325, P_HP_BARA, 1.01325))
+
+    def _res_9(p):
+        m903_p = _valve_flow(K_903, state.valve_admit9_pct, state.P_SUP, p, P_SUP_BARA, P_MP_BARA)
+        mld_p = _valve_flow(K_LD9, state.valve_letdown_pct, p, state.P_LP, P_MP_BARA, P_LP_BARA)
+        att_p = M_ATTEMPER9_DES * (m903_p / max(M_903_DES, 1e-12))
+        return m903_p + m_flash9 + att_p - m_9_users - mld_p
+
+    def _res_lp(p):
+        mld_p = _valve_flow(K_LD9, state.valve_letdown_pct, state.P_9, p, P_MP_BARA, P_LP_BARA)
+        water_p = mld_p * (H_G_MP - H_G_LP) / (H_G_LP - H_W)
+        m963_p = (_valve_flow(K_963, state.valve_963_pct, state.P_SUP, p, P_SUP_BARA, P_LP_BARA)
+                  + _valve_flow(K_HV602, state.hv_329602_pct, state.P_SUP, p, P_SUP_BARA, P_LP_BARA))
+        vent_p = _valve_flow(K_207A, state.pv207a_pct, p, 1.01325, P_LP_BARA, 1.01325)
+        turb_p = _valve_flow(K_207B, state.pv207b_pct, p, P_TURBINE_OUT_BARA,
+                             P_LP_BARA, P_TURBINE_OUT_BARA)
+        return m_hpcc_gen + mld_p + water_p + m963_p - M_USERS_LP - vent_p - turb_p
+
+    def _implicit(p, res, res_fn, capacitance):
+        g = (res - res_fn(p + _DP_PROBE)) / _DP_PROBE       # kg/s per bar, >= 0 for a stable node
+        return p + res * dt / (capacitance + max(g, 0.0) * dt)
+
+    state.P_MP = max(0.0, _implicit(state.P_MP, residual_d005_vapor, _res_mp, C_MP))
+    state.P_9 = max(0.0, _implicit(state.P_9, residual_d009_vapor, _res_9, C_9))
+    state.P_LP = max(P_LP_MIN_BARA, _implicit(state.P_LP, residual_lp_vapor, _res_lp, C_LP))
 
     # publish diagnostics (m_ld field carries the 9->4 let-down for back-compat telemetry)
     state.m_supply, state.m_903, state.m_ld = m_supply, m_903, m_ld9

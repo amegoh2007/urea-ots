@@ -37,12 +37,17 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   specs and drawings themselves are scans -- render and read them). It answered 324F001's volume,
   which two passes had recorded as unobtainable. Use the `/soft-copy-search` skill's routing: TOC row
   -> Document ID -> file. `pypdf` and `pymupdf` are installed for this.
-* **D-14 / D-15 are now data-complete and blocked only on the integrator.** 329D005 is 13.00 m3
-  (UD-AU-329-EC-0001 p2) and 322D001A/B are 2 x ID 3470 x 5300 mm (UD-AU-322-EC-0009 p2). The LP
-  header's calibrated C = 25 turns out to be RIGHT (two drums give about 24 kg/bar); the MP 25 and
-  the 9-bar x30 `F_lump` are not (about 3 and 0.9 kg/bar). At the true capacitance the header ODE is
-  stiff at STEP_CAP, so closing these means a semi-implicit header integration -- the same treatment
-  the 324 melt temperatures got -- not a new number.
+* **D-14 / D-15 CLOSED (same session).** Capacitances are V_vap.drho_sat/dP on IF97 with datasheet
+  volumes: C_MP 3.19, C_LP 25.20, C_9 2.01 kg/bar (were 25.0, 25.0, 53.2). The LP constant was right
+  by accident. The x30 `F_lump` is gone because the header pressures now step SEMI-IMPLICITLY,
+  `P' = P + res.dt/(C + g.dt)` with g = -dres/dP from the same valve laws -- so the stability limit
+  that motivated the lumping no longer exists at any dt.
+* **Still an assumption in there:** each drum is taken as half full (vapour share 0.50). All three
+  DDSs leave "max. fill lev. in oper. cond." blank and C scales linearly with it.
+* **`steam_system.MSPAN_504` disagrees with the 322D001 datasheet and was left alone.** The model
+  builds the LP drums' level span from 1.600 m x 2.000 m; UD-AU-322-EC-0009 p2 says ID 3470 mm x
+  5300 mm, two drums -- about 25x the volume each. It feeds a level controller, so fixing it means
+  re-deriving the design holdup in the same pass.
 * **D-12 now has a measurable price.** The 323F010 vacuum node settles 0.5 mbar below design because
   the ejector pull is linear in suction pressure. Since A-17 the barometric leg transmits that into
   a 48 kg level offset and a 0.19 % evaporation offset, and `test_equation_audit_323_324`'s F-3 gate
