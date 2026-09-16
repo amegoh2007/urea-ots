@@ -37,7 +37,7 @@ def test_nh3_excess():
 
 def test_couple_design_identity():
     """At the design feed, react_couple reproduces pinned xi and leaves overflow unchanged."""
-    feed = {"NH3": 7464.673, "CO2": 2429.147, "H2O": 990.675}
+    feed = {"NH3": R.L0_DES * 2429.147, "CO2": 2429.147, "H2O": R.W0_DES * 2429.147}   # (L0, W0)
     ov0  = {k: main.REACT_OVERFLOW_DES.get(k, 0.0) for k in main.MW_COMP}
     xi, ov, X, L, W = R.react_couple(feed, ov0, main.REACT_XI_UREA_DES, R.T0_DES_C)
     assert approx(xi, main.REACT_XI_UREA_DES, 1e-6), "xi=%r" % xi

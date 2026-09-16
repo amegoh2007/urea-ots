@@ -6,8 +6,8 @@ from core.stream import Stream
 # Importing required constants from main. We assume main won't have a circular dependency 
 # if we import scrubber at the bottom or inside step_sim.
 from main import (
-    MW_COMP, SCRUB_CARB_KMOLH_DES, SCRUB_OFFGAS_KMOLH_DES, SCRUB_OVERFLOW_KMOLH_DES,
-    SCRUB_CARB_KMOLH_DES_REF, SCRUB_CARB_ABS_GAIN, SCRUB_DH_CARB_KJMOL, SCRUB_Q_CCW_DES_KW,
+    MW_COMP, SCRUB_CARB_KMOLH_DES, scrub_vent_kmolh,
+    SCRUB_DH_CARB_KJMOL, SCRUB_Q_CCW_DES_KW,
     SCRUB_COND_SPINDLE_GAIN, SCRUB_COND_CHOKE_MIN, SCRUB_LEVEL_NLL_PCT, SCRUB_CCW_CP,
     SCRUB_UA_KWK, SCRUB_HIC604_DES_PCT, SCRUB_T_PROC_C, SCRUB_OVERFLOW_T_VENT_GAIN,
     SCRUB_OFFGAS_NC_DES, SCRUB_OFFGAS_T_C, SCRUB_OFFGAS_T_GAIN, SCRUB_OFFGAS_T_VENT_GAIN,
@@ -56,20 +56,10 @@ class Scrubber322E003(UnitOperation):
         # Logic ported from main.py's scrub_322e003
         carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}
         feed     = {k: offgas_feed.get(k, 0.0) + carb[k] for k in MW_COMP}
-        offgas   = {k: SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}
-        overflow = {k: SCRUB_OVERFLOW_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}
-
-        carb_dev     = {k: carb[k] - SCRUB_CARB_KMOLH_DES_REF.get(k, 0.0) * s for k in MW_COMP}
-        carb_dev_tot = sum(carb_dev.values())
-        for k in MW_COMP:
-            overflow[k] += carb_dev[k]
-            
-        d_co2 = SCRUB_CARB_ABS_GAIN * carb_dev_tot
-        d_co2 = max(min(d_co2, 0.5 * offgas.get("CO2", 0.0)), -0.5 * offgas.get("CO2", 0.0))
-        d_nh3 = max(min(2.0 * d_co2, 0.5 * offgas.get("NH3", 0.0)), -0.5 * offgas.get("NH3", 0.0))
-        
-        offgas["CO2"] -= d_co2;  overflow["CO2"] += d_co2
-        offgas["NH3"] -= d_nh3;  overflow["NH3"] += d_nh3
+        # Report A-2: saturated-inert vent at the design K, overflow by difference (main.scrub_322e003
+        # carries the live PT-329201 K ratio; this port is not stepped).
+        offgas   = scrub_vent_kmolh(feed)
+        overflow = {k: feed[k] - offgas[k] for k in MW_COMP}
 
         carry_mass_kgh = 0.0
         if self.liq_carry_kmolh:

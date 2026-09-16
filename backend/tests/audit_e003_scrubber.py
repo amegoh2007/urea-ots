@@ -2,9 +2,9 @@
 
 Re-evaluates the scrubber in isolation (pure-function calls + isolated sump ODE; no full
 synthesis-loop multi-settle, so no coupled-solver stall). Sections:
-  A. Discharge pin + comp shift : offgas/overflow == DES*s bit-exact at design; the LIVE surplus-
-                                  wash (323P001) deviation injection conserves mass AND shifts
-                                  composition gas->liquid (CO2 + 2:1 NH3) -- directive #2.
+  A. Saturated-inert vent       : offgas/overflow == DES*s at every load (the law is homogeneous);
+                                  a surplus 323P001 wash leaves with the overflow and does not
+                                  change the vent a saturated top can hold (report A-2).
   B. ccw eps-NTU bridge (GAP#2) : design pins TT-329125=95.0, TT-322002=178.8; C_ccw*dT_ccw==q_ccw
                                   energy balance; m_ccw->0 bounded at T_proc (no divide-by-zero pole).
   C. HV-322604 equal-% valve    : phi_ep(theta_des)==1 bit-exact; R^((th-th_des)/100) gain; sqrt(dP);
@@ -20,7 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import main
 from main import (MW_COMP, scrub_322e003, hv_322604, _eq_pct, react_nc_ratio,
                   REACT_OFFGAS_DES, SCRUB_OFFGAS_KMOLH_DES, SCRUB_OVERFLOW_KMOLH_DES,
-                  SCRUB_CARB_ABS_GAIN, SCRUB_Q_CCW_DES_KW, SCRUB_CCW_KGH_DES, SCRUB_CCW_CP,
+                  SCRUB_Q_CCW_DES_KW, SCRUB_CCW_KGH_DES, SCRUB_CCW_CP,
                   SCRUB_CCW_T_IN_DES, SCRUB_CCW_T_OUT_DES, SCRUB_OVERFLOW_T_C, SCRUB_OFFGAS_T_C,
                   SCRUB_T_PROC_C, SCRUB_HIC604_DES_PCT, SCRUB_HV604_P_OUT, SCRUB_HV604_DP_DES,
                   SCRUB_HV604_RANGE, SCRUB_HV604_MU_JT, SCRUB_OFFGAS_P_BARA, SCRUB_OFFGAS_NC_DES,
@@ -84,13 +84,11 @@ for wx in (0.95, 1.0, 1.05):                                  # NON-SATURATING r
     dNH3 = base["offgas_kmolh"]["NH3"] - r["offgas_kmolh"]["NH3"]
     cons_ok   &= abs(d_out_kg - carb_dev_kg) < 1e-6            # only added mass = surplus wash (transfers cancel)
     resid_inv &= abs(r["closure_resid"] - base["closure_resid"]) < 1e-9   # resid invariant to wash dev
-    if abs(wx - 1.0) > 1e-9:
-        shift_ok &= (math.copysign(1, dCO2) == math.copysign(1, wx - 1.0))   # surplus wash -> +CO2 scrubbed
-        shift_ok &= abs(dNH3 - 2.0 * dCO2) < 1e-6                            # 2 NH3 : 1 CO2 stoichiometry
+    shift_ok &= abs(dCO2) < 1e-9 and abs(dNH3) < 1e-9          # A-2: the saturated vent ignores the wash rate
     print("      %.2f   | %18.4f  %10.4f | %10.5f  %10.5f" % (wx, d_out_kg, carb_dev_kg, dCO2, dNH3))
 main.SCRUB_CARB_KMOLH_DES.clear(); main.SCRUB_CARB_KMOLH_DES.update(_saved)   # RESTORE module state
 chk(cons_ok,   "mass conserved: d(offgas+overflow) == carb_dev (gas<->liq transfers cancel exactly)")
-chk(shift_ok,  "composition shift: surplus wash scrubs CO2 gas->liq at 2:1 NH3:CO2 (deficit reverses sign)")
+chk(shift_ok,  "vent unchanged by the wash rate: inerts saturated at the top, the surplus is all overflow")
 chk(resid_inv, "closure_resid invariant to wash deviation (deviation added to feed AND overflow equally)")
 chk(all(abs(main.SCRUB_CARB_KMOLH_DES[k] - _saved[k]) < 1e-12 for k in _saved), "module wash vector restored clean")
 

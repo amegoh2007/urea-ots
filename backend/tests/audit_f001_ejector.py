@@ -73,7 +73,7 @@ print("  LIVE DESIGN (phi_m=1): total=%.4f kg/h  suction=%.4f  mu=%.6f  T_d(TT-3
 print("\n" + bar); print("  A. MASS CLOSURE + DESIGN ANCHORS  (Domino + 100% conservation + design HMB)"); print(bar)
 # A1 LIVE-pin invariant (feed-independent): phi_m==1 -> design suction reproduced bit-exact
 chk(abs(d["suction_kgh"] - EJ_SUC_TOT_DES) < 1e-6, "LIVE-pin: phi_m==1 -> suction == EJ_SUC_TOT_DES %.1f bit-exact" % EJ_SUC_TOT_DES)
-chk(all(abs(d["comp"][k] - ((MOT_LIVE if k=="NH3" else 0.0) + EJ_SUCTION_KGH[k])) < 1e-6 for k in MW_COMP),
+chk(all(abs(d["comp"][k] - (MOT_LIVE*main.EJ_MOTIVE_W[k] + EJ_SUCTION_KGH[k])) < 1e-6 for k in MW_COMP),
     "LIVE-pin: discharge comp == live motive*[NH3] + EJ_SUCTION_KGH bit-exact")
 chk(abs(d["mu"] - EJ_SUC_TOT_DES/MOT_LIVE) < 1e-9, "LIVE-pin: mu == EJ_SUC_TOT_DES/MOT_LIVE %.6f (live-basis; nominal EJ_MU %.6f recovered unpinned in A2)" % (EJ_SUC_TOT_DES/MOT_LIVE, EJ_MU))
 chk(abs(d["total_kgh"] - (MOT_LIVE + EJ_SUC_TOT_DES)) < 1e-6, "LIVE-pin: discharge total == live motive + EJ_SUC_TOT_DES (live design discharge)")
@@ -86,7 +86,7 @@ _saved = main.EJ_MOTIVE_DES_LIVE
 main.EJ_MOTIVE_DES_LIVE = None                                # nominal design-HMB basis (phi_m = motive/40756)
 hold = ejector_322f001(MOT_NOM, TM, EJ_OPEN_DES, 1.0)
 chk(abs(hold["total_kgh"] - EJ_DES_TOTAL) < 1e-6, "NOMINAL-basis hold (unpinned): total == EJ_DES_TOTAL %.3f bit-exact (reconciled discharge = 40756 + EJ_SUC_TOT_DES)" % EJ_DES_TOTAL)
-chk(all(abs(hold["comp"][k] - ((MOT_NOM if k=="NH3" else 0.0) + EJ_SUCTION_KGH[k])) < 1e-6 for k in MW_COMP), "NOMINAL-basis hold: discharge comp == nominal motive*[NH3] + EJ_SUCTION_KGH bit-exact (reconciled)")
+chk(all(abs(hold["comp"][k] - (MOT_NOM*main.EJ_MOTIVE_W[k] + EJ_SUCTION_KGH[k])) < 1e-6 for k in MW_COMP), "NOMINAL-basis hold: discharge comp == nominal motive*[NH3] + EJ_SUCTION_KGH bit-exact (reconciled)")
 chk(abs(hold["mu"] - EJ_SUC_TOT_DES/MOT_NOM) < 1e-9, "NOMINAL-basis hold: entrainment ratio mu == EJ_SUC_TOT_DES/MOT_NOM == EJ_MU %.6f bit-exact (reconciled)" % EJ_MU)
 main.EJ_MOTIVE_DES_LIVE = _saved                              # RESTORE pin
 chk(main.EJ_MOTIVE_DES_LIVE == _saved, "pin restored clean after HMB-hold probe")
@@ -99,9 +99,9 @@ print("\n   component balance disch_k == motive*[NH3] + m_suc*CARB_FRAC_k + suct
 bal_ok = frac_ok = tot_ok = True
 for (pm, opn, fr) in ((1.0,74,1.0),(1.3,74,1.0),(0.7,74,1.0),(1.0,90,1.0),(1.0,60,1.0),(1.0,74,1.2),(1.0,74,0.6)):
     r = ejp(pm=pm, opn=opn, frac=fr); ms = r["suction_kgh"]; mot = MOT_LIVE*pm
-    bal_ok &= all(abs(r["comp"][k] - ((mot if k=="NH3" else 0.0) + ms*EJ_CARB_FRAC[k])) < 1e-6 for k in MW_COMP)
+    bal_ok &= all(abs(r["comp"][k] - (mot*main.EJ_MOTIVE_W[k] + ms*EJ_CARB_FRAC[k])) < 1e-6 for k in MW_COMP)
     tot_ok &= abs(r["total_kgh"] - (mot + ms)) < 1e-6
-    if ms > 0:  frac_ok &= all(abs((r["comp"][k]-(mot if k=="NH3" else 0.0))/ms - EJ_CARB_FRAC[k]) < 1e-9 for k in MW_COMP)
+    if ms > 0:  frac_ok &= all(abs((r["comp"][k]-mot*main.EJ_MOTIVE_W[k])/ms - EJ_CARB_FRAC[k]) < 1e-9 for k in MW_COMP)
 chk(bal_ok, "disch_k == motive*[k==NH3] + m_suc*CARB_FRAC_k  exact across phi_m/open/frac sweep")
 chk(tot_ok, "discharge total == motive + suction  (overall mass closure) across sweep")
 chk(frac_ok,"entrained-suction composition pinned to EJ_CARB_FRAC (no fractionation in the jet)")

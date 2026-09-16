@@ -1,5 +1,5 @@
 """322E003 HP Scrubber self-test (binds 322E003, HV-322604, 329P006 A/B, 329E004).
-Pinned split-fraction model proven IDENTICAL to shared discharges (compare_scrubber.py).
+Saturated-inert vent, overflow by difference (report A-2): design lands on PFD 204 / 206.
 Plain asserts (repo has no pytest). Run:  python backend/test_scrubber.py"""
 import os, sys, traceback
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -53,23 +53,39 @@ def test_offgas_hmb():
     sc = _design()
     og = sc["offgas_kmolh"]
     n_tot = sum(og.values())
-    # Path-B (Option 1, ov_CO2=458.358305) RECONCILED off-gas: 100% inerts + forced reactant slip
-    # (NH3 94.7637 + CO2 62.1821), H2O=0 -> NH3/CO2-dominated vent (supersedes img1 64.78 datasheet).
-    assert abs(n_tot - 214.776) < 0.05, n_tot                     # Σ kmol/h (reconciled 214.78)
+    # Report A-2: every inert of the PFD 203 off-gas, saturated with NH3/CO2/H2O at the PFD 204 mole
+    # fractions -- so the design vent IS stream 204 (64.78 kmol/h, 1708 kg/h, MW 26.36), not the
+    # Path-B 214.8 kmol/h / 5901 kg/h vent that carried 89 NH3 + 61 CO2 kmol/h of the overflow.
+    assert abs(n_tot - 64.78) < 0.05, n_tot                       # PFD 204 molar flow
     mass = sum(og[k] * MW_COMP[k] for k in MW_COMP)
-    assert abs(mass - 5901.35) < 5.0, mass                        # kg/h
-    assert abs(mass / n_tot - 27.4768) < 0.1, mass / n_tot        # mean MW
-    assert abs(og["N2"]  / n_tot * 100.0 - 20.7332) < 0.1         # mol % N2
-    assert abs(og["O2"]  / n_tot * 100.0 -  3.4548) < 0.1         # mol % O2
-    assert abs(og["CO2"] / n_tot * 100.0 - 28.9521) < 0.1         # mol % CO2 slip
-    assert abs(og["NH3"] / n_tot * 100.0 - 44.1221) < 0.1         # mol % NH3 slip
+    assert abs(mass - 1708.0) < 1.0, mass                         # PFD 204 mass flow
+    assert abs(mass / n_tot - 26.36) < 0.05, mass / n_tot         # PFD 204 mean MW
+    for k, pct in main.SCRUB_OFFGAS_MOLPCT.items():               # PFD 204 mol %
+        assert abs(og[k] / n_tot * 100.0 - pct) < 0.1, (k, og[k] / n_tot * 100.0)
+    for k in main.SCRUB_VENT_INERTS:                              # no inert is retained
+        assert og[k] == sc["feed_kmolh"][k] and sc["overflow_kmolh"][k] == 0.0, k
+
+
+def test_vent_is_the_inerts_saturated():
+    """Double the inerts offered and the vent doubles, condensable slip included; the rest condenses."""
+    feed = dict(main.REACT_OFFGAS_DES)
+    for k in main.SCRUB_VENT_INERTS:
+        feed[k] *= 2.0
+    base, rich = _design(), main.scrub_322e003(feed, 1.0, main.SCRUB_CCW_T_IN_DES, main.SCRUB_CCW_KGH_DES)
+    for k in MW_COMP:
+        assert abs(rich["offgas_kmolh"][k] - 2.0 * base["offgas_kmolh"][k]) < 1e-9, k
+        assert abs(rich["feed_kmolh"][k] - rich["offgas_kmolh"][k] - rich["overflow_kmolh"][k]) < 1e-9, k
+    assert abs(rich["overflow_kmolh"]["NH3"]
+               - (base["overflow_kmolh"]["NH3"] - base["offgas_kmolh"]["NH3"])) < 1e-9
+    assert abs(rich["closure_resid"]) < 1e-9
 
 
 def test_overflow_equals_ej_suction():
     sc = _design()
     mass = sum(sc["overflow_kmolh"][k] * MW_COMP[k] for k in MW_COMP)
-    assert abs(mass - sum(main.EJ_SUCTION_KGH.values())) < 1.0, mass   # reconciled 53368.28 kg/h
-    assert abs(sum(sc["overflow_kmolh"].values()) - 2367.504) < 0.2    # kmol/h (Path-B reconciled)
+    assert abs(mass - sum(main.EJ_SUCTION_KGH.values())) < 1e-6, mass  # 57 561.3 kg/h
+    assert abs(mass - 57564.0) < 5.0, mass                              # PFD 206 mass flow
+    assert abs(sum(sc["overflow_kmolh"].values()) - 2517.69) < 0.3      # PFD 206 molar flow
 
 
 def test_closure_resid():
@@ -102,7 +118,9 @@ def test_ccw_flow_throttle():
 
 
 def test_scale_s080():
-    sc = main.scrub_322e003(main.REACT_OFFGAS_DES, 0.8,
+    # a consistent 80 % turndown: the off-gas offered AND the wash both at 0.8 (the vent follows the
+    # inerts it is offered, so scaling s alone no longer scales it)
+    sc = main.scrub_322e003({k: v * 0.8 for k, v in main.REACT_OFFGAS_DES.items()}, 0.8,
                             main.SCRUB_CCW_T_IN_DES, main.SCRUB_CCW_KGH_DES)
     assert abs(sc["co2_scale"] - 0.8) < 1e-9
     assert abs(sc["offgas_kmolh"]["N2"] - main.SCRUB_OFFGAS_KMOLH_DES["N2"] * 0.8) < 1e-9
@@ -138,7 +156,7 @@ def test_packet_tags_and_streams():
         assert tag in blk["ccw"], tag
     # off-gas composition closes; design point pins MW / mol% / temps
     assert abs(sum(blk["off_mol_pct"].values()) - 100.0) < 0.2
-    assert abs(blk["off_MW"] - 27.4768) < 0.2                     # Path-B reconciled off-gas mean MW
+    assert abs(blk["off_MW"] - 26.36) < 0.05                      # PFD 204 off-gas mean MW (A-2)
     assert abs(blk["TT_322011"] - 114.0) < 0.1
     assert abs(blk["TT_322011_lp"] - 38.8) < 0.1                  # JT-cooled off-gas to 322C001
     assert abs(blk["TT_322002"] - 178.8) < 0.1
@@ -162,7 +180,7 @@ def test_packet_tags_and_streams():
     assert st["CCW_RETURN"]["src"] == "322E003" and st["CCW_RETURN"]["dst"] == "329P006 A/B"
     # CARB_RECYCLE re-pointed to live scrubber overflow (322E003 -> 322F001)
     assert st["CARB_RECYCLE"]["src"] == "322E003" and st["CARB_RECYCLE"]["dst"] == "322F001"
-    assert abs(st["CARB_RECYCLE"]["mol_kmolh"] - 2367.504) < 0.5   # Path-B reconciled overflow Σ
+    assert abs(st["CARB_RECYCLE"]["mol_kmolh"] - 2517.69) < 0.5    # PFD 206 molar flow (A-2)
 
 
 def test_hic604_command():

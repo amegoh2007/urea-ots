@@ -345,7 +345,15 @@ MW_COMP = {"CO2":44.0098,"CH4":16.043,"H2":2.0158,"H2O":18.0152,
 # both atom-consistent w.r.t. the listed CO2/NH3/H2O MW -> reactor mass closes to machine zero.
 _H0_GAPS = h0_enthalpy.unsupported_species(MW_COMP)
 assert not _H0_GAPS, f"no H0 enthalpy datum for {sorted(_H0_GAPS)}; add it before publishing streams"
-EJ_MOTIVE_NH3_DES = 42762.05427809782   # kg/h, design motive NH3 (pure, 321P002 A/B BL feed)
+EJ_MOTIVE_NH3_DES = 42762.05427809782   # kg/h, design motive liquid-ammonia stream (321P002 A/B BL feed)
+# Report A-2.  The motive is not pure NH3: PFD 116 ("Ammonia L.", liquid row -> MASS %) carries the
+# plant ammonia's trace methane, hydrogen, nitrogen and water, and those are the ONLY source of the
+# CH4 and H2 that leave in the 322E003 vent (PFD 204: CH4 3.84, H2 2.03 kmol/h against 116's 3.81 /
+# 2.02).  With a pure motive the reactor recycle tear had to create them.  The pump and its flow
+# meter see the whole liquid stream, so the flow above is the stream mass and this is its split
+# (normalised: the row sums to 99.95).
+EJ_MOTIVE_MASSPCT = {"NH3": 99.67, "CH4": 0.15, "H2": 0.01, "N2": 0.04, "H2O": 0.08}   # PFD 116, mass %
+EJ_MOTIVE_W = {k: EJ_MOTIVE_MASSPCT.get(k, 0.0) / sum(EJ_MOTIVE_MASSPCT.values()) for k in MW_COMP}
 #   RE-PINNED to physical Cluster-2023 design point: motive = RATIO_PV_DES*NC_TO_MASS*CO2_DES_KGH.
 #   Prior 40756.0 implied fresh N/C = 1.928 < 2.0 (sub-stoichiometric -> proven non-steady free-run);
 #   re-pin restores ejector phi_m == 1 at the published operating point (W_inst == W0, L_feed == L0).
@@ -357,16 +365,19 @@ EJ_DES_TOTAL_NAMEPLATE = 98320.0   # kg/h, OLD datasheet discharge total (Carb. 
 EJ_DES_MASSPCT    = {"CO2":23.24,"CH4":0.06,"H2":4.17e-3,"H2O":12.39,
                      "N2":0.02,"NH3":64.27,"O2":0.0,"Urea":0.02,"Biuret":0.0}   # superseded datasheet mass%
 _EJ_DES_MASS   = {k: EJ_DES_MASSPCT[k]/100.0*EJ_DES_TOTAL_NAMEPLATE for k in MW_COMP}  # superseded reconstruction
-# -- RECONCILED design suction (Path B, Option 1: free DOF ov_CO2 = 458.358305 kmol/h, the feasible-band MAX
-#   -> vent_H2O=0, max heavy recovery).  Overflow (kmol/h) is the source of truth; EJ_SUCTION = overflow*MW.
-#   Verified atom-/mass-closing: scrubber GAP=0, W_inst=W0_DES, L_inst=L0_DES, reactor-node dM/dt sump=0. --
-_EJ_OVERFLOW_KMOLH = {"CO2": 458.35830512, "CH4": 0.0, "H2": 0.0, "H2O": 674.24844864,
-                      "N2": 0.0, "NH3": 1234.46697667, "O2": 0.0, "Urea": 0.43027771, "Biuret": 0.0}
+# -- Design suction = the 322E003 overflow on its own physics (report A-2): PFD 203 off-gas + PFD 308 wash
+#   minus the saturated-inert vent `scrub_vent_kmolh` (defined with the scrubber below, which asserts
+#   these literals against it).  Lands on PFD 206 (57 564 kg/h): NH3 1323.9 / CO2 519.1 / H2O 674.1.
+#   The Path-B literal it replaces (NH3 1234.5 / CO2 458.4) had pushed 89.4 NH3 + 60.7 CO2 kmol/h
+#   of this liquid out through the vent to close the scrubber against a pure motive. --
+_EJ_OVERFLOW_KMOLH = {"CO2": 519.1023064413574, "CH4": 0.0, "H2": 0.0, "H2O": 674.0800180395814,
+                      "N2": 0.0, "NH3": 1323.8797410553616, "O2": 0.0, "Urea": 0.43027771024753814,
+                      "Biuret": 0.0}
 EJ_SUCTION_KGH = {k: _EJ_OVERFLOW_KMOLH[k] * MW_COMP[k] for k in MW_COMP}   # kg/h reconciled design suction
 #   NOTE: the former "~94124" annotation here was stale -- it was arithmetic off the OLD 40756 kg/h
 #   motive and is superseded by the Path-B tear-closure reconciliation (motive re-pinned to 42762.05).
-EJ_DES_TOTAL   = EJ_MOTIVE_NH3_DES + sum(EJ_SUCTION_KGH.values())           # kg/h reconciled discharge (~96130)
-EJ_MU          = sum(EJ_SUCTION_KGH.values()) / EJ_MOTIVE_NH3_DES   # entrainment ~1.3095 (reconciled)
+EJ_DES_TOTAL   = EJ_MOTIVE_NH3_DES + sum(EJ_SUCTION_KGH.values())           # kg/h design discharge (~100323)
+EJ_MU          = sum(EJ_SUCTION_KGH.values()) / EJ_MOTIVE_NH3_DES   # entrainment ~1.3461 (A-2 overflow)
 EJ_OPEN_DES    = 74.0            # %, HV-322602 design opening (HIC-322602 design SP)
 # HV-322602 spindle characteristic (322F001 DDS, item (d)): the diaphragm-actuated parabolic NH3-nozzle
 # needle is a CONVERGING motive throat.  Motive NH3 comes from the 321P002 A/B POSITIVE-DISPLACEMENT
@@ -3362,7 +3373,7 @@ def ejector_322f001(motive_nh3_kgh: float, T_motive_C: float, hv_open_pct: float
     # call unchanged.
     frac     = EJ_CARB_FRAC if carb_frac is None else carb_frac
     suction  = {k: m_suc * frac.get(k, 0.0) for k in MW_COMP}
-    disch   = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
+    disch   = {k: motive_nh3_kgh * EJ_MOTIVE_W[k] + suction[k] for k in MW_COMP}   # PFD 116 motive
     m_d   = sum(disch.values())
     n_d   = sum(disch[k] / MW_COMP[k] for k in MW_COMP)   # kmol/h
     m_suc = sum(suction.values())
@@ -4598,35 +4609,68 @@ REACT_C_ATOMS = {"CO2": 1, "Urea": 1, "Biuret": 2, "CH4": 1}
 REACT_NC_SPAN_MAX = 99.99        # -, AT-322701 over-range indication (analyzer span ceiling)
 # statics (display only): H 25000 mm, ID 2950 mm, 11 sieve trays, volume 191 m³
 
-# ----- 322E003 HP Scrubber (reactive falling-film absorber, pinned split-fraction) -----------
+# ----- 322E003 HP Scrubber (reactive falling-film absorber, saturated-inert vent) --------------
 #   Tube side, counter-current: inert-rich reactor off-gas (322R001 -> TT-322009, live
 #   react["offgas_kmolh"]) rises through the tubes; cold weak carbamate wash (323P001 A/B,
 #   design vector) falls as a film.  NH3/CO2/H2O are recovered by instantaneous carbamate
 #   formation 2NH3(aq)+CO2(aq) <=> NH2COONH4(l), dH≈-160 kJ/mol; inerts (N2/O2/CH4/H2) slip to
-#   the off-gas.  BOTH discharges are PINNED to the shared design HMB (proven IDENTICAL by
-#   compare_scrubber.py); closure_resid is a diagnostic only (NOT injected into any stream):
-#     off-gas  322E003 -> TT-322011 -> HV-322604 -> 322C001 LP absorber  (img1, MOL%, 64.78 kmol/h)
-#     overflow 322E003 -> PT-329201/TT-322002/LT-329501 -> 322F001       (= EJ_SUCTION, ejector suction)
-#       off-gasᵢ = νᵒᵍ_des,i · s ;  overflowᵢ = νᵒᵛ_des,i · s ;  s = react co2_scale.
+#   the off-gas.  The vent is the inerts leaving the cold top saturated with NH3/CO2/H2O
+#   (`scrub_vent_kmolh`, report A-2); the overflow is everything else, so the unit closes by
+#   construction and closure_resid is a diagnostic only:
+#     off-gas  322E003 -> TT-322011 -> HV-322604 -> 322C001 LP absorber  (PFD 204, MOL%, 64.78 kmol/h)
+#     overflow 322E003 -> PT-329201/TT-322002/LT-329501 -> 322F001       (PFD 206, ejector suction)
 SCRUB_CARB_KGH_DES   = 36915.0   # kg/h design weak-carbamate wash (323P001 A/B -> 322E003)
 SCRUB_CARB_MASSPCT   = {"CO2": 38.49, "H2O": 30.83, "NH3": 30.61, "Urea": 0.07}   # img2 MASS%
 SCRUB_CARB_KMOLH_DES = {k: SCRUB_CARB_MASSPCT.get(k, 0.0) / 100.0 * SCRUB_CARB_KGH_DES / MW_COMP[k]
                         for k in MW_COMP}                            # Σ ≈ 1618.5 kmol/h
 SCRUB_CARB_KMOLH_DES_REF = dict(SCRUB_CARB_KMOLH_DES)    # FROZEN design wash (deviation datum; never mutate)
-SCRUB_CARB_ABS_GAIN  = 0.15      # kmol extra CO2 scrubbed per kmol surplus carbamate-wash flow (323P001)
-# -- SUPERSEDED off-gas datasheet (img1 MOL%, 64.78 kmol/h): does NOT route 100% of inerts -> vent and
-#   leaves the scrubber node open.  Retained as provenance + to keep audit imports resolvable; NOT live. --
-SCRUB_OFFGAS_MOLPCT  = {"N2": 68.81, "O2": 11.39, "NH3": 8.26, "CH4": 5.93,       # superseded img1 MOL%
+# PFD 204, the 322E003 off-gas (vapour row -> MOL %), 114 C / 140.7 bar a.
+SCRUB_OFFGAS_MOLPCT  = {"N2": 68.81, "O2": 11.39, "NH3": 8.26, "CH4": 5.93,
                         "H2": 3.14, "CO2": 2.22, "H2O": 0.26}
-SCRUB_OFFGAS_MOL_DES = 64.78     # kmol/h OLD design off-gas total (322E003 -> 322C001) -- superseded
-# -- RECONCILED off-gas (Path B, Option 1): 100% of inerts (N2,O2,CH4,H2) routed to vent; NH3/CO2 vent =
-#   reactor-offgas IN minus heavy-overflow recovery (forced reactant slip 156.95 kmol/h); H2O vent = 0
-#   (ov_CO2 at feasible max).  Closes the 322E003 component balance to machine zero (GAP=0). --
-_SCRUB_OFFGAS_RECON = {"CO2": 62.18213955, "CH4": 3.86000000, "H2": 2.02000000, "N2": 44.53000000,
-                       "NH3": 94.76367511, "O2": 7.42000000, "H2O": 0.0}
-SCRUB_OFFGAS_KMOLH_DES = {k: _SCRUB_OFFGAS_RECON.get(k, 0.0) for k in MW_COMP}   # span all 9 comps (Urea/Biuret=0)
-# Overflow design vector IS the 322F001 ejector suction (single source of truth -> DRY, bit-identical):
-SCRUB_OVERFLOW_KMOLH_DES = {k: EJ_SUCTION_KGH[k] / MW_COMP[k] for k in MW_COMP}   # Σ ≈ 2519.4 kmol/h
+SCRUB_OFFGAS_MOL_DES = 64.78     # kmol/h, PFD 204 total (322E003 -> 322C001)
+# --- Report A-2: the vent is the inerts, saturated at the cold top --------------------------------
+#   The top of a falling-film carbamate scrubber is a condenser with a non-condensable load: the
+#   N2/O2/CH4/H2 cannot be absorbed, so every kmol that enters leaves, and it leaves carrying the
+#   condensables' equilibrium vapour at the top temperature and loop pressure (the same simplified
+#   Colburn-Hougen closure the 324 vacuum condensers use, B-13):
+#       vent_inert,i = feed_i ;   vent_c = n_inert . y_c / (1 - sum y_c) ;   overflow = feed - vent
+#   with y_c anchored on PFD 204 and moved by the thermo service's K ratio at the live PT-329201.
+#   The Path-B reconciliation this replaces solved the vent from the scrubber balance instead, which
+#   took it to 214.8 kmol/h (44 % NH3, 5 901 kg/h) against PFD 204's 64.78 kmol/h (8.3 % NH3, 1 708).
+SCRUB_VENT_INERTS      = ("N2", "O2", "CH4", "H2")
+SCRUB_VENT_CONDENSABLE = ("NH3", "CO2", "H2O")
+SCRUB_VENT_Y_DES = {k: SCRUB_OFFGAS_MOLPCT[k] / sum(SCRUB_OFFGAS_MOLPCT.values())
+                    for k in SCRUB_VENT_CONDENSABLE}          # NH3 .0826 / CO2 .0222 / H2O .0026
+SCRUB_VENT_Y_MAX = 0.95          # -, cap on sum y_c: the inert-free limit of n/(1-y) is not a vent
+
+
+def scrub_vent_kmolh(feed_kmolh: dict, k_ratio: dict = None) -> dict:
+    """322E003 vent (kmol/h): every inert in the tube feed, saturated with NH3/CO2/H2O.
+
+    `k_ratio` is the per-species K(T, P)/K(T_des, P_des); an empty/None ratio is the design K, and
+    a ratio of exactly 1.0 multiplies y_des by 1.0, so the design vector below and the live call at
+    the design pressure are the same arithmetic.  A condensable cannot leave faster than it
+    arrives, so each is capped at its own feed (an inert-rich, NH3-starved feed vents what it has)."""
+    ratio = k_ratio or {}
+    n_inert = sum(max(feed_kmolh.get(k, 0.0), 0.0) for k in SCRUB_VENT_INERTS)
+    y = {k: SCRUB_VENT_Y_DES[k] * ratio.get(k, 1.0) for k in SCRUB_VENT_CONDENSABLE}
+    y_sum = sum(y.values())
+    if y_sum > SCRUB_VENT_Y_MAX:
+        y = {k: v * SCRUB_VENT_Y_MAX / y_sum for k, v in y.items()}
+        y_sum = SCRUB_VENT_Y_MAX
+    vent = {k: 0.0 for k in MW_COMP}
+    for k in SCRUB_VENT_INERTS:
+        vent[k] = max(feed_kmolh.get(k, 0.0), 0.0)
+    for k in SCRUB_VENT_CONDENSABLE:
+        vent[k] = min(n_inert * y[k] / (1.0 - y_sum), max(feed_kmolh.get(k, 0.0), 0.0))
+    return vent
+
+
+SCRUB_FEED_KMOLH_DES     = {k: REACT_OFFGAS_DES.get(k, 0.0) + SCRUB_CARB_KMOLH_DES[k] for k in MW_COMP}
+SCRUB_OFFGAS_KMOLH_DES   = scrub_vent_kmolh(SCRUB_FEED_KMOLH_DES)                  # 64.79 kmol/h, 1708.3 kg/h
+SCRUB_OVERFLOW_KMOLH_DES = {k: SCRUB_FEED_KMOLH_DES[k] - SCRUB_OFFGAS_KMOLH_DES[k] for k in MW_COMP}
+assert all(abs(SCRUB_OVERFLOW_KMOLH_DES[k] - _EJ_OVERFLOW_KMOLH[k]) < 1e-9 for k in MW_COMP), \
+    "322F001 design suction literal is not the 322E003 overflow; re-derive _EJ_OVERFLOW_KMOLH"
 # --- 322E003 sump liquid inventory (Option 3: TRUE dynamic state, not a display lag) ---
 #   dM_scrub/dt = ṁ_cond,in − ṁ_entrain ;  ṁ_cond,in = Σ overflow_kmolh·MWᵢ (carbamate make from
 #   condensation/absorption), ṁ_entrain = ej["suction_kgh"] (actual non-linear-curve entrainment).
@@ -4658,10 +4702,12 @@ SCRUB_HV604_RANGE    = 50.0      # equal-% inherent rangeability R (datasheet ch
 # valve is CHOKED AT ITS OWN DESIGN POINT and stays choked until the downstream node rises above
 # about 42.7 bar a.  Choked flow is a function of UPSTREAM conditions only; the incompressible
 # sqrt(dP) law this replaces let the flow keep rising as the downstream pressure fell, which cannot
-# happen.  gamma is the mixture value for an NH3/CO2-rich off-gas (NH3 1.31, CO2 1.29, inerts 1.40).
+# happen.  gamma 1.30 was chosen for an NH3/CO2-rich off-gas (NH3 1.31, CO2 1.29, inerts 1.40); the
+# PFD 204 vent is 89 mol % inert (report A-2), so the ideal-gas mixture value is nearer 1.38 -- the
+# valve is choked either way, and the constant is kept until D-4 puts the letdown on an EOS.
 SCRUB_HV604_GAMMA    = 1.30      # -, off-gas mixture heat-capacity ratio
 SCRUB_HV604_MW_DES   = (sum(SCRUB_OFFGAS_KMOLH_DES[k] * MW_COMP[k] for k in MW_COMP)
-                        / max(sum(SCRUB_OFFGAS_KMOLH_DES.values()), 1e-12))   # 27.4768 kg/kmol
+                        / max(sum(SCRUB_OFFGAS_KMOLH_DES.values()), 1e-12))   # 26.368 kg/kmol (PFD 204: 26.36)
 # --- Shell-side CCW (Conditioning Cooling Water) closed loop: 329P006 A/B pump + 329E004 cooler ---
 #   322E003 shell -- TT-329125 -- 329P006 A/B -- FV-329409/FIC-329409 -- TIC-329005 -- shell in;
 #   branch after 329P006: TV-329005 -- 329E002 -- main CCW header (heat rejected via 329E004).
@@ -4862,13 +4908,14 @@ SYN_P_PHASE_RHO_L   = EJ_RHO_SUCT   # 1133.0 kg/m3, 322E003 overflow density (PF
 SYN_P_PHASE_GAIN    = 1.0 - SYN_P_PHASE_RHO_V / SYN_P_PHASE_RHO_L   # 0.90203, vapour-hold-up fraction
 # --- PT-329201 lumped HP-loop mass accumulator: design boundary closure ------------------------
 # The loop-pressure ODE at the foot of step_sim() integrates (in - out) over the loop's mass
-# capacity.  Its five boundary terms are the model's OWN reconciled design flows, and two of them
-# were deliberately moved off their PFD rows: the ejector motive NH3 was re-pinned 40756 ->
-# 42762.05 kg/h (Path-B tear closure, to restore fresh N/C = 2.0) and the 322E003 vent vector was
-# re-solved to close the SCRUBBER's component balance, which took its total mass from the PFD's
-# 1708 kg/h to 5901.4 kg/h.  On the PFD rows the loop closes to 1 kg/h in 132 289
-# (54618 + 40756 + 36915 in == 130582 + 1708 out); on the reconciled pins it leaves a CONSTANT
-# -2168.1 kg/h that the ODE was integrating as though it were real accumulation.  That is the
+# capacity.  Its five boundary terms are the model's OWN design flows, and one of them is
+# deliberately off its PFD row: the ejector motive was re-pinned 40756 -> 42762.05 kg/h (the plant's
+# fresh N/C, 2.02 against the DCS's ~2.04).  Report A-2 put the 322E003 vent back on PFD 204 (it had
+# been re-solved to 5901.4 kg/h to close the scrubber against a pure motive).  On the PFD rows the
+# loop closes to 1 kg/h in 132 289 (54618 + 40756 + 36915 in == 130582 + 1708 out); on these pins it
+# leaves a CONSTANT +2024.9 kg/h -- the motive surplus, which has no exit while the LV-322501 bottoms
+# and the 323 section stay on PFD 208 -- that the ODE was integrating as though it were real
+# accumulation (it was -2168.1 kg/h before A-2, when the vent over-carried 4193 kg/h).  That is the
 # whole of the design-hold drift: PT-329201 bled ~0.30 bar per 600 s, LV-322501's letdown head
 # fell with it (drain ~ sqrt(P_syn - P_down)), and the entire 323/324 train walked off its
 # anchors -- v305 24.56 -> 24.45 t/h, v701 4.43 -> 4.41, evap 12.01 -> 11.79, TT-323005 106.0 ->
@@ -4877,14 +4924,14 @@ SYN_P_PHASE_GAIN    = 1.0 - SYN_P_PHASE_RHO_V / SYN_P_PHASE_RHO_L   # 0.90203, v
 # gate the stripper forward-push (pb_push) already uses and for the same reason: the reconciliation
 # tears ride the CIRCULATING inventory, so a design-full loop holds PT-329201 EXACTLY while an
 # empty loop integrates the raw balance and zero feeds still create nothing (G4 null-feed rule).
-SCRUB_OFFGAS_KGH_DES   = sum(SCRUB_OFFGAS_KMOLH_DES[k] * MW_COMP[k] for k in MW_COMP)   # 5901.4 kg/h
+SCRUB_OFFGAS_KGH_DES   = sum(SCRUB_OFFGAS_KMOLH_DES[k] * MW_COMP[k] for k in MW_COMP)   # 1708.3 kg/h (PFD 204)
 # SV-32201 effective orifice, back-solved from the rated capacity through the API 520 equation.
 SYN_PSV_AREA_M2 = hydraulics.psv_area_from_rated_m2(
     SYN_PSV_CAP_KGH, SYN_PSV_P1_RATED, SYN_PSV_T_REL_K, SCRUB_HV604_MW_DES,
     k=SYN_PSV_K_GAMMA, z=SYN_PSV_Z, kd=SYN_PSV_KD, kb=SYN_PSV_KB, kc=SYN_PSV_KC)
 SYN_LOOP_IN_DES_KGH    = EJ_MOTIVE_NH3_DES + CO2_DES_KGH + R3232_E003_M308_DES      # 134215.2 kg/h
-SYN_LOOP_OUT_DES_KGH   = STRIP_BOT_DES_KGH + SCRUB_OFFGAS_KGH_DES                   # 136383.4 kg/h
-SYN_LOOP_RESID_DES_KGH = SYN_LOOP_IN_DES_KGH - SYN_LOOP_OUT_DES_KGH                 #  -2168.1 kg/h
+SYN_LOOP_OUT_DES_KGH   = STRIP_BOT_DES_KGH + SCRUB_OFFGAS_KGH_DES                   # 132190.3 kg/h
+SYN_LOOP_RESID_DES_KGH = SYN_LOOP_IN_DES_KGH - SYN_LOOP_OUT_DES_KGH                 #  +2024.9 kg/h
 SYN_LOOP_C_KG_PER_BAR  = 1500.0  # kg/bar, lumped HP-loop mass capacity (reactor + stripper + HPCC +
 #   scrubber vapour space and dissolved-gas compressibility); sets the emergent cold-start
 #   pressurisation rate (report A-1: still a lumped constant, not a vapour-space EOS).
@@ -5469,11 +5516,11 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
                   liq_carry_kmolh: dict = None, t_carry_c: float = None,
                   choke_level_pct: float = None, spindle_phi: float = 1.0,
                   cool_frac: float = 1.0) -> dict:
-    """322E003 HP scrubber — reduced calibrated split-fraction, pinned to the shared design HMB.
+    """322E003 HP scrubber — saturated-inert vent, overflow by difference (report A-2).
     Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
-    wash (323P001 A/B design vector × s).  Both discharges PINNED (proven IDENTICAL):
-        offgasᵢ   = SCRUB_OFFGAS_KMOLH_DES_i   · s   (322E003 -> HV-322604 -> 322C001)
-        overflowᵢ = SCRUB_OVERFLOW_KMOLH_DES_i · s   (322E003 -> 322F001, ejector suction)
+    wash (323P001 A/B design vector × s).  Discharges:
+        offgas   = scrub_vent_kmolh(feed, K ratio at PT-329201)   (322E003 -> HV-322604 -> 322C001)
+        overflow = feed - offgas                                  (322E003 -> 322F001, ejector suction)
     closure_resid is a diagnostic only (NOT injected).  Shell-side CCW removes the carbamate
     exotherm.  Boundary-coupled duty: in a closed synthesis loop a rise in reactor-top pressure
     (PT-329201) lifts the uncondensed off-gas vent load into 322E003, so the carbamate-
@@ -5484,87 +5531,27 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     s = co2_scale
     carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}      # 323P001 A/B wash
     feed     = {k: offgas_feed.get(k, 0.0) + carb[k] for k in MW_COMP}         # combined tube feed
-    offgas   = {k: SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}    # pinned -> img1
-    overflow = {k: SCRUB_OVERFLOW_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}  # pinned -> EJ suction
-    # --- 323P001 weak-carbamate recycle wash: LIVE deviation injection (design bit-exact) ----------
-    # Surplus wash above/below the design rate (carb_dev = carb − carb_des·s) is a real liquid-phase
-    # absorbent perturbation: (1) its mass leaves with the bottom overflow (-> 322F001 ejector suction),
-    # and (2) the surplus absorbent scrubs extra CO2 (+ paired NH3 at the 2:1 carbamate stoichiometry)
-    # out of the off-gas into that overflow.  Both terms are DEVIATIONS from the design wash, so at
-    # carb == carb_des·s every term is identically 0 -> pinned off-gas/overflow HMB + TT pins hold exact.
-    carb_dev     = {k: carb[k] - SCRUB_CARB_KMOLH_DES_REF.get(k, 0.0) * s for k in MW_COMP}
-    carb_dev_tot = sum(carb_dev.values())
-    for k in MW_COMP:
-        overflow[k] += carb_dev[k]                                            # surplus absorbent -> bottom liquid
-    d_co2 = SCRUB_CARB_ABS_GAIN * carb_dev_tot                                 # extra CO2 scrubbed by surplus wash
-    d_co2 = max(min(d_co2, 0.5 * offgas.get("CO2", 0.0)), -0.5 * offgas.get("CO2", 0.0))  # bounded -> off-gas>0
-    d_nh3 = max(min(2.0 * d_co2, 0.5 * offgas.get("NH3", 0.0)), -0.5 * offgas.get("NH3", 0.0))  # 2 NH3:1 CO2
-    offgas["CO2"] -= d_co2;  overflow["CO2"] += d_co2                          # mass-conserving gas->liquid
-    offgas["NH3"] -= d_nh3;  overflow["NH3"] += d_nh3
-    # --- G-VLE-3: the vent COMPOSITION responds to the scrubber state ------------------------------
-    # `offgas` and `overflow` are the two pinned design vectors scaled by one scalar s, so the vent
-    # COMPOSITION was frozen: every species left in exactly the design proportion whatever the
-    # scrubber did.  That is the stream where it matters most, because it is the only route the four
-    # inerts have out of the plant -- and until G-VLE-3 they had no property data at all in this
-    # repository, so nothing could have moved them even in principle.
+    # --- Report A-2: the vent is the inerts, saturated at the cold top (see `scrub_vent_kmolh`) --------
+    # Every inert in the tube feed leaves with the vent, carrying the condensables' equilibrium vapour;
+    # the bottom overflow is everything else, so the unit closes per species by construction.  This
+    # replaces two pinned vectors times s, a surplus-wash absorption gain (0.15 kmol CO2 per kmol of
+    # extra wash) and a K-ratio re-partition renormalised back to the pinned vent total.  A surplus
+    # wash now simply leaves with the overflow: it does not change what the saturated top can hold.
     #
-    # The correction is a CONSERVATIVE RE-PARTITION in this routine's own idiom (the same shape as
-    # d_co2/d_nh3 above, and nh3_shift in the reactor): per species, theta = offgas/(offgas+overflow)
-    # is shifted by the anchored K ratio and the delta is moved between the two vectors.  The
-    # combined discharge and every element balance are untouched; only the SPLIT moves, so
-    # `closure_resid` below is unchanged by construction.
-    #
-    # PT-329201 is the ONE live state it rides, and the temperature deliberately does NOT enter.
-    # That is not caution, it is a measured result.  TT-322011 in this model is not a state: it is a
-    # correlation, `114 + 120*(AT-322701 - N/C_des) + 20*theta_dev`, whose 120 C per N/C unit is a
-    # FITTED gain.  Feeding it into a rigorous K-ratio multiplies that fitted gain by a
-    # thermodynamic derivative, and the product is not a better model of anything -- measured, it
-    # drove the 322C001 design liquor's stationarity residual from 8.1e-9 to 3.7e-4 (45 000x) and
-    # REVERSED the sign of the vent NH3 slip against off-gas throughput
-    # (test_c001_species_layer.py::test_vent_nh3_slip_tracks_offgas_throughput).  A derivative is
-    # only as good as the input it differentiates, and a correlated input is the wrong one.
-    # PT-329201 is a real measurement, so the vent split rides that and nothing else.
-    #  This re-partition sets the vent COMPOSITION and nothing else.  `offgas` is the only stream in
-    #  the four G-VLE-3 wirings that LEAVES the HP loop (HV-322604 -> 322C001); the other three --
-    #  the HPCC flash, the reactor disengagement, the stripper split -- partition material that
-    #  recirculates, so a ratio may move them freely.  Here it may not.  Letting the ratio move the
-    #  vented TOTAL closes a positive feedback through the loop inventory: a higher PT-329201 lowers
-    #  every K, lowers the vented moles, retains more inventory, and raises PT-329201 again.  It is a
-    #  weak loop per tick (-0.41 % of vent per bar, measured) but it INTEGRATES, and it cost this
-    #  branch test_3_scrubber_heat's relaxation leg -- CCW-attributable excess GREW +0.400 -> +1.200
-    #  bar over the 1000 s relax window instead of decaying to +0.100.
-    #  The vent rate is not a thermodynamic quantity in the first place: it is set by HV-322604 and
-    #  the pressure controller, and a real valve passes MORE at higher upstream pressure, not less --
-    #  the opposite sign to the one an equilibrium K supplies.  So the total is renormalised back to
-    #  the licensor's pinned value and only the composition rides the ratio.
-    #  At design every ratio is exactly 1.0, so every `_d` is 0.0, the two totals are bit-identical,
-    #  `_sc_norm` is exactly 1.0, and `x * 1.0 == x` leaves the pinned vent untouched.
+    # PT-329201 is the ONE live state the saturation rides, and the temperature deliberately does NOT
+    # enter.  TT-322011 in this model is a correlation, `114 + 120*(AT-322701 - N/C_des) +
+    # 20*theta_dev` (report A-10), and feeding a fitted gain into a rigorous K-ratio measured badly
+    # (322C001 liquor stationarity 8.1e-9 -> 3.7e-4 under G-VLE-3).  PT-329201 is a measurement.
+    #  The vented TOTAL now moves with the inerts, not with the ratio: the condensables are ~11 mol %
+    #  of the vent, so the K-ratio's pressure feedback on the loop inventory is ~1/40 of the -0.41 %
+    #  of vent per bar that forced the old renormalisation, and HV-322604's choked law (flow rises
+    #  with upstream pressure) dominates it with the stabilising sign.
+    #  At design the ratio is exactly 1.0 and the feed is SCRUB_FEED_KMOLH_DES, so the vent and the
+    #  overflow are SCRUB_OFFGAS_KMOLH_DES / SCRUB_OVERFLOW_KMOLH_DES to the last bit.
     _sc_ratio = _hp_k_ratio(feed, SCRUB_OFFGAS_T_C, state.p_syn_bara,
                             SCRUB_OFFGAS_T_C, SYN_P_DES_BARA)
-    _og_tot_before = sum(offgas.get(k, 0.0) for k in MW_COMP)
-    for k in MW_COMP:
-        _tot_k = offgas.get(k, 0.0) + overflow.get(k, 0.0)
-        if _tot_k <= 0.0:
-            continue
-        _th = offgas.get(k, 0.0) / _tot_k
-        _d = _tot_k * (_ratio_shift_frac(_th, _sc_ratio.get(k, 1.0)) - _th)
-        #  Bounded like every other re-partition in this routine: at most half of either side moves
-        #  in one tick, so a transient ratio can neither empty a stream nor drive one negative.
-        _d = max(min(_d, 0.5 * overflow.get(k, 0.0)), -0.5 * offgas.get(k, 0.0))
-        offgas[k] = offgas.get(k, 0.0) + _d
-        overflow[k] = overflow.get(k, 0.0) - _d
-    #  Renormalise the vented total back to the pinned value (see the note above the ratio call).
-    #  Per species the pair sum is untouched -- whatever leaves `offgas` is handed to `overflow` --
-    #  so the component balance closes exactly, and each `_new` is clamped into [0, _tot_k] so the
-    #  rescale can no more drive a stream negative than the per-species bound above it could.
-    _og_tot_after = sum(offgas.get(k, 0.0) for k in MW_COMP)
-    if _og_tot_before > 0.0 and _og_tot_after > 0.0:
-        _sc_norm = _og_tot_before / _og_tot_after
-        for k in MW_COMP:
-            _old_k = offgas.get(k, 0.0)
-            _new_k = min(max(_old_k * _sc_norm, 0.0), _old_k + overflow.get(k, 0.0))
-            offgas[k] = _new_k
-            overflow[k] = overflow.get(k, 0.0) + (_old_k - _new_k)
+    offgas   = scrub_vent_kmolh(feed, _sc_ratio)
+    overflow = {k: feed[k] - offgas[k] for k in MW_COMP}
     # --- Phase A: reactor OFF-GAS-LINE LIQUID CARRYOVER (flood entrainment) -------------------------
     # On reactor flood (holdup at PHYSICAL vessel-full; LT-322504 narrow-band already pegged 100%) the
     # un-passable melt spills the off-gas line into 322E003 as
@@ -7641,7 +7628,9 @@ def step_sim(dt: float) -> dict:
     #   == REACT_OFFGAS_DES and s.react_T_offgas == REACT_OFFGAS_T_C -> rho_fac == 1.0 -> bit-exact pin.
     dP_des_og = REACT_OFFGAS_P_BARA - SYN_P_DES_BARA
     m_og_live = max(sum(react["offgas_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
-    m_og_des  = max(sum(SCRUB_OFFGAS_KMOLH_DES.get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
+    #  Anchored on the REACTOR off-gas it scales (PFD 203).  It read the 322E003 vent vector, so the
+    #  design mass ratio was 22 355/5 901 and the published line sat at 149.3 bar a, not PFD 203's 141.3.
+    m_og_des  = max(sum(REACT_OFFGAS_DES.get(k, 0.0) * MW_COMP[k] for k in MW_COMP), 1e-6)
     _n_og_live = max(sum(react["offgas_kmolh"].get(k, 0.0) for k in MW_COMP), 1e-9)
     _n_og_des  = max(sum(REACT_OFFGAS_DES.get(k, 0.0) for k in MW_COMP), 1e-9)
     _mw_og_live = m_og_live / _n_og_live                                          # live off-gas mean MW
@@ -8043,7 +8032,7 @@ def step_sim(dt: float) -> dict:
     _valve_og_in.set_state(T=scrub["T_offgas"], P=scrub["P_offgas"])
     _valve_unit.hic_pct = s.HIC_322604
     # HV-322604 hydraulic ceiling.  The condensation gate above hands the off-gas stream everything
-    #   the shell failed to condense -- ~16.5 t/h measured, against the 5.9 t/h reconciled inert purge
+    #   the shell failed to condense -- ~16.5 t/h measured, against the 1.7 t/h PFD 204 inert purge
     #   the DN-24 / Kvs 2.1 seat is sized for.  Without a ceiling the valve model ("pass what is
     #   offered x valve factor") would
     #   simply vent it to 322C001, the boundary balance would close, and the excursion would vanish --
@@ -9944,13 +9933,15 @@ def step_sim(dt: float) -> dict:
     MW_NH3 = MW_COMP["NH3"]
     streams = {
         "NH3_FEED": make_stream(
-            {"NH3": F_pump_total_th * 1000.0 / MW_NH3}, s.tank_T_C, s.tank_P_top_barG + 1.0,
+            {k: F_pump_total_th * 1000.0 * EJ_MOTIVE_W[k] / MW_COMP[k] for k in MW_COMP},
+            s.tank_T_C, s.tank_P_top_barG + 1.0,
             "NH3 ex 309E005", "309E005", "321D003", "liquid", rho=NH3_RHO),
         "PUMP_SUCT": make_stream(
-            {"NH3": F_pump_total_th * 1000.0 / MW_NH3}, s.tank_T_C, PT_A + 1.0,
+            {k: F_pump_total_th * 1000.0 * EJ_MOTIVE_W[k] / MW_COMP[k] for k in MW_COMP},
+            s.tank_T_C, PT_A + 1.0,
             "NH3 pump suction header", "321D003", "321P002 A/B", "liquid", rho=NH3_RHO),
         "HP_DISCH": make_stream(
-            {"NH3": motive_nh3_kgh / MW_NH3}, TI_321020, P_SYN_DOWN_BAR,
+            {k: motive_nh3_kgh * EJ_MOTIVE_W[k] / MW_COMP[k] for k in MW_COMP}, TI_321020, P_SYN_DOWN_BAR,
             "HP NH3 discharge (motive)", "321P002 A/B", "322F001", "liquid", rho=NH3_RHO),
         "CARB_RECYCLE": make_stream(
             scrub["overflow_kmolh"], scrub["T_overflow"], scrub["P_overflow"],
@@ -10111,8 +10102,8 @@ def step_sim(dt: float) -> dict:
     #   IN : fresh NH3 through the 321P002 A/B triplex pumps (ejector motive), fresh CO2 through
     #        322K001, and the 323P001 LP-carbamate recycle washed into 322E003.
     #   OUT: the LV-322501 bottoms letdown to 323C003 and the HV-322604 inert vent to 328.
-    # The design residual SYN_LOOP_RESID_DES_KGH is the constant offset the model's own Path-B
-    # reconciliations leave in this five-term boundary (see its definition); crediting it through the
+    # The design residual SYN_LOOP_RESID_DES_KGH is the constant offset the model's own design pins
+    # leave in this five-term boundary (see its definition); crediting it through the
     # live loop-mass fraction makes dP/dt EXACTLY zero at the design seed -- so PT-329201 holds 140.7
     # bar a and LV-322501's letdown head, which every 323/324 anchor rides on, stops bleeding -- while
     # leaving the raw balance intact on an empty loop (m_loop_frac -> 0), where zero feeds must still
@@ -10183,13 +10174,18 @@ def step_sim(dt: float) -> dict:
         _y_nh3 = (SCRUB_OFFGAS_KMOLH_DES.get("NH3", 0.0) * MW_COMP["NH3"]
                   / max(SCRUB_OFFGAS_KGH_DES, 1e-9))
     psv_nh3_kgh = m_psv_kgh * _y_nh3
-    # Report A-2 (re-audited 2026-09-15): the credit below is NOT the mass source, it is the loop-level
-    # MIRROR of one.  The source is REACT_TEAR_DES, subtracted from the reactor feed in react_322r001
-    # (fc = feed - tear*s), which puts +2085.7 kg/h into 322R001 that never arrived; the balance of the
-    # -2168.2 kg/h is the 322E003 vent re-solve (+4193.4 kg/h of forced NH3/CO2 slip over the PFD
-    # row) net of the motive NH3 re-pin (+2006.05).  Deleting only this credit was measured: PT-329201
-    # 140.700 -> 139.477 bar a in 2750 s (-1.45 bar/h = R_des/C_loop) with the reactor and HPCC levels
-    # bleeding behind it.  It comes out together with the tear, not before it.
+    # Report A-2: the credit below is NOT the mass source, it is the loop-level MIRROR of one.  The
+    # source is REACT_TEAR_DES, subtracted from the reactor feed in react_322r001 (fc = feed - tear*s).
+    # Since the 322E003 vent went back onto PFD 204 and the motive onto PFD 116's composition, that
+    # tear (NH3 +129.1, CO2 +5.8, H2O -5.1, urea -4.7 kmol/h; 2107.5 kg/h) decomposes exactly: the
+    # motive's surplus over PFD 116 (NH3 117.5, CH4 0.19, H2 0.10 -- 2004 kg/h), the stripper top's
+    # offset from PFD 201 (NH3 2.4, CO2 1.5, N2 0.9 -- 127 kg/h), and 4.6 kmol/h of urea extent
+    # (the engine's 1302.27 against the 1306.9 PFD 205 -> 207 implies; mass-neutral).  Before A-2 it
+    # CREATED 3.86 CH4, 2.02 H2 and 54.9 CO2 that no feed carries.  The credit (+2024.9) differs from
+    # the tear by 82.6 kg/h, and that is located too: the scrubber washes with PFD 308 (36 915 kg/h)
+    # while this boundary counts the 323E003 draw (36 835.2), 79.8 kg/h, plus the CO2 feed's
+    # mole-fraction rounding (1.1) and the stripper bottoms' (1.6).  Deleting only this credit was
+    # measured before A-2: PT-329201 140.700 -> 139.477 bar a in 2750 s.  It comes out with the tear.
     m_net_loop = ((m_in_loop - m_out_loop) - m_loop_frac * SYN_LOOP_RESID_DES_KGH
                   + m_phase_shift - m_psv_kgh)
 

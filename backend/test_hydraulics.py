@@ -648,13 +648,13 @@ def test_api520_critical_ratio_matches_the_gas_table():
 
 
 def test_sv32201_is_sized_between_two_api_letter_orifices():
-    """The back-solve lands at 2.558 in^2, 90 % of letter "L" -- an L-orifice valve carrying about
-    10 % sizing margin, which is what a DN 100 relief valve on this service is.  A capacity that
+    """The back-solve lands at 2.611 in^2, 92 % of letter "L" -- an L-orifice valve carrying about
+    8 % sizing margin, which is what a DN 100 relief valve on this service is.  A capacity that
     had been invented rather than documented would not land there."""
     main = _main()
     in2 = main.SYN_PSV_AREA_M2 * 1550.0031
     assert 1.838 < in2 < 2.853          # between API letters K and L
-    assert abs(in2 - 2.558) < 0.01
+    assert abs(in2 - 2.611) < 0.01      # MW 26.37 of the PFD 204 vent (report A-2; 2.558 at 27.48)
 
 
 def test_sv32201_pops_and_reseats_on_a_real_blowdown():

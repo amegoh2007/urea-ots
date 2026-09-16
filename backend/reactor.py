@@ -20,19 +20,20 @@ sensitive to.
 
 CALIBRATION (anchored to as-built design HMB, no fabrication):
     L0 = 3.072961   (live reactor-feed NH3/CO2 molar at design steady state)
-    W0 = 0.407828   (live reactor-feed H2O/CO2 molar at design steady state)
+    W0 = 0.398241   (live reactor-feed H2O/CO2 molar at the design seed; 0.407828 before A-2)
     T0 = 183.0 C    (REACT_OVERFLOW_T_C)
     X_des = 0.543   (xi_urea / CO2_feed = 1302.27 / 2397.7, CO2 per-pass)
     a = 3.6180      NH3-excess saturation coeff -- FROZEN: sets the f_L N/C slope (test_1_nc_shift).
                     f_L(L0) = a*(L0-2)/(1+a*(L0-2))          = 0.795165
     b = 0.85        water-penalty strength -- calibrated UP from 0.60 for an aggressive Stamicarbon
-                    H/C penalty.  f_W(W0) = 1/(1+0.85*0.407828) = 0.742582
-    X_inf = 0.9196  high-NH3 low-water ceiling -- now SOLVED (was 0.85) to hold the anchor with a,b
+                    H/C penalty.  f_W(W0) = 1/(1+0.85*0.398241) = 0.747102
+    X_inf = 0.9140  high-NH3 low-water ceiling -- now SOLVED (was 0.85) to hold the anchor with a,b
                     fixed, giving f_W the headroom a stronger b needs (else f_L/f_W fight one budget):
-                    X_inf = X_des/(f_L(L0)*f_W(W0)) = 0.543/(0.795165*0.742582) = 0.9196
+                    X_inf = X_des/(f_L(L0)*f_W(W0)) = 0.543/(0.795165*0.747102) = 0.9140
+                    (0.9196 on the pre-A-2 W0 = 0.407828)
     k = 0.0015      parabolic T-penalty curvature, 1/C^2.  f_T peaks at Topt(L) and falls either
        (1/C^2)      side -> over-temperature equilibrium REVERSAL.  At the (L=1000,W=0) corner the
-                    conversion holds ~91.96% (X_inf ceiling) up to ~207 C, then drops to ~30% by
+                    conversion holds ~91.40% (X_inf ceiling) up to ~207 C, then drops to ~30% by
                     225 C and collapses past 250 C -> a noticeable drop is already visible by 210 C.
     Topt(L)         N/C-dependent optimum = clip(185 + 2*(L-2), 185, 195) C.  Excess NH3 drives the
                     endothermic dehydration step, lifting the optimum; design L0 -> ~187 C, so the
@@ -53,9 +54,13 @@ import math
 # --- calibration constants (tunable; see module docstring) -----------------------------------
 R_GAS      = 8.314          # J/(mol*K)
 L0_DES     = 3.072961       # design reactor-feed N/C molar  (NH3/CO2), live-probed
-W0_DES     = 0.407828       # design reactor-feed H/C molar  (H2O/CO2), live-probed
+W0_DES     = 0.39824129577331385   # design reactor-feed H/C molar (H2O/CO2), live-probed at the seed
+#   Re-probed for report A-2 (was 0.407828): the 322E003 overflow now carries PFD 206's CO2 (+60.7
+#   kmol/h), so the HPCC feed is drier per CO2.  It seeds the recycle H/C lag, so it must be the seed's
+#   own value or the design point walks for tau_rec.  It is also PFD 202+205's H2O/CO2 (0.39839), where
+#   0.407828 was not.  X_INF below is re-solved on it by the same rule, so X(L0,W0,T0) stays 0.543.
 T0_DES_C   = 183.0          # design reactor bulk temperature, C  (REACT_OVERFLOW_T_C)
-X_INF      = 0.9196         # thermodynamic conversion ceiling -- SOLVED to hold X_des with a,b fixed (was 0.85)
+X_INF      = 0.9140         # thermodynamic conversion ceiling -- SOLVED to hold X_des with a,b fixed (0.9196 pre-A-2)
 ALPHA_NC   = 3.6180         # NH3-excess saturation coefficient  (FROZEN -- sets f_L slope, see test_1)
 BETA_HC    = 0.85           # water-penalty coefficient (aggressive Stamicarbon H/C penalty; was 0.60)
 K_TOPT     = 0.0015         # parabolic T-penalty curvature, 1/C^2 (noticeable conversion drop by 210 C)
