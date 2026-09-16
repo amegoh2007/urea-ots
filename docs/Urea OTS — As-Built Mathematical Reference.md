@@ -2353,6 +2353,80 @@ Test files, each in its own process, against the previous commit:
 | `test_session_regression_gate` / `test_startup_stability` (run with the D-16 commit on top) | 7 / 5 passed | 7 / 5 passed |
 | `test_equation_audit_322e002`, `test_lv322501_pressure_retuning`, `test_reactor`, `test_scrubber` (same) | 1 failed / 17 / 14 / 13 passed | identical |
 
+## Phase 5f — the steam-drum level valves feel the drums on either side (D-16)
+
+`steam_system._level_loop` drove all three drum level valves as
+
+```text
+m_valve = m_des . op / LV_OPEN_DES
+```
+
+-- stroke alone. A valve in MAN kept passing its design flow whatever the two drums did, and a
+let-down that lost its differential kept delivering condensate it could no longer be pushed. The
+mapping names both ends of every valve and PFD-26 tabulates them:
+
+| valve | from -> to | PFD-26 stream | liquid |
+|---|---|---|---|
+| LV-329502 | 329D005 19.7 -> 329D009 9.0 bar a | 904 | saturated, 850.84 kg/m3 |
+| LV-329503 | 329D009 9.0 -> 322D001 4.4 bar a | 913 | saturated, 891.84 kg/m3 |
+| LV-329504 | 329P001A/B 9.0 -> 322D001 4.4 bar a | 916 | 100 C, 958.58 kg/m3 |
+
+Each is now IEC 60534 liquid, anchored on its design duty at the 50 % design stroke:
+
+```text
+m_valve = m_des . frac(op).sqrt(dP_eff.rho) / [frac(50 %).sqrt(dP_eff,des.rho_des)]
+dP_eff  = min(P_up - P_dn, FL^2.P_up)
+```
+
+with both drum pressures live and rho the saturated-liquid density at the upstream drum's own
+pressure (IAPWS-IF97). LV-329504's upstream is the condensate-pump discharge, which the steam module
+does not simulate, so it is the stream-916 boundary and its subcooled density is constant. The design
+pressures are the module's own (`P_HP_BARA`, `P_MP_BARA`, `P_LP_BARA`), so the seed is bit-exact.
+
+Two stated choices, both for the reason they were made elsewhere. The trim is LINEAR: no level-valve
+data sheet exists, and linear keeps the gain LIC_KC / LIC_TI were tuned on. The two drum-to-drum
+valves pass SATURATED liquid, whose vena contracta flashes; Pv at saturation would collapse the
+single-phase choke to ~4 % of P1, so they run with Pv = 0 and the FL^2.P1 ceiling -- the same
+treatment, and the same open two-phase gap, as the three 328 bottoms valves.
+
+### Measured
+
+Full engine, 3 000 s design hold at STEP_CAP, before -> after:
+
+| | before | after |
+|---|---|---|
+| PT-329201 | 140.475951 | 140.475951 |
+| P_MP / P_9 / P_LP (bar a) | 19.69416 / 9.00272 / 5.01226 | 19.69416 / 9.00274 / 5.01226 |
+| LIC-329502 / 503 / 504 level (%) | 50.0040 / 50.0040 / 50.0155 | 50.0044 / 50.0030 / 50.0157 |
+| LV-329502 / 503 / 504 stroke (%) | 50.1088 / 50.1090 / 49.4873 | 50.1287 / 50.0862 / 49.4799 |
+
+At design nothing moves that a trend could show. Off design is where it matters -- the standalone
+steam module, 322D001 header master setpoint +0.5 bar a from a 600 s settle:
+
+| | before | after |
+|---|---|---|
+| level loops in MAN, 600 s: 329D009 level change | +0.000 % | **+24.6 %** (LV-329503 lost 0.5 bar of its 4 bar differential) |
+| 322D001 level change | +9.904 % | +9.858 % |
+| level loops in AUTO, 1 800 s: LV-329503 stroke | 50.000 % | **53.126 %** |
+
+Before this, a let-down whose downstream drum rose by half a bar delivered exactly the same
+condensate on exactly the same stroke. `test_steam_system_pfd_mass_paths::test_lp_drum_liquid_balance_includes_lv329503_inflow`
+compared the LP drum's accumulation with `M_503_DES` after a step in which every steam source is
+zeroed and both drums move; it now compares with the valve law at the post-step pressures, and
+asserts that the two differ.
+
+Test files, each in its own process, against the previous commit:
+
+| file | previous commit | this commit |
+|---|---|---|
+| `test_steam_system_pfd_mass_paths` | 6 passed | 6 passed (one updated as above) |
+| `test_lp_steam_4barg` / `test_steam_consumption_surge` | 1 / 1 passed | 1 / 1 passed |
+| `test_g8_lp_turbine_export` | 2 failed / 4 passed | same two ids |
+| `test_session_regression_gate` / `test_startup_stability` | 7 / 5 passed | 7 / 5 passed |
+| `test_equation_audit_td014` | 3 failed / 8 passed | same ids |
+| `test_equation_audit_322e002` | 1 failed / 7 passed | same id |
+| `test_lv322501_pressure_retuning` / `test_reactor` / `test_scrubber` | 17 / 14 / 13 passed | identical |
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

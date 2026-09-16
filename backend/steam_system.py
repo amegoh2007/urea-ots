@@ -49,6 +49,7 @@ from dataclasses import dataclass, field
 
 import hydraulics                    # PHASE 2 report D-2: ISA-75.01 compressible valve law
 from iapws_if97 import tsat_c, v_vapour_sat_m3kg   # shared pure-water saturation line + sat vapour v
+from iapws_if97 import rho_liquid_sat_kgm3          # saturated condensate density at a drum's own P
 
 # ---------------------------------------------------------------- saturated-steam enthalpies (kJ/kg)
 #   Standard IAPWS/IF97 saturation table (sourced), used only for let-down desuperheat trims.
@@ -284,6 +285,25 @@ MSPAN_503    = 892.15 * (1.776 * 2.600) * 0.750         # kg, 329D009 horiz
 LT504_SPAN_M = 1.500      # m, LICA-329504 tap separation N8B 300 -> N8A 1800 above bottom t.l.
 MSPAN_504    = RHO_D001_L * (N_D001 * A_D001_M2) * LT504_SPAN_M   # kg, 322D001A+B (~26085)
 
+#  LEVEL-VALVE HYDRAULICS (report D-16).  Each valve passes liquid between two pressures the mapping
+#  names ("Mapping of the steam system.md" lines 13, 20, 28) and PFD-26 tabulates:
+#     LV-329502  329D005 19.7 -> 329D009 9.0 bar a   stream 904, saturated condensate  850.84 kg/m3
+#     LV-329503  329D009  9.0 -> 322D001 4.4 bar a   stream 913, saturated condensate  891.84 kg/m3
+#     LV-329504  329P001A/B 9.0 -> 322D001 4.4 bar a stream 916, condensate at 100 C   958.58 kg/m3
+#  The two drum-to-drum valves read both ends live and take the density of saturated liquid at the
+#  upstream drum's own pressure; LV-329504's upstream is the condensate-pump discharge, which this
+#  module does not simulate, so it is the PFD-26 stream-916 boundary.
+P_916_BARA   = 9.0        # bar a, PFD-26 stream 916 -- 329P001A/B discharge into LV-329504
+RHO_916      = 958.58     # kg/m3, PFD-26 stream 916 (100 C, subcooled: density does not follow P)
+#  No level-valve datasheet exists in References/, so the trim is LINEAR -- the gain basis LIC_KC /
+#  LIC_TI were tuned against when the law was `m_des . op/50`, so the terms added here are the live
+#  differential and density, not a retune.  Both drum-to-drum valves pass SATURATED liquid, whose
+#  vena contracta flashes; with Pv at saturation the single-phase choke would collapse dP_eff to ~4 %
+#  of P1 and make them hard orifices.  They run with Pv = 0, so the FL^2.P1 ceiling applies the right
+#  qualitative limit without claiming a two-phase capacity -- the same stated treatment as the three
+#  328 bottoms valves, and the same open IEC 60534 two-phase gap.
+LV_CHAR      = "linear"
+
 
 #  Saturated steam, gamma = c_p/c_v.  1.30 is the standard value for superheated/saturated steam
 #  over this pressure range and is the same one `hydraulics` defaults to; F_gamma = 1.30/1.40 =
@@ -338,23 +358,30 @@ def _seed_supply_pct() -> float:
 _SUPPLY_BIAS = _seed_supply_pct()   # design-seed PV-329204 opening; PIC-329204 bias anchor (bit-exact fixed point)
 
 
-def _level_loop(mode, sp, lvl, op, ep, dt, m_span, m_des, direct, m_ext, valve_out):
+def _level_loop(mode, sp, lvl, op, ep, dt, m_span, m_des, direct, m_ext, valve_out,
+                p_up, p_dn, p_up_des, p_dn_des, rho, rho_des):
     """Advance one drum level loop; return (lvl, op, ep, m_valve).
 
     Velocity-form PI on the drum level, then a LOCAL mass balance (accumulation = in - out):
         e        = (lvl-sp) if direct else (sp-lvl)              # direct=drain, reverse=make-up
         op      <- clamp(op + KC*((e-ep) + dt/TI*e), 0, 100)     # AUTO only; frozen in MAN
-        m_valve  = m_des * (op / LV_OPEN_DES)                    # design-seeded valve flow (kg/s)
+        m_valve  = m_des . Phi(op, p_up, p_dn, rho) / Phi(LV_OPEN_DES, design)     (kg/s)
+                   Phi = frac(op) . sqrt(dP_eff . rho)           # IEC 60534 liquid, report D-16
         dm       = (m_ext - m_valve) if valve_out else (m_valve - m_ext)   # in - out
         lvl     <- clamp(lvl + dm*dt/m_span*100, 0, 100)
-    ep is tracked every tick (incl. MAN) -> bumpless MAN->AUTO.  Seeded op==LV_OPEN_DES with
-    m_ext==m_des gives m_valve==m_ext -> dm==0 -> level parks at SP (design bit-exact).
+    The valve law was `m_des * op/LV_OPEN_DES`: stroke alone, so a valve in MAN kept passing its
+    design flow whatever happened to the drums on either side of it, and a let-down drum that lost
+    pressure kept receiving condensate it could no longer be pushed.  ep is tracked every tick
+    (incl. MAN) -> bumpless MAN->AUTO.  Seeded op==LV_OPEN_DES at the design pressures and density
+    gives a bracket of exactly 1.0 -> m_valve==m_des==m_ext -> dm==0 -> level parks at SP.
     """
     e = (lvl - sp) if direct else (sp - lvl)
     if mode == "AUTO":
         op = max(0.0, min(100.0, op + LIC_KC * ((e - ep) + (dt / LIC_TI) * e)))
     ep = e
-    m_valve = m_des * (max(0.0, min(100.0, op)) / LV_OPEN_DES)
+    m_valve = hydraulics.valve_liquid_anchored(
+        m_des, max(0.0, min(100.0, op)) / 100.0, p_up, p_dn, rho,
+        LV_OPEN_DES / 100.0, p_up_des, p_dn_des, rho_des, characteristic=LV_CHAR, pv_bara=0.0)
     dm = (m_ext - m_valve) if valve_out else (m_valve - m_ext)
     lvl = max(0.0, min(100.0, lvl + dm * dt / m_span * 100.0))
     return lvl, op, ep, m_valve
@@ -451,7 +478,10 @@ def step_steam(state: SteamState, dt: float,
     # Flashing belongs to condensate that actually crosses the valve, not to upstream steam demand.
     state.lic502_lvl, state.lic502_op, state.lic502_ep, m_lv502 = _level_loop(
         state.lic502_mode, state.lic502_sp, state.lic502_lvl, state.lic502_op, state.lic502_ep,
-        dt, MSPAN_502, M_502_DES, direct=True, m_ext=m_strip_consume, valve_out=True)
+        dt, MSPAN_502, M_502_DES, direct=True, m_ext=m_strip_consume, valve_out=True,
+        p_up=state.P_MP, p_dn=state.P_9, p_up_des=P_HP_BARA, p_dn_des=P_MP_BARA,
+        rho=rho_liquid_sat_kgm3(tsat_c(max(state.P_MP, 1e-6))),
+        rho_des=rho_liquid_sat_kgm3(tsat_c(P_HP_BARA)))
     m_flash9 = FLASH9_FRACTION * m_lv502
 
     # -- PIC-329204 HP-saturator pressure (direct PI about the seed opening: under-P -> open supply) --
@@ -620,10 +650,15 @@ def step_steam(state: SteamState, dt: float,
     #    Liquid inventories do not write the header pressures; their published residuals expose net flow.
     state.lic503_lvl, state.lic503_op, state.lic503_ep, m_lv503 = _level_loop(
         state.lic503_mode, state.lic503_sp, state.lic503_lvl, state.lic503_op, state.lic503_ep,
-        dt, MSPAN_503, M_503_DES, direct=True, m_ext=m_lv502 - m_flash9, valve_out=True)
+        dt, MSPAN_503, M_503_DES, direct=True, m_ext=m_lv502 - m_flash9, valve_out=True,
+        p_up=state.P_9, p_dn=state.P_LP, p_up_des=P_MP_BARA, p_dn_des=P_LP_BARA,
+        rho=rho_liquid_sat_kgm3(tsat_c(max(state.P_9, 1e-6))),
+        rho_des=rho_liquid_sat_kgm3(tsat_c(P_MP_BARA)))
     state.lic504_lvl, state.lic504_op, state.lic504_ep, m_lv504 = _level_loop(
         state.lic504_mode, state.lic504_sp, state.lic504_lvl, state.lic504_op, state.lic504_ep,
-        dt, MSPAN_504, M_504_DES, direct=False, m_ext=m_hpcc_gen - m_lv503, valve_out=False)
+        dt, MSPAN_504, M_504_DES, direct=False, m_ext=m_hpcc_gen - m_lv503, valve_out=False,
+        p_up=P_916_BARA, p_dn=state.P_LP, p_up_des=P_916_BARA, p_dn_des=P_LP_BARA,
+        rho=RHO_916, rho_des=RHO_916)
 
     state.mass_residual_d005_vapor = residual_d005_vapor
     state.mass_residual_d009_vapor = residual_d009_vapor

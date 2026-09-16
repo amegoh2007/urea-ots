@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 26 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 37 OPEN.**
+**Totals: 27 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 36 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -70,7 +70,7 @@ and the third was not a missing number at all. See *What the archive supplied* b
 | A. Algebraic state | 10 | 0 | 0 | 0 | 9 |
 | B. Phase splits | 0 | 5 | 0 | 0 | 9 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
-| D. Hydraulics | 11 | 3 | 0 | 0 | 8 |
+| D. Hydraulics | 12 | 3 | 0 | 0 | 7 |
 | E. Gains / signals | 1 | 0 | 0 | 1 | 10 |
 
 Status key. **CLOSED**: the live path now solves the first-principles relationship. Where it is written
@@ -173,7 +173,7 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | D-13 | OPEN | [steam_system.py:74](../../backend/steam_system.py#L74) | K back-sized at a 50 % opening |
 | D-14 | **CLOSED** (2026-09-16) | `_header_capacitance` + `DRUM GEOMETRY` in `steam_system.py` | Each header is V_vapour·dρ_sat/dP with dρ/dP from IAPWS-IF97 and V_vapour from the **as-built GAs**, taken at each drum's printed normal liquid level rather than at an assumed half-full: **C_MP 3.39, C_9 1.97, C_LP 45.92** kg/bar against the calibrated 25.0 / 53.2 / 25.0. The half-full assumption I flagged the same day turned out to be a *datum* for the two horizontal drums — both GAs draw NLL on the shell axis — and wrong for the vertical LP drums, which carry 1.05 m of water in a 5.3 m shell |
 | D-15 | **CLOSED** (2026-09-16) | as D-14 | The ×30 `F_lump` is deleted: 329D009's nameplate 8 m³, half of it vapour, gives 1.97 kg/bar, not 53.2. The factor existed to keep an EXPLICIT step stable, which is a property of the integrator, so the header pressures now step semi-implicitly — `P' = P + res·dt/(C + g·dt)` with g = −∂res/∂P evaluated from the same valve laws. Amplification C/(C + g·dt) ∈ (0,1] for any dt, and every residual is zero at design so the seed is bit-exact |
-| D-16 | OPEN | [steam_system.py:287](../../backend/steam_system.py#L287) | `m_des × op/op_des` |
+| D-16 | **CLOSED** (2026-09-16, As-Built *Phase 5f*) | `_level_loop` in `steam_system.py` | IEC 60534 liquid on the live drum-to-drum differential for LV-329502 (329D005 → 329D009) and LV-329503 (329D009 → 322D001), saturated-liquid density at the upstream drum's pressure; LV-329504 from the PFD-26 stream-916 pump boundary. Linear trim and Pv = 0 on the flashing pair, both stated |
 | D-17 | OPEN | [main.py:6013](../../backend/main.py#L6013) | Constant η_v |
 | D-18 | OPEN | [main.py:6022](../../backend/main.py#L6022) | Current linear in rpm |
 | D-19 | CLOSED (Phase 2) | As-Built *D-19/D-20/D-21* | The report's site was the 322F001 suction: head term restored |

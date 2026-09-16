@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, D-12, D-14, D-15, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; no BLOCKED findings left)
+**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, D-12, D-14, D-16, D-15, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; no BLOCKED findings left)
 
 ---
 
@@ -49,6 +49,11 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   LIC-329504, LICA-329504 taps N8B/N8A 1.500 m apart, rho 919.36 -> 26 083 kg. Both taps are in the
   cylindrical shell, so no head correction. Not design-pinned: `_level_loop` is seeded for
   dm/dt = 0 at design whatever `m_span` is, so only the level timescale moved.
+* **D-16 closed (As-Built *Phase 5f*), and the design flows it anchors on do not match PFD-26.**
+  `M_502_DES` is `M_STRIP_DES` = 76 670 kg/h against stream 904's 57 989; `M_504_DES` is
+  `M_HPCC_DES` = 10 800 kg/h against stream 916's 19 500. The level valves are anchored on the
+  module's flows, so they are self-consistent, but the steam network's liquid split is not the PFD's.
+  Reconciling it moves the stripper-steam and HPCC-raising anchors, so it is its own piece of work.
 * **Two things the 322D001 datasheet disagrees with and were NOT changed.** Its operating pressure
   is 4.400 bar a, while `steam_system.P_LP_BARA` is 5.01325 (4.0 barg, the header the mapping
   documents call the 4-bar header). And its "max. fill lev. in oper. cond." is blank on all three
