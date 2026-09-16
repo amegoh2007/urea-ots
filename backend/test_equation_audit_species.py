@@ -195,7 +195,10 @@ def test_stream_331_closes_the_f010_total_mass_balance():
     assert main.SOL_F010["resid"] == 0.0, main.SOL_F010["resid"]
     # every design vapour component is now physically possible without clipping
     assert all(main.SOL_F010["y"][k] >= 0.0 for k in main.SOL_SPECIES)
-    assert main.SOL_F010["alpha"]["Urea"] > 0.0        # real (small) urea carryover, was clipped to 0
+    #  Urea does not evaporate at 99 C, but PFD stream 790 does carry 0.14 mol% of it: entrained
+    #  liquor, closed as a carryover fraction of the overhead, not as a volatility (As-Built 5e).
+    assert main.SOL_F010["alpha"]["Urea"] == 0.0
+    assert 0.005 < main.SOL_F010["entrain"] < 0.007, main.SOL_F010["entrain"]
     assert main.SOL_F010["alpha"]["CO2"] > main.SOL_F010["alpha"]["NH3"] > 1.0   # ordering is physical
 
 

@@ -1177,9 +1177,15 @@ R323_MEVAP_DES = R323_PHI_VEVAP * R323_M319_DES + R323_M331_DES           # vapo
 R323_M317_DES  = (1.0 - R323_PHI_VEVAP) * R323_M319_DES                   # product -> tank
 # 323F010 vacuum is a LIVE state (PT-323204) driven by two hand valves — HV-323605 (gas outlet 790,
 # HIC-323605) and HV-329605 (324F002 ejector motive).  Mapping rule: opening either drops the
-# pressure.  No controller on this node, so stability comes from the ejector's suction-pressure
-# capacity roll-off (pull ∝ P/P_des); anchored so m_evap == pull == R323_MEVAP_DES at design.
+# pressure.  No controller on this node: it is self-regulating because stream 790 is a GAS VALVE
+# FLOW from this vessel into the 324E002 shell, so the pull rises with the vessel's own pressure
+# (report D-12, see `hv323605_flow_kgh`).  HV-329605 reaches it through the 324E002 shell pressure.
 R323_HIC605_DES_PCT = 50.0        # % HIC-323605 design opening (HV-323605 gas-outlet hand valve, stream 790)
+#  No datasheet for HV-323605 exists in References/ or in the vendor archive (its TOC indexes only
+#  package-unit valves), so the trim is a stated choice, made on the same basis as R323_LV_CHAR:
+#  LINEAR keeps the per-cent-of-stroke gain the retired `pull x HIC/50` law gave the operator, so this
+#  change adds the missing pressure physics without re-scaling the hand valve.
+R323_HV605_CHAR     = "linear"
 R323_M324_DES  = R323_M317_DES                                           # tank throughput -> Unit 324
 
 # --- Derived latent / duty terms (force dT/dt = 0 at each design fixed point) ---
@@ -2548,7 +2554,7 @@ R323_CP_S331_DES = urea_soln_cp(W_S331["Urea"], R323_M331_T_C)       # 44.37 % @
 
 
 def _sol_stage_anchor(w_in: dict, w_out: dict, m_in: float, m_vap: float, m_liq: float,
-                      w_in2: dict = None, m_in2: float = 0.0) -> dict:
+                      w_in2: dict = None, m_in2: float = 0.0, entrain: bool = False) -> dict:
     """Back-solve one stage's design biuret extent and relative volatilities from the PFD.
 
     A stage with a second inlet passes w_in2/m_in2 and the two feeds are summed component-wise
@@ -2556,35 +2562,68 @@ def _sol_stage_anchor(w_in: dict, w_out: dict, m_in: float, m_vap: float, m_liq:
     urea-recovery return from the granulation scrubber, joins stream 319 ahead of 323E010.
 
     Returns {'xi': kmol/h, 'y': design vapour mass fractions, 'alpha': volatility vs water,
-             'resid': the kg/h that had to be clipped to keep every vapour flow non-negative}.
+             'resid': the kg/h that had to be clipped to keep every vapour flow non-negative,
+             'entrain': the mass fraction of the overhead that is entrained LIQUOR, not vapour}.
+
+    `entrain` is for a stage whose PFD overhead row lists urea, which cannot evaporate and therefore
+    left as droplets of the vessel's own liquor.  The carryover fraction f and the biuret extent xi
+    then close urea and biuret TOGETHER, because the droplets carry biuret too:
+        urea:    m_in,U - 2.MW_U.xi - m_liq.w_U - f.m_vap.w_U = 0
+        biuret:  m_in,B +   MW_B.xi - m_liq.w_B - f.m_vap.w_B = 0
+    unless that asks for a negative xi, in which case xi = 0 (as the plain back-solve already
+    clips it) and f closes urea alone.  y / alpha are back-solved on the (1 - f).m_vap that really
+    is vapour.
     The clip residual is reported, never hidden.  It used to be -1414 kg/h of urea at 323F010 with
     stream 331 absent (finding F-11); with the real two-feed topology it is 0.0 there and the water
     closure term falls from ~1.4 t/h to ~1 kg/h.  Everywhere else it is under 0.4 % of the vapour
     and is PFD percentage rounding."""
     m_i = {k: m_in * w_in[k] + (m_in2 * w_in2[k] if w_in2 else 0.0) for k in SOL_SPECIES}
     xi  = max((m_liq * w_out["Biuret"] - m_i["Biuret"]) / MW_SOL["Biuret"], 0.0)
+    f_ent = 0.0
+    if entrain and m_vap > 1e-9:
+        r_ub = 2.0 * MW_SOL["Urea"] / MW_SOL["Biuret"]
+        a_u = m_i["Urea"] - m_liq * w_out["Urea"]
+        b_b = m_i["Biuret"] - m_liq * w_out["Biuret"]
+        f_ent = max((a_u + r_ub * b_b) / (m_vap * (w_out["Urea"] + r_ub * w_out["Biuret"])), 0.0)
+        xi = (f_ent * m_vap * w_out["Biuret"] - b_b) / MW_SOL["Biuret"]
+        if xi < 0.0:
+            #  The biuret rows leave no room for formation (323F010: 5 kg/h MORE biuret in than out,
+            #  inside the 0.005 wt% rounding of a 101 t/h feed), so xi is zero as before and the
+            #  carryover closes urea alone.
+            xi = 0.0
+            f_ent = max(a_u / (m_vap * w_out["Urea"]), 0.0)
     gen = {k: 0.0 for k in SOL_SPECIES}
     gen["Biuret"] = +xi * MW_SOL["Biuret"]
     gen["Urea"]   = -xi * 2.0 * MW_SOL["Urea"]
     gen["NH3"]    = +xi * MW_SOL["NH3"]
-    vap   = {k: m_i[k] + gen[k] - m_liq * w_out[k] for k in SOL_SPECIES}
+    vap   = {k: m_i[k] + gen[k] - m_liq * w_out[k] - f_ent * m_vap * w_out[k] for k in SOL_SPECIES}
+    if f_ent > 0.0:
+        vap["Urea"] = 0.0                            # closed by construction; kill the round-off
     resid = sum(v for v in vap.values() if v < 0.0)
     for k in SOL_SPECIES:
         if k in SOL_NONVOL or vap[k] < 0.0:
             vap[k] = 0.0
-    vap["H2O"] += m_vap - sum(vap.values())          # water closes the balance (reference species)
-    y = {k: vap[k] / m_vap for k in SOL_SPECIES} if m_vap > 1e-9 else dict(w_out)
+    m_v = (1.0 - f_ent) * m_vap                      # the part of the overhead that is vapour
+    vap["H2O"] += m_v - sum(vap.values())            # water closes the balance (reference species)
+    y = {k: vap[k] / m_v for k in SOL_SPECIES} if m_v > 1e-9 else dict(w_out)
     aw = y["H2O"] / w_out["H2O"]
     alpha = {k: ((y[k] / w_out[k]) / aw if (w_out[k] > 1e-12 and k not in SOL_NONVOL) else 0.0)
              for k in SOL_SPECIES}
     alpha["H2O"] = 1.0                               # reference species, by definition
-    return {"xi": xi, "y": y, "alpha": alpha, "resid": resid}
+    return {"xi": xi, "y": y, "alpha": alpha, "resid": resid, "entrain": f_ent}
 
 
 SOL_C003 = _sol_stage_anchor(W_S208, W_S314, R323_FEED_DES_KGH, R323_M305_DES,  R323_M314_DES)
 SOL_F004 = _sol_stage_anchor(W_S314, W_S319, R323_M314_DES,     R323_M701_DES,  R323_M319_DES)
+#  323F010 is the one stage whose PFD overhead lists a non-volatile: stream 790 carries 0.14 mol%
+#  urea, 54 kg/h in 12 040.  Urea does not evaporate at 99 C, so that is liquor entrained into the
+#  DN 600 overhead, and the anchor closes it as such: f = 0.611 % of the overhead, 58.7 kg/h of
+#  urea on the reconciled rows against the 54.4 the rounded mole-% row gives.  Stream 305 above
+#  lists no urea, so 323C003's 8 kg/h balance remainder is table rounding (0.008 % of 106 t/h), not
+#  carryover, and is left where it was.
 SOL_F010 = _sol_stage_anchor(W_S319, W_S317, R323_M319_DES,     R323_MEVAP_DES, R323_M317_DES,
-                             w_in2=W_S331, m_in2=R323_M331_DES)   # F-11: 319 + 331 -> E010 -> F010
+                             w_in2=W_S331, m_in2=R323_M331_DES,   # F-11: 319 + 331 -> E010 -> F010
+                             entrain=True)
 SOL_E001 = _sol_stage_anchor(W_S317, W_S401, R324_FEED_DES,     R324_V1_DES,    R324_P1_DES)
 SOL_E003 = _sol_stage_anchor(W_S401, W_S402, R324_P1_DES,       R324_V2_DES,    R324_P2_DES)
 
@@ -2618,11 +2657,14 @@ SOL_VLE_DOMAIN = {}
 
 #  Species that cannot enter the vapour at ANY temperature or pressure these stages reach.  Their
 #  K-value is zero as a matter of structure, not of model bias, so the anchored form below sets them
-#  to zero outright rather than scaling the licensor's back-solved alpha.  This is the urea leak the
-#  Phase-1 audit found: `_sol_stage_anchor` back-solves alpha for EVERY species, so it produced
-#  alpha_Urea = 7.92e-4 at 323C003 and 1.36e-3 at 323F010, i.e. a frozen y_Urea = 0.4887 % at the
-#  pre-evaporator -- about 59 kg/h of urea "evaporating" into a 0.46 bar a vacuum and subtracted
-#  from the holdup by `sol_advance` as a real mass sink.  Urea's vapour pressure at 99 C is nil.
+#  to zero outright rather than scaling the licensor's back-solved alpha.  The Phase-1 audit found
+#  `_sol_stage_anchor` back-solving alpha for EVERY species -- alpha_Urea = 7.92e-4 at 323C003 and
+#  1.36e-3 at 323F010, about 59 kg/h of urea "evaporating" at the pre-evaporator -- and was right
+#  that urea's vapour pressure at 99 C is nil.  It was wrong about the 59 kg/h: that mass is real.
+#  PFD stream 790 lists it (0.14 mol%), and it leaves as ENTRAINED LIQUOR.  Zeroing it here without
+#  giving it another way out left the design seed accumulating 58.7 kg/h of urea and short 56.8 kg/h
+#  of water, which concentrated the liquor, raised its bubble point and made TIC-323012 trim the
+#  steam until evaporation sat 0.2 % low.  It now leaves through `SOL_F010["entrain"]`.
 SOL_NONVOLATILE = ("Urea", "Biuret", "HCHO")
 
 #  Per-stage relative volatility from the rigorous model AT THE DESIGN STATE -- the denominator of
@@ -2741,6 +2783,10 @@ _sol_alpha_anchor("F010", W_S317, R323_F010_T_SP_C, R323_F010_P_BARA)
 #  the vector the first tick would have produced.
 SOL_F010_Y_DES = sol_vapour_y_vle("F010", W_S317, R323_F010_T_SP_C, R323_F010_P_BARA,
                                   SOL_F010["alpha"])
+#  Molar mass of that vector, written as the SAME expression the 323F010 tick evaluates on its
+#  pressure tear, so the HV-323605 anchor sees an identical float at the seed.
+R323_F010_MW_VAP_DES = 1.0 / max(sum(SOL_F010_Y_DES.get(k, 0.0) / MW_SOL[k] for k in SOL_SPECIES),
+                                 1e-12)
 
 
 def sol_biuret_xi(key: str, M: float, w: dict, T_c: float) -> float:
@@ -3466,6 +3512,37 @@ def gravity_outflow_323f010(holdup_kg: float, p_vessel_bara: float = R323_F010_P
     dp_live = (max(holdup_kg, 0.0) * 9.80665 / R323_F010_AREA_M2
                + max(p_vessel_bara, 0.0) * 1.0e5)
     return R323_M317_DES * math.sqrt(max(dp_live / dp_des, 0.0))
+
+
+def hv323605_flow_kgh(stroke_pct: float, p_f010_bara: float, p_e002_bara: float, t_f010_c: float,
+                      mw_vap: float) -> float:
+    """Stream 790 through HV-323605, 323F010 overhead -> 324E002 shell [kg/h], report D-12.
+
+    Was `MEVAP_DES . (P/P_des) . (HIC-323605/50) . (HIC-329605/50)`, written as the 324F002
+    EJECTOR's suction roll-off.  The ejector is the wrong machine for this flow.  The PFD carries
+    stream 790 (12 040 kg/h, 0.5 bar a, 99 C) into stream 703 at 0.3 bar a, where it joins the
+    324F001 vapour 705 on the shell side of the 324E002 CONDENSER; what leaves that shell for the
+    ejector is stream 706 -- 72 kg/h, 38.6 mol% N2 -- and the 324F002 datasheet sizes the ejector
+    for 94 kg/h at 0.2 bar a (UD-AU-324-EC-0007 p2).  The ejector moves 0.6 % of this flow; the
+    other 99.4 % is condensed.  So the pull on 323F010 is the flow HV-323605 passes between two live
+    pressures, and 324F002 acts on it only through the 324E002 shell pressure it holds.
+
+    The ISA-75.01 compressible law, anchored on stream 790 at the 50 % design stroke across the
+    0.46 -> 0.33 bar a design differential (x = 0.28, well short of the F_gamma.xT = 0.70 choke):
+
+        w = w_des . Phi(h, P1, P2, T1, M) / Phi(h_des, P1_des, P2_des, T1_des, M_des)
+        Phi = frac(h) . P1 . Y . sqrt(x.M/T1),   x = (P1 - P2)/P1
+
+    d(w)/d(P1) is 4.07 w per bar at design (measured on this law; the expansion factor takes it
+    below the 1/2dP + 1/2P1 = 4.9 of the incompressible estimate), against the 2.17 w per bar of
+    the retired P/P_des law, so the node is 1.9x stiffer.  No valve datasheet exists, so the trim is the
+    stated `R323_HV605_CHAR`; Cv cancels in the ratio.  Reverse differential passes nothing -- a real
+    backflow from the condenser into the separator needs its own model, not a sign flip here.
+    Bit-exact at design: same expression, same operands, ratio 1.0."""
+    return hydraulics.valve_gas_anchored(
+        R323_MEVAP_DES, stroke_pct / 100.0, p_f010_bara, p_e002_bara, t_f010_c + 273.15,
+        R323_HIC605_DES_PCT / 100.0, R323_F010_P_BARA, R324_F001_P_BARA, R323_F010_T_SP_C + 273.15,
+        mw_vap, characteristic=R323_HV605_CHAR, mw_des=R323_F010_MW_VAP_DES)
 
 
 def redistribute_communicating_compartments(masses_kg, temperatures_c, full_masses_kg):
@@ -8251,17 +8328,15 @@ def step_sim(dt: float) -> dict:
                   + (R323_E010_UA_KW if Q_e010_kw > 0.0 else 0.0))
     s.r323_f010_T = s.r323_f010_T + P_f010 * dt / max(M_f010_pre * cp_f010 + k_cap_f010 * dt, 1e-6)
     s.r323_f010_M = max(M_f010_pre + (m_319_in + m_331 - m_evap - m_317) / 3600.0 * dt, 1.0)
-    # Mapping — live 323F010 vacuum (PT-323204).  The evolved vapour m_evap is pulled out through
-    # HV-323605 (gas outlet, HIC-323605) and evacuated by the 324F002 ejector on HV-329605; opening
-    # either raises the pull and drops the pressure.  pull ∝ P/P_des is the ejector suction-pressure
-    # capacity roll-off, which makes it a stable first-order node with no controller.  Anchored: at
-    # design HIC-323605 == HIC-329605 == 50 %, P == P_des and m_evap == R323_MEVAP_DES, so
-    # pull == R323_MEVAP_DES and dP/dt is a literal 0.0.  (The bubble point above stays on the DESIGN
-    # vacuum -- TD-016 consistency; feeding live P into the concentration would reopen the P<->m_evap
-    # oscillation this repo just closed on unit 324.)
-    pull_f010  = (R323_MEVAP_DES * (s.r323_f010_P / R323_F010_P_BARA)
-                  * (s.HIC_323605 / R323_HIC605_DES_PCT)
-                  * (s.HIC_329605 / R324_HIC9605_DES_PCT))
+    # Mapping — live 323F010 vacuum (PT-323204).  The evolved vapour m_evap leaves through HV-323605
+    # (gas outlet, HIC-323605) into the 324E002 shell, whose pressure the 324F002 ejector on
+    # HV-329605 holds; opening either raises the pull and drops the pressure.  The pull is the
+    # valve's own compressible flow between the two live pressures (report D-12,
+    # `hv323605_flow_kgh`), which is what makes this a stable node with no controller.  The 324E002
+    # shell is read from the previous tick -- an explicit tear, as every cross-stage pressure read
+    # here -- because unit 324 advances later in the tick.  (The bubble point above stays on the
+    # DESIGN vacuum -- TD-016 consistency; feeding live P into the concentration would reopen the
+    # P<->m_evap oscillation this repo just closed on unit 324.)
     # PHASE 2, report A-6.  This ODE was  dP/dt = 0.02 * (m_evap - pull)/3600  -- a capacitance of
     # 0.02 bar per kg/s that this vessel SHARED with eight others, among them the 16.8 bar a
     # hydrolyser.  The real coefficient is RT/(V_v.Mbar) and it is 4.8x stiffer here than the
@@ -8272,26 +8347,55 @@ def step_sim(dt: float) -> dict:
     #   * level swell, V_v = V_vessel - M_l/rho_l, so a filling vessel gets a stiffer response.
     # Design invariance: m_evap == pull_f010 == R323_MEVAP_DES bit-exactly at the seed, and dT/dt and
     # dV_v/dt are both a literal 0.0 there, so dP/dt is exactly 0.0 and the pin cannot move.
-    # `pull_f010` above is still the ejector's design-anchored suction law -- that is report D-12 and
-    # belongs to the Phase 4 machine maps, so it is deliberately untouched here.
+    #
+    # SEMI-IMPLICIT in P (report D-12).  The valve pull is 1.9x stiffer in P than the law it replaced:
+    # on the 17.8 m3 design vapour space the node's time constant is 0.78 s (was 1.47 s), so an
+    # explicit step would ring on the 1 s harness tick and diverge on anything above 1.57 s, which
+    # the 2 s harness ticks elsewhere in this file already use.  Same closure as the steam headers:
+    # linearise dP/dt about the current P and take the backward step,
+    #     P' = P + f(P).dt / (1 - J.dt),    J = df/dP <= 0  (numerical, same valve law),
+    # whose amplification 1/(1 - J.dt) is in (0, 1] for any dt.  f(P) is a literal 0.0 at the seed,
+    # so P' == P bit-exactly there whatever J is.  A positive J (a non-physical, pressure-amplifying
+    # linearisation) is clipped to 0, which returns the explicit step.
     _y_tear = s.y_evap_f010                                                       # previous substep
     _mw_evap = 1.0 / max(sum(_y_tear.get(k, 0.0) / MW_SOL[k] for k in SOL_SPECIES), 1e-12)
     _rho_f010 = urea_soln_rho(s.w_f010.get("Urea", 0.0), s.r323_f010_T, R323_D002_RHO)
     _vv_f010 = hydraulics.vapour_volume_m3(R323_F010_VOL_M3, M_f010_pre, _rho_f010)
     _dmdt_f010 = (m_319_in + m_331 - m_evap - m_317) / 3600.0                     # kg/s of holdup
-    s.r323_f010_P = clamp(
-        s.r323_f010_P + hydraulics.vessel_dpdt(
-            s.r323_f010_P, s.r323_f010_T + 273.15, _vv_f010, _mw_evap,
-            m_evap / _mw_evap, pull_f010 / _mw_evap,                              # kmol/h each
-            dtdt_k_s=P_f010 / max(M_f010_pre * cp_f010, 1e-6),
-            dvvdt_m3_s=-_dmdt_f010 / max(_rho_f010, 1e-6)) * dt,
-        0.05, 1.0)
+    _dtdt_f010 = P_f010 / max(M_f010_pre * cp_f010, 1e-6)
+    _dvvdt_f010 = -_dmdt_f010 / max(_rho_f010, 1e-6)
+    _p_e002 = s.r324_f001_P                                                       # 324E002 shell, tear
+
+    def _dpdt_f010(p):
+        pull = hv323605_flow_kgh(s.HIC_323605, p, _p_e002, s.r323_f010_T, _mw_evap)
+        return hydraulics.vessel_dpdt(
+            p, s.r323_f010_T + 273.15, _vv_f010, _mw_evap,
+            m_evap / _mw_evap, pull / _mw_evap,                                   # kmol/h each
+            dtdt_k_s=_dtdt_f010, dvvdt_m3_s=_dvvdt_f010)
+
+    _p_f010_old = s.r323_f010_P
+    _f_f010 = _dpdt_f010(_p_f010_old)
+    _jac_f010 = min((_dpdt_f010(_p_f010_old + 1.0e-6) - _f_f010) / 1.0e-6, 0.0)
+    s.r323_f010_P = clamp(_p_f010_old + _f_f010 * dt / (1.0 - _jac_f010 * dt), 0.05, 1.0)
+    #  The flow the backward step actually passed, at the pressure it ended on -- this is what enters
+    #  the 324E002 shell below, so the condenser sees the same stream 790 the separator lost.
+    pull_f010 = hv323605_flow_kgh(s.HIC_323605, s.r323_f010_P, _p_e002, s.r323_f010_T, _mw_evap)
     y_evap     = sol_vapour_y_vle("F010", s.w_f010, s.r323_f010_T, s.r323_f010_P,
                                   SOL_F010["alpha"])   # AUDIT F-8 -> Phase 1 rigorous flash
     s.y_evap_f010 = y_evap                             # close the A-6 pressure tear
+    #  Stream 790 is vapour PLUS entrained liquor at the vessel's own composition (PFD 0.14 mol%
+    #  urea; see SOL_NONVOLATILE).  Carryover is taken as a fixed fraction of the overhead, i.e.
+    #  proportional to vapour load, which is the first-order behaviour of a separator's droplet
+    #  entrainment; nothing in the sources gives its dependence on vapour velocity beyond that.
+    #  Its latent heat is still charged on the whole of m_evap above: 0.61 % of the overhead, 46 kW
+    #  of the 7 253 kW design duty, which is inside the uncertainty of the 2 280 kJ/kg itself
+    #  (IAPWS-IF97: 2 310 at the 79.3 C saturation of 0.46 bar a, 2 259 at 99 C).
+    _f_ent_f010 = SOL_F010["entrain"]
+    y_790      = {k: (1.0 - _f_ent_f010) * y_evap.get(k, 0.0) + _f_ent_f010 * s.w_f010.get(k, 0.0)
+                  for k in SOL_SPECIES}
     xi_f010    = sol_biuret_xi("F010", M_f010_pre, s.w_f010, s.r323_f010_T)
     s.w_f010   = sol_advance(s.w_f010, M_f010_pre, s.r323_f010_M, m_319_in, w_319_in,
-                             m_evap, y_evap, m_317, xi_f010, dt, m_in2=m_331, w_in2=W_S331)
+                             m_evap, y_790, m_317, xi_f010, dt, m_in2=m_331, w_in2=W_S331)
 
     # ---- Stage 4: Urea Solution Tank 323D002  (atmospheric, two compartments) -----------------
     #  TOPOLOGY (References/323D002.md §3, confirmed by operations 2026-07-23):
@@ -9365,7 +9469,7 @@ def step_sim(dt: float) -> dict:
                   + (R324_E001_UA_KW if Q_e001_kw > 0.0 else 0.0))
         t1_next = t1_old + pwr1 * dt / max(M_f001_pre * cp_hold1 + k_cap1 * dt, 1e-6)
         m703_fp = (VACUUM_CONDENSERS["324E002"]["inlet_kgh"]
-                   + (m_evap - R323_MEVAP_DES) + (v1_m - R324_V1_DES)
+                   + (pull_f010 - R323_MEVAP_DES) + (v1_m - R324_V1_DES)
                    + (fa202_m - R324_F001_FA_DES))
         nc002_fp = max(72.0 - R324_F001_FA_DES + fa202_m, 0.0)
         vent002_fp = max(nc002_fp, m703_fp - VACUUM_CONDENSERS["324E002"]["condensate_kgh"])

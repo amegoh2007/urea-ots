@@ -962,7 +962,8 @@ sites was checked for which kind it is.
 * **323F010's barometric leg**, still `M317_DES·√(M/M_DES)` — head-driven in form but with no vessel
   pressure term, so a vacuum break would not change the drain rate. Needs the leg height.
 * **The 328 bottoms valves are flashing services on a single-phase law.** See D-1 above.
-* **D-12, `pull_f010`** — a machine map, and Phase 4's.
+* **D-12, `pull_f010`** — CLOSED in *Phase 5e*, and not as a machine map: 323F010's overhead is a
+  valve into a condenser.
 
 ## Phase 4a: the CCW chain's design seed, and two of the three machines
 
@@ -1992,7 +1993,9 @@ pre-existing 0.5 mbar deficit (report D-12 — the 324F002 ejector pull is still
 pressure) now backs the column up by about 48 kg and trims evaporation 0.19 % through `q_relax`.
 `test_equation_audit_323_324::test_design_fixed_point_holds` was re-based from 6e-3 to 3e-2 t/h with
 that measurement written into it, plus a new assertion that the leg law returns the PFD drain
-exactly at the seed. Closing D-12 should put it back inside 6e-3.
+exactly at the seed. Closing D-12 should put it back inside 6e-3. **It did not** -- the deficit was
+never the pull law. *Phase 5e* found the cause (a 58.7 kg/h urea hole in the stage's species
+balance) and the gate is back at 6e-3.
 
 ### Measured
 
@@ -2227,6 +2230,128 @@ Suite, every `backend/test_*.py` in its own process, against the previous commit
 | `test_thermo_service` | 27 passed | 29 passed |
 
 The 20 files failing on both are pre-existing and unchanged id for id.
+
+## Phase 5e — 323F010's overhead: a valve into a condenser, and the liquor it carries (D-12)
+
+### D-12: the pull was written for the wrong machine
+
+```text
+was:   pull_f010 = MEVAP_DES . (P/P_des) . (HIC-323605/50) . (HIC-329605/50)
+```
+
+That is the suction roll-off of a steam-jet ejector, and the report's own "required" column asked
+for the 324F002 suction curve. The flowsheet says the ejector is not what pulls this stream. PFD
+stream 790 (12 040 kg/h, 0.5 bar a, 99 C) joins the 324F001 vapour in stream 703 on the shell side
+of the **324E002 condenser**; what leaves that shell for 324F002 is stream 706, 72 kg/h and 38.6 mol%
+N2, and the 324F002 design data sheet (UD-AU-324-EC-0007 p2, rendered and read) sizes the ejector for
+94 kg/h of suction at 0.2 bar a on 650 kg/h of LP motive steam. The ejector moves 0.6 % of stream
+790; the condenser takes the rest. Its 6-page design calculation (UD-AU-324-DZ-0007-004) is AD 2000
+wall-thickness checks with no performance curve, and no control-valve data sheet for HV-323605 exists
+in `References/` or in the vendor TOC, which indexes package-unit valves only.
+
+So the pull is the flow HV-323605 passes between two live pressures, ISA-75.01 compressible, anchored
+on stream 790 at the 50 % design stroke across the 0.46 -> 0.33 bar a design differential:
+
+```text
+w_790 = w_des . Phi(h, P_F010, P_E002, T, M) / Phi(0.5, 0.46, 0.33, 99 C, M_des)
+Phi   = frac(h) . P1 . Y . sqrt(x.M/T1),   x = (P1 - P2)/P1 = 0.28 at design (choke at 0.70)
+```
+
+`hv323605_flow_kgh` in `main.py`. The trim is linear, the same stated choice and reason as
+`R323_LV_CHAR`: it keeps the per-cent-of-stroke gain the operator already had. The 324E002 shell
+(`r324_f001_P`) is read from the previous tick because unit 324 advances later. HV-329605 no
+longer multiplies this flow; it acts through the shell pressure the ejector holds, which is where
+it physically is. What enters the 324E002 inlet balance is now the flow the valve passed, not the
+evaporation rate.
+
+The law is stiffer in P than the one it replaces -- dw/dP is 4.07 w per bar against 2.17 -- so on
+the 17.8 m3 design vapour space the node's time constant falls from 1.47 s to 0.78 s. The pressure
+therefore steps semi-implicitly, as the steam headers do:
+
+```text
+P' = P + f(P).dt / (1 - J.dt),     J = df/dP <= 0 (numerical, same valve law)
+```
+
+f is a literal 0.0 at the seed, so the pin is untouched.
+
+### What the ejector law allowed that the valve law does not
+
+| probe (from a 300 s settle) | ejector law | valve law |
+|---|---|---|
+| HV-323605 50 -> 80 %, 323F010 after 300 s | 0.2773 bar a, **below** the 0.3483 shell it drains into | 0.3927 (shell 0.3431) |
+| HV-323605 -> 25 % | 0.8743 | 0.7523 |
+| HV-329605 50 -> 85 %, PIC-324202 MAN, 400 s: 324F001 | 0.3300 -> 0.2953 | 0.3301 -> 0.3273 |
+| same, 323F010 | 0.4592 -> **0.2616**, below 324F001 again | 0.4601 -> 0.4581 |
+| HV-323605 50 -> 60 %, 323F010 at 0.5 / 2 / 10 s | 0.4309 / 0.3948 / 0.3835 | 0.4418 / 0.4304 / 0.4286 |
+
+Under the old law both hand valves could pull the separator below the pressure of the vessel it
+discharges into, which needs vapour to flow uphill. The HV-329605 row is smaller now for a reason
+that is not this valve: the 324F001 / 324E002 node still condenses the DESIGN condensate (26 768
+kg/h, a constant in the pressure loop -- `vacuum_condenser_node` and `vacuum_train_324` exist but
+nothing calls them; open findings A-13 / B-9 / B-13), so every extra kilogram 324F001 boils goes to a
+72 kg/h vent. A real condenser would also hold that shell stiffly -- at 0.3 bar a the water dew point
+moves 81 K per bar (IF97 at the 0.28 bar water partial pressure), worth roughly 70 kg/h of condensate per mbar on an 18.5 MW duty -- but the
+number should come from condensation, not from a constant. The old law's 35 mbar was one swing of a
++/-4 % evaporation oscillation it set off, not a steady answer.
+
+### The deficit D-12 was blamed for, and what it actually was
+
+With the valve law in, 323F010 still settled 0.8 mbar low and evaporated 11.97 t/h at 600 s -- so
+the pull law was never the cause. Tracing it: the liquor CONCENTRATES in the first 250 s (w_urea
+0.80013 -> 0.80030), its bubble point rises, TIC-323012 answers by trimming PIC-329208, and
+evaporation settles low. The design seed's own species balance says why:
+
+| species | in - out at the seed, before | after |
+|---|---|---|
+| Urea | **+58.713** kg/h | 0.000 |
+| H2O | -56.781 | -4.974 |
+| NH3 | -4.022 | 0.000 |
+| CO2 | -3.199 | 0.000 |
+| Biuret | +5.160 | +4.852 |
+
+Phase 1 was right that urea does not evaporate at 99 C and set its K to zero -- but the 58.7 kg/h
+it removed from the vapour is real. **PFD stream 790 lists 0.14 mol% urea** (54.4 kg/h on the
+rounded mole-% row), and it leaves as liquor entrained into the DN 600 overhead. With no other way
+out it accumulated in the holdup. `_sol_stage_anchor(..., entrain=True)` now closes it as carryover:
+
+```text
+urea:    m_in,U - 2.MW_U.xi - m_liq.w_U - f.m_vap.w_U = 0       (biuret jointly, xi >= 0)
+y_790  = (1 - f).y_vapour + f.w_liquor,        f = 0.611 % of the overhead
+```
+
+and `alpha` is back-solved on the (1 - f).m_vap that really is vapour. 323F010's biuret rows leave
+no room for formation (5 kg/h more in than out, inside the 0.005 wt% rounding of a 101 t/h feed), so
+xi stays 0 as before and f closes urea alone. Stream 305 lists no urea, so 323C003's 8 kg/h remainder
+is rounding and is not treated as carryover. The carryover is proportional to vapour load, the
+first-order behaviour of droplet entrainment; nothing in the sources gives more. Its latent heat is
+still charged on all of m_evap: 46 kW of the 7 253 kW duty, inside the uncertainty of the 2 280 kJ/kg
+itself (IF97: 2 310 at 79.3 C, 2 259 at 99 C).
+
+### Measured
+
+| 600 s from the seed | before | valve law only | valve law + carryover |
+|---|---|---|---|
+| PT-323204 | 0.459086 | 0.459186 | **0.459918** |
+| 323F010 evaporation | 11.99 t/h | 11.97 | **12.01** (design 12.013) |
+| holdup | 6 196.2 kg | 6 195.0 | 6 184.0 (seed 6 183.3) |
+
+`test_equation_audit_323_324`'s F-3 gate is back at 6e-3 t/h. `test_equation_audit_species` now
+asserts that 323F010's urea alpha is zero and its carryover fraction is positive, instead of reading
+the carryover as a volatility.
+
+Test files, each in its own process, against the previous commit:
+
+| file | previous commit | this commit |
+|---|---|---|
+| `test_equation_audit_323_324` | 2 failed / 3 passed, F-3 gate at 3e-2 | same 2 failed, **F-3 gate at 6e-3** |
+| `test_equation_audit_species` | 7 failed / 9 passed | **6 failed / 10 passed** -- `test_species_layer_does_not_perturb_the_mass_or_energy_balance` (its own 6e-3 F-3 check) now passes |
+| `test_equation_audit_td014` | 4 failed | 3 failed -- the phase-sampled 1 mK check reads 0.10 mK here |
+| `test_vacuum_valve_rules` | 5 passed | 5 passed |
+| `test_hydraulics` | 56 passed | 56 passed |
+| `test_g3_component_reconciliation` | 1 failed / 9 passed | same id |
+| `test_equation_audit_c10_live_cp` | 7 passed | 7 passed |
+| `test_session_regression_gate` / `test_startup_stability` (run with the D-16 commit on top) | 7 / 5 passed | 7 / 5 passed |
+| `test_equation_audit_322e002`, `test_lv322501_pressure_retuning`, `test_reactor`, `test_scrubber` (same) | 1 failed / 17 / 14 / 13 passed | identical |
 
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 

@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, D-14, D-15, MSPAN_504 and the thermo-memo path dependence closed; no BLOCKED findings left)
+**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, D-12, D-14, D-15, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; no BLOCKED findings left)
 
 ---
 
@@ -67,10 +67,15 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   tick, +/-5 mK by 7 900 s). The test reads its PHASE -- 1.01 mK on this commit (fail), 0.10 mK
   once D-12 lands (pass). It is not the memo: a 10x finer temperature quantum gives the same 30.5
   vs 31.0 mK. The loop's damping is the open item, not this test.
-* **D-12 now has a measurable price.** The 323F010 vacuum node settles 0.5 mbar below design because
-  the ejector pull is linear in suction pressure. Since A-17 the barometric leg transmits that into
-  a 48 kg level offset and a 0.19 % evaporation offset, and `test_equation_audit_323_324`'s F-3 gate
-  is re-based to 3e-2 t/h until D-12 closes. That gate is the check to restore afterwards.
+* **D-12 closed (As-Built *Phase 5e*); what it leaves open.** (1) The 324F001 pressure loop still
+  condenses 324E002's DESIGN condensate as a constant, so extra 324F001 vapour all lands on the 72
+  kg/h vent; `vacuum_condenser_node` / `vacuum_train_324` exist and have NO caller (A-13 / B-9 /
+  B-13). Opening HV-329605 50 -> 85 % now moves 324F001 by 2.8 mbar. A real condenser also holds that
+  shell stiffly (~70 kg/h of condensate per mbar at 0.3 bar a), so the size may be right, but it
+  should come from condensation at the live shell pressure. That is the next closure on this train. (2) The stream
+  790 carryover is a fixed 0.611 % of the overhead; its latent heat is still charged on the whole
+  overhead (46 kW of 7 253). (3) 323F010's seed still gains 4.85 kg/h of biuret against 4.97 kg/h
+  of water -- PFD rounding on a 101 t/h feed, left as it is.
 * **`test_lv324501_routing.py` is 4 failed / 6 passed on BOTH trees** -- the handoff's recorded "3"
   was stale, not a regression from this work.
 * **Regression, measured against HEAD in a side worktree.**
@@ -288,9 +293,6 @@ twice.
   qualitative limit without claiming a two-phase capacity. Closing it properly needs the IEC 60534
   two-phase sizing method, which does not exist in this repository. Same class of gap as the
   D-19 letdown guards below.
-* **D-12, `pull_f010`** — an ejector machine map, and Phase 4's. NOT closed by the 322F001 work:
-  `jet_pump.py` is an INCOMPRESSIBLE liquid-liquid closure and 323F010's is a steam-jet vacuum
-  ejector, which is the compressible double-choking service `ejector_huang.py` was written for.
 
 ### Three findings from this pass worth not re-deriving
 

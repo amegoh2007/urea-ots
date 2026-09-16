@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 25 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 38 OPEN.**
+**Totals: 26 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 37 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -70,7 +70,7 @@ and the third was not a missing number at all. See *What the archive supplied* b
 | A. Algebraic state | 10 | 0 | 0 | 0 | 9 |
 | B. Phase splits | 0 | 5 | 0 | 0 | 9 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
-| D. Hydraulics | 10 | 3 | 0 | 0 | 9 |
+| D. Hydraulics | 11 | 3 | 0 | 0 | 8 |
 | E. Gains / signals | 1 | 0 | 0 | 1 | 10 |
 
 Status key. **CLOSED**: the live path now solves the first-principles relationship. Where it is written
@@ -169,7 +169,7 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | D-9 | CLOSED (Phase 4a) | [main.py:9863](../../backend/main.py#L9863) | API 520 choked orifice with pop/blowdown latch |
 | D-10 | CLOSED (Phase 4b) | As-Built *Phase 4b, D-2* | 328 vapour paths compressible |
 | D-11 | OPEN | [main.py:8420](../../backend/main.py#L8420) | Fixed vent split |
-| D-12 | OPEN | [main.py:8192](../../backend/main.py#L8192) | Linear in suction P; `ejector_huang.py` is the candidate |
+| D-12 | **CLOSED** (2026-09-16, As-Built *Phase 5e*) | `hv323605_flow_kgh` in `main.py` | Not an ejector curve: stream 790 goes through HV-323605 into the 324E002 **condenser**, and 324F002 only takes the 72 kg/h stream 706 (DDS UD-AU-324-EC-0007: 94 kg/h at 0.2 bar a). Now an ISA-75.01 compressible valve between the live 323F010 and 324E002 pressures, stepped semi-implicitly. The old law let 323F010 fall below the vessel it drains into (0.277 vs 0.348 bar a). The 0.5 mbar deficit blamed on D-12 was a 58.7 kg/h urea hole instead: PFD 790 carries 0.14 mol% urea as entrained liquor, which Phase 1 had zeroed with no other way out |
 | D-13 | OPEN | [steam_system.py:74](../../backend/steam_system.py#L74) | K back-sized at a 50 % opening |
 | D-14 | **CLOSED** (2026-09-16) | `_header_capacitance` + `DRUM GEOMETRY` in `steam_system.py` | Each header is V_vapour·dρ_sat/dP with dρ/dP from IAPWS-IF97 and V_vapour from the **as-built GAs**, taken at each drum's printed normal liquid level rather than at an assumed half-full: **C_MP 3.39, C_9 1.97, C_LP 45.92** kg/bar against the calibrated 25.0 / 53.2 / 25.0. The half-full assumption I flagged the same day turned out to be a *datum* for the two horizontal drums — both GAs draw NLL on the shell axis — and wrong for the vertical LP drums, which carry 1.05 m of water in a 5.3 m shell |
 | D-15 | **CLOSED** (2026-09-16) | as D-14 | The ×30 `F_lump` is deleted: 329D009's nameplate 8 m³, half of it vapour, gives 1.97 kg/bar, not 53.2. The factor existed to keep an EXPLICIT step stable, which is a property of the integrator, so the header pressures now step semi-implicitly — `P' = P + res·dt/(C + g·dt)` with g = −∂res/∂P evaluated from the same valve laws. Amplification C/(C + g·dt) ∈ (0,1] for any dt, and every residual is zero at design so the seed is bit-exact |
@@ -1450,7 +1450,7 @@ a correct ISA-75.01 compressible expansion factor — is defined but never calle
 > **Status 2026-09-15.** `vle_nh3co2h2o.py` is **live** through `thermo_service.py` (Phases 1 and 5).
 > Every valve model uses `hydraulics.expansion_factor` (Phase 2); the `consequence.py` copy is now a
 > duplicate called only inside its own module. `iapws_if97` also supplies the chest latent heat
-> (A-5). Still dead: `ejector_huang.py` (D-6 used `jet_pump.py`, and D-12 is its intended site),
+> (A-5). Still dead: `ejector_huang.py` (D-6 used `jet_pump.py`, and D-12 turned out not to be an ejector at all -- see its ledger row),
 > `core/lp.py` and `core/mp.py` (`mp.py` also still calls the retired two-argument
 > `steam_chest_pressure`). **Correction (2026-09-16):** `core.thermo.EmpiricalThermo` is NOT dead —
 > the previous revision listed it wrongly. It supplies the stream viscosities the SM flowsheet
