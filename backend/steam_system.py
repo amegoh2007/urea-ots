@@ -92,23 +92,14 @@ K_LD9 = 2.0         # PV-329205B  : 329D009 (9) -> 4-bar header let-down (split-
 #  at the host dt, which is a property of the INTEGRATOR, not of the drum; the fix is therefore a
 #  stable integration (see the semi-implicit step in `step`), not a fictitious volume.
 #
-#  Each capacitance is now V_vapour * drho_sat/dP, with drho/dP from IAPWS-IF97 on the saturation
-#  line at that header's own pressure and the volumes from the vendor datasheets:
-#    329D005  13.00 m3 nominal   (UD-AU-329-EC-0001 p2, DDS line 19; ID 1760 x 5000 mm horizontal)
-#    329D009   8.16 m3           (References/329-1 mapping and description.md)
-#    322D001A/B  2 x 50.13 m3    (UD-AU-322-EC-0009 p2: ID 3470 mm, cyl height 5300 mm, QTY 2)
-#  STATED ASSUMPTION: each drum runs half full, so half the shell is vapour.  The DDS leaves
-#  "max. fill lev. in oper. cond." blank on all three, and C scales linearly with that fraction --
-#  it is the one number here that is an assumption rather than a datum, and it is worth revisiting
-#  if a level datum ever turns up.
+#  Each capacitance is V_vapour * drho_sat/dP, with drho/dP from IAPWS-IF97 on the saturation line
+#  at that header's own pressure and V_vapour from the as-built vendor drawings.  The three drums
+#  are set out in DRUM GEOMETRY below, which the level spans read as well -- one description of the
+#  vessel serving both the vapour side and the liquid side, rather than two that can drift apart.
 #
-#  What this changes: the LP value is VINDICATED (two 3.47 m drums give ~24 kg/bar against the
-#  calibrated 25, i.e. the old constant was right for the wrong reason), while the MP header is
-#  ~8x and the 9-bar drum ~25x stiffer than the constants claimed.
-VAP_FRACTION = 0.50          # -, vapour share of each drum shell at normal level (stated assumption)
-V_D005_M3 = 13.00            # m3, 329D005 nominal volume (datasheet)
-V_D009_M3 = 8.16             # m3, 329D009 capacity (mapping document)
-V_D001_M3 = 2.0 * (0.78539816 * 3.470 ** 2 * 5.300)   # m3, 322D001A + B shells (datasheet)
+#  What this changes against the constants: the LP value is VINDICATED IN ORDER OF MAGNITUDE (two
+#  3.47 m drums, and they run a fifth full, not half) while the MP header is ~7x and the 9-bar drum
+#  ~27x stiffer than the constants claimed.
 
 
 def _rho_vapour_sat(p_bara: float) -> float:
@@ -121,9 +112,46 @@ def _header_capacitance(v_vapour_m3: float, p_bara: float, dp: float = 0.5) -> f
     return v_vapour_m3 * (_rho_vapour_sat(p_bara + dp) - _rho_vapour_sat(p_bara - dp)) / (2.0 * dp)
 
 
-C_MP = _header_capacitance(VAP_FRACTION * V_D005_M3, P_HP_BARA)    # ~3 kg/bar (was 25.0)
-C_LP = _header_capacitance(VAP_FRACTION * V_D001_M3, P_LP_BARA)    # ~24 kg/bar (was 25.0)
-C_9  = _header_capacitance(VAP_FRACTION * V_D009_M3, P_MP_BARA)    # ~2 kg/bar (was 53.2)
+# ---------------------------------------------------------------- DRUM GEOMETRY (vendor as-built)
+#  Sources, all read from the vendor archive and visually verified on the scans:
+#
+#  322D001A/B  LP steam drums, QUANTITY 2, VERTICAL       UD-AU-322-EC-0009 p2 (DDS)
+#      ID 3470 mm, cyl. height (t.l./t.l.) 5300 mm, 2:1 ellipsoidal heads, rho_liq 919.36 kg/m3.
+#      As-built GA UD-AU-322-DZ-0009-006 rev 05 prints NLL 1050 mm above the bottom tangent line
+#      and the LICA-329504 tappings N8B / N8A at 300 mm and 1800 mm above it -- so the level
+#      transmitter spans 1500 mm, both taps are in the cylindrical shell, and NLL sits at EXACTLY
+#      mid-span, which is the drawing confirming the model's 50 % design level rather than the
+#      model assuming it.  The same GA's design block states CAPACITY 62 m3; the geometry built up
+#      here gives 61.06 m3 and the DDS hydrostatic-test weight (80 065 - 19 065 = 61 000 kg of cold
+#      water) gives 61.0 m3.  Three independent numbers agreeing to 1.5 % also settle the head
+#      shape: torispherical heads would give 58.5 m3 and miss all three.
+#
+#  329D005  HP steam saturator, QUANTITY 1, HORIZONTAL    DDS p2 (References/Datasheets/329D005)
+#      ID 1760 mm x 5000 mm.  As-built GA UD-AU-329-DZ-0001-005 rev 02 states CAPACITY 13.8 m3
+#      (the DDS "nominal volume" 13.00 m3 is the design figure; the hydrostatic-test weight
+#      21 725 - 7 820 = 13 905 kg agrees with the as-built one) and draws NLL on the shell axis.
+#
+#  329D009  MP steam drum, QUANTITY 1, HORIZONTAL         DDS p2 (References/Datasheets/329D009)
+#      ID 1776 mm x 2600 mm.  As-built GA UD-AU-329-DZ-0003-005 rev 04 carries the manufacturer's
+#      nameplate, shell-side Volume 8 m3, and draws NLL on the shell axis.
+#
+#  So the "each drum runs half full" assumption that stood here is a DATUM for the two horizontal
+#  drums -- both GAs put the NLL flag on the axis -- and was WRONG for the vertical LP drums, which
+#  carry 1.05 m of water in a 5.3 m shell.  Their vapour space is 45.7 m3 per drum, not 25.1.
+A_D001_M2      = 0.78539816 * 3.470 ** 2              # m2, 322D001 cross-section (constant over the span)
+V_D001_HEAD_M3 = 3.14159265 * 3.470 ** 3 / 24.0       # m3, one 2:1 ellipsoidal head (pi.D^3/24)
+V_D001_M3      = A_D001_M2 * 5.300 + 2.0 * V_D001_HEAD_M3     # 61.06 m3 per drum (as-built 62)
+N_D001         = 2                                    # -, drums on the one lumped LP node
+D001_NLL_M     = 1.050                                # m, normal liquid level above bottom t.l. (GA)
+RHO_D001_L     = 919.36                               # kg/m3, DDS line 8 (was 917.0)
+
+V_D001_VAP_M3 = N_D001 * (V_D001_M3 - (V_D001_HEAD_M3 + A_D001_M2 * D001_NLL_M))
+V_D005_VAP_M3 = 0.50 * 13.80    # m3, NLL on the axis of a 13.8 m3 horizontal shell (GA)
+V_D009_VAP_M3 = 0.50 * 8.00     # m3, NLL on the axis of an 8 m3 horizontal shell (nameplate)
+
+C_MP = _header_capacitance(V_D005_VAP_M3, P_HP_BARA)    # ~3.4 kg/bar (was 25.0)
+C_LP = _header_capacitance(V_D001_VAP_M3, P_LP_BARA)    # ~46 kg/bar  (was 25.0)
+C_9  = _header_capacitance(V_D009_VAP_M3, P_MP_BARA)    # ~2.0 kg/bar (was 53.2)
 
 # ---------------------------------------------------------------- LP header floor (site LP-main tie-in)
 #   Make-up import holds the header when local generation (HPCC steam raising + 9->4 let-down)
@@ -229,10 +257,20 @@ M_ATTEMPER9_DES = M_USERS_9_DES - M_903_DES - M_FLASH9_DES
 #   is removed before LV-329503 transfers the remaining liquid into 322D001A/B.  LV-329504 provides
 #   additional condensate-pump make-up, and LP boil-off is the liquid sink.
 #   Mass-per-%level  m_span = rho_liq * A_surface * span  (sets the level TIMESCALE only; NOT design-
-#   pinned).  Datasheet geometry (NSF/Uhde DDS, folder 329-1):
+#   pinned -- each loop is seeded so dm/dt = 0 at the design point whatever m_span is).  Datasheet
+#   geometry (NSF/Uhde DDS, folder 329-1):
 #     329D005 horiz ID 1.760 m x L 5.000 m, LT-329502 span 1.500 m, rho 850.25 -> ~11223 kg
 #     329D009 horiz ID 1.776 m x L 2.600 m, LT-329503 span 0.750 m, rho 892.15 -> ~ 3090 kg
-#     322D001 vert  ID 1.600 m (A=pi/4 D^2), LT-329504 span 2.000 m, rho 917.0 -> ~ 3688 kg
+#     322D001 vert, TWO drums, see DRUM GEOMETRY above                          -> ~26085 kg
+#
+#   322D001 used to read `ID 1.600 m, LT-329504 span 2.000 m, rho 917.0 -> ~3688 kg`, and every
+#   one of those four numbers was wrong.  The drums are ID 3.470 m (UD-AU-322-EC-0009 p2), there
+#   are TWO of them on this one controller, the LICA-329504 taps N8B/N8A are 1.500 m apart
+#   (UD-AU-322-DZ-0009-006), and the liquid is 919.36 kg/m3.  Together that is 26.1 t per full
+#   span against 3.7 t -- a level loop given 7x the inventory it actually has to move, so it was
+#   swinging about seven times too fast for the make-up flow driving it.  The area is the plain
+#   cross-section because BOTH taps sit in the cylindrical shell (300 mm and 1800 mm above the
+#   bottom tangent line), so there is no head correction anywhere in the span.
 LEVEL_SP_DES = 50.0        # %, design normal liquid level (all three drums)
 LV_OPEN_DES  = 50.0        # %, design-seed level-valve opening (valve flow == design draw at this opening)
 LIC_KC       = 2.5         # %op per %level, velocity-form PI proportional gain (controller tuning)
@@ -243,7 +281,8 @@ M_504_DES    = M_HPCC_DES     # kg/s, 322D001 make-up = LP steam boil-off replac
 FLASH9_FRACTION = M_FLASH9_DES / M_502_DES  # design-anchored fraction of LV329502 transfer flashed
 MSPAN_502    = 850.25 * (1.760 * 5.000) * 1.500         # kg, 329D005 horiz (mid-level chord = ID)
 MSPAN_503    = 892.15 * (1.776 * 2.600) * 0.750         # kg, 329D009 horiz
-MSPAN_504    = 917.0  * (0.78539816 * 1.600 ** 2) * 2.000   # kg, 322D001 vert (A=pi/4*D^2=2.0106 m^2)
+LT504_SPAN_M = 1.500      # m, LICA-329504 tap separation N8B 300 -> N8A 1800 above bottom t.l.
+MSPAN_504    = RHO_D001_L * (N_D001 * A_D001_M2) * LT504_SPAN_M   # kg, 322D001A+B (~26085)
 
 
 #  Saturated steam, gamma = c_p/c_v.  1.30 is the standard value for superheated/saturated steam

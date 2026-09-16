@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17 closed from the vendor archive; no BLOCKED findings left)
+**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, D-14, D-15 and MSPAN_504 closed from the vendor archive; no BLOCKED findings left)
 
 ---
 
@@ -37,17 +37,50 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   specs and drawings themselves are scans -- render and read them). It answered 324F001's volume,
   which two passes had recorded as unobtainable. Use the `/soft-copy-search` skill's routing: TOC row
   -> Document ID -> file. `pypdf` and `pymupdf` are installed for this.
-* **D-14 / D-15 CLOSED (same session).** Capacitances are V_vap.drho_sat/dP on IF97 with datasheet
-  volumes: C_MP 3.19, C_LP 25.20, C_9 2.01 kg/bar (were 25.0, 25.0, 53.2). The LP constant was right
-  by accident. The x30 `F_lump` is gone because the header pressures now step SEMI-IMPLICITLY,
-  `P' = P + res.dt/(C + g.dt)` with g = -dres/dP from the same valve laws -- so the stability limit
-  that motivated the lumping no longer exists at any dt.
-* **Still an assumption in there:** each drum is taken as half full (vapour share 0.50). All three
-  DDSs leave "max. fill lev. in oper. cond." blank and C scales linearly with it.
-* **`steam_system.MSPAN_504` disagrees with the 322D001 datasheet and was left alone.** The model
-  builds the LP drums' level span from 1.600 m x 2.000 m; UD-AU-322-EC-0009 p2 says ID 3470 mm x
-  5300 mm, two drums -- about 25x the volume each. It feeds a level controller, so fixing it means
-  re-deriving the design holdup in the same pass.
+* **D-14 / D-15 CLOSED, and the assumption they left behind is closed too.** Capacitances are
+  V_vap.drho_sat/dP on IF97, with V_vap read at each drum's PRINTED normal liquid level:
+  C_MP 3.39, C_9 1.97, C_LP 45.92 kg/bar (were 25.0, 53.2, 25.0). The x30 `F_lump` is gone because
+  the header pressures now step SEMI-IMPLICITLY, `P' = P + res.dt/(C + g.dt)` with g = -dres/dP from
+  the same valve laws -- so the stability limit that motivated the lumping no longer exists at any
+  dt. "Half full" turned out to be a DATUM for 329D005 and 329D009 (both GAs draw NLL on the shell
+  axis) and WRONG for 322D001, which carries 1.05 m of water in a 5.3 m vertical shell.
+* **`MSPAN_504` CLOSED the same pass.** The 322D001 level span was 1.600 m x 2.000 m at rho 917.0
+  (3 687 kg); the as-built GA UD-AU-322-DZ-0009-006 gives ID 3.470 m, TWO drums on the one
+  LIC-329504, LICA-329504 taps N8B/N8A 1.500 m apart, rho 919.36 -> 26 083 kg. Both taps are in the
+  cylindrical shell, so no head correction. Not design-pinned: `_level_loop` is seeded for
+  dm/dt = 0 at design whatever `m_span` is, so only the level timescale moved.
+* **Two things the 322D001 datasheet disagrees with and were NOT changed.** Its operating pressure
+  is 4.400 bar a, while `steam_system.P_LP_BARA` is 5.01325 (4.0 barg, the header the mapping
+  documents call the 4-bar header). And its "max. fill lev. in oper. cond." is blank on all three
+  DDSs -- the NLL used now comes from the GAs, not the DDSs.
+* **NEW OPEN FINDING -- the thermo memo is PATH-DEPENDENT, and it is wider than the tightest gates
+  standing on it.** `thermo_service.bubble_t` / `flash` memoise on a quantised key (`_W_QUANTUM`
+  1e-4 mass fraction, `_P_QUANTUM_BARA` 1e-4 bar). Every point landing in a bin gets the value of
+  whichever point filled that bin FIRST, so an answer depends on what the process computed earlier.
+  Measured, in ONE process, with every module global identical and a bit-identical `State()` --
+  1 200 s from the design seed, 323F010 temperature:
+
+  | memo state | d925a24 | with the drum geometry |
+  |---|---|---|
+  | as imported (3 entries) | 99.008098 | 99.000257 |
+  | after `flash_cache_clear()` | **99.013365** | 99.010351 |
+  | after a boot settle filled it | -- | 99.005956 |
+
+  `test_equation_audit_c10_live_cp` gates that at 0.01 C, so **d925a24 already fails it** the moment
+  the memo is cleared -- it was passing by 1.9 mK against a 5-10 mK spread. A COLD
+  `.boot_pin_cache.json`, which every source edit forces exactly once, takes the bottom branch; that
+  is the whole story behind "it fails on the first run after a model change and passes afterwards".
+  The gate is re-based to 0.05 with the table written into the test. Two things to fix, in order:
+  the memo should not depend on fill order (or no gate may be tighter than its quantum), and
+  `bubble_t` does a **full `_bubble_t_cache.clear()`** when it reaches `_BUBT_CACHE_SIZE` (4096), so
+  the same non-determinism exists WITHIN a long run every time the cache wraps.
+* **Ruled out while chasing that,** so nobody repeats it: the design seed is bit-identical on the
+  two boot paths (108 float fields), and so is every physics-bearing module global in `main`,
+  `steam_system`, `reactor` and `controllers` (1 256 compared; the only four that differ are
+  `SOL_VLE_DOMAIN`, `_DIAG`, `_cached` and `health.last_step_wall`, all write-only diagnostics).
+  `_A328_Q_REACT_DES_KW` (main.py 1315) IS captured on a pre-pin tick on the cold path and is not in
+  the cache -- a real cold/warm asymmetry, but it reaches only the published packet, never a state
+  ODE, so it is not this.
 * **D-12 now has a measurable price.** The 323F010 vacuum node settles 0.5 mbar below design because
   the ejector pull is linear in suction pressure. Since A-17 the barometric leg transmits that into
   a 48 kg level offset and a 0.19 % evaporation offset, and `test_equation_audit_323_324`'s F-3 gate

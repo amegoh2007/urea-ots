@@ -171,8 +171,8 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | D-11 | OPEN | [main.py:8420](../../backend/main.py#L8420) | Fixed vent split |
 | D-12 | OPEN | [main.py:8192](../../backend/main.py#L8192) | Linear in suction P; `ejector_huang.py` is the candidate |
 | D-13 | OPEN | [steam_system.py:74](../../backend/steam_system.py#L74) | K back-sized at a 50 % opening |
-| D-14 | **CLOSED** (2026-09-16) | `_header_capacitance` in `steam_system.py` | Each header is V_vapour·dρ_sat/dP with dρ/dP from IAPWS-IF97 and volumes from the datasheets (329D005 13.00 m³, 322D001A/B 2 × 50.13 m³). The LP constant was right by accident — the physical value is 25.20 against the calibrated 25.0 — while the MP header is 3.19, not 25. Vapour share (half the shell) is a stated assumption, flagged in the source |
-| D-15 | **CLOSED** (2026-09-16) | as D-14 | The ×30 `F_lump` is deleted: 329D009's 8.16 m³ gives 2.01 kg/bar, not 53.2. The factor existed to keep an EXPLICIT step stable, which is a property of the integrator, so the header pressures now step semi-implicitly — `P' = P + res·dt/(C + g·dt)` with g = −∂res/∂P evaluated from the same valve laws. Amplification C/(C + g·dt) ∈ (0,1] for any dt, and every residual is zero at design so the seed is bit-exact |
+| D-14 | **CLOSED** (2026-09-16) | `_header_capacitance` + `DRUM GEOMETRY` in `steam_system.py` | Each header is V_vapour·dρ_sat/dP with dρ/dP from IAPWS-IF97 and V_vapour from the **as-built GAs**, taken at each drum's printed normal liquid level rather than at an assumed half-full: **C_MP 3.39, C_9 1.97, C_LP 45.92** kg/bar against the calibrated 25.0 / 53.2 / 25.0. The half-full assumption I flagged the same day turned out to be a *datum* for the two horizontal drums — both GAs draw NLL on the shell axis — and wrong for the vertical LP drums, which carry 1.05 m of water in a 5.3 m shell |
+| D-15 | **CLOSED** (2026-09-16) | as D-14 | The ×30 `F_lump` is deleted: 329D009's nameplate 8 m³, half of it vapour, gives 1.97 kg/bar, not 53.2. The factor existed to keep an EXPLICIT step stable, which is a property of the integrator, so the header pressures now step semi-implicitly — `P' = P + res·dt/(C + g·dt)` with g = −∂res/∂P evaluated from the same valve laws. Amplification C/(C + g·dt) ∈ (0,1] for any dt, and every residual is zero at design so the seed is bit-exact |
 | D-16 | OPEN | [steam_system.py:287](../../backend/steam_system.py#L287) | `m_des × op/op_des` |
 | D-17 | OPEN | [main.py:6013](../../backend/main.py#L6013) | Constant η_v |
 | D-18 | OPEN | [main.py:6022](../../backend/main.py#L6022) | Current linear in rpm |
@@ -208,9 +208,10 @@ visually verified; the routing is TOC row → Document ID → file.
 | Datum | Value | Source |
 |---|---|---|
 | 324F001 vessel volume (A-6) | **70.5 m³** | UD-AU-324-DZ-0006-001, assembly drawing design table. Its DDS (UD-AU-324-EC-0006 p2) leaves lines 19 and 22 blank — the reason this was deferred three times |
-| 322D001A/B LP steam drums (D-14) | ID 3470 mm × 5300 mm, **2 off** (≈50.1 m³ each), ρ_v 2.28 kg/m³ at 4.4 bar a | UD-AU-322-EC-0009 p2 |
-| 329D005 HP saturator (D-14) | **13.00 m³** nominal, ID 1760 × 5000 mm, ρ_v 9.97 kg/m³ | UD-AU-329-EC-0001 p2 |
-| 329D009 MP drum (D-15) | 8.16 m³ | `References/329-1 mapping and description.md` |
+| 322D001A/B LP steam drums (D-14) | ID 3470 mm × 5300 mm **vertical**, **2 off**, 2:1 ellipsoidal heads → **61.06 m³ each**, ρ_l 919.36, ρ_v 2.28 kg/m³ | UD-AU-322-EC-0009 p2 |
+| 322D001A/B normal level + LICA-329504 taps (D-14, MSPAN_504) | **NLL 1050 mm** above the bottom tangent line; N8B **300 mm**, N8A **1800 mm** → **span 1500 mm**, and NLL sits at exactly mid-span. As-built CAPACITY **62 m³** | UD-AU-322-DZ-0009-006 rev 05 |
+| 329D005 HP saturator (D-14) | as-built **CAPACITY 13.8 m³** (DDS nominal 13.00), ID 1760 × 5000 mm horizontal, NLL on the axis, ρ_v 9.97 kg/m³ | UD-AU-329-EC-0001 p2; UD-AU-329-DZ-0001-005 rev 02 |
+| 329D009 MP drum (D-15) | nameplate shell-side **Volume 8 m³**, ID 1776 × 2600 mm horizontal, NLL on the axis | UD-AU-329-DZ-0003-005 rev 04 |
 | 323E002 bundle (A-5 dynamic chest) | 1520 tubes, 19 mm OD × 2 mm, 5900 mm, 24 mm pitch, 535 m² | `References/323C003 323E002.md` |
 
 Two consequences for findings still open. **D-14's LP value is vindicated, not fudged**: two 3.47 m
@@ -222,11 +223,51 @@ physical and the header integration is semi-implicit. Measured: `test_lp_steam_4
 `steam_system.py`'s own four-scenario self-check OVERALL PASS, `test_g8_lp_turbine_export` unchanged
 at its 2-failed baseline.
 
-**A discrepancy found on the way and NOT acted on.** `steam_system.MSPAN_504` builds the 322D001
-level span from a 1.600 m diameter × 2.000 m shell. The datasheet (UD-AU-322-EC-0009 p2) gives ID
-3470 mm × 5300 mm cylindrical, two drums — about 25× the volume per drum. The level span feeds a
-level controller whose design reading would move with it, so correcting it means re-deriving the
-design holdup at the same time; it is recorded here rather than changed in passing.
+**The discrepancy recorded here the same day is now closed too.** `steam_system.MSPAN_504` built
+the 322D001 level span from a 1.600 m × 2.000 m vessel at ρ 917.0 — 3 687 kg for the full
+transmitter span. All four numbers were wrong. The as-built GA settles it: the drums are ID 3.470 m,
+there are **two** of them on the one LIC-329504, the LICA-329504 taps N8B/N8A are **1.500 m** apart,
+and the liquid is 919.36 kg/m³ — **26 083 kg**, seven times the inventory the loop thought it was
+moving. Both taps sit in the cylindrical shell (300 mm and 1800 mm above the bottom tangent line),
+so the area is the plain cross-section with no head correction anywhere in the span. Nothing is
+design-pinned to it: `_level_loop` is seeded so dm/dt = 0 at the design point for any `m_span`, so
+the correction changes the level *timescale* and nothing else.
+
+The same drawing also removed the assumption. It prints NLL 1050 mm above the bottom tangent line —
+i.e. **exactly mid-span of LICA-329504**, which is the vendor confirming the model's 50 % design
+level instead of the model assuming it — and that makes the LP drums about a fifth full, not half.
+Their vapour space is 45.7 m³ per drum, so C_LP is 45.92 kg/bar, not the 25.20 published above. The
+two horizontal drums keep 0.50 because both their GAs draw the NLL flag on the shell axis; there the
+assumption was right, and is now a citation.
+
+**A new finding this work uncovered, outside the 73: the thermo memo is path-dependent, and it is
+wider than the tightest gates standing on it.** `thermo_service.bubble_t` and `flash` memoise on a
+quantised key (`_W_QUANTUM` 1e-4 mass fraction, `_P_QUANTUM_BARA` 1e-4 bar), so every point falling
+in a bin receives the value of whichever point filled that bin *first* — the answer depends on what
+the process computed before it. Measured in one process, with every module global identical and a
+bit-identical `State()`, 1 200 s from the design seed, 323F010 temperature against its 99.0 °C
+setpoint:
+
+| memo state | d925a24 | with the drum geometry |
+|---|---|---|
+| as imported (3 entries) | 99.008098 | 99.000257 |
+| after `flash_cache_clear()` | **99.013365** | 99.010351 |
+| after a boot settle filled it | — | 99.005956 |
+
+`test_equation_audit_c10_live_cp` gates that at 0.01 °C, so **the previous commit already fails it**
+once the memo is cleared — it was passing by 1.9 mK against a 5–10 mK spread. A cold
+`.boot_pin_cache.json`, which every source edit forces exactly once, fills the memo from the settle
+and takes the bottom branch; that is the whole of "it fails the first run after a model change and
+passes on every run after". The assertion is re-based to 0.05 °C with the table written into it.
+Two things need fixing, in order: the memo must not depend on fill order (or no gate may be tighter
+than its quantum), and `bubble_t` performs a full `_bubble_t_cache.clear()` on reaching
+`_BUBT_CACHE_SIZE` (4096), so the same non-determinism recurs *within* a long run every time the
+cache wraps.
+
+Ruled out along the way, so nobody repeats it: the design seed is bit-identical on the two boot
+paths (108 float fields), and so is every physics-bearing module global in `main`, `steam_system`,
+`reactor` and `controllers` — 1 256 compared, and the only four that differ (`SOL_VLE_DOMAIN`,
+`_DIAG`, `_cached`, `health.last_step_wall`) are write-only diagnostics.
 
 **Measured this revision** (engine run, dt = STEP_CAP 0.25 s, fresh `State()`, HEAD in a side worktree):
 the 3 000 s design hold matches HEAD to 1.8e-5 bar on PT-329201 and 0.01 °C on every stage

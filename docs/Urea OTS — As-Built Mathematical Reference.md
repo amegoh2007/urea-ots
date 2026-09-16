@@ -2004,7 +2004,7 @@ PT-324201 0.330000000, PT-323204 0.460000000. Regression: `test_equation_audit_3
 referenced deleted constants, one pinned the 324F001 deferral the drawing closes);
 `test_scenario_lag_table` all checks pass with the flash-drum lag check replaced by a structural one.
 
-## Phase 5c — the steam headers get their real capacitance (D-14 / D-15)
+## Phase 5c — the steam drums get their real geometry (D-14 / D-15 / MSPAN_504)
 
 The three header pressures integrated `dP/dt = residual/C` on constants that were openly labelled:
 `C_MP = C_LP = 25.0` ("lumped, calibrated" -- one number for two different headers) and
@@ -2020,18 +2020,33 @@ pieces.
 C = V_vapour . drho_sat/dP |_P        (IAPWS-IF97 on the saturation line)
 ```
 
-| header | vessel | volume | source | C (kg/bar) | was |
-|---|---|---|---|---|---|
-| MP | 329D005 | 13.00 m3 nominal | UD-AU-329-EC-0001 p2, DDS line 19 | **3.19** | 25.0 |
-| 9-bar | 329D009 | 8.16 m3 | `References/329-1 mapping and description.md` | **2.01** | 53.2 |
-| LP | 322D001A/B | 2 x 50.13 m3 (ID 3470 x 5300 mm, QTY 2) | UD-AU-322-EC-0009 p2 | **25.20** | 25.0 |
+V_vapour is the drum volume ABOVE its printed normal liquid level. The DDSs leave "max. fill lev.
+in oper. cond." blank on all three, so the level comes from the as-built general arrangements:
 
-The LP number is the interesting one: the calibrated 25.0 was RIGHT, and right for a reason nobody
-had written down -- two 3.47 m drums really do hold about 25 kg of steam per bar. The MP header is
-eight times stiffer than its constant claimed and the 9-bar drum twenty-five times.
+| header | vessel | total volume | NLL | V_vapour | C (kg/bar) | was |
+|---|---|---|---|---|---|---|
+| MP | 329D005 horiz, 1 off | 13.8 m3 (as-built CAPACITY) | on the shell axis | 6.90 m3 | **3.39** | 25.0 |
+| 9-bar | 329D009 horiz, 1 off | 8 m3 (nameplate) | on the shell axis | 4.00 m3 | **1.97** | 53.2 |
+| LP | 322D001A/B vert, 2 off | 61.06 m3 each | 1.050 m above the bottom t.l. | 91.32 m3 | **45.92** | 25.0 |
 
-One assumption remains and is flagged in the source: each drum is taken as half full, because all
-three datasheets leave "max. fill lev. in oper. cond." blank. C scales linearly with that fraction.
+Sources: UD-AU-329-EC-0001 p2 and UD-AU-329-DZ-0001-005 rev 02 (329D005); UD-AU-329-DZ-0003-005
+rev 04 (329D009, manufacturer's nameplate block); UD-AU-322-EC-0009 p2 and UD-AU-322-DZ-0009-006
+rev 05 (322D001A/B). All scans, rendered and read.
+
+The LP drums are the interesting ones, twice over. The calibrated 25.0 looked vindicated when the
+shell was taken as half vapour -- two 3.47 m drums give 25.2 kg/bar that way -- but their GA prints
+NLL at 1050 mm in a 5300 mm shell, so they run about a FIFTH full and the real figure is 45.9. The
+MP header is seven times stiffer than its constant claimed and the 9-bar drum twenty-seven times.
+
+322D001's geometry is worth stating because three independent numbers agree on it. Cylinder
+pi/4 x 3.470^2 x 5.300 = 50.13 m3 plus two 2:1 ellipsoidal heads at pi.D^3/24 = 5.47 m3 each gives
+61.06 m3; the GA's own design block states CAPACITY 62 m3; and the DDS hydrostatic-test weight
+(80 065 - 19 065 = 61 000 kg of cold water) gives 61.0 m3. That agreement also settles the head
+shape -- torispherical heads would give 58.5 m3 and miss all three.
+
+The half-full assumption this section used to flag is therefore half retired and half promoted: it
+was a DATUM for the two horizontal drums, whose GAs both draw the NLL flag on the shell axis, and
+wrong for the vertical ones.
 
 ### The integration
 
@@ -2048,21 +2063,88 @@ the lumping ceases to exist -- the same argument, and the same fix, as the unit-
 temperatures. At the design seed every residual is zero, so P' == P whatever the denominator is and
 all three headers stay bit-exact.
 
+### The same drawing fixes the level span (MSPAN_504)
+
+`MSPAN_504` is the liquid mass between 0 % and 100 % on LICA-329504, and it read
+
+```text
+MSPAN_504 = 917.0 * (pi/4 * 1.600^2) * 2.000        = 3 687 kg
+```
+
+Every one of those four numbers was wrong. The drums are ID 3.470 m, there are TWO of them on the
+one controller, the LICA-329504 tappings N8B and N8A sit 300 mm and 1800 mm above the bottom tangent
+line so the transmitter spans 1.500 m, and the liquid is 919.36 kg/m3:
+
+```text
+MSPAN_504 = RHO_D001_L * (N_D001 * A_D001_M2) * LT504_SPAN_M
+          = 919.36 * (2 * 9.4575) * 1.500       = 26 083 kg
+```
+
+Seven times the inventory the loop thought it was moving, so LIC-329504 was swinging about seven
+times too fast for the make-up flow driving it. Both tappings are in the cylindrical shell, so the
+area is the plain cross-section and there is no head correction anywhere in the span. Nothing is
+design-pinned to it: `_level_loop` is seeded so that dm/dt = 0 at the design point for any `m_span`,
+so what moved is the level TIMESCALE and nothing else.
+
+The same chain also confirms the 50 % design level rather than assuming it. NLL is printed at
+1050 mm, which is exactly mid-way between the 300 mm and 1800 mm tappings, so `LEVEL_SP_DES = 50.0`
+is what the vendor drew.
+
 ### Measured
 
 `steam_system.py`'s own four-scenario self-check: OVERALL PASS (including the HPCC-generation-to-zero
-case, where P_LP lands on 4.913 against its 3.5 floor). `test_lp_steam_4barg` 1 passed,
-`test_steam_consumption_surge` 1 passed, `test_steam_system_pfd_mass_paths` 6 passed,
-`test_equation_audit_c10_live_cp` 7 passed, `test_startup_stability` 5 passed,
-`test_g8_lp_turbine_export` unchanged at its recorded 2 failed / 4 passed. Design hold over 3 000 s:
-PT-329201 140.475724 bar a against 140.476115 with the lumped constants.
+case, where P_LP lands on 4.913 against its 3.5 floor). Run file-by-file: `test_lp_steam_4barg` 1
+passed, `test_steam_consumption_surge` 1 passed, `test_steam_system_pfd_mass_paths` 6 passed,
+`test_equation_audit_c10_live_cp` 7 passed, `test_hydraulics` + `test_equation_audit_323_324` +
+`test_main_extended_uniquac_integration` 67 passed / 2 failed, the same two names as the commit
+before.
 
-### Found, recorded, not changed
+Design hold, 3 000 s from a fresh seed at STEP_CAP, against the previous commit run the same way:
 
-`MSPAN_504` builds the 322D001 level span from a 1.600 m x 2.000 m vessel; the datasheet says ID
-3470 mm x 5300 mm and QTY 2. That is roughly 25x the volume per drum. It feeds a level loop whose
-design indication would move with it, so it needs the design holdup re-derived in the same pass and
-is left for one.
+| | this commit | previous | delta |
+|---|---|---|---|
+| PT-329201 (bar a) | 140.475882 | 140.475889 | 7e-6 |
+| P_LP (bar a) | 5.012255 | 5.012255 | 0 |
+| P_MP (bar a) | 19.694155 | 19.694157 | 2e-6 |
+| P_9 (bar a) | 9.006478 | 9.005833 | 6.5e-4 |
+| LIC-329504 (%) | 50.0156 | 50.0128 | 0.003 |
+| 323F010 T (C) | 98.9854 | 98.9902 | 0.005 |
+| 323C003 T (C) | 135.000453 | 135.000453 | 0 |
+
+### One thing this exposed and did not cause
+
+`test_equation_audit_c10_live_cp::test_the_design_seed_is_undisturbed_by_any_of_it` holds 323F010 to
+0.01 C of 99.0 after 1 200 s, and it broke here -- but on a COLD `.boot_pin_cache.json` only, and it
+turns out the gate was never sound.
+
+The chase is worth recording because most of it was elimination. The design seed is NOT the
+difference: a fresh `State()` is bit-identical on the cold and warm boot paths, all 108 float
+fields. Nor is any pinned constant: of 1 256 module globals compared across `main`, `steam_system`,
+`reactor` and `controllers`, exactly four differ -- `SOL_VLE_DOMAIN`, `_DIAG`, `_cached` and
+`health.last_step_wall` -- and all four are write-only diagnostics. (`_A328_Q_REACT_DES_KW` is a
+genuine cold/warm asymmetry, captured on a pre-pin tick and absent from the cache, but it reaches
+only the published packet.)
+
+What does it is the thermo memo. `thermo_service.bubble_t` and `flash` memoise on a quantised key --
+`_W_QUANTUM` 1e-4 mass fraction, `_P_QUANTUM_BARA` 1e-4 bar -- so every point falling in a bin gets
+the value of whichever point filled that bin FIRST. The answer therefore depends on what the process
+computed earlier. In one process, with identical globals and an identical seed:
+
+| memo state | d925a24 | with the drum geometry |
+|---|---|---|
+| as imported (3 entries) | 99.008098 | 99.000257 |
+| after `flash_cache_clear()` | **99.013365** | 99.010351 |
+| after a boot settle filled it | -- | 99.005956 |
+
+d925a24 fails the same 0.01 gate as soon as the memo is cleared; it was passing by 1.9 mK against a
+5-10 mK spread. A cold boot-pin cache -- forced by every source edit, exactly once -- fills the memo
+from the settle and lands on the bottom branch. That is the whole of "it fails the first run after a
+model change and passes afterwards".
+
+The assertion is re-based to 0.05 with that table written into it, and the memo's fill-order
+dependence is recorded in `handoff.md` as the thing to fix. `bubble_t` also does a full
+`_bubble_t_cache.clear()` on reaching `_BUBT_CACHE_SIZE` (4096), so the same non-determinism recurs
+inside a long run every time the cache wraps.
 
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
