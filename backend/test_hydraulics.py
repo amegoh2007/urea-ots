@@ -4,6 +4,11 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydraulics as hy
+
+#  The coefficient nine vessels used to share (report A-6).  The constants themselves are deleted
+#  from the engine now that every vessel carries its own geometry; the number is kept here because
+#  these tests exist to show how far off one shared value was.
+_SHARED_P_KP = 0.02
 import machines
 
 def test_liquid_design_is_bit_exact():
@@ -121,7 +126,7 @@ def test_the_323f010_vapour_space_is_not_on_the_shared_capacitance():
     assert 0.0 < vv < main.R323_F010_VOL_M3          # the melt really does occupy part of the shell
     k_new = hy.vessel_dpdt(main.R323_F010_P_BARA, main.R323_F010_T_SP_C + 273.15, vv, 18.54,
                            3600.0 / 18.54, 0.0)      # 1 kg/s of steam
-    assert k_new > 3.0 * main.R323_F010_P_KP, (k_new, main.R323_F010_P_KP)
+    assert k_new > 3.0 * _SHARED_P_KP, (k_new, _SHARED_P_KP)
 
 
 def test_the_323_geometry_matches_the_vessel_datasheet():
@@ -166,9 +171,9 @@ def test_the_328_columns_run_mostly_empty_so_their_coefficients_are_large():
     RT/(V_v.Mbar) is several times the 0.02 they shared with a 62 m3 hydrolyser and a level tank."""
     main = _main()
     for vol, m_des, rho, kp in ((main.R328_C002_VOL_M3, main.R328_C002_M_DES, main.R328_C002_RHO,
-                                 main.R328_C002_P_KP),
+                                 _SHARED_P_KP),
                                 (main.R328_C004_VOL_M3, main.R328_C004_M_DES, main.R328_C004_RHO,
-                                 main.R328_C004_P_KP)):
+                                 _SHARED_P_KP)):
         vv = hy.vapour_volume_m3(vol, m_des, rho)
         assert vv > 0.8 * vol                       # under 20 % liquid-full at design
         k = hy.vessel_dpdt(3.5, 412.15, vv, 18.0, 3600.0 / 18.0, 0.0)
@@ -372,17 +377,24 @@ def test_323e011_and_323d011_are_one_gas_envelope():
     assert not hasattr(main, "R3232_E011_P_KP")
 
 
-def test_324f003_is_wired_and_324f001_is_blocked_on_a_missing_height():
-    """A-6.  324F003's OEM datasheet gives 2500 mm OD and 1550 mm cylindrical height, so its
-    vapour space is computable.  324F001's gives the bore (4570 mm) and the melt density but NOT
-    the cylindrical height, and a 4570 mm bore admits 33 to 164 m3 depending on it -- five times
-    the uncertainty on the only term A-6 needs.  Pinned so nobody closes that gap by estimating."""
+def test_both_324_separators_are_wired_on_their_own_geometry():
+    """A-6, closed for the last vessel.  324F003's OEM datasheet gives 2500 mm OD and 1550 mm
+    cylindrical height.  324F001's datasheet leaves both the nominal volume and the cylindrical
+    height BLANK -- which is what deferred it through three passes -- but the vendor ASSEMBLY
+    drawing (UD-AU-324-DZ-0006-001, Uhde/A&S rev 00) states Nominal volume, Body = 70.5 m3 in its
+    own design table.  Neither separator is on a shared coefficient any more."""
     main = _main()
     assert (main.R324_F003_OD_M, main.R324_F003_SHELL_M) == (2.500, 1.550)
     assert abs(main.R324_F003_VOL_M3 - 7.427) < 0.001
     assert not hasattr(main, "R324_F003_P_KP")
-    assert not hasattr(main, "R324_F001_VOL_M3")   # no geometry is asserted for it
-    assert main.R324_F001_P_KP == 0.02             # so it stays on the lumped constant
+    assert main.R324_F001_VOL_M3 == 70.5           # drawing value, visually verified
+    assert not hasattr(main, "R324_F001_P_KP")     # the lumped constant is gone
+    #  The melt occupies part of it, and what is left responds as its own vapour space.
+    vv = hy.vapour_volume_m3(main.R324_F001_VOL_M3, main.R324_F001_M_DES, main.R324_F001_RHO_L)
+    assert 0.0 < vv < main.R324_F001_VOL_M3
+    k = hy.vessel_dpdt(main.R324_F001_P_BARA, main.R324_E001_T_SP_C + 273.15, vv,
+                       main.R324_F001_MW_VAP, 3600.0 / main.R324_F001_MW_VAP, 0.0)
+    assert k > _SHARED_P_KP, (k, _SHARED_P_KP)
 
 
 def test_the_328_bottoms_valves_see_both_node_pressures_and_the_live_head():

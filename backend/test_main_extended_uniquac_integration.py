@@ -72,12 +72,20 @@ def test_shut_steam_valve_leaves_the_chest_at_process_saturation() -> None:
     assert main.tsat_steam(shut) == pytest.approx(main.R323_C003_T_SP_C, abs=1e-6)
 
 
-def test_f010_gravity_outlet_has_independent_holdup_response() -> None:
-    design = main.gravity_outflow_323f010(main.R323_F010_M_DES)
-    quarter_holdup = main.gravity_outflow_323f010(0.25 * main.R323_F010_M_DES)
+def test_f010_barometric_leg_responds_to_head_and_to_vacuum() -> None:
+    """Report A-17.  The drain was `M317_DES*sqrt(M/M_DES)` -- a mass ratio, so a quarter of the
+    holdup gave exactly half the flow and the vessel's own vacuum did nothing at all.  On a real
+    barometric leg the liquid column is the SMALL term: about 64 mbar of melt against the 0.46 bar a
+    the leg's own column is balancing, so level moves the drain a little and breaking the vacuum
+    moves it a lot."""
+    p_des = main.R323_F010_P_BARA
+    design = main.gravity_outflow_323f010(main.R323_F010_M_DES, p_des)
+    quarter = main.gravity_outflow_323f010(0.25 * main.R323_F010_M_DES, p_des)
+    broken = main.gravity_outflow_323f010(main.R323_F010_M_DES, 1.01325)
 
-    assert design == main.R323_M317_DES
-    assert quarter_holdup == pytest.approx(0.5 * main.R323_M317_DES)
+    assert design == main.R323_M317_DES                       # design is exact, not approximate
+    assert 0.90 * design < quarter < design                   # level is a real but minor term
+    assert broken == pytest.approx(1.43 * design, rel=0.02)   # the seal is no longer holding atmosphere
 
 
 def test_lv324501_route_selector_uses_documented_a_and_b_destinations() -> None:

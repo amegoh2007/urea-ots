@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-15 (heuristic re-audit: report ledger corrected; A-3 and A-5 closed; A-2 traced and kept)
+**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17 closed from the vendor archive; no BLOCKED findings left)
 
 ---
 
@@ -27,6 +27,28 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
 * **Dead code the ledger found:** `T_conv_c` (`react_322r001` never reads `T_overflow_c`),
   `SYN_P_DEFICIT_GAIN` / `SYN_P_VENT_GAIN`, `R323_F010_P_KP` / `R328_C002_P_KP` / `R328_C004_P_KP`.
   All have no reader.
+* **Closed 2026-09-16 (details in the As-Built under *Phase 5b*).** A-6 (324F001 on its drawing's
+  70.5 m3), A-7 (323F004 rides the 323E011 envelope -- there is no valve in that line), A-11 (323C003
+  and 323F004 off pure-water T_sat onto `thermo_service`), A-17 (323F010's barometric leg on
+  `M.g/A + P_vessel`). Ledger now 23 closed / 8 partial / 0 blocked / 2 reclassified / 40 open.
+* **The vendor archive is the place to look when `References/` is silent.**
+  `D:\Work\Helwan Fertilizers Company (HFC)\A - Plant Documentation\Licensor and Vendor
+  Documentation\Soft copy`, indexed by `TOC_UD_AM_G00_AB_0022_000_01_HL.pdf` (1730 text pages; the
+  specs and drawings themselves are scans -- render and read them). It answered 324F001's volume,
+  which two passes had recorded as unobtainable. Use the `/soft-copy-search` skill's routing: TOC row
+  -> Document ID -> file. `pypdf` and `pymupdf` are installed for this.
+* **D-14 / D-15 are now data-complete and blocked only on the integrator.** 329D005 is 13.00 m3
+  (UD-AU-329-EC-0001 p2) and 322D001A/B are 2 x ID 3470 x 5300 mm (UD-AU-322-EC-0009 p2). The LP
+  header's calibrated C = 25 turns out to be RIGHT (two drums give about 24 kg/bar); the MP 25 and
+  the 9-bar x30 `F_lump` are not (about 3 and 0.9 kg/bar). At the true capacitance the header ODE is
+  stiff at STEP_CAP, so closing these means a semi-implicit header integration -- the same treatment
+  the 324 melt temperatures got -- not a new number.
+* **D-12 now has a measurable price.** The 323F010 vacuum node settles 0.5 mbar below design because
+  the ejector pull is linear in suction pressure. Since A-17 the barometric leg transmits that into
+  a 48 kg level offset and a 0.19 % evaporation offset, and `test_equation_audit_323_324`'s F-3 gate
+  is re-based to 3e-2 t/h until D-12 closes. That gate is the check to restore afterwards.
+* **`test_lv324501_routing.py` is 4 failed / 6 passed on BOTH trees** -- the handoff's recorded "3"
+  was stale, not a regression from this work.
 * **Regression, measured against HEAD in a side worktree.**
   `test_equation_audit_323_324.py`: HEAD 3 failed, this tree 2 failed
   (`test_design_fixed_point_holds` now passes). `test_equation_audit_td014.py`: 3 failed / 8 passed

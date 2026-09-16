@@ -1101,8 +1101,6 @@ R323_LV505_OP_DES   = 50.0                      # %, LV-323505 design stroke
 #     P_tgt = P_des + K_P * (m_701 - m_701,des) / m_701,des      [bar a]
 #     dP/dt = (P_tgt - P) / tau_P
 #   Seed-exact: at design m_701 == R323_M701_DES => P_tgt == R323_F004_P_BARA => dP/dt == 0 (pin invariant).
-R323_F004_P_GAIN    = 0.45                      # bar a per unit fractional flash-vapour excess
-R323_F004_P_TAU_S   = 90.0                      # s, flash-drum pressure relaxation
 
 # --- Stage 3: Pre-evaporator 323E010 + Separator 323F010 (vacuum 0.46 bar a, hold 99 C)
 #  AUDIT F-11 (CLOSED): this stage takes TWO feeds, not one.  Stream 319 (323F004 liquid) is joined
@@ -1142,6 +1140,7 @@ R323_F004_VOL_M3   = math.pi * 0.25 * R323_F004_ID_M ** 2 * R323_F004_SHELL_M   
 R323_F010_ID_M     = 3.478                      # m, 323F010 inside diameter (3478 mm)
 R323_F010_SHELL_M  = 2.437                      # m, cylindrical shell height (2437 mm)
 R323_F010_VOL_M3   = math.pi * 0.25 * R323_F010_ID_M ** 2 * R323_F010_SHELL_M      # 23.153 m3
+R323_F010_AREA_M2  = math.pi * 0.25 * R323_F010_ID_M ** 2      # 9.501 m2, liquid-head cross-section
 
 # PFD-published effective densities (STRICT source, PFD-21 "Density eff." row) for the two liquid
 # services the letdown valves pass.  Density is the term the frozen `design x stroke/stroke_des`
@@ -1181,7 +1180,6 @@ R323_M317_DES  = (1.0 - R323_PHI_VEVAP) * R323_M319_DES                   # prod
 # pressure.  No controller on this node, so stability comes from the ejector's suction-pressure
 # capacity roll-off (pull ∝ P/P_des); anchored so m_evap == pull == R323_MEVAP_DES at design.
 R323_HIC605_DES_PCT = 50.0        # % HIC-323605 design opening (HV-323605 gas-outlet hand valve, stream 790)
-R323_F010_P_KP      = 0.02        # bar a per (kg/s) net vapour imbalance -> 323F010 vacuum ODE
 R323_M324_DES  = R323_M317_DES                                           # tank throughput -> Unit 324
 
 # --- Derived latent / duty terms (force dT/dt = 0 at each design fixed point) ---
@@ -1969,10 +1967,8 @@ R328_C002_P_TOP  = 3.5                                      # 328C002 OVHD press
 #    328C002: psat(139) - 3.5  = -0.010 bar  -- essentially zero; the small NEGATIVE value is the
 #             dissolved NH3/CO2 raising the liquor's vapour pressure above pure water, so the
 #             pure-water bubble point slightly overstates it.  Treated as one lumped offset.
-R328_C002_P_KP   = 0.02                                     # bar per (kg/s) net vapour imbalance
 R328_C002_DP_COL = psat_water_bara(R328_C002_T_BOT_BOT) - R328_C002_P_TOP     # -0.0104 bar
 R328_C004_P_BARA = 3.7                                      # bar a, PFD-22 stream 750 / 779 / 780
-R328_C004_P_KP   = 0.02                                     # bar per (kg/s) net vapour imbalance
 R328_C004_DP_COL = psat_water_bara(R328_C004_T) - R328_C004_P_BARA        # +0.2041 bar
 R328_E004_DP     = R328_C002_P_TOP - R328_D001_P_BARA       # 0.9 bar drop 328C002 top -> 328D001 drum over 328E004
 R328_D001_OFFGAS_H2O_PFD = 46.21                            # mol% H2O in offgas, Combined_1750 PFD stream 737 @117 C / 3.5 bar a
@@ -2111,6 +2107,20 @@ R324_COND_DES  = R323_MEVAP_DES + R324_V1_DES + R324_V2_DES    # kg/h (12013.3 +
 
 # --- Stage 1 : Evaporator I  324E001 / 324F001  (0.33 bar a, hold 130 C) ------
 R324_F001_P_BARA = 0.33                           # bar a separator vacuum boundary (HARD)
+#  PHASE 5, report A-6 -- the last vessel left on the shared lumped capacitance.  The DDS leaves BOTH
+#  "nominal volume" (line 19) and "height (length) of shell, cyl." (line 22) BLANK, which is what
+#  blocked this for three passes.  The vendor ASSEMBLY drawing carries the number in its own design
+#  table: UD-AU-324-DZ-0006-001 (Uhde / Aguilar y Salas, rev 00, sheet 1), "Design acc. to AD-2000
+#  MERKBLATT" -> Nominal volume, Body = 70.5 m3 (the tracing-coil chamber's 0.083 m3 is separate and
+#  excluded).  Cross-check on the same drawing: ID 4570 mm is 16.40 m2, so 70.5 m3 is 4.30 m of
+#  equivalent straight shell plus heads, consistent with the 3271 + 1150 mm shell courses drawn.
+R324_F001_VOL_M3 = 70.5                           # m3, vessel volume (assembly drawing, visually verified)
+R324_F001_RHO_L  = 1200.0                         # kg/m3, 95 % melt (324F001 DDS line 8)
+#  Vapour molecular weight from the DDS's OWN pair (line 9: rho_v = 0.14 kg/m3 at line 15: 0.3 bar a
+#  and line 14: 130 C): MW = rho.R.T/P.  It lands below water's 18.02 because the vapour carries the
+#  NH3/CO2 the melt still holds -- which is exactly why one shared coefficient could not serve both
+#  this node and a 16.8 bar a hydrolyser.
+R324_F001_MW_VAP = 0.14 * 8.314e3 * (130.0 + 273.15) / (0.3 * 1.0e5)      # ~= 15.6 kg/kmol
 R324_E001_T_SP_C = 130.0                          # C melt boundary (HARD)
 R324_LAM_V1      = 2174.0                          # kJ/kg water latent @130 C
 R324_E001_PCHEST_DES = 3.96                       # bar a steam-chest press. (324E001 DDS N2: sat. LP,
@@ -2141,7 +2151,6 @@ R324_F001_M_FULL  = R324_F001_M_DES / (R324_F001_LVL_SP/100.0)
 #  argument, not a measurement.
 #  So 324F001 keeps the constant, the same standing 328D001 has, until the vessel's cylindrical
 #  height is established.  See handoff.
-R324_F001_P_KP    = 0.02                           # bar a per (kg/s) net vapour imbalance
 R324_F001_FA_DES  = 21.0                            # kg/h PFD stream 784 false-air (PV-324202)
 R324_PV202_OP_DES = 50.0                            # % PV-324202 design stroke
 R324_F001_EJPULL_DES = 72.0                         # kg/h PFD stream 706, gas leaving 324E002
@@ -2504,6 +2513,16 @@ def sol_bubble_t_dep(key: str, w: dict, p_bara: float, t_sp_c: float, tbub_raoul
 
 
 _sol_tbub_anchor("F010", W_S317, R323_F010_P_BARA)
+#  PHASE 5, report A-11.  323C003 and 323F004 kept the PURE-WATER saturation offset
+#  `T_sp + (tsat(P_live) - tsat(P_des))` -- the bubble point of a 55-69 wt% urea / ammonium-carbamate
+#  / NH3 liquor taken as steam's, with the whole boiling-point elevation frozen into the anchor.  Both
+#  stages already take their VAPOUR composition from `thermo_service`, so the two legs of each
+#  stage's own loop stood on different surfaces: exactly the defect A-11 closed at 323F010, left
+#  open at the two stages whose liquors carry volatiles.  The DEPARTURE form is kept, so each design
+#  point is still the PFD boundary bit-exactly; what changes is that the slope with composition AND
+#  with pressure now comes off the same surface as that stage's flash instead of off the steam table.
+_sol_tbub_anchor("C003", W_S314, R323_C003_P_BARA)
+_sol_tbub_anchor("F004", W_S319, R323_F004_P_BARA)
 
 # --- AUDIT C10, 323 half: one lumped cp for the whole recirculation train ----------------------
 # `cp323 = R323_CP_SOLN` (2.5 kJ/kg.K) covered every stream from the 44 % granulation return at
@@ -3418,10 +3437,35 @@ PIC_329212_KC_SCALE = _chest_slave_kc_scale(R324_E003_OP_DES, R324_E003_PCHEST_D
                                             steam_system.P_MP_BARA)
 
 
-def gravity_outflow_323f010(holdup_kg: float) -> float:
-    """Design-anchored gravity drain from 323F010 [kg/h]."""
+def gravity_outflow_323f010(holdup_kg: float, p_vessel_bara: float = R323_F010_P_BARA) -> float:
+    """323F010 barometric-leg drain to 323D002 [kg/h], report A-17.
 
-    return R323_M317_DES * math.sqrt(max(holdup_kg / R323_F010_M_DES, 0.0))
+    Was `M317_DES*sqrt(M/M_DES)`: Torricelli written on a MASS RATIO, so the drain could not feel the
+    vessel's own vacuum and breaking it changed nothing.  The leg is a seal leg, and the sources say
+    how to model one -- `References/324-1 Equipment Descriprion and Datasheet 1.md` on the sister leg:
+    "compute the liquid column height based strictly on the differential pressure ... h = dP/(rho.g)".
+
+    This leg discharges into 323D002, which is ATMOSPHERIC, so it is a barometric leg in the strict
+    sense: its column is sized to balance atmosphere, h_leg = P_atm/(rho.g) -- about 8 m of 80 %
+    melt.  (The sister leg quoted above runs between two VACUUM vessels, 0.33 -> 0.13 bar, so it is
+    sized on that differential instead.  The distinction sets how sensitive each drain is to its own
+    vessel pressure, and getting it wrong here made the drain ten times too twitchy.)
+
+    Writing the head in PRESSURE units makes the melt density cancel twice over -- once in the
+    liquid column and once in the leg -- which matters because density is the one quantity no source
+    pins for this stream:
+
+        rho.g.h_leg = P_atm   ->   dP_drive = M.g/A + P_atm - (P_atm - P_vessel) = M.g/A + P_vessel
+
+    So the drain is driven by the liquid standing on the leg plus the vessel's own absolute pressure
+    (A is the separator bore, datasheet ID 3478 mm).  At design M == M_DES and P == P_DES the ratio
+    is exactly 1.0 and the drain is R323_M317_DES bit-exactly.  Breaking the vacuum now raises the
+    drain by about 43 % (the column is no longer holding atmosphere back) and a falling level lowers
+    it -- neither of which a ratio of masses could represent."""
+    dp_des = R323_F010_M_DES * 9.80665 / R323_F010_AREA_M2 + R323_F010_P_BARA * 1.0e5
+    dp_live = (max(holdup_kg, 0.0) * 9.80665 / R323_F010_AREA_M2
+               + max(p_vessel_bara, 0.0) * 1.0e5)
+    return R323_M317_DES * math.sqrt(max(dp_live / dp_des, 0.0))
 
 
 def redistribute_communicating_compartments(masses_kg, temperatures_c, full_masses_kg):
@@ -4532,8 +4576,6 @@ CO2_VENT_T_DES_K  = CO2_T_FEED_C + 273.15
 # the anchored ISA-75.01 law is normalised on -- so at HIC/PIC = 0 it passes exactly nothing, which
 # the old `(pv/100)*COND*sqrt(dP)` conductance also did, and at 100 % it passes a real, choked,
 # compressible flow instead of a dimensionless conductance.
-SYN_P_DEFICIT_GAIN  = 0.30       # bar/bar, PT lift per unit condensation deficit (1-rho_cond)  -- calib
-SYN_P_VENT_GAIN     = 0.30       # bar/bar, PT lift per unit HV-322604 vent deficit (1-vent_frac) -- calib
 SYN_P_TAU_MIN       = 4.0        # min, loop-pressure accumulation time constant (vapour inventory, warm op-pt)
 # Cold-start loop-fill pressurisation time constant.  SOURCED, NOT fabricated: FOPTD fit of 9 exact field
 # points of PT-329201 (3.6.2025 synthesis startup trend) -> tau = 3469.5 s = 57.8 min +/- 585.9
@@ -7400,11 +7442,11 @@ def step_sim(dt: float) -> dict:
     #   lip). This keeps the deliberate conversion self-loop (gain ~0.16, stable) while CUTTING the
     #   conversion->composition->HPCC-N/C cliff return leg that closed an unstable G~-15 thermal recycle
     #   (the source of the TT-322010 161<->213 oscillation). conv_fac=1 -> 170+13=183=T0_DES (bit-exact).
-    T_conv_c = HPCC_T_PROD_DES_C + REACT_DT_COL_DES * s.react_conv_fac
+    #  report A-8: react_322r001 never reads its T_overflow_c argument -- the column profile has been
+    #  an energy balance since Phase 3 -- so the prescribed 13 C rise once computed here is gone.
     _react_vdot_live = max(sum(s.react_overflow_kmolh.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
                            / max(reactor.liquid_density(sum(s.react_T_node) / 4.0), 1e-6), 1e-6)
     react   = react_322r001(hpcc, F_CO2_syn_th, s.HIC_322605, L_drive=L_blend, W_drive=W_blend,
-                            T_overflow_c=T_conv_c,
                             t_nodes_c=s.react_T_node,                 # explicit tear (prev substep)
                             level_frac=s.react_level_pct / 100.0,     # live level -> wetted volume
                             vdot_m3h=_react_vdot_live)                # live throughput -> residence
@@ -7960,7 +8002,8 @@ def step_sim(dt: float) -> dict:
     # 305 -> higher P -> higher T_sat -> higher T.
     # Design: P == 4.1 -> the tsat bracket is a literal 0.0 -> T_bub == 135.0 == T -> q_relax == 0.0
     # -> q_avail − 0.0 == q_avail bit-identically -> m_305 == R323_M305_DES exactly (the min() ties).
-    T_bub_c003 = R323_C003_T_SP_C + (tsat_steam(s.r323_c003_P) - _R323_TSAT_C003_DES)
+    T_bub_c003 = sol_bubble_t_dep("C003", s.w_c003, s.r323_c003_P, R323_C003_T_SP_C,
+                                  bubble_T_raoult(R323_C003_P_BARA, W_S314))   # report A-11
     q305_relax_kw = (s.r323_c003_M * cp_c003 * (T_bub_c003 - s.r323_c003_T)
                      / R323_C003_M_TAU_S)                                         # kW retained to reach bubble point
     T_strip_bot = s.tlag.get("TT_322004", STRIP_T_BOTTOM_DES_C)
@@ -8069,7 +8112,8 @@ def step_sim(dt: float) -> dict:
     #       the energy ODE below yields exactly dT/dt = (T_sat − T)/τ, so energy stays conserved.
     # Design: P == 1.13 -> T_sat == 106.0 -> relax term ≡ 0 and q701_avail_kw == R323_Q701_DES_KW
     # bit-identically (same operand order) -> m_701 == R323_M701_DES exactly.
-    T_sat_f004 = R323_F004_T_SP_C + (tsat_steam(s.r323_f004_P) - _R323_TSAT_F004_DES)
+    T_sat_f004 = sol_bubble_t_dep("F004", s.w_f004, s.r323_f004_P, R323_F004_T_SP_C,
+                                  bubble_T_raoult(R323_F004_P_BARA, W_S319))   # report A-11
     q701_relax_kw = (s.r323_f004_M * cp_f004 * (T_sat_f004 - s.r323_f004_T)
                      / R323_F004_M_TAU_S)                                         # kW retained to reach bubble point
     q701_avail_kw = m_314_in / 3600.0 * cp_314_in * (T_314_in - s.r323_f004_T)      # kW released by the letdown
@@ -8112,10 +8156,27 @@ def step_sim(dt: float) -> dict:
     xi_f004    = sol_biuret_xi("F004", M_f004_pre, s.w_f004, s.r323_f004_T)
     s.w_f004   = sol_advance(s.w_f004, M_f004_pre, s.r323_f004_M, m_314_in, w_314_in,
                              m_701, y_701, m_319, xi_f004, dt)
-    #  323F004 hydraulic coupling: forward pressure accumulation from live flash-vapour flow (701).
-    #  Opening LV-323501 raises m_314 -> m_701 > design => flash-drum P relaxes UP (feeds PIC-323203 LP node).
-    p_f004_tgt = R323_F004_P_BARA + R323_F004_P_GAIN * (m_701 - R323_M701_DES) / R323_M701_DES
-    s.r323_f004_P = clamp(s.r323_f004_P + (p_f004_tgt - s.r323_f004_P) / R323_F004_P_TAU_S * dt, 0.3, 6.0)
+    #  PHASE 5, report A-7.  Was an algebraic SETPOINT the state chased through an invented lag:
+    #      p_tgt = 1.13 + 0.45 bar per unit of relative flash-vapour excess ;  dP/dt = (p_tgt - P)/90 s
+    #  i.e. pressure followed flow, where physically flow follows pressure.  It was deferred twice as
+    #  "blocked on a real line dP", because the model's design dP from 323F004 to 323E011 is
+    #  identically zero (both rows read 1.13 bar a) and the PFD's 0.1 bar rounding is the same order.
+    #
+    #  That framing was wrong: there is no dP to find, because there is no valve in that line.  The
+    #  sources are explicit that the two vessels are ONE pressure system --
+    #    "non-condensed gases from the flash tank condenser (323E011) and the level tank (323D011) are
+    #     routed to the Atmospheric Absorber under the strict regulation of pressure controller
+    #     PIC323203, which maintains the upstream flash tank system at approximately 1.13 bar"
+    #    (References/323C005 328V001 Datasheets.md), and PIC-323203's valve "is located further
+    #    downstream in the vapour discharge line connecting the Flash Tank Condenser (323E011) to the
+    #    atmospheric absorber" (References/323F004 323E010 323F010.md).
+    #  So 323F004 rides the 323E011/323D011 gas node that already carries a real vapour-space ODE on
+    #  its measured 3.14 m3 envelope (report A-6), and m_701 is already one of that node's inflows.
+    #  The feedback the gain was imitating is now the real one: more flash -> the node's own dP/dt
+    #  raises the pressure -> the bubble point rises -> the next flash is smaller.  Same explicit tear
+    #  as every other cross-stage pressure read (Stage 9 advances the node later in this tick), and
+    #  bit-exact at design, where both vessels sit at 1.13 bar a.
+    s.r323_f004_P = s.r3232_e011_P
 
     # ---- Stage 3: Pre-evaporator 323F010 + Heater 323E010  (vacuum 0.46 bar, hold 99 C) ------
     #  Cascade  TIC-323012 (temp master) -> PIC-329208 (LP-steam chest-P slave) -> heater duty.
@@ -8162,7 +8223,16 @@ def step_sim(dt: float) -> dict:
     m_evap    = min(R323_MEVAP_DES * ((m_319_in + m_331) / (R323_M319_DES + R323_M331_DES)),
                     max(R323_MEVAP_DES * ((qevap_avail_kw - qevap_relax_kw) / R323_QEVAP_DES_KW),
                         0.0))                                                     # vapour 790 -> vac (kg/h)
-    m_317     = gravity_outflow_323f010(s.r323_f010_M)                              # gravity drain -> tank (kg/h)
+    m_317     = gravity_outflow_323f010(s.r323_f010_M, s.r323_f010_P)               # barometric leg -> tank (kg/h)
+    #  A head-driven leg needs the one guard a mass-ratio law never did: at M = 0 the driving head is
+    #  still the vessel's own 0.46 bar a, so the equation would happily keep draining an empty
+    #  separator.  What happens physically is that the seal breaks and the leg passes VAPOUR, and
+    #  this engine has no two-phase leg model -- the same limitation that keeps the D-20 letdown
+    #  guards in place.  So the liquid drain is capped at the liquid that exists plus what is
+    #  arriving this substep.  Inert at every normal state, including the design seed.
+    _m317_avail = s.r323_f010_M / max(dt, 1.0e-9) * 3600.0 + m_319_in + m_331
+    if m_317 > _m317_avail:
+        m_317 = _m317_avail
     # ---- 323F010 -> 323D002 product line: plug-flow transport of the CLOSED packet --------------
     _pkt_dep_317 = _cq_packet(m_317, s.r323_f010_T, s.w_f010, cp_f010)
     _pkt_arr_317 = _transport_process(s, "323F010_TO_323D002", _pkt_dep_317, m_317, dt)
@@ -9301,8 +9371,16 @@ def step_sim(dt: float) -> dict:
         vent002_fp = max(nc002_fp, m703_fp - VACUUM_CONDENSERS["324E002"]["condensate_kgh"])
         ejpull_live = (R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES)
                        * (p1_solved / R324_F001_P_BARA))
+        #  PHASE 5, report A-6.  Was `p1_old + R324_F001_P_KP*(vent - pull)` on the same
+        #  0.02 bar/(kg/s) eight other vessels used to share.  It is now this vessel's own molar
+        #  vapour-space balance over the drawing's 70.5 m3, less the melt it is holding.  At design
+        #  vent002_fp == ejpull_live, so dP/dt is identically zero and PT-324201 holds 0.330 bar a.
+        _vv_f001 = hydraulics.vapour_volume_m3(R324_F001_VOL_M3, M_f001_pre, R324_F001_RHO_L)
         p1_next = clamp(p1_old
-                        + R324_F001_P_KP * (vent002_fp - ejpull_live) / 3600.0 * dt,
+                        + hydraulics.vessel_dpdt(
+                            p1_old, t1_solved + 273.15, _vv_f001, R324_F001_MW_VAP,
+                            vent002_fp / R324_F001_MW_VAP,
+                            ejpull_live / R324_F001_MW_VAP) * dt,
                         0.05, 1.0)
         t1_fp_residual = max(abs(p1_next - p1_solved), abs(t1_next - t1_solved))
         if t1_fp_residual <= R324_PT_LOOP_TOL:

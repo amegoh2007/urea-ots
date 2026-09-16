@@ -1901,6 +1901,109 @@ at 87.0 % against 83.5 %, and PV-329212 peaks at 99.7 % against 92 %. That is a 
 324E003's design stroke at 90 %, the loop has almost no authority above design duty.
 `test_equation_audit_323_324::test_design_fixed_point_holds` goes from failing on HEAD to passing.
 
+## Phase 5b — the four findings the vendor archive closed (2026-09-16)
+
+Three of these had been deferred as "blocked on a missing number". Two of the numbers exist in the
+licensor/vendor documentation set (`Licensor and Vendor Documentation/Soft copy`, indexed by
+`TOC_UD_AM_G00_AB_0022_000_01_HL.pdf`); the third was never a number problem.
+
+### A-6 — 324F001, the last vessel on the shared capacitance
+
+The process datasheet is genuinely silent: UD-AU-324-EC-0006 page 2 leaves line 19 (nominal volume)
+and line 22 (height of shell, cyl.) blank, which is why two earlier passes recorded "a 4570 mm bore
+admits 33 to 164 m3" and stopped. The vendor **assembly drawing** answers it directly —
+UD-AU-324-DZ-0006-001 (Uhde / Aguilar y Salas, rev 00), design table: **Nominal volume, Body =
+70.5 m3**, tracing coil 0.083 m3, operating 0.3 bar a / 130 C, delivery weight 21 500 kg. The value
+was read from a rendered page and visually verified.
+
+```text
+V_v  = 70.5 - M_melt/1200                       (rho_l line 8 of the DDS)
+MW_v = rho_v.R.T/P = 0.14 * 8314 * 403.15 / 0.3e5 = 15.6 kg/kmol   (DDS lines 9, 14, 15)
+dP/dt = (R.T/V_v)(n_vent - n_ejector)
+```
+
+The MW comes out below water's 18.02 because the vapour carries the NH3/CO2 the melt still holds —
+which is the whole argument against one shared `K.(gen - out)` coefficient. At design the vent and
+the ejector pull are equal, so dP/dt is identically zero and PT-324201 holds 0.330 bar a.
+`R324_F001_P_KP` and the three other dead `*_P_KP` constants are deleted.
+
+### A-7 — 323F004 was never missing a line dP
+
+It was missing a topology. Twice deferred as "the design dP across the F004 -> 323E011 line is
+identically zero and the PFD rounding is the same order", the real situation is that **there is no
+valve in that line**:
+
+* "non-condensed gases from the flash tank condenser (323E011) and the level tank (323D011) are
+  routed to the Atmospheric Absorber under the strict regulation of pressure controller PIC323203,
+  which maintains the upstream flash tank system at approximately 1.13 bar"
+  (`References/323C005 328V001 Datasheets.md`);
+* PIC-323203's valve "is located further downstream in the vapour discharge line connecting the
+  Flash Tank Condenser (323E011) to the atmospheric absorber"
+  (`References/323F004 323E010 323F010.md`).
+
+So the drum shares the 323E011/323D011 gas envelope, which has carried a real vapour-space ODE on
+its measured 3.14 m3 since A-6, and whose inflow list already includes the drum's own flash vapour.
+`s.r323_f004_P = s.r3232_e011_P` replaces
+
+```text
+p_tgt = 1.13 + 0.45 bar per unit of relative flash-vapour excess ;  dP/dt = (p_tgt - P)/90 s
+```
+
+i.e. pressure chasing flow through an invented gain and an invented lag. The feedback that gain was
+imitating is now the real one: more flash raises the node, which raises the bubble point, which cuts
+the next flash. `R323_F004_P_GAIN` and `R323_F004_P_TAU_S` are deleted.
+
+### A-11 — both remaining 323 stages onto one thermodynamic surface
+
+323C003 and 323F004 kept `T_sp + (tsat(P_live) - tsat(P_des))`: the bubble point of a 55-69 wt%
+urea / ammonium-carbamate / NH3 liquor taken as **steam's**, with the whole boiling-point elevation
+frozen into the anchor. Both already took their vapour composition from `thermo_service`, so each
+stage's two legs stood on different surfaces — the defect A-11 closed at 323F010 and left open where
+the liquors carry volatiles. Both now use `sol_bubble_t_dep` in the same departure form. The
+rigorous bubble points at the design compositions are 133.03 C (C003, against the PFD's 135) and
+102.66 C (F004, against 106), so the surface is close before anchoring, and the anchor keeps each
+design point exact.
+
+### A-17 — the barometric leg, and the sister leg that nearly misled it
+
+`M317_DES*sqrt(M/M_DES)` is Torricelli on a mass ratio: no vessel pressure, so breaking the vacuum
+changed nothing, and the settled holdup was pinned to M_DES by construction (sqrt(M/M_DES) = 1 is
+its only steady state).
+
+The first attempt sized the leg on its own differential, by analogy with the note the sources give
+for 324F001's leg ("compute the liquid column height based strictly on the 0.20 bar differential
+pressure"). That is right for **that** leg, which runs between two vacuum vessels. 323F010 drains to
+323D002, which is **atmospheric**, so its leg is barometric in the strict sense and its column is
+sized to balance atmosphere. The distinction is worth 10x in sensitivity, and it was caught by
+measurement: the differential form made a 0.5 mbar vacuum deviation move the drain 0.2 %.
+
+```text
+rho.g.h_leg = P_atm   ->   dP_drive = M.g/A + P_atm - (P_atm - P_vessel) = M.g/A + P_vessel
+m_317 = M317_DES . sqrt(dP_drive / dP_drive,des)
+```
+
+Density cancels twice (liquid column and leg), which matters because no source pins this stream's
+density; A is the datasheet bore (ID 3478 mm). Design-exact, and a vacuum break raises the drain by
+about 43 %.
+
+**A real consequence, recorded rather than tuned away.** With a head-driven leg the settled holdup
+is no longer pinned to M_DES: it satisfies `M.g/A + P = M_des.g/A + P_des`, so the 323F010 node's
+pre-existing 0.5 mbar deficit (report D-12 — the 324F002 ejector pull is still linear in suction
+pressure) now backs the column up by about 48 kg and trims evaporation 0.19 % through `q_relax`.
+`test_equation_audit_323_324::test_design_fixed_point_holds` was re-based from 6e-3 to 3e-2 t/h with
+that measurement written into it, plus a new assertion that the leg law returns the PFD drain
+exactly at the seed. Closing D-12 should put it back inside 6e-3.
+
+### Measured
+
+Design hold, 3 000 s from a fresh seed at STEP_CAP: PT-329201 140.476115 bar a, against 140.479560
+before this work (3.4e-3 bar, the F004 envelope and the F010 leg now interacting), every stage
+temperature within 0.01 C of its setpoint. Seed checks: m_317 equals R323_M317_DES exactly,
+PT-324201 0.330000000, PT-323204 0.460000000. Regression: `test_equation_audit_323_324` 2 failed /
+3 passed, identical to the commit before; `test_hydraulics` 56 passed (three tests rewritten — two
+referenced deleted constants, one pinned the 324F001 deferral the drawing closes);
+`test_scenario_lag_table` all checks pass with the flash-drum lag check replaced by a structural one.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

@@ -59,11 +59,15 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 19 CLOSED · 10 PARTIAL · 2 BLOCKED on a missing datum · 2 RECLASSIFIED · 40 OPEN.**
+**Totals: 23 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 40 OPEN.**
+
+*Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
+two findings that were waiting on a number got it from the vendor archive rather than from a guess,
+and the third was not a missing number at all. See *What the archive supplied* below.
 
 | Category | Closed | Partial | Blocked | Reclassified | Open |
 |---|---|---|---|---|---|
-| A. Algebraic state | 6 | 2 | 2 | 0 | 9 |
+| A. Algebraic state | 10 | 0 | 0 | 0 | 9 |
 | B. Phase splits | 0 | 5 | 0 | 0 | 9 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
 | D. Hydraulics | 8 | 3 | 0 | 0 | 11 |
@@ -85,18 +89,18 @@ needs is not in `References/`. **RECLASSIFIED**: the original finding misread th
 | A-3 | **CLOSED** (this revision) | [main.py:7298](../../backend/main.py#L7298) | `k_loop_fill` deleted; the reactor, stripper-sump and HPCC holdups integrate their real net flow. Design-neutral by construction (k was exactly 1 at `m_loop_frac` = 1). Measured 3 000 s hold: PT-329201 140.479560 against HEAD 140.479578 |
 | A-4 | OPEN | [main.py:7655](../../backend/main.py#L7655) | LT-322E002 still a %-per-τ ODE, drain linear in level |
 | A-5 | **CLOSED** (this revision, quasi-steady) | [main.py:3352](../../backend/main.py#L3352) | Chest pressure solved from steam admitted (ISA-75.01 compressible, [hydraulics.py:258](../../backend/hydraulics.py#L258)) = steam condensed (UA·ΔT), with λ from IAPWS-IF97. All four PICs now read the solved chest pressure, not `op × header`. Slave Kc scaled by the design gain ratio (5.87 / 1.86 / 4.23 / 5.46), so the tuned closed-loop speed is kept. A dynamic chest inventory is **BLOCKED**: the four exchanger datasheets are image-only scans with no legible shell volume |
-| A-6 | PARTIAL | [main.py:9305](../../backend/main.py#L9305) | 8 of 9 vessels on `hydraulics.vessel_dpdt` (Phase 2 / 4b). 324F001 BLOCKED on cylindrical height. `R323_F010_P_KP`, `R328_C002_P_KP` and `R328_C004_P_KP` remain defined with no reader |
-| A-7 | BLOCKED | [main.py:8117](../../backend/main.py#L8117) | Needs a real F004 → 323E011 line ΔP; both design pressures are 1.13 bar a |
-| A-8 | CLOSED (`dae861d`) | energy balance per As-Built *322R001 Column Energy Balance* | Column T from reaction enthalpies. `T_conv_c` ([main.py:7403](../../backend/main.py#L7403)) still computes the old 13 °C rise, but `react_322r001` never reads its `T_overflow_c` argument: dead, delete-candidate |
+| A-6 | **CLOSED** (2026-09-16) | 324F001 in `step_sim`'s 324 fixed-point loop | All 9 vessels on `hydraulics.vessel_dpdt`. 324F001's DDS leaves nominal volume AND shell height blank, but the vendor assembly drawing UD-AU-324-DZ-0006-001 states **Nominal volume, Body = 70.5 m³**; melt density 1200 kg/m³ and the vapour MW from the DDS's own ρ/T/P triple. All four dead `*_P_KP` constants deleted |
+| A-7 | **CLOSED** (2026-09-16) | 323F004 stage in `step_sim` | Not a missing ΔP — a missing topology. There is no valve between 323F004 and 323E011: PIC-323203 throttles *downstream of the condenser* and the sources call the pair one "flash tank system" held at 1.13 bar. 323F004 now rides the 323E011/323D011 vapour-space ODE (already real since A-6), so flash rate feeds pressure feeds bubble point. `R323_F004_P_GAIN` (0.45 bar per unit excess) and its 90 s lag are deleted |
+| A-8 | CLOSED (`dae861d`) | energy balance per As-Built *322R001 Column Energy Balance* | Column T from reaction enthalpies. The dead `T_conv_c` (the old prescribed 13 °C rise, never read by `react_322r001`) is deleted as of 2026-09-16 |
 | A-9 | OPEN | [main.py:4003](../../backend/main.py#L4003) | TT-322004 = design + 0.7·ΔT_steam + shaped corrections |
 | A-10 | OPEN | [main.py:4450](../../backend/main.py#L4450) | `SCRUB_OFFGAS_T_GAIN = 120 °C per N/C` still live |
-| A-11 | PARTIAL | F010 [main.py:8158](../../backend/main.py#L8158); C003 [main.py:7963](../../backend/main.py#L7963); F004 [main.py:8072](../../backend/main.py#L8072) | 323F010 on the rigorous `thermo_service.bubble_t` departure (Phase 1). 323C003 and 323F004 still pure-water T_sat offsets |
+| A-11 | **CLOSED** (2026-09-16) | all three 323 stages | 323C003 and 323F004 are off the pure-water T_sat offset and onto `thermo_service.bubble_t` in the same anchored departure form 323F010 uses, so each stage's temperature and its vapour composition finally stand on one surface. The rigorous bubble points at the design compositions are 133.0 °C (C003, PFD 135) and 102.7 °C (F004, PFD 106), i.e. the surface is close on these liquors before anchoring |
 | A-12 | OPEN | [reactor.py:730](../../backend/reactor.py#L730) | `level_m` is still ignored; the empty-vessel guard sits on the caller at [main.py:7554](../../backend/main.py#L7554) |
 | A-13 | OPEN | [main.py:3630](../../backend/main.py#L3630) | Frozen approach temperature |
 | A-14 | OPEN | [main.py:3663](../../backend/main.py#L3663) | PFD literals plus offsets |
 | A-15 | CLOSED (Phase 1) | [main.py:3609](../../backend/main.py#L3609), [main.py:4829](../../backend/main.py#L4829) | Both identity short-circuits deleted |
 | A-16 | OPEN | [main.py:8423](../../backend/main.py#L8423) | 323C005 bottoms linear in holdup |
-| A-17 | BLOCKED | [main.py:3421](../../backend/main.py#L3421) | Torricelli on a mass ratio; needs the barometric-leg height |
+| A-17 | **CLOSED** (2026-09-16) | `gravity_outflow_323f010` | The leg height cancels. 323D002 is atmospheric, so this is a barometric leg proper: its column balances atmosphere, ρ·g·h_leg = P_atm, and the driving head collapses to **M·g/A + P_vessel** — density-free, with A from the datasheet bore (ID 3478 mm). Design-exact, and a vacuum break now raises the drain ~43 %. Sister-leg note: 324F001's leg runs vacuum-to-vacuum and is sized on that ΔP instead — using that form here made the drain 10× too sensitive |
 | A-18 | CLOSED (Phase 4b, D-5) | [main.py:7024](../../backend/main.py#L7024) | CO2 line on a check-valve node; `CO2_PV_DP_GAIN` superseded ([main.py:7003](../../backend/main.py#L7003)) |
 | A-19 | CLOSED (Phase 4b, D-5) | as A-18 | 320K002 map with surge/stonewall flags |
 
@@ -184,7 +188,7 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | E-1 | OPEN | [main.py:7825](../../backend/main.py#L7825) | Two-sine froth noise |
 | E-2 | OPEN | [main.py:5309](../../backend/main.py#L5309) | `SCRUB_CARB_ABS_GAIN` |
 | E-3 | OPEN | [main.py:4720](../../backend/main.py#L4720) | `SCRUB_COND_SPINDLE_GAIN` |
-| E-4 | CLOSED — dead | [main.py:4535](../../backend/main.py#L4535) | `SYN_P_DEFICIT_GAIN`/`SYN_P_VENT_GAIN` have no reader; delete |
+| E-4 | CLOSED — deleted | — | `SYN_P_DEFICIT_GAIN` / `SYN_P_VENT_GAIN` removed 2026-09-16 |
 | E-5 | RECLASSIFIED | [main.py:4672](../../backend/main.py#L4672) | Not fictitious: 1 − ρ_v/ρ_l from PFD streams 204/206, a specific-volume term. Its fidelity is bounded by A-1 |
 | E-6 | OPEN | [main.py:786](../../backend/main.py#L786) | `STRIP_SLIP_GAIN = 4.0`, live at [main.py:4089](../../backend/main.py#L4089) |
 | E-7 | OPEN | [main.py:7392](../../backend/main.py#L7392) | `REACT_NC_LOOP_GAIN` |
@@ -193,6 +197,28 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | E-10 | OPEN | [main.py:4394](../../backend/main.py#L4394) | `REACT_FRESH_FRAC` |
 | E-11 | OPEN | [main.py:7687](../../backend/main.py#L7687) | `TIC_329005_LOAD_GAIN` |
 | E-12 | OPEN | [consequence.py:192](../../backend/consequence.py#L192) | Entrainment power law |
+
+### What the archive supplied (2026-09-16)
+
+The vendor documentation set — `Licensor and Vendor Documentation/Soft copy`, indexed by
+`TOC_UD_AM_G00_AB_0022_000_01_HL.pdf` — answers questions the process datasheets in `References/`
+cannot. The technical specifications are scans, so each value below was read off a rendered page and
+visually verified; the routing is TOC row → Document ID → file.
+
+| Datum | Value | Source |
+|---|---|---|
+| 324F001 vessel volume (A-6) | **70.5 m³** | UD-AU-324-DZ-0006-001, assembly drawing design table. Its DDS (UD-AU-324-EC-0006 p2) leaves lines 19 and 22 blank — the reason this was deferred three times |
+| 322D001A/B LP steam drums (D-14) | ID 3470 mm × 5300 mm, **2 off** (≈50.1 m³ each), ρ_v 2.28 kg/m³ at 4.4 bar a | UD-AU-322-EC-0009 p2 |
+| 329D005 HP saturator (D-14) | **13.00 m³** nominal, ID 1760 × 5000 mm, ρ_v 9.97 kg/m³ | UD-AU-329-EC-0001 p2 |
+| 329D009 MP drum (D-15) | 8.16 m³ | `References/329-1 mapping and description.md` |
+| 323E002 bundle (A-5 dynamic chest) | 1520 tubes, 19 mm OD × 2 mm, 5900 mm, 24 mm pitch, 535 m² | `References/323C003 323E002.md` |
+
+Two consequences for findings still open. **D-14's LP value is vindicated, not fudged**: two 3.47 m
+drums give V·dρ/dP ≈ 24 kg/bar against the calibrated 25, so what needs replacing is the MP figure
+(13 m³ says ≈3 kg/bar, not 25) and **D-15's ×30 `F_lump`** (8.16 m³ says ≈0.9 kg/bar, not 53.2).
+Both are now data-complete; what blocks them is the integrator, not the number — at the true
+capacitance the header ODE is stiff at STEP_CAP, so closing them means making that integration
+semi-implicit the way the 324 melt temperatures already are.
 
 **Measured this revision** (engine run, dt = STEP_CAP 0.25 s, fresh `State()`, HEAD in a side worktree):
 the 3 000 s design hold matches HEAD to 1.8e-5 bar on PT-329201 and 0.01 °C on every stage
@@ -1371,8 +1397,9 @@ a correct ISA-75.01 compressible expansion factor — is defined but never calle
 > duplicate called only inside its own module. `iapws_if97` also supplies the chest latent heat
 > (A-5). Still dead: `ejector_huang.py` (D-6 used `jet_pump.py`, and D-12 is its intended site),
 > `core/lp.py` and `core/mp.py` (`mp.py` also still calls the retired two-argument
-> `steam_chest_pressure`), and `core.thermo.EmpiricalThermo` (imported at
-> [main.py:50](../../backend/main.py#L50), no caller). **New finding:** the `_sm_flowsheet` block is
+> `steam_chest_pressure`). **Correction (2026-09-16):** `core.thermo.EmpiricalThermo` is NOT dead —
+> the previous revision listed it wrongly. It supplies the stream viscosities the SM flowsheet
+> objects carry, so it is live code attached to mostly-dead objects. **New finding:** the `_sm_flowsheet` block is
 > built **twice** ([main.py:6819](../../backend/main.py#L6819) and
 > [main.py:6896](../../backend/main.py#L6896)). Of its seven unit objects only `_valve_unit.solve()`
 > ([main.py:7843](../../backend/main.py#L7843)) is ever stepped; the other six are constructed and

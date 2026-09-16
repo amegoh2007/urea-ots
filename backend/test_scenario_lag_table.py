@@ -78,8 +78,19 @@ print("\n=== Scenarios4 deduced lag-time bands ===")
 # Steam Header Pressure: θp 1-3 s, τp 30-90 s
 check("steam header pressure capacitance (gas-space) 1-3 s",
       1.0 <= main.R323_C003_P_TAU_S <= 3.0, "%.1f s" % main.R323_C003_P_TAU_S)
-check("flash-drum pressure relaxation (vapour) 30-90 s",
-      30.0 <= main.R323_F004_P_TAU_S <= 90.0, "%.1f s" % main.R323_F004_P_TAU_S)
+#  Report A-7.  There is no flash-drum pressure LAG CONSTANT any more.  323F004 has no valve
+#  between it and 323E011 -- PIC-323203 throttles downstream of the condenser and the sources call
+#  the pair one "flash tank system" -- so the drum rides that node's vapour-space ODE, and its
+#  response time is now emergent from the measured 3.14 m3 envelope rather than fitted to this band.
+#  What is checked is the structure (the constant is gone, the coupling exists) and the emergent
+#  vapour residence is REPORTED; it is not asserted against the Scenarios4 band, which was deduced
+#  for a lag that no longer exists.
+_rho_v_e011 = (main.R3232_E011_P_BARA * 1.0e5 * main.R3232_E011_MW_VAP
+               / (8314.0 * (main.R3232_E011_T + 273.15)))
+_tau_e011 = (_rho_v_e011 * main.R3232_E011_VOL_M3) / (main.R3232_E011_MV_DES / 3600.0)
+check("flash-drum pressure is the 323E011 node, not a fitted lag",
+      not hasattr(main, "R323_F004_P_TAU_S") and not hasattr(main, "R323_F004_P_GAIN"),
+      "emergent vapour residence %.1f s" % _tau_e011)
 
 # Reactor Thermal Profile: θp 30-60 s, τp 8-360 min
 check("reactor forward washout time constant 8-360 min",
