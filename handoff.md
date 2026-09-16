@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, A-13, B-9, B-13, D-12, D-14, D-15, D-16, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; no BLOCKED findings left)
+**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, A-13, B-9, B-13, D-11, D-12, D-14, D-15, D-16, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; D-4 is ready but blocked behind A-2 step 1)
 
 ---
 
@@ -58,10 +58,36 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   model RAILED to the 0.020 clamp there, and the production loop never exceeds STEP_CAP = 0.25 s.
   (4) PIC-324202 / PIC-324203 have Kc 2 %/bar, so a +0.01 bar SP step moves PT-324204 by ~0.1 mbar in
   1 200 s, on the old model and the new -- check against the DCS tuning before relying on them.
-  (5) `PFD_324_MASS_PCT` stores the PFD's VAPOUR rows, which are MOLE %, but `make_stream_mass_pct`
-  reads every row as mass %, so the published S0703 / S0706 / ... component flows are wrong for the
-  vapour streams (the condenser model reads them as mole %). (6) A-14 is still open: the train's
+  (5) Closed in *Phase 5h*: the vapour rows are now published as mole %. (6) A-14 is still open: the train's
   stream masses are design numbers plus deltas, though the species now cascade.
+* **D-11 closed (As-Built *Phase 5h*); what it leaves open.** Stream 702's inert content is still its
+  PFD composition scaled with the PIC-323203 flow -- 323E011 / 323D011 do not carry a live N2/O2
+  inventory -- and A-16 (323C005 bottoms linear in holdup) is untouched: 343 gravity-drains to the
+  328V001 base, whose N1 overflow fixes the downstream head, and no source gives the elevation
+  difference that would set the drain law.
+* **D-4 is ready and BLOCKED on A-2 step 1.** An SRK isenthalpic letdown for HV-322604
+  (h_ig from `gap_g6_h0_enthalpy` + SRK residual enthalpy from `props_nh3co2h2o`'s cubic, k_ij = 0,
+  Illinois solve, 0.1 ms) gives 94.8 C at the 322C001 inlet on PFD 204's composition (69 mol% N2;
+  mean 0.14 K/bar; pure N2 from 100 C, 100 -> 1 bar checks at 0.088 K/bar). But the engine's design
+  off-gas `SCRUB_OFFGAS_KMOLH_DES` is 214.8 kmol/h at 44 % NH3 / 29 % CO2 / 21 % N2 -- the 5 901 kg/h
+  vent A-2 says must be re-reconciled to PFD 204's 1 708 -- and on THAT gas the letdown gives 17.9 C
+  (0.70 K/bar) and trips CARBAMATE_DEPOSITION (< 20 C) at the design state. Wire the letdown into
+  `hv_322604` and `core/valve.py` only after the off-gas matches PFD 204. The module was not committed.
+* **A-2 step 1, narrowed (2026-09-16).** 322E003's two INPUTS already sit exactly on their PFD rows:
+  the reactor off-gas `REACT_OFFGAS_DES` is PFD 203 (NH3 665.73 / CO2 197.69 / H2O 42.51 / N2 44.53
+  kmol/h) and the wash `SCRUB_CARB_KMOLH_DES` is PFD 308. On the PFD rows the scrubber closes per
+  component to 0.2 kmol/h (NH3 1 329.2 in / 1 329.4 out). The whole 4 193 kg/h vent excess is the
+  OVERFLOW: `_EJ_OVERFLOW_KMOLH` carries NH3 1 234.47 / CO2 458.36 against PFD 206's 1 324.0 / 519.1,
+  short by 89.5 / 60.7 kmol/h -- exactly the NH3 94.76 - 5.35 and CO2 62.18 - 1.44 the vent over-carries.
+  Path B lowered that overflow to close the 322F001 -> 322E002 -> 322R001 chain against the engine's
+  own stripper-top vector with the motive re-pinned to N/C 2.0 (`tests/audit_f001_ejector.py`), so
+  step 1 is not "set the vent to PFD 204": it is "put the overflow back on PFD 206 and re-close that
+  chain on PFD 202 / 205 / 217", after which the motive can return to 40 756 and the credit can go.
+* **A-14's offsets hide a real mass gap, not a relabelling.** The engine's own design vapour flows are
+  705 = 14 094 kg/h (V1_DES + false air) against PFD 14 799, 709 = 2 759 against 3 342, 703 = 26 107
+  against 26 840. The PFD's 317 -> 401 melt rows lose 655 kg/h of urea where entrainment into 705
+  (121 kg/h) and biuret formation (172 kg/h) explain 293 -- the tabulated inconsistency G3 reconciled
+  away. Letting "the design numbers emerge" means reopening G3.
 * **D-16 closed (As-Built *Phase 5f*), and the design flows it anchors on do not match PFD-26.**
   `M_502_DES` is `M_STRIP_DES` = 76 670 kg/h against stream 904's 57 989; `M_504_DES` is
   `M_HPCC_DES` = 10 800 kg/h against stream 916's 19 500. The level valves are anchored on the

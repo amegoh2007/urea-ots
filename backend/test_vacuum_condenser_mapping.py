@@ -168,3 +168,16 @@ def test_pfd_component_records_preserve_stream_total():
     )
     assert stream["mass_kgh"] == 72.0
     assert abs(sum(stream["component_kgh"].values()) - 72.0) <= 1e-9
+
+
+def test_vapour_rows_are_read_as_mole_percent():
+    """PFD vapour rows are MOLE %: stream 706's published molar weight must be the PFD's 24.13, and
+    the live vent carries the model's composition at the model's cold-end temperature."""
+    main.state = main.State()
+    packet = main.step_sim(0.1)
+    s706 = packet["STREAMS"]["S0706"]
+    assert abs(s706["MW"] - 24.13) < 0.15, s706["MW"]
+    s703 = main.make_stream_mole_pct(26840.0, main.PFD_324_MASS_PCT["703"], 116.0, 0.3,
+                                     "703", "a", "b", "vapor")
+    assert abs(s703["MW"] - 18.45) < 0.05, s703["MW"]
+    assert abs(sum(s703["component_kgh"].values()) - 26840.0) < 1e-6

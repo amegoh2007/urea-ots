@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 30 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 33 OPEN.**
+**Totals: 31 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 32 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -70,7 +70,7 @@ and the third was not a missing number at all. See *What the archive supplied* b
 | A. Algebraic state | 11 | 0 | 0 | 0 | 8 |
 | B. Phase splits | 2 | 5 | 0 | 0 | 7 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
-| D. Hydraulics | 12 | 3 | 0 | 0 | 7 |
+| D. Hydraulics | 13 | 3 | 0 | 0 | 6 |
 | E. Gains / signals | 1 | 0 | 0 | 1 | 10 |
 
 Status key. **CLOSED**: the live path now solves the first-principles relationship. Where it is written
@@ -161,14 +161,14 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | D-1 | PARTIAL | [main.py:5620](../../backend/main.py#L5620) | Every listed LV/PV now IEC 60534. `_fic_flow` is still `design × op/op_des` with no ΔP |
 | D-2 | CLOSED (Phase 2) | [main.py:5498](../../backend/main.py#L5498), [core/valve.py:55](../../backend/core/valve.py#L55), [steam_system.py:225](../../backend/steam_system.py#L225) | ISA-75.01 compressible with choke on HV-322604 (both ports) and the steam let-downs |
 | D-3 | PARTIAL | [core/valve.py:65](../../backend/core/valve.py#L65) | A capacity ceiling now retains what the seat cannot pass. The composition vector is still multiplied by the anchored valve ratio, which exceeds 1 above design upstream pressure |
-| D-4 | OPEN | [main.py:5534](../../backend/main.py#L5534), [core/valve.py:66](../../backend/core/valve.py#L66) | Constant μ_JT |
+| D-4 | OPEN — **blocked on A-2 step 1** | [main.py:5534](../../backend/main.py#L5534), [core/valve.py:66](../../backend/core/valve.py#L66) | Constant μ_JT. An SRK isenthalpic letdown was written and measured (2026-09-16): on PFD 204 (69 mol% N2) it gives 94.8 C at 322C001, 0.14 K/bar; on the engine's design off-gas (`SCRUB_OFFGAS_KMOLH_DES`, 214.8 kmol/h, 44 % NH3 / 29 % CO2) it gives 17.9 C, 0.70 K/bar, and trips CARBAMATE_DEPOSITION at design. The off-gas has to be reconciled to the PFD row first (A-2 closure order), then the letdown goes in |
 | D-5 | CLOSED (Phase 4b) | [main.py:7024](../../backend/main.py#L7024) | Compressor node and check-valve diode |
 | D-6 | CLOSED (Phase 4b) | [main.py:3203](../../backend/main.py#L3203) | `jet_pump` momentum closure; `f_stall` retired |
 | D-7 | OPEN | [main.py:7262](../../backend/main.py#L7262) | ṁ²/ρ ratio, no friction factor |
 | D-8 | CLOSED, anchored (Phase 2) | [main.py:5729](../../backend/main.py#L5729) | Line inventory back-solved from the design transit; delay ∝ ρV/ṁ |
 | D-9 | CLOSED (Phase 4a) | [main.py:9863](../../backend/main.py#L9863) | API 520 choked orifice with pop/blowdown latch |
 | D-10 | CLOSED (Phase 4b) | As-Built *Phase 4b, D-2* | 328 vapour paths compressible |
-| D-11 | OPEN | [main.py:8420](../../backend/main.py#L8420) | Fixed vent split |
+| D-11 | **CLOSED** (2026-09-16, As-Built *Phase 5h*) | `c005_vent_kgh` in `main.py` | Stream 341 is the inert gas of 702 + 708 saturated at the live lean-solvent temperature (PFD: 2.490 kmol/h N2+O2 out for 2.486 in; y_H2O.P at psat(43 C) x 0.95). Unanchored 79.95 kg/h against the PFD's 80 |
 | D-12 | **CLOSED** (2026-09-16, As-Built *Phase 5e*) | `hv323605_flow_kgh` in `main.py` | Not an ejector curve: stream 790 goes through HV-323605 into the 324E002 **condenser**, and 324F002 only takes the 72 kg/h stream 706 (DDS UD-AU-324-EC-0007: 94 kg/h at 0.2 bar a). Now an ISA-75.01 compressible valve between the live 323F010 and 324E002 pressures, stepped semi-implicitly. The old law let 323F010 fall below the vessel it drains into (0.277 vs 0.348 bar a). The 0.5 mbar deficit blamed on D-12 was a 58.7 kg/h urea hole instead: PFD 790 carries 0.14 mol% urea as entrained liquor, which Phase 1 had zeroed with no other way out |
 | D-13 | OPEN | [steam_system.py:74](../../backend/steam_system.py#L74) | K back-sized at a 50 % opening |
 | D-14 | **CLOSED** (2026-09-16) | `_header_capacitance` + `DRUM GEOMETRY` in `steam_system.py` | Each header is V_vapour·dρ_sat/dP with dρ/dP from IAPWS-IF97 and V_vapour from the **as-built GAs**, taken at each drum's printed normal liquid level rather than at an assumed half-full: **C_MP 3.39, C_9 1.97, C_LP 45.92** kg/bar against the calibrated 25.0 / 53.2 / 25.0. The half-full assumption I flagged the same day turned out to be a *datum* for the two horizontal drums — both GAs draw NLL on the shell axis — and wrong for the vertical LP drums, which carry 1.05 m of water in a 5.3 m shell |

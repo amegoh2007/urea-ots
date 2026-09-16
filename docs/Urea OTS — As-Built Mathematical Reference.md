@@ -2529,6 +2529,50 @@ against the full run at the thermo-memo commit (no full run was made at the two 
 | `test_vacuum_valve_rules` | 5 passed | 5 passed |
 | `test_equation_audit_td014` | 4 failed | 4 failed, same ids (the phase-sampled 1 mK check reads the swing's other side again) |
 
+## Phase 5h — the 323C005 vent is saturated inert gas (D-11), and PFD vapour rows are mole %
+
+### D-11
+
+```text
+was:   m_341 = VENT_DES . (m_702 + m_708) / (702_DES + 708_DES)        -- a fixed 8.9 % of the gas
+```
+
+PFD stream 341 leaves the top of the atmospheric absorber in equilibrium with the lean 756 solvent
+entering there at 43 C. Its N2 + O2, 2.490 kmol/h, is the 2.486 kmol/h that streams 702 and 708
+bring in; its water partial pressure, 0.0821 bar at 1.0 bar a, is psat(43 C) = 0.0865 at a water
+activity of 0.95. So it is the same law as a condenser's cold end (*Phase 5g*):
+
+```text
+n_341 = n_inert . 1/(1 - y_c),   y_c = Y_des . psat_w(T_756)/psat_w(43 C)      (P = 1.0 bar a)
+```
+
+with the inerts of 702 at its PFD composition scaled by the live PIC-323203 flow, the inerts of 708
+straight from 324E002's live vent, and T the live 322C001 holdup temperature that stream 756 leaves
+at. Unanchored, the law gives **79.95 kg/h against the PFD's 80**; it is anchored so the design is
+80.0 exactly. A 702 surge now vents what it brings in inert gas, not 8.9 % of its NH3; a warmer
+solvent carries more vapour out (+5 K: +3.8 %); false air bled in at PV-324202 reaches the stack as
+the inert gas it is, plus the vapour it carries (708 inerts x2: +59 %).
+
+### Stream telemetry
+
+The PFD tabulates vapour and gas streams in MOLE per cent (the F-8 convention). `PFD_324_MASS_PCT`
+stores those rows as given, but the packet built every one with `make_stream_mass_pct`, which reads
+them as mass per cent: S0706 published 38.6 % of its mass as N2 and a molar weight of 22.38 against
+the PFD's 24.13. The fifteen vapour rows now go through `make_stream_mole_pct`, and the four vacuum
+vents (706, 712, 715, 722) publish the condenser model's live composition at its live cold-end
+temperature. After 1 200 s: S0706 24.105, S0703 18.448, S0341 27.524, S0712 21.587 kg/kmol against
+the PFD's 24.13 / 18.45 / 27.52 / 21.59.
+
+Test files, each in its own process, against the previous commit:
+
+| file | previous commit | this commit |
+|---|---|---|
+| `test_vacuum_condenser_mapping` | 13 passed | **14 passed** (+ vapour rows read as mole %) -- the absorber closure test still reads 341 = 80.0 at design |
+| `test_equation_audit_desorption` / `test_328d003_compartments` / `test_c001_species_layer` | 2 failed / 12 passed / 1 failed | same ids |
+| `test_audit_stream_state` / `test_streams` / `test_consequence_transport` / `test_historian` | 1 failed / 6 / 8 / 26 passed | same |
+| `test_session_regression_gate` / `test_startup_stability` / `test_vacuum_valve_rules` | 7 / 5 / 5 passed | 7 / 5 / 5 passed |
+| `test_trend_coverage` / `test_scenario_coverage` | 9 passed / 6 failed | same ids |
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

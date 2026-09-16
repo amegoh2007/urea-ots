@@ -3735,6 +3735,31 @@ VACUUM_CONDENSER_SPECS = {
 }
 
 
+#  Report D-11.  PFD stream 341 -- the 323C005 atmospheric absorber vent -- is the inert gas of streams
+#  702 and 708 leaving saturated at the absorber top, in equilibrium with the lean 756 solvent that
+#  enters there at 43 C: its N2 + O2 (2.490 kmol/h) is the 2.486 that 702 and 708 bring, and its water
+#  partial pressure (0.0821 bar at 1.0 bar a) is psat(43 C) = 0.0865 at a water activity of 0.95.  So
+#  the vent is the same saturated-gas law as a condenser's cold end (`vacuum_condenser.vent_moles`),
+#  at the live solvent temperature and the inerts actually arriving.
+A323_C005_VENT_SPEC = vacuum_condenser.saturated_gas_spec(PFD_324_MASS_PCT["341"], 1.0, A328_C001_T)
+_C005_N702 = vacuum_condenser.moles_from_mole_pct(24.99, PFD_324_MASS_PCT["702"])     # PFD 702 row
+_C005_N708 = vacuum_condenser.moles_from_mole_pct(24.64, PFD_324_MASS_PCT["708"])     # PFD 708 row
+_C005_CAP = {k: _C005_N702[k] + _C005_N708[k] for k in vacuum_condenser.CONDENSABLE}  # vapour available
+_E002_INERT_DES = {k: VACUUM_CONDENSER_SPECS["324E002"]["n_in_des"][k] for k in vacuum_condenser.INERT}
+
+
+def c005_vent_kgh(m702_kgh, inert_706_kmolh, t_top_c):
+    """Stream 341 [kg/h], anchored: 80 kg/h exactly at the design state (report D-11)."""
+    def model(r702, r706, t):
+        n = {k: _C005_N702[k] * r702 + _C005_N708[k] * r706[k] for k in vacuum_condenser.INERT}
+        n.update(_C005_CAP)
+        return vacuum_condenser.vent_mass_kgh(
+            vacuum_condenser.vent_moles(A323_C005_VENT_SPEC, 1.0, t, n))
+    r706 = {k: inert_706_kmolh.get(k, 0.0) / _E002_INERT_DES[k] for k in vacuum_condenser.INERT}
+    des = model(1.0, {k: 1.0 for k in vacuum_condenser.INERT}, A328_C001_T)
+    return A323_C005_VENT_DES * (model(m702_kgh / A323_C005_M702_DES, r706, t_top_c) / des)
+
+
 def vacuum_inlet_kmolh(tag, inlet_kgh, air_kgh, air_des_kgh):
     """Live species into a first-stage condenser: the PFD vapour row scaled on its air-free mass,
     plus the live false-air bleed.  Written as n_des.r + (air - air_des) + air_des.(1 - r) so that
@@ -6172,6 +6197,29 @@ def make_stream_mass_pct(mass_kgh, mass_pct, T, P, name, src, dst, phase,
         for k in MW_COMP
     }
     return make_stream(comp_kmolh, T, P, name, src, dst, phase, rho=rho, h_kjkg=h_kjkg)
+
+
+def make_stream_mole_pct(mass_kgh, mole_pct, T, P, name, src, dst, phase,
+                         rho=None, h_kjkg=None):
+    """Build a canonical stream from a PFD MOLE-percent row (every vapour / gas row -- the F-8 unit
+    convention), scaled so its components sum to the live mass flow.
+
+    The vapour rows used to go through `make_stream_mass_pct`, which read them as mass per cent:
+    stream 706 then published 38.6 % of its MASS as nitrogen when 38.6 % of its MOLES are, and an
+    average molar weight of 22.38 against the PFD's own 24.13."""
+    n_rel = {k: max(mole_pct.get(k, 0.0), 0.0) for k in MW_COMP}
+    m_rel = sum(n_rel[k] * MW_COMP[k] for k in MW_COMP)
+    if mass_kgh <= 0.0 or m_rel <= 0.0:
+        return make_stream({}, T, P, name, src, dst, phase, rho=rho, h_kjkg=h_kjkg)
+    return make_stream({k: mass_kgh * n_rel[k] / m_rel for k in MW_COMP},
+                       T, P, name, src, dst, phase, rho=rho, h_kjkg=h_kjkg)
+
+
+def _vent_mole_pct(node):
+    """A 324 condenser vent's LIVE composition (A-13 / B-9 / B-13), as mole per cent."""
+    v = node["vent_kmolh"]
+    tot = sum(v.values())
+    return {k: (x / tot * 100.0 if tot > 0.0 else 0.0) for k, x in v.items()}
 
 
 # ----- Pump model -----
@@ -8637,7 +8685,12 @@ def step_sim(dt: float) -> dict:
     # ----- Stage 1 : 323C005 vent scrub -> 328V001 -> Comp-II feed --------
     Tc005    = s.a323_c005_T
     gas_c005 = m702_prev + m708_prev
-    m_341    = A323_C005_VENT_DES * gas_c005 / (A323_C005_M702_DES + A323_C005_M708_DES)
+    #  Report D-11.  Was `VENT_DES . gas / gas_DES`: a fixed 8.9 % of whatever gas arrived, so an
+    #  NH3-rich 702 surge vented in proportion and a warm solvent vented nothing extra.  Now the inert
+    #  gas that arrives, saturated at the lean-solvent temperature (see `c005_vent_kgh`).
+    m_341    = min(c005_vent_kgh(m702_prev,
+                                 s.tlag.get("R324_706_INERT", _E002_INERT_DES), s.a328_c001_T),
+                   gas_c005)
     abs_c005 = max(gas_c005 - m_341, 0.0)
     in_c005  = m756_prev + gas_c005
     bot_c005 = A323_C005_BOT_DES * (s.a323_c005_M / A323_C005_M_DES)
@@ -9764,6 +9817,8 @@ def step_sim(dt: float) -> dict:
     #  Cold-end temperatures from this full UA.LMTD solve carry to the next tick's pressure loops.
     s.tlag["324E002_T_VENT"] = vac324["nodes"]["324E002"]["t_vent_c"]
     s.tlag["324E005_T_VENT"] = vac324["nodes"]["324E005"]["t_vent_c"]
+    s.tlag["R324_706_INERT"] = {k: vac324["nodes"]["324E002"]["vent_kmolh"][k]
+                                for k in vacuum_condenser.INERT}     # -> 323C005 vent (report D-11)
     vac_stream = vac324["streams_kgh"]
     m_324_cond = vac_stream["719"] + vac_stream["720"] + vac_stream["721"] + vac_stream["759"]
     m_324_vent = vac_stream["722"]
@@ -9954,29 +10009,32 @@ def step_sim(dt: float) -> dict:
     streams.update({
         "S0204": make_stream(hv604["comp_kmolh"], hv604["T_out"], hv604["P_out"],
                               "204 HP off-gas", "HV-322604", "322C001", "vapor"),
-        "S0341": make_stream_mass_pct(mapped_m341, PFD_324_MASS_PCT["341"], 43.0, 1.0,
+        "S0341": make_stream_mole_pct(mapped_m341, PFD_324_MASS_PCT["341"], 43.0, 1.0,
                                        "341 absorber vent", "323C005", "328V001", "vapor"),
         "S0343": make_stream_mass_pct(mapped_m343, PFD_324_MASS_PCT["343"], 56.0, 1.0,
                                        "343 ammonia water", "323C005", "328D003 Comp II", "liquid", rho=992.2),
-        "S0702": make_stream_mass_pct(mapped_m702, PFD_324_MASS_PCT["702"], 45.0, 1.0,
+        "S0702": make_stream_mole_pct(mapped_m702, PFD_324_MASS_PCT["702"], 45.0, 1.0,
                                        "702 flash-condenser gas", "323D011", "323C005", "vapor"),
-        "S0703": make_stream_mass_pct(vac_stream["703"], PFD_324_MASS_PCT["703"], 116.0, 0.3,
+        "S0703": make_stream_mole_pct(vac_stream["703"], PFD_324_MASS_PCT["703"], 116.0, 0.3,
                                        "703 condenser-I inlet", "705 + 790", "324E002", "vapor"),
-        "S0705": make_stream_mass_pct(vac_stream["705"], PFD_324_MASS_PCT["705"], 130.0, 0.3,
+        "S0705": make_stream_mole_pct(vac_stream["705"], PFD_324_MASS_PCT["705"], 130.0, 0.3,
                                        "705 evaporator-I vapor", "324F001", "324E002", "vapor"),
-        "S0706": make_stream_mass_pct(vac_stream["706"], PFD_324_MASS_PCT["706"], 45.0, 0.3,
+        "S0706": make_stream_mole_pct(vac_stream["706"], _vent_mole_pct(vac324["nodes"]["324E002"]),
+                                       vac324["nodes"]["324E002"]["t_vent_c"], 0.3,
                                        "706 condenser-I gas", "324E002", "324F002", "vapor"),
-        "S0708": make_stream_mass_pct(vac_stream["708"], PFD_324_MASS_PCT["708"], 121.0, 1.0,
+        "S0708": make_stream_mole_pct(vac_stream["708"], PFD_324_MASS_PCT["708"], 121.0, 1.0,
                                        "708 ejector-I discharge", "324F002", "323C005", "vapor"),
-        "S0709": make_stream_mass_pct(vac_stream["709"], PFD_324_MASS_PCT["709"], 140.0, 0.1,
+        "S0709": make_stream_mole_pct(vac_stream["709"], PFD_324_MASS_PCT["709"], 140.0, 0.1,
                                        "709 condenser-II inlet", "324F003", "324E005", "vapor"),
-        "S0712": make_stream_mass_pct(vac_stream["712"], PFD_324_MASS_PCT["712"], 40.0, 0.1,
+        "S0712": make_stream_mole_pct(vac_stream["712"], _vent_mole_pct(vac324["nodes"]["324E005"]),
+                                       vac324["nodes"]["324E005"]["t_vent_c"], 0.1,
                                        "712 condenser-II gas", "324E005", "324F004", "vapor"),
-        "S0714": make_stream_mass_pct(vac_stream["714"], PFD_324_MASS_PCT["714"], 104.0, 0.3,
+        "S0714": make_stream_mole_pct(vac_stream["714"], PFD_324_MASS_PCT["714"], 104.0, 0.3,
                                        "714 ejector-II discharge", "324F004", "324E006", "vapor"),
-        "S0715": make_stream_mass_pct(vac_stream["715"], PFD_324_MASS_PCT["715"], 41.0, 0.3,
+        "S0715": make_stream_mole_pct(vac_stream["715"], _vent_mole_pct(vac324["nodes"]["324E006"]),
+                                       vac324["nodes"]["324E006"]["t_vent_c"], 0.3,
                                        "715 condenser-III gas", "324E006", "324F005", "vapor"),
-        "S0717": make_stream_mass_pct(vac_stream["717"], PFD_324_MASS_PCT["717"], 120.0, 1.0,
+        "S0717": make_stream_mole_pct(vac_stream["717"], PFD_324_MASS_PCT["717"], 120.0, 1.0,
                                        "717 ejector-III discharge", "324F005", "324E007", "vapor"),
         "S0719": make_stream_mass_pct(vac_stream["719"], PFD_324_MASS_PCT["719"], 45.0, 0.3,
                                        "719 condenser-I condensate", "324E002", "328D003 Comp I", "liquid", rho=999.1),
@@ -9984,7 +10042,8 @@ def step_sim(dt: float) -> dict:
                                        "720 condenser-II condensate", "324E005", "328D003 Comp I", "liquid", rho=1014.0),
         "S0721": make_stream_mass_pct(vac_stream["721"], PFD_324_MASS_PCT["721"], 41.0, 0.3,
                                        "721 condenser-III condensate", "324E006", "328D003 Comp I", "liquid", rho=1036.0),
-        "S0722": make_stream_mass_pct(vac_stream["722"], PFD_324_MASS_PCT["722"], 55.0, 1.0,
+        "S0722": make_stream_mole_pct(vac_stream["722"], _vent_mole_pct(vac324["nodes"]["324E007"]),
+                                       vac324["nodes"]["324E007"]["t_vent_c"], 1.0,
                                        "722 final vacuum vent", "324E007", "atmosphere", "vapor"),
         "S0744": make_stream_mass_pct(m_744, PFD_324_MASS_PCT["744"], 44.0, 1.0,
                                        "744 absorber-pump suction", "328D003 Comp I", "322P002", "liquid", rho=1002.0),
@@ -9994,11 +10053,11 @@ def step_sim(dt: float) -> dict:
                                        "756 LP-absorber solution", "322C001", "323C005", "liquid", rho=1003.0),
         "S0759": make_stream_mass_pct(vac_stream["759"], PFD_324_MASS_PCT["759"], 55.0, 1.0,
                                        "759 condenser-IV condensate", "324E007", "328D003 Comp I", "liquid", rho=989.1),
-        "S0783": make_stream_mass_pct(fa203_m, PFD_324_MASS_PCT["783"], 32.0, 1.0,
+        "S0783": make_stream_mole_pct(fa203_m, PFD_324_MASS_PCT["783"], 32.0, 1.0,
                                        "783 stage-II false air", "atmosphere", "PV-324203", "vapor"),
-        "S0784": make_stream_mass_pct(fa202_m, PFD_324_MASS_PCT["784"], 32.0, 1.0,
+        "S0784": make_stream_mole_pct(fa202_m, PFD_324_MASS_PCT["784"], 32.0, 1.0,
                                        "784 stage-I false air", "atmosphere", "PV-324202", "vapor"),
-        "S0797": make_stream_mass_pct(R3232_M797_DES, PFD_324_MASS_PCT["797"], 46.0, 3.9,
+        "S0797": make_stream_mole_pct(R3232_M797_DES, PFD_324_MASS_PCT["797"], 46.0, 3.9,
                                        "797 LP-absorber vent", "322C001", "PV-322201", "vapor"),
         "S0924": make_stream({"H2O": vac_stream["924"] / MW_COMP["H2O"]}, 146.0, 4.1,
                               "924 ejector motive", "LP steam", "324F002", "vapor"),

@@ -218,6 +218,19 @@ def design_spec(tag: str, p_des: float, n_in_des: dict, t_in_des: float, vent_ro
     return spec
 
 
+def saturated_gas_spec(vent_row: dict, p_des: float, t_des: float) -> dict:
+    """The saturation part of a condenser spec, for any gas outlet that leaves in equilibrium with a
+    cold liquid: a scrubber or absorber top as much as a condenser's cold end."""
+    y_c = sum(vent_row.get(k, 0.0) for k in CONDENSABLE)
+    return {"p_des": p_des, "t_v_des": t_des, "psat_v_des": iapws_if97.psat_bara(t_des),
+            "y_des": y_c / sum(vent_row.get(k, 0.0) for k in CONDENSABLE + INERT),
+            "split": {k: vent_row.get(k, 0.0) / y_c for k in CONDENSABLE}}
+
+
+def vent_mass_kgh(vent: dict) -> float:
+    return sum(vent.get(k, 0.0) * MW[k] for k in SPECIES)
+
+
 def vent_kgh(spec: dict, result: dict) -> float:
     """PFD vent anchored on the model: bit-exact PFD value at the design state."""
     return spec["vent_kgh"] * (result["vent_model_kgh"] / spec["vent_model_des_kgh"])
