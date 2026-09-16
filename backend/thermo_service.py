@@ -485,23 +485,66 @@ def bubble_t(w: dict, p_bara: float, t_lo: float = None, t_hi: float = None,
     A bubble_t is 60 bisection steps, each a full gamma-phi `bubble_p`, so it costs ~8 ms against a
     flash's ~9 ms.  The engine calls it once per stage per 0.25 s tick, which is 45x more often than
     the composition can actually move, so it is quantised on exactly the same grid as the flash memo
-    (`_W_QUANTUM`, `_P_QUANTUM_BARA`) -- far below any composition analyser or PT in the plant.
+    (`_W_QUANTUM`, `_P_QUANTUM_BARA`).  Each bin stores a first-order expansion about its canonical
+    point (`_bubble_t_linearisation`) and returns it evaluated at the caller's (w, P), so the answer
+    is continuous across bin edges and does not depend on which point filled the bin.
     Explicit brackets bypass the memo, since they change the answer."""
     if _BUBT_CACHE_SIZE <= 0 or t_lo is not None or t_hi is not None:
         return _bubble_t_solve(w, p_bara, t_lo, t_hi, tol)
     z = _norm_mass(w)
     key = (round(p_bara / _P_QUANTUM_BARA), round(tol / 1.0e-9),
            tuple(round(z[s] / _W_QUANTUM) for s in SPECIES))
-    hit = _bubble_t_cache.get(key)
-    if hit is not None:
+    lin = _bubble_t_cache.get(key)
+    if lin is not None:
         _bubble_t_stats["hit"] += 1
-        return hit
-    _bubble_t_stats["miss"] += 1
-    val = _bubble_t_solve(z, p_bara, t_lo, t_hi, tol)
-    if len(_bubble_t_cache) >= _BUBT_CACHE_SIZE:
-        _bubble_t_cache.clear()              # cheap generational evict; the working set is tiny
-    _bubble_t_cache[key] = val
-    return val
+    else:
+        _bubble_t_stats["miss"] += 1
+        lin = _bubble_t_linearisation(key, tol)
+        if len(_bubble_t_cache) >= _BUBT_CACHE_SIZE:
+            _bubble_t_cache.clear()          # harmless now: an entry is a pure function of its key
+        _bubble_t_cache[key] = lin
+    t_c, p_c, z_c, grad, dp_dt = lin
+    if dp_dt <= 0.0:
+        return t_c
+    dp_comp = sum(g * (z[s] - z_c[s]) for s, g in grad.items())
+    return t_c + ((p_bara - p_c) - dp_comp) / dp_dt
+
+
+def _bubble_t_linearisation(key: tuple, tol: float):
+    """(T_c, P_c, z_c, dP/dz_s, dP/dT) at a memo bin's canonical point -- see `_canonical_point`.
+
+    The bubble point returned for ANY caller in the bin is the first-order expansion about that
+    point, from the implicit function P_bub(z, T) = P:
+
+        T = T_c + [ (P - P_c) - sum_s g_s (z_s - z_c,s) ] / (dP_bub/dT)
+
+    with g_s the derivative of P_bub along a NORMALISED perturbation of species s,
+    g_s = grad(P_bub) . (e_s - z_c).  Because both z and z_c sum to one, sum_s g_s dz_s equals
+    grad(P_bub) . dz exactly, so no renormalisation term is missing.  Only species present at the
+    canonical point carry a derivative: a species that rounds to zero is below half a quantum, and
+    differentiating from zero would risk flipping the owning activity model mid-difference.
+
+    Cost on a miss: the bisection (~3 ms) plus one bubble_p per present species and two for dP/dT
+    (~0.1 ms each).  A derivative that cannot be taken (the canonical point sits on an envelope
+    edge) degrades to the canonical value alone, flagged by dP/dT = 0."""
+    p_c, z_q = _canonical_point(key[0], key[2])
+    z_c = _norm_mass(z_q)
+    t_c = _bubble_t_solve(z_c, p_c, None, None, key[1] * 1.0e-9)
+    grad = {}
+    try:
+        h_t = 0.01
+        dp_dt = (bubble_p(z_c, t_c + h_t) - bubble_p(z_c, t_c - h_t)) / (2.0 * h_t)
+        p_at = bubble_p(z_c, t_c)
+        h = 1.0e-6
+        for s in SPECIES:
+            if z_c[s] <= 0.0:
+                continue
+            zp = {k: z_c[k] / (1.0 + h) for k in SPECIES}
+            zp[s] += h / (1.0 + h)
+            grad[s] = (bubble_p(zp, t_c) - p_at) * (1.0 + h) / h
+    except (OutOfDomain, ValueError, ZeroDivisionError):
+        grad, dp_dt = {}, 0.0
+    return t_c, p_c, z_c, grad, dp_dt
 
 
 def _bubble_t_solve(w: dict, p_bara: float, t_lo: float = None, t_hi: float = None,
@@ -668,14 +711,51 @@ def _rachford_rice(z_mole: dict, k: dict, iters: int = 80) -> float:
 #  It is also pointless.  A flash is a STATE function of (T, P, z), and those inputs move on stage
 #  residence times of 150-600 s, not on the 0.1 s tick.  So the result is memoised against QUANTISED
 #  inputs: the solve repeats only once the state has actually moved by more than the quantum.  The
-#  quanta are far below both instrument resolution and the model's own accuracy (the electrolyte
-#  bubble point carries +1.7 to +17.5 % at these stages), so this bounds a numerical convenience,
-#  never a physical response.  Set _FLASH_CACHE_SIZE = 0 to disable and solve every call.
+#  quanta are far below instrument resolution in ABSOLUTE terms -- but not in effect for a trace
+#  volatile: 1e-4 is 1.5 % of 323F004's 0.665 wt% CO2 and moves its bubble point 0.19 C.  That is
+#  why a memo entry is not served flat: see `_canonical_point`, `_bubble_t_linearisation` and
+#  `_flash_at`, which answer for the caller's own point to within a millikelvin (bubble_t) and a
+#  few tenths of a percent in alpha (flash).  Set _FLASH_CACHE_SIZE = 0 to disable and solve every
+#  call.
 _T_QUANTUM_C = 0.02          # C     -- 25x finer than any TT resolution in the plant
 _P_QUANTUM_BARA = 1.0e-4     # bar a -- 100x finer than any PT resolution
 _W_QUANTUM = 1.0e-4          # mass fraction -- 100 ppm, ~100x below any composition analyser
 _FLASH_CACHE_SIZE = 4096
 _flash_cache: dict = {}
+
+
+def _canonical_point(p_key: int, z_key: tuple):
+    """The one (P, z) a memo bin stands for: its integer key times the quantum.
+
+    PATH INDEPENDENCE.  Both memos used to solve at the CALLER's (P, z) and store that answer for the
+    whole bin, so every later point in the bin got the value of whichever point happened to fill it
+    FIRST -- and what filled it first depended on everything the process had computed before.
+    Measured, in one process with identical globals and a bit-identical `State()`: 1 200 s from the
+    design seed put 323F010 at 99.000257 C with the memo as imported, 99.010351 after
+    `flash_cache_clear()`, 99.005956 after a boot settle had filled it.  A cold boot-pin cache takes
+    the last branch, so the engine's answers after a model change differed from its answers after a
+    cached boot, and the generational clear below re-rolled them inside any long run.
+
+    The mechanism that made it matter is the departure form in `main`: `SOL_TBUB_DES` and
+    `SOL_ALPHA_MODEL_DES` store the design value once, at import, while the live call reads the bin.
+    With first-filler semantics those agree only while the design point is still the bin's filler;
+    after any clear, a live point refills it and the "zero at design" bracket becomes a constant
+    offset of up to one quantum's worth of bubble point.
+
+    Solving at the canonical point makes every memo entry a pure function of its key, so fill
+    order, clears and boot path cannot change it.
+
+    What is NOT acceptable is serving that canonical value flat across the bin, and the first
+    attempt at this fix did exactly that.  A 1e-4 mass-fraction bin is 1.5 % wide in the 0.665 wt%
+    CO2 of the 323F004 liquor, and the electrolyte bubble point moves 0.19 C across it.  Flat
+    canonical values turned every bin edge into a 0.19 C relay, and the F004 pressure loop sat on
+    one and chattered: T_sat flipping 105.87 <-> 106.06 C every two seconds, the flash vapour
+    4.40 <-> 4.45 t/h.  (The first-filler memo had the same 0.19 C inside every such bin; it hid it
+    as history-dependent bias instead of showing it as a step.)  So each entry stores what is needed
+    to answer for the CALLER's point: `bubble_t` a first-order expansion about the canonical point,
+    `flash` the canonical K with Rachford-Rice re-solved on the caller's own feed."""
+    z_q = {s: k * _W_QUANTUM for s, k in zip(SPECIES, z_key)}
+    return p_key * _P_QUANTUM_BARA, z_q
 #  Warm-start buckets: coarse enough that one stage keeps one entry across its whole operating
 #  excursion, fine enough that two different stages never share one.
 _WARM_T_BUCKET_C = 10.0
@@ -722,20 +802,57 @@ def flash(z_mass: dict, t_c: float, p_bara: float,
     z = _norm_mass(z_mass)
     key = (round(t_c / _T_QUANTUM_C), round(p_bara / _P_QUANTUM_BARA),
            tuple(round(z[s] / _W_QUANTUM) for s in SPECIES))
-    hit = _flash_cache.get(key)
-    if hit is not None:
+    canon = _flash_cache.get(key)
+    if canon is not None:
         _flash_cache_stats["hit"] += 1
-        return hit
-    _flash_cache_stats["miss"] += 1
-    fr = _flash_solve(z, t_c, p_bara, outer_iters, tol)
-    if len(_flash_cache) >= _FLASH_CACHE_SIZE:
-        _flash_cache.clear()                 # cheap generational evict; the working set is tiny
-    _flash_cache[key] = fr
-    return fr
+    else:
+        _flash_cache_stats["miss"] += 1
+        #  Solve at the bin's CANONICAL point -- see `_canonical_point` -- from a cold start, so
+        #  the stored K is a pure function of the key.
+        p_q, z_q = _canonical_point(key[1], key[2])
+        canon = _flash_solve(_norm_mass(z_q), key[0] * _T_QUANTUM_C, p_q, outer_iters, tol,
+                             warm=False)
+        if len(_flash_cache) >= _FLASH_CACHE_SIZE:
+            _flash_cache.clear()             # harmless now: an entry is a pure function of its key
+        _flash_cache[key] = canon
+    return _flash_at(z, t_c, p_bara, canon)
+
+
+def _flash_at(z: dict, t_c: float, p_bara: float, canon: "FlashResult") -> "FlashResult":
+    """The caller's flash from the bin's canonical K: Rachford-Rice at the caller's OWN feed.
+
+    K = y/x is the part of a gamma-phi flash that varies slowly with feed composition; x, y and the
+    vapour fraction are not -- y_i of a trace volatile is close to proportional to its own feed
+    fraction.  Serving the canonical point's x and y to every caller in the bin handed a stage the
+    vapour of a DIFFERENT liquor: at 323F004 the bin is 1.5 % wide in CO2, and a consumer taking
+    alpha_i = y_i / w_i off it saw that 1.5 % as a step.  Re-solving the material balance with the
+    stored K costs one bisection (no activity model, no fugacity) and makes x, y and psi exact for
+    the caller's feed, consistent with its mass balance, and continuous across the bin."""
+    k = canon.k
+    z_mole = mass_to_mole(z)
+    psi = _rachford_rice(z_mole, k)
+    x_mole, y_mole = {}, {}
+    for s in SPECIES:
+        denom = 1.0 + psi * (k[s] - 1.0)
+        xs = z_mole[s] / denom if denom > 1e-12 else z_mole[s]
+        x_mole[s] = max(xs, 0.0)
+        y_mole[s] = max(k[s] * xs, 0.0)
+    sx, sy = sum(x_mole.values()), sum(y_mole.values())
+    if sx > 0.0:
+        x_mole = {s: v / sx for s, v in x_mole.items()}
+    if sy > 0.0:
+        y_mole = {s: v / sy for s, v in y_mole.items()}
+    x, y = mole_to_mass(x_mole), mole_to_mass(y_mole)
+    mw_x = sum(x_mole[s] * MW[s] for s in SPECIES)
+    mw_y = sum(y_mole[s] * MW[s] for s in SPECIES)
+    denom = (1.0 - psi) * mw_x + psi * mw_y
+    psi_mass = (psi * mw_y / denom) if denom > 0.0 else 0.0
+    return FlashResult(psi, psi_mass, x, y, k, t_c, p_bara, canon.domain,
+                       canon.iterations, canon.residual, canon.converged)
 
 
 def _flash_solve(z_mass: dict, t_c: float, p_bara: float,
-                 outer_iters: int = 40, tol: float = _FLASH_TOL) -> FlashResult:
+                 outer_iters: int = 40, tol: float = _FLASH_TOL, warm: bool = True) -> FlashResult:
     """Isothermal (T, P) flash of overall mass composition `z_mass`.
 
     gamma-phi outer loop: K depends on the liquid composition through the activity model and on the
@@ -767,7 +884,11 @@ def _flash_solve(z_mass: dict, t_c: float, p_bara: float,
     #  without needing the call site to carry any state.  It changes iteration count only -- the
     #  fixed point of the map is unchanged, and a cold key simply falls back to x = z.
     warm_key = (round(t_c / _WARM_T_BUCKET_C), round(p_bara / _WARM_P_BUCKET_BARA))
-    x = dict(_warm_start.get(warm_key) or z)
+    #  The MEMOISED path passes warm=False.  A warm start changes where successive substitution
+    #  stops inside `tol`, and it is keyed on whatever that coarse bucket converged last -- so a
+    #  memo entry solved from it would depend on call history, which is exactly what the canonical
+    #  point exists to remove.  Only a miss pays the cold start, and misses are ~1 % of calls.
+    x = dict((_warm_start.get(warm_key) if warm else None) or z)
     if abs(sum(x.values()) - 1.0) > 1.0e-6:                   # guard a corrupt warm entry
         x = dict(z)
     y_mole = None
@@ -816,7 +937,7 @@ def _flash_solve(z_mass: dict, t_c: float, p_bara: float,
         y_mole = y_mole_new
         if resid < tol:
             break
-    if resid < tol:
+    if resid < tol and warm:
         _warm_start[warm_key] = dict(x)                       # only cache a CONVERGED liquid
     y = mole_to_mass(y_mole) if y_mole else {s: 0.0 for s in SPECIES}
     # mole -> mass vapour fraction

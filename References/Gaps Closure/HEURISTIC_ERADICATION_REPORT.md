@@ -258,11 +258,17 @@ setpoint:
 once the memo is cleared — it was passing by 1.9 mK against a 5–10 mK spread. A cold
 `.boot_pin_cache.json`, which every source edit forces exactly once, fills the memo from the settle
 and takes the bottom branch; that is the whole of "it fails the first run after a model change and
-passes on every run after". The assertion is re-based to 0.05 °C with the table written into it.
-Two things need fixing, in order: the memo must not depend on fill order (or no gate may be tighter
-than its quantum), and `bubble_t` performs a full `_bubble_t_cache.clear()` on reaching
-`_BUBT_CACHE_SIZE` (4096), so the same non-determinism recurs *within* a long run every time the
-cache wraps.
+passes on every run after".
+
+**CLOSED the same day (As-Built *Phase 5d*).** Each memo entry is now solved at its bin's canonical
+point, so it is a pure function of its key, and answers for the caller rather than for the bin:
+`bubble_t` as a first-order expansion from `bubble_p` derivatives, `flash` as the canonical K with
+Rachford-Rice re-solved on the caller's feed. The fix had to go that far because the bin is not
+small for a trace volatile — 1e-4 is 1.5 % of 323F004's 0.665 wt% CO2 and moves its bubble point
+0.19 °C — and serving the canonical value flat made the F004 pressure loop chatter on a bin edge.
+Measured after: memo as imported, cleared and cold-boot-filled all give 98.998990 °C; bubble_t
+within 0.64 mK of the exact solve across that edge; F004 vapour steady; 323F010 wander over 9 600 s
+34 → 5.5 mK; 6 % slower (44.6× vs 47.3× real time). The 0.01 °C gate is restored.
 
 Ruled out along the way, so nobody repeats it: the design seed is bit-identical on the two boot
 paths (108 float fields), and so is every physics-bearing module global in `main`, `steam_system`,

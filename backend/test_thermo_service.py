@@ -120,9 +120,14 @@ def test_srk_raises_the_bubble_point_above_the_ideal_sum():
 
 
 def test_bubble_t_inverts_bubble_p():
+    """The SOLVER inverts bubble_p to 1 mK.  The memoised `bubble_t` answers for its quantisation
+    bin, solved at the bin's canonical point, so it is allowed the bin's own error and no more:
+    measured worst 4.6 mK across these stages (323F010, where 1e-4 of water fraction moves the bubble
+    point most), held to 10 mK here -- an order below any TT in the plant."""
     for tag, w, t_c, _p in STAGES_323:
         p = ts.bubble_p(w, t_c)
-        assert math.isclose(ts.bubble_t(w, p), t_c, abs_tol=1e-3), tag
+        assert math.isclose(ts._bubble_t_solve(w, p), t_c, abs_tol=1e-3), tag
+        assert math.isclose(ts.bubble_t(w, p), t_c, abs_tol=1e-2), tag
 
 
 def test_bubble_t_rises_with_pressure():
@@ -218,7 +223,9 @@ def test_quantised_cache_does_not_change_the_answer():
     ts.flash_cache_clear()
     cold = ts.flash(W_C003, 135.0, 4.10)
     warm = ts.flash(W_C003, 135.0, 4.10)
-    assert warm is cold                                    # same object -> served from the memo
+    assert ts.flash_cache_stats()["hit"] == 1               # served from the memo...
+    for s in ts.SPECIES:                                     # ...and identical to the solve
+        assert warm.y[s] == cold.y[s] and warm.x[s] == cold.x[s], s
     ts.flash_cache_clear()
     fresh = ts.flash(W_C003, 135.0, 4.10)
     for s in ts.SPECIES:
@@ -230,6 +237,56 @@ def test_cache_quantum_is_far_below_instrument_resolution():
     """The memo may only hide changes smaller than anything the plant can see."""
     assert ts._T_QUANTUM_C <= 0.05          # C -- finer than any TT
     assert ts._P_QUANTUM_BARA <= 1.0e-3     # bar a -- finer than any PT
+
+
+def test_memo_answer_does_not_depend_on_which_point_filled_the_bin():
+    """Regression for the path dependence found 2026-09-16.  Both memos used to solve at the CALLER's
+    point and serve that answer to the whole bin, so a value depended on what the process had asked
+    before.  It moved 323F010 by 10 mK over 1 200 s in the engine, and a cold boot-pin cache took the
+    worst branch.  Two points inside one bin, filled in either order, must now return the same
+    float -- and the flash must not inherit a warm start from an unrelated earlier solve."""
+    p = ts.bubble_p(W_F010, 99.0)
+    nudged = dict(W_F010, H2O=W_F010["H2O"] + 0.3 * ts._W_QUANTUM)
+    ts.flash_cache_clear()
+    first = ts.bubble_t(W_F010, p)
+    ts.flash_cache_clear()
+    ts.bubble_t(nudged, p)
+    assert ts.bubble_t(W_F010, p) == first
+
+    #  Flash: the memo stores the canonical K; x, y and psi are re-solved on the caller's own feed.
+    #  So a nudged point shares the unnudged point's K exactly, and its own answer does not depend
+    #  on what filled the bin or on a warm start left behind by an unrelated solve.
+    nudged_c003 = dict(W_C003, H2O=W_C003["H2O"] + 0.3 * ts._W_QUANTUM)
+    ts.flash_cache_clear()
+    fr_a = ts.flash(W_C003, 135.0, 4.10)
+    fr_b_first = ts.flash(nudged_c003, 135.004, 4.10)
+    ts.flash_cache_clear()
+    ts._flash_solve(W_C003, 128.0, 4.10)          # leaves a warm start in the same coarse bucket
+    fr_b = ts.flash(nudged_c003, 135.004, 4.10)
+    assert fr_b.k == fr_a.k
+    for slot in ts.FlashResult.__slots__:
+        assert getattr(fr_b, slot) == getattr(fr_b_first, slot), slot
+
+
+def test_memo_answers_for_the_callers_point_not_the_bins():
+    """The bin's canonical value served flat was a relay: 323F004's liquor carries 0.665 wt% CO2,
+    a 1e-4 bin is 1.5 % of that, and the electrolyte bubble point moves 0.19 C across it.  The F004
+    pressure loop chattered on the edge.  Both memos now answer for the caller: bubble_t to within a
+    millikelvin of the exact solve, flash alpha within 0.3 %, and neither steps at the bin edge."""
+    base = dict(Urea=0.717279, Biuret=0.00377431, NH3=0.00883245, CO2=0.00664998, H2O=0.263464)
+    ts.flash_cache_clear()
+    prev = None
+    for i in range(-8, 9):
+        z = ts._norm_mass(dict(base, CO2=0.00665 + i * 1.0e-5))
+        exact = ts._bubble_t_solve(z, 1.13)
+        memo = ts.bubble_t(z, 1.13)
+        assert abs(memo - exact) < 1.0e-3, (i, memo, exact)
+        if prev is not None:                               # exact slope is -19.3 mK per step
+            assert -0.021 < memo - prev < -0.018, (i, memo - prev)
+        prev = memo
+        fm = ts.flash(z, 106.0, 1.13)
+        fe = ts._flash_solve(z, 106.0, 1.13, warm=False)
+        assert abs(fm.y["CO2"] / fe.y["CO2"] - 1.0) < 3.0e-3, i
 
 
 def test_cache_misses_when_the_state_actually_moves():

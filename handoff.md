@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, D-14, D-15 and MSPAN_504 closed from the vendor archive; no BLOCKED findings left)
+**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, D-14, D-15, MSPAN_504 and the thermo-memo path dependence closed; no BLOCKED findings left)
 
 ---
 
@@ -53,34 +53,20 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   is 4.400 bar a, while `steam_system.P_LP_BARA` is 5.01325 (4.0 barg, the header the mapping
   documents call the 4-bar header). And its "max. fill lev. in oper. cond." is blank on all three
   DDSs -- the NLL used now comes from the GAs, not the DDSs.
-* **NEW OPEN FINDING -- the thermo memo is PATH-DEPENDENT, and it is wider than the tightest gates
-  standing on it.** `thermo_service.bubble_t` / `flash` memoise on a quantised key (`_W_QUANTUM`
-  1e-4 mass fraction, `_P_QUANTUM_BARA` 1e-4 bar). Every point landing in a bin gets the value of
-  whichever point filled that bin FIRST, so an answer depends on what the process computed earlier.
-  Measured, in ONE process, with every module global identical and a bit-identical `State()` --
-  1 200 s from the design seed, 323F010 temperature:
-
-  | memo state | d925a24 | with the drum geometry |
-  |---|---|---|
-  | as imported (3 entries) | 99.008098 | 99.000257 |
-  | after `flash_cache_clear()` | **99.013365** | 99.010351 |
-  | after a boot settle filled it | -- | 99.005956 |
-
-  `test_equation_audit_c10_live_cp` gates that at 0.01 C, so **d925a24 already fails it** the moment
-  the memo is cleared -- it was passing by 1.9 mK against a 5-10 mK spread. A COLD
-  `.boot_pin_cache.json`, which every source edit forces exactly once, takes the bottom branch; that
-  is the whole story behind "it fails on the first run after a model change and passes afterwards".
-  The gate is re-based to 0.05 with the table written into the test. Two things to fix, in order:
-  the memo should not depend on fill order (or no gate may be tighter than its quantum), and
-  `bubble_t` does a **full `_bubble_t_cache.clear()`** when it reaches `_BUBT_CACHE_SIZE` (4096), so
-  the same non-determinism exists WITHIN a long run every time the cache wraps.
-* **Ruled out while chasing that,** so nobody repeats it: the design seed is bit-identical on the
-  two boot paths (108 float fields), and so is every physics-bearing module global in `main`,
-  `steam_system`, `reactor` and `controllers` (1 256 compared; the only four that differ are
-  `SOL_VLE_DOMAIN`, `_DIAG`, `_cached` and `health.last_step_wall`, all write-only diagnostics).
-  `_A328_Q_REACT_DES_KW` (main.py 1315) IS captured on a pre-pin tick on the cold path and is not in
-  the cache -- a real cold/warm asymmetry, but it reaches only the published packet, never a state
-  ODE, so it is not this.
+* **Thermo memo closed (As-Built *Phase 5d*); what it leaves open.** (1) `flash` corrects for the
+  caller's FEED but not for the caller's temperature inside a 0.02 C bin, so K still steps ~0.12 %
+  per bin edge -- the same size the old memo had, and invisible in every trace taken, but it is the
+  next thing to linearise if a flash-driven loop ever chatters. (2) `_A328_Q_REACT_DES_KW`
+  (main.py 1315) is still captured on the first tick the process runs, which on a cold boot is a
+  PRE-pin tick, and it is not in the pin cache; it only reaches the published packet, so it is a
+  cosmetic cold/warm asymmetry. (3) 323F004 drifts slowly over hours -- 106.00 at 1 200 s, 105.84 at
+  9 600 s -- identically on the old and new memo, so that one is the plant model, not numerics.
+  (4) `test_equation_audit_td014::test_the_column_and_pre_evaporator_hold_their_setpoints` asserts
+  323F010 within 1 mK of 99 C at exactly 7 200 s, and 323F010 is still ringing there: TIC-323012
+  is in a lightly damped +/-10 mK, ~450 s swing (p-p 30 mK over 3 000-6 000 s at the 1 s harness
+  tick, +/-5 mK by 7 900 s). The test reads its PHASE -- 1.01 mK on this commit (fail), 0.10 mK
+  once D-12 lands (pass). It is not the memo: a 10x finer temperature quantum gives the same 30.5
+  vs 31.0 mK. The loop's damping is the open item, not this test.
 * **D-12 now has a measurable price.** The 323F010 vacuum node settles 0.5 mbar below design because
   the ejector pull is linear in suction pressure. Since A-17 the barometric leg transmits that into
   a 48 kg level offset and a 0.19 % evaporation offset, and `test_equation_audit_323_324`'s F-3 gate

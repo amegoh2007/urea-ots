@@ -2141,10 +2141,92 @@ d925a24 fails the same 0.01 gate as soon as the memo is cleared; it was passing 
 from the settle and lands on the bottom branch. That is the whole of "it fails the first run after a
 model change and passes afterwards".
 
-The assertion is re-based to 0.05 with that table written into it, and the memo's fill-order
-dependence is recorded in `handoff.md` as the thing to fix. `bubble_t` also does a full
-`_bubble_t_cache.clear()` on reaching `_BUBT_CACHE_SIZE` (4096), so the same non-determinism recurs
-inside a long run every time the cache wraps.
+For one commit that assertion was re-based to 0.05. The memo is fixed in the next section and the
+gate is back at 0.01.
+
+## Phase 5d — the thermo memo answers for the caller, not for whoever filled the bin
+
+`thermo_service.bubble_t` and `thermo_service.flash` are memoised, because an unmemoised engine is
+several hundred times over its real-time budget. The key is quantised: 1e-4 mass fraction per
+species, 1e-4 bar, 0.02 C. Until this phase, a miss solved at the CALLER's point and stored that
+answer for the whole bin.
+
+### What was wrong with it
+
+Two things, and the second was found while fixing the first.
+
+**It was history-dependent.** A bin returned whatever point had filled it first. In one process,
+with every module global identical and a bit-identical `State()`, 1 200 s from the design seed put
+323F010 at 99.000257 C with the memo as imported, 99.010351 after `flash_cache_clear()`, and
+99.005956 after a boot settle had filled it. A cold `.boot_pin_cache.json` takes the last branch,
+so the engine answered differently after a model change than after a cached boot, and the
+generational `clear()` at 4 096 entries re-rolled it inside any long run. The departure form made
+it bite: `SOL_TBUB_DES` / `SOL_ALPHA_MODEL_DES` store the design value once at import, the live call
+reads the bin, and once a live point refills the design bin the "zero at design" bracket becomes a
+constant offset.
+
+**The bin is not small for a trace volatile.** 1e-4 mass fraction is 1.5 % of the 0.665 wt% CO2 in
+the 323F004 liquor, and the electrolyte bubble point moves **0.19 C** across it (measured: 102.669
+vs 102.475 C either side of the CO2 = 0.00665 edge). The first attempt at a fix -- solve at the bin's
+canonical point and serve that flat -- made the memo deterministic and turned every bin edge into a
+0.19 C relay. The F004 pressure loop sat on one: T_sat flipped 105.87 <-> 106.06 C every two seconds
+and the flash vapour chattered 4.40 <-> 4.45 t/h. The first-filler memo had the same 0.19 C inside
+every such bin; it hid it as history-dependent bias instead of showing it as a step.
+
+### The closure
+
+Each entry is solved at its bin's canonical point -- the integer key times the quantum -- from a cold
+start, so it is a pure function of the key. What it stores is enough to answer for the caller:
+
+```text
+bubble_t:  T(w, P) = T_c + [ (P - P_c) - sum_s g_s (w_s - w_c,s) ] / (dP_bub/dT)
+           g_s = grad(P_bub) . (e_s - w_c)          (normalised perturbation of species s)
+
+flash:     K from the canonical solve;  psi, x, y from Rachford-Rice on the CALLER's feed
+```
+
+Because w and w_c both sum to one, sum_s g_s dw_s equals grad(P_bub) . dw with nothing missing.
+K = y/x is the slowly-varying part of a gamma-phi flash; x, y and psi are not, and y of a trace
+volatile is close to proportional to its own feed fraction, so re-solving the material balance on
+the caller's feed is what makes alpha = y/w continuous.
+
+### Measured
+
+| check | before | after |
+|---|---|---|
+| 323F010 T at 1 200 s, memo as imported / cleared / cold-boot-filled | 99.000257 / 99.010351 / 99.005956 | **98.998990 all three** |
+| bubble_t error vs exact solve, CO2 swept through the F004 bin edge | -122 to +72 mK (flat canonical) | **0.64 mK** worst |
+| step in bubble_t at that edge | 194 mK | **0.8 mK** |
+| flash alpha_CO2 vs exact, same sweep | -- | within 0.2 % |
+| 323F004 T_sat / vapour, 200-330 s | 105.87 <-> 106.06 C, 4.40 <-> 4.45 t/h | 105.9826 -> 105.9814 monotone, 4.430 steady |
+| 323F010 excursion over 9 600 s | 34 mK | 5.5 mK |
+| 1 200 s wall time (both trees under identical load) | 25.39 s, 47.3x real time | 26.88 s, 44.6x |
+| memo misses in that run, flash / bubble_t | 228 / 163 | 167 / 145 |
+
+The long-horizon wander the engine used to show on 323F010 was the memo, not the plant: every
+4 096-entry clear re-rolled every bin. `test_equation_audit_c10_live_cp`'s 323F010 gate is back at
+0.01 C. Two regression tests pin the new contract in `test_thermo_service.py`: the answer does not
+depend on which point filled a bin, and it answers for the caller's point across a bin edge.
+
+One file moves the other way and is not a regression.
+`test_equation_audit_td014::test_the_column_and_pre_evaporator_hold_their_setpoints` wants 323F010
+within 1 mK of setpoint at exactly 7 200 s, and TIC-323012 is still in a lightly damped +/-10 mK,
+~450 s swing there. The test samples its phase: 1.01 mK on this commit, 0.10 mK after the next one.
+A 10x finer memo temperature quantum leaves the swing unchanged (p-p 30.5 vs 31.0 mK), so the swing
+is the loop, not the memo.
+
+Suite, every `backend/test_*.py` in its own process, against the previous commit:
+
+| | previous commit (ffb07d3) | this commit |
+|---|---|---|
+| files run | 70 | 70 |
+| failing test ids | 49 | 50 |
+| files whose failures differ | -- | **1**: `test_equation_audit_td014::test_the_column_and_pre_evaporator_hold_their_setpoints` (the phase-sampled 1 mK check above) |
+| `test_equation_audit_323_324`, `test_equation_audit_td014` otherwise | 2 / 3 failed | identical ids -- the three tests the flat-canonical attempt broke are back |
+| `test_equation_audit_c10_live_cp` | 7 passed at a 0.05 C gate | 7 passed at **0.01 C** |
+| `test_thermo_service` | 27 passed | 29 passed |
+
+The 20 files failing on both are pre-existing and unchanged id for id.
 
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
