@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 27 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 36 OPEN.**
+**Totals: 30 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 33 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -67,8 +67,8 @@ and the third was not a missing number at all. See *What the archive supplied* b
 
 | Category | Closed | Partial | Blocked | Reclassified | Open |
 |---|---|---|---|---|---|
-| A. Algebraic state | 10 | 0 | 0 | 0 | 9 |
-| B. Phase splits | 0 | 5 | 0 | 0 | 9 |
+| A. Algebraic state | 11 | 0 | 0 | 0 | 8 |
+| B. Phase splits | 2 | 5 | 0 | 0 | 7 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
 | D. Hydraulics | 12 | 3 | 0 | 0 | 7 |
 | E. Gains / signals | 1 | 0 | 0 | 1 | 10 |
@@ -96,7 +96,7 @@ needs is not in `References/`. **RECLASSIFIED**: the original finding misread th
 | A-10 | OPEN | [main.py:4450](../../backend/main.py#L4450) | `SCRUB_OFFGAS_T_GAIN = 120 °C per N/C` still live |
 | A-11 | **CLOSED** (2026-09-16) | all three 323 stages | 323C003 and 323F004 are off the pure-water T_sat offset and onto `thermo_service.bubble_t` in the same anchored departure form 323F010 uses, so each stage's temperature and its vapour composition finally stand on one surface. The rigorous bubble points at the design compositions are 133.0 °C (C003, PFD 135) and 102.7 °C (F004, PFD 106), i.e. the surface is close on these liquors before anchoring |
 | A-12 | OPEN | [reactor.py:730](../../backend/reactor.py#L730) | `level_m` is still ignored; the empty-vessel guard sits on the caller at [main.py:7554](../../backend/main.py#L7554) |
-| A-13 | OPEN | [main.py:3630](../../backend/main.py#L3630) | Frozen approach temperature |
+| A-13 | **CLOSED** (2026-09-16, As-Built *Phase 5g*) | `vacuum_condenser.solve` | Gas outlet is the root of the H0 duty balance against UA.LMTD on the live cooling water, not design + inlet shift. Cooling water +5 K warms 324E002's cold end 45 -> 51.2 C |
 | A-14 | OPEN | [main.py:3663](../../backend/main.py#L3663) | PFD literals plus offsets |
 | A-15 | CLOSED (Phase 1) | [main.py:3609](../../backend/main.py#L3609), [main.py:4829](../../backend/main.py#L4829) | Both identity short-circuits deleted |
 | A-16 | OPEN | [main.py:8423](../../backend/main.py#L8423) | 323C005 bottoms linear in holdup |
@@ -136,11 +136,11 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | B-6 | PARTIAL | [main.py:4251](../../backend/main.py#L4251) | θ vector moved by anchored `k_ratio`; inerts structurally θ = 1 |
 | B-7 | PARTIAL | [main.py:4055](../../backend/main.py#L4055) | `eta_P` replaced by the rigorous pressure ratio; `eta_co2`, `eta_T_steam` and `g_flood` remain |
 | B-8 | PARTIAL | [main.py:2640](../../backend/main.py#L2640) / [main.py:2584](../../backend/main.py#L2584) | 323C003/F004/F010 on `sol_vapour_y_vle`; the 328 train and 324 still on frozen α |
-| B-9 | OPEN | [main.py:3531](../../backend/main.py#L3531) | One `h_eff_kjkg` per condenser |
+| B-9 | **CLOSED** (2026-09-16, *Phase 5g*) | `vacuum_condenser._q_balance` | `h_eff_kjkg` deleted. Duty is H_gas(in) - H_gas(vent) - H_liq(condensate) on the H0 datum, per species (H2O 43.2, NH3 33.6, CO2 16.3 kJ/mol at 45 C); 18 019 kW on the PFD rows against 18 460 kW of cooling water |
 | B-10 | OPEN | [consequence.py:329](../../backend/consequence.py#L329) | Linear in NH3 + CO2 loading |
 | B-11 | OPEN | [main.py:7971](../../backend/main.py#L7971) | `R323_PHI_V305` cap plus duty ratio at fixed λ |
 | B-12 | OPEN | [main.py:8162](../../backend/main.py#L8162) | min of two design ratios |
-| B-13 | OPEN | [main.py:3629](../../backend/main.py#L3629) | Linear NC derate |
+| B-13 | **CLOSED** (2026-09-16, *Phase 5g*) | `vacuum_condenser.vent_moles` | Inerts leave saturated with vapour at the cold end and the shell pressure, as every PFD vent row shows; the linear UA derate and the design-condensate constant in both pressure loops are gone. Simplified Colburn-Hougen: the interface is the cold end, and NH3/CO2 follow water's saturation line (stated) |
 | B-14 | OPEN | [main.py:2990](../../backend/main.py#L2990) | One scalar for all volatiles (328) |
 
 ### C. Scripted kinetics

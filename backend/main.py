@@ -46,6 +46,7 @@ import iapws_if97  # shared pure-water steam/condensate boundary (IAPWS-IF97 R7-
 import machines                            # Phase 4 rotating machinery: polytropic maps
 import jet_pump                            # Phase 4 liquid-liquid constant-area jet pump (322F001)
 import gap_g6_h0_enthalpy as h0_enthalpy  # H0 stream enthalpy on the elements-at-298.15 K datum
+import vacuum_condenser                    # A-13 / B-9 / B-13 saturated-vent surface condensers
 import consequence  # ISA-75.01.01 consequence physics + plug-flow line transport (StreamPacket)
 from core.thermo import EmpiricalThermo
 thermo = EmpiricalThermo()
@@ -3649,7 +3650,6 @@ def _vacuum_condenser_spec(tag, inlet, condensate, vent, hot_in, hot_out,
         "q_kw": q_kw,
         "lmtd_k": lmtd_k,
         "ua_kw_k": q_kw / lmtd_k,
-        "h_eff_kjkg": q_kw * 3600.0 / condensate,
         "area_m2": area,
         "tube_count": tubes,
         "tube_length_mm": length_mm,
@@ -3714,72 +3714,78 @@ PFD_324_MASS_PCT = {
 }
 
 
-def vacuum_condenser_node(spec, inlet_kgh, noncondensable_kgh, hot_in_c,
-                          cw_flow_kgh=None, cw_in_c=None):
-    """Reduced condenser node, anchored exactly to its PFD design point.
+#  Report A-13 / B-9 / B-13 -- the physics is in `vacuum_condenser.py`.  Each condenser is anchored on
+#  its own PFD inlet and vent rows.  PFD_324_MASS_PCT is named for mass per cent, but its VAPOUR rows
+#  are the PFD's mole per cent (the F-8 unit convention), which is how they are read here; the
+#  molar totals are the same rows' "Molar Flow total".  Shell pressures are the two live vacuum nodes'
+#  design values for 324E002 / 324E005 and the PFD's for 324E006 (0.3) and 324E007 (1.0).
+_VAC_PFD_KMOLH = {"703": 1454.67, "709": 172.98, "714": 94.76, "717": 11.46}
+_VAC_AIR_MW = 28.85                                   # PFD 783 / 784 average molar weight
+_VAC_AIR_FRAC = {"N2": 0.7906, "O2": 0.2094}          # PFD 783 / 784 mole fractions
+VACUUM_CONDENSER_SPECS = {
+    _tag: vacuum_condenser.design_spec(
+        _tag, _p, vacuum_condenser.moles_from_mole_pct(_VAC_PFD_KMOLH[_sin], PFD_324_MASS_PCT[_sin]),
+        VACUUM_CONDENSERS[_tag]["hot_in_c"], PFD_324_MASS_PCT[_svent], VACUUM_CONDENSERS[_tag]["hot_out_c"],
+        VACUUM_CONDENSERS[_tag]["cw_flow_kgh"], VACUUM_CONDENSERS[_tag]["cw_in_c"], CW_CP_KJKG_K,
+        VACUUM_CONDENSERS[_tag]["inlet_kgh"], VACUUM_CONDENSERS[_tag]["vent_kgh"])
+    for _tag, _sin, _svent, _p in (("324E002", "703", "706", R324_F001_P_BARA),
+                                   ("324E005", "709", "712", R324_F003_P_BARA),
+                                   ("324E006", "714", "715", 0.3),
+                                   ("324E007", "717", "722", 1.0))
+}
 
-    The design UA already contains the design gas-film resistance.  Above the design
-    noncondensable fraction, UA is derated by the remaining condensable fraction.  This
-    supplies the source-backed direction of effect without inventing a fitted coefficient.
-    """
+
+def vacuum_inlet_kmolh(tag, inlet_kgh, air_kgh, air_des_kgh):
+    """Live species into a first-stage condenser: the PFD vapour row scaled on its air-free mass,
+    plus the live false-air bleed.  Written as n_des.r + (air - air_des) + air_des.(1 - r) so that
+    at design (r == 1.0, air == air_des) every term but the first is a literal 0.0."""
+    spec = VACUUM_CONDENSER_SPECS[tag]
+    r = (inlet_kgh - air_kgh) / (spec["inlet_kgh"] - air_des_kgh)
+    d_air = (air_kgh - air_des_kgh) / _VAC_AIR_MW
+    a_des = air_des_kgh / _VAC_AIR_MW
+    return {k: spec["n_in_des"][k] * r
+               + _VAC_AIR_FRAC.get(k, 0.0) * d_air + _VAC_AIR_FRAC.get(k, 0.0) * a_des * (1.0 - r)
+            for k in vacuum_condenser.SPECIES}
+
+
+def vacuum_condenser_node(tag, inlet_kgh, n_in_kmolh, p_bara, cw_flow_kgh=None, cw_in_c=None):
+    """One 324 surface condenser at its live shell pressure (A-13 / B-9 / B-13).
+
+    The vent is the anchored saturated-vent model; the condensate is what is left of the inlet, so
+    the node closes mass exactly.  Q is the H0 enthalpy balance (18 019 kW at 324E002's design, the
+    PFD's cooling water carries 18 460), and the cooling water leaves at the temperature that Q gives
+    it, so the energy residual is the Q = UA.LMTD solve's own residual."""
+    spec = VACUUM_CONDENSER_SPECS[tag]
     cw_flow = spec["cw_flow_kgh"] if cw_flow_kgh is None else max(cw_flow_kgh, 0.0)
     cw_in = spec["cw_in_c"] if cw_in_c is None else cw_in_c
     inlet = max(inlet_kgh, 0.0)
-    nc = clamp(noncondensable_kgh, 0.0, inlet)
-
-    #  PHASE 1 (finding A-15): the design-point identity short-circuit that used to sit here --
-    #  `if inlet == spec[...] and nc == ... and cw_in == ...: return the spec verbatim` -- is DELETED.
-    #  It made this unit's headline design-point accuracy a lookup rather than a solve, and it hid
-    #  whatever residual the iteration below actually carries at that point.  The node now converges
-    #  to its own answer at design like it does everywhere else, and any residual is visible in
-    #  `mass_residual_kgh` / `energy_residual_kw` where it can be audited.
-    if inlet <= 0.0 or cw_flow <= 0.0:
-        return {
-            "tag": spec["tag"], "inlet_kgh": inlet,
-            "condensate_kgh": 0.0, "vent_kgh": inlet,
-            "q_kw": 0.0, "lmtd_k": 0.0, "ua_kw_k": spec["ua_kw_k"],
-            "ua_eff_kw_k": 0.0, "cw_flow_kgh": cw_flow,
-            "cw_in_c": cw_in, "cw_out_c": cw_in, "hot_in_c": hot_in_c,
-            "hot_out_c": hot_in_c, "mass_residual_kgh": 0.0,
-            "energy_residual_kw": 0.0,
-        }
-
-    x_nc = nc / inlet
-    x_nc_des = spec["vent_kgh"] / spec["inlet_kgh"]
-    condensable_ratio = clamp((1.0 - x_nc) / max(1.0 - x_nc_des, 1e-12), 0.0, 1.0)
-    ua_eff = spec["ua_kw_k"] * condensable_ratio
-    hot_out = spec["hot_out_c"] + (hot_in_c - spec["hot_in_c"])
-    q_kw = spec["q_kw"] * min(cw_flow / spec["cw_flow_kgh"], inlet / spec["inlet_kgh"])
-    lmtd_k = 0.0
-    for _ in range(30):
-        cw_out = cw_in + q_kw * 3600.0 / (cw_flow * CW_CP_KJKG_K)
-        lmtd_k = lmtd_countercurrent(hot_in_c, hot_out, cw_in, cw_out)
-        q_cap = max(ua_eff * lmtd_k, 0.0)
-        cond = min(max(inlet - nc, 0.0), q_cap * 3600.0 / spec["h_eff_kjkg"])
-        q_next = cond * spec["h_eff_kjkg"] / 3600.0
-        if abs(q_next - q_kw) <= 1e-10:
-            q_kw = q_next
-            break
-        q_kw = 0.5 * (q_kw + q_next)
-    condensate = min(max(inlet - nc, 0.0), q_kw * 3600.0 / spec["h_eff_kjkg"])
-    vent = inlet - condensate
-    cw_out = cw_in + q_kw * 3600.0 / (cw_flow * CW_CP_KJKG_K)
+    res = vacuum_condenser.solve(spec, p_bara, n_in_kmolh, spec["t_in_des"], cw_flow, cw_in)
+    vent = min(vacuum_condenser.vent_kgh(spec, res), inlet) if res["q_kw"] > 0.0 else inlet
+    condensate = inlet - vent
     return {
-        "tag": spec["tag"], "inlet_kgh": inlet,
-        "condensate_kgh": condensate, "vent_kgh": vent,
-        "q_kw": q_kw, "lmtd_k": lmtd_k, "ua_kw_k": spec["ua_kw_k"],
-        "ua_eff_kw_k": ua_eff, "cw_flow_kgh": cw_flow,
-        "cw_in_c": cw_in, "cw_out_c": cw_out, "hot_in_c": hot_in_c,
-        "hot_out_c": hot_out, "mass_residual_kgh": inlet - condensate - vent,
-        "energy_residual_kw": q_kw - cw_flow / 3600.0 * CW_CP_KJKG_K * (cw_out - cw_in),
+        "tag": tag, "inlet_kgh": inlet, "condensate_kgh": condensate, "vent_kgh": vent,
+        "q_kw": res["q_kw"], "lmtd_k": res["lmtd_k"], "ua_kw_k": spec["ua_kw_k"],
+        "cw_flow_kgh": cw_flow, "cw_in_c": cw_in, "cw_out_c": res["cw_out_c"],
+        "hot_in_c": spec["t_in_des"], "hot_out_c": res["t_vent_c"], "t_vent_c": res["t_vent_c"],
+        "p_bara": p_bara, "vent_kmolh": res["vent_kmolh"],
+        "mass_residual_kgh": inlet - condensate - vent,
+        "energy_residual_kw": res["q_kw"] - res["q_ua_kw"],
     }
 
 
 def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
                      false_air2_kgh, motive924_kgh, motive927_kgh, motive929_kgh,
-                     cw_factors=None):
-    """Four condensers and three ejector mixing nodes on the PFD-21 basis."""
+                     cw_factors=None, p_e002_bara=None, p_e005_bara=None):
+    """Four condensers and three ejector mixing nodes on the PFD-21 basis.
+
+    The second and third condensers take the first's LIVE vent species plus the ejector's motive
+    steam, as a departure from their design inlet rows, so the design state reproduces the PFD
+    stream table exactly and a change at 324E005 reaches 324E006 and 324E007 by composition, not only
+    by mass."""
     cw_factors = cw_factors or {}
+    p002 = R324_F001_P_BARA if p_e002_bara is None else p_e002_bara
+    p005 = R324_F003_P_BARA if p_e005_bara is None else p_e005_bara
+    specs = VACUUM_CONDENSER_SPECS
     streams = {
         "705": 14799.0 + (vapour1_kgh - R324_V1_DES) + (false_air1_kgh - R324_F001_FA_DES),
         "790": 12040.0 + (m_evap_kgh - R323_MEVAP_DES),
@@ -3787,39 +3793,79 @@ def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
         "924": motive924_kgh, "927": motive927_kgh, "929": motive929_kgh,
     }
     streams["703"] = 26840.0 + (streams["705"] - 14799.0) + (streams["790"] - 12040.0)
+
+    def cw(tag):
+        return VACUUM_CONDENSERS[tag]["cw_flow_kgh"] * cw_factors.get(tag, 1.0)
+
     e002 = vacuum_condenser_node(
-        VACUUM_CONDENSERS["324E002"], streams["703"],
-        max(72.0 - R324_F001_FA_DES + false_air1_kgh, 0.0), 116.0,
-        VACUUM_CONDENSERS["324E002"]["cw_flow_kgh"] * cw_factors.get("324E002", 1.0),
-    )
+        "324E002", streams["703"],
+        vacuum_inlet_kmolh("324E002", streams["703"], false_air1_kgh, R324_F001_FA_DES), p002,
+        cw("324E002"))
     streams["719"], streams["706"] = e002["condensate_kgh"], e002["vent_kgh"]
     streams["708"] = streams["706"] + streams["924"]
 
     e005 = vacuum_condenser_node(
-        VACUUM_CONDENSERS["324E005"], streams["709"],
-        max(584.0 - R324_F003_FA_DES + false_air2_kgh, 0.0), 140.0,
-        VACUUM_CONDENSERS["324E005"]["cw_flow_kgh"] * cw_factors.get("324E005", 1.0),
-    )
+        "324E005", streams["709"],
+        vacuum_inlet_kmolh("324E005", streams["709"], false_air2_kgh, R324_F003_FA_DES), p005,
+        cw("324E005"))
     streams["720"], streams["712"] = e005["condensate_kgh"], e005["vent_kgh"]
     streams["714"] = streams["712"] + streams["927"]
 
+    def cascade(tag, upstream, upstream_tag, motive_kgh, motive_des_kgh):
+        spec, up = specs[tag], specs[upstream_tag]
+        up_des = vacuum_condenser.vent_moles(up, up["p_des"], up["t_v_solved_des"], up["n_in_des"])
+        d_mot = (motive_kgh - motive_des_kgh) / vacuum_condenser.MW["H2O"]
+        return {k: spec["n_in_des"][k] + (upstream["vent_kmolh"][k] - up_des[k])
+                   + (d_mot if k == "H2O" else 0.0)
+                for k in vacuum_condenser.SPECIES}
+
     e006 = vacuum_condenser_node(
-        VACUUM_CONDENSERS["324E006"], streams["714"],
-        41.0 + max(streams["712"] - 584.0, 0.0), 104.0,
-        VACUUM_CONDENSERS["324E006"]["cw_flow_kgh"] * cw_factors.get("324E006", 1.0),
-    )
+        "324E006", streams["714"],
+        cascade("324E006", e005, "324E005", streams["927"], R324_F004_MOTIVE_DES), 0.3, cw("324E006"))
     streams["721"], streams["715"] = e006["condensate_kgh"], e006["vent_kgh"]
     streams["717"] = streams["715"] + streams["929"]
 
     e007 = vacuum_condenser_node(
-        VACUUM_CONDENSERS["324E007"], streams["717"],
-        31.0 + max(streams["715"] - 41.0, 0.0), 120.0,
-        VACUUM_CONDENSERS["324E007"]["cw_flow_kgh"] * cw_factors.get("324E007", 1.0),
-    )
+        "324E007", streams["717"],
+        cascade("324E007", e006, "324E006", streams["929"], R324_F005_MOTIVE_DES), 1.0, cw("324E007"))
     streams["759"], streams["722"] = e007["condensate_kgh"], e007["vent_kgh"]
     return {"streams_kgh": streams,
             "nodes": {"324E002": e002, "324E005": e005, "324E006": e006, "324E007": e007},
             "mixing_residual_703_kgh": streams["703"] - streams["705"] - streams["790"]}
+
+
+def _backward_euler_p(p_old, dt, dpdt, p_lo, p_hi):
+    """P' = P + dt.f(P') for a vacuum node whose vent is steep in its own pressure.
+
+    With the saturated vent (A-13 / B-9 / B-13) 324F003's vent grows 42 % for a 10 % pressure drop, so
+    dt.df/dP reaches -1.8 on the 1 s harness tick and the plain fixed-point update the loop used to
+    make oscillates and diverges.  g(P) = P - P_old - dt.f(P) is strictly increasing (the vent falls
+    and the ejector pull rises with P), so Newton safeguarded by a bracket converges from P_old.  At a
+    stationary state f(P_old) is a literal 0.0 and P_old is returned untouched."""
+    g0 = -dt * dpdt(p_old)
+    if g0 == 0.0:
+        return p_old
+    lo, hi = p_lo, p_hi
+    p = p_old
+    g = g0
+    for _ in range(40):
+        if g > 0.0:
+            hi = p
+        elif g < 0.0:
+            lo = p
+        else:
+            break
+        h = 1.0e-7
+        dg = ((p + h) - p_old - dt * dpdt(p + h) - g) / h
+        if dg > 0.0 and lo <= p - g / dg <= hi:
+            step = g / dg
+            p -= step
+            if abs(step) <= 1.0e-14:      # at the root to rounding: a bracket test would bisect away
+                break
+        else:
+            p = 0.5 * (lo + hi)
+        g = p - p_old - dt * dpdt(p)
+    return min(max(p, p_lo), p_hi)
 
 
 # ----- L3 boundary guards (Level-3 audit, Batch 1) -----
@@ -9437,6 +9483,7 @@ def step_sim(dt: float) -> dict:
     t1_solved = t1_old
     p1_old = s.r324_f001_P
     p1_solved = p1_old
+    _tv_e002 = s.tlag.get("324E002_T_VENT", VACUUM_CONDENSER_SPECS["324E002"]["t_v_solved_des"])
     t1_fp_residual = math.inf
     t1_fp_converged = False
     t1_fp_iterations = 0
@@ -9471,21 +9518,27 @@ def step_sim(dt: float) -> dict:
         m703_fp = (VACUUM_CONDENSERS["324E002"]["inlet_kgh"]
                    + (pull_f010 - R323_MEVAP_DES) + (v1_m - R324_V1_DES)
                    + (fa202_m - R324_F001_FA_DES))
-        nc002_fp = max(72.0 - R324_F001_FA_DES + fa202_m, 0.0)
-        vent002_fp = max(nc002_fp, m703_fp - VACUUM_CONDENSERS["324E002"]["condensate_kgh"])
-        ejpull_live = (R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES)
-                       * (p1_solved / R324_F001_P_BARA))
+        #  Reports A-13 / B-9 / B-13.  Was `max(nc, m703 - condensate_DES)`: the DESIGN condensate
+        #  subtracted as a constant, so the shell could not condense more when its pressure rose or
+        #  less when it fell, and every extra kilogram 324F001 boiled went to a 72 kg/h vent.  The vent
+        #  is now the inert gas plus the vapour it holds saturated at the cold end and the trial shell
+        #  pressure (`vacuum_condenser`), with the cold-end temperature from the last full UA.LMTD
+        #  solve -- it moves on the exchanger's thermal time scale, not on this iteration's.
+        _n703 = vacuum_inlet_kmolh("324E002", m703_fp, fa202_m, R324_F001_FA_DES)
+        _vv_f001 = hydraulics.vapour_volume_m3(R324_F001_VOL_M3, M_f001_pre, R324_F001_RHO_L)
+
+        def _dpdt_f001(p):
+            vent = vacuum_condenser.vent_kgh_at(VACUUM_CONDENSER_SPECS["324E002"], p, _tv_e002, _n703)
+            pull = R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES) * (p / R324_F001_P_BARA)
+            return hydraulics.vessel_dpdt(p1_old, t1_solved + 273.15, _vv_f001, R324_F001_MW_VAP,
+                                          vent / R324_F001_MW_VAP, pull / R324_F001_MW_VAP)
+
         #  PHASE 5, report A-6.  Was `p1_old + R324_F001_P_KP*(vent - pull)` on the same
         #  0.02 bar/(kg/s) eight other vessels used to share.  It is now this vessel's own molar
-        #  vapour-space balance over the drawing's 70.5 m3, less the melt it is holding.  At design
-        #  vent002_fp == ejpull_live, so dP/dt is identically zero and PT-324201 holds 0.330 bar a.
-        _vv_f001 = hydraulics.vapour_volume_m3(R324_F001_VOL_M3, M_f001_pre, R324_F001_RHO_L)
-        p1_next = clamp(p1_old
-                        + hydraulics.vessel_dpdt(
-                            p1_old, t1_solved + 273.15, _vv_f001, R324_F001_MW_VAP,
-                            vent002_fp / R324_F001_MW_VAP,
-                            ejpull_live / R324_F001_MW_VAP) * dt,
-                        0.05, 1.0)
+        #  vapour-space balance over the drawing's 70.5 m3, less the melt it is holding, stepped
+        #  backward in P because the vent is now steep in it.  At design the vent and the ejector
+        #  pull are both exactly 72 kg/h, so dP/dt is identically zero and PT-324201 holds 0.330.
+        p1_next = _backward_euler_p(p1_old, dt, _dpdt_f001, 0.05, 1.0)
         t1_fp_residual = max(abs(p1_next - p1_solved), abs(t1_next - t1_solved))
         if t1_fp_residual <= R324_PT_LOOP_TOL:
             p1_solved = p1_next
@@ -9585,6 +9638,7 @@ def step_sim(dt: float) -> dict:
     t2_solved = t2_old
     p2_old = s.r324_f003_P
     p2_solved = p2_old
+    _tv_e005 = s.tlag.get("324E005_T_VENT", VACUUM_CONDENSER_SPECS["324E005"]["t_v_solved_des"])
     t2_fp_residual = math.inf
     t2_fp_converged = False
     t2_fp_iterations = 0
@@ -9603,21 +9657,23 @@ def step_sim(dt: float) -> dict:
         t2_next = t2_old + pwr2 * dt / max(M_f003_pre * cp_hold2 + k_cap2 * dt, 1e-6)
         m709_fp = (VACUUM_CONDENSERS["324E005"]["inlet_kgh"]
                    + (v2_m - R324_V2_DES) + (fa203_m - R324_F003_FA_DES))
-        nc005_fp = max(584.0 - R324_F003_FA_DES + fa203_m, 0.0)
-        vent005_fp = max(nc005_fp, m709_fp - VACUUM_CONDENSERS["324E005"]["condensate_kgh"])
-        ejpull2_live = (R324_F003_EJPULL_DES * (s.HIC_329606 / R324_HIC9606_DES_PCT)
-                        * (p2_solved / R324_F003_P_BARA))
+        #  A-13 / B-9 / B-13, as 324F001 above.  This vent is 97 % condensables at design, so it is
+        #  far steeper in P than 324E002's -- see `_backward_euler_p`.
+        _n709 = vacuum_inlet_kmolh("324E005", m709_fp, fa203_m, R324_F003_FA_DES)
+
+        def _dpdt_f003(p):
+            vent = vacuum_condenser.vent_kgh_at(VACUUM_CONDENSER_SPECS["324E005"], p, _tv_e005, _n709)
+            pull = R324_F003_EJPULL_DES * (s.HIC_329606 / R324_HIC9606_DES_PCT) * (p / R324_F003_P_BARA)
+            return hydraulics.vessel_dpdt(p, t2_solved + 273.15, _vv_f003, R324_F003_MW_VAP,
+                                          vent / R324_F003_MW_VAP, pull / R324_F003_MW_VAP)
+
         # PHASE 2, report A-6.  Was the shared 0.02 bar/(kg/s); the real coefficient over 324F003's
         # own 4.31 m3 vapour space is 13.7x that.  Solved INSIDE the existing P/T fixed point, so
         # the stiffer state is marched implicitly and the ejector's own p2-proportional pull closes
         # the loop; no thermal or swell term here -- t2 is the joint unknown of this very iteration
         # and the melt inventory is on the separate M_f003 state, so both are carried by the
         # fixed point rather than differenced across it.
-        p2_next = clamp(p2_old
-                        + hydraulics.vessel_dpdt(
-                            p2_solved, t2_solved + 273.15, _vv_f003, R324_F003_MW_VAP,
-                            vent005_fp / R324_F003_MW_VAP, ejpull2_live / R324_F003_MW_VAP) * dt,
-                        0.02, 1.0)
+        p2_next = _backward_euler_p(p2_old, dt, _dpdt_f003, 0.02, 1.0)
         t2_fp_residual = max(abs(p2_next - p2_solved), abs(t2_next - t2_solved))
         if t2_fp_residual <= R324_PT_LOOP_TOL:
             p2_solved = p2_next
@@ -9694,7 +9750,7 @@ def step_sim(dt: float) -> dict:
     motive_ratio_606 = max(s.HIC_329606 / R324_HIC9606_DES_PCT, 0.0)
     mot927_m = R324_F004_MOTIVE_DES * motive_ratio_606
     mot929_m = R324_F005_MOTIVE_DES * motive_ratio_606
-    _vac_evap_in.set_state(mass_flow=m_evap)
+    _vac_evap_in.set_state(mass_flow=pull_f010)          # what HV-323605 passed (report D-12)
     _vac_v1_in.set_state(mass_flow=v1_m)
     _vac_v2_in.set_state(mass_flow=v2_m)
     _vac_fa1_in.set_state(mass_flow=fa202_m)
@@ -9702,8 +9758,12 @@ def step_sim(dt: float) -> dict:
     _vac_mot924_in.set_state(mass_flow=mot9605_m)
     _vac_mot927_in.set_state(mass_flow=mot927_m)
     _vac_mot929_in.set_state(mass_flow=mot929_m)
+    _vac_unit.p_shell = {"324E002": s.r324_f001_P, "324E005": s.r324_f003_P}
     _vac_unit.solve()
     vac324 = _vac_unit.diagnostics
+    #  Cold-end temperatures from this full UA.LMTD solve carry to the next tick's pressure loops.
+    s.tlag["324E002_T_VENT"] = vac324["nodes"]["324E002"]["t_vent_c"]
+    s.tlag["324E005_T_VENT"] = vac324["nodes"]["324E005"]["t_vent_c"]
     vac_stream = vac324["streams_kgh"]
     m_324_cond = vac_stream["719"] + vac_stream["720"] + vac_stream["721"] + vac_stream["759"]
     m_324_vent = vac_stream["722"]
@@ -10637,7 +10697,7 @@ def step_sim(dt: float) -> dict:
                     _tag: {
                         "Q_kW": round(_node["q_kw"], 1),
                         "UA_kW_K": round(_node["ua_kw_k"], 3),
-                        "UA_eff_kW_K": round(_node["ua_eff_kw_k"], 3),
+                        "T_vent_C": round(_node["t_vent_c"], 3),
                         "LMTD_K": round(_node["lmtd_k"], 3),
                         "cw_in_th": round(_node["cw_flow_kgh"] / 1000.0, 3),
                         "cw_in_C": round(_node["cw_in_c"], 2),
@@ -11990,6 +12050,9 @@ _PIN_SRC_FILES  = (
     #  STALE pin in place and the engine would boot on design constants that no longer match its own
     #  thermodynamics -- silently, because the cache would still report a hit.
     "thermo_service.py", "vle_nh3co2h2o.py", "props_nh3co2h2o.py",
+    #  The 324 condensers set PT-324201 / PT-324204 through their vent (A-13 / B-9 / B-13), and their
+    #  per-species condensation heat comes from the H0 enthalpy module.
+    "vacuum_condenser.py", "gap_g6_h0_enthalpy.py",
 )
 
 

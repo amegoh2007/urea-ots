@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, D-12, D-14, D-16, D-15, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; no BLOCKED findings left)
+**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, A-13, B-9, B-13, D-12, D-14, D-15, D-16, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; no BLOCKED findings left)
 
 ---
 
@@ -49,6 +49,19 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   LIC-329504, LICA-329504 taps N8B/N8A 1.500 m apart, rho 919.36 -> 26 083 kg. Both taps are in the
   cylindrical shell, so no head correction. Not design-pinned: `_level_loop` is seeded for
   dm/dt = 0 at design whatever `m_span` is, so only the level timescale moved.
+* **A-13 / B-9 / B-13 closed (As-Built *Phase 5g*); what they leave open.** (1) The condensers'
+  cooling water is still the PFD-28 constant: `VacuumTrain324.cw_factors` exists and nothing sets it,
+  and the CCW / CW system is not wired to the 324 exchangers, so the new cold-end physics only moves
+  with load and shell pressure until it is. (2) NH3 and CO2 in the vents follow water's saturation
+  line (the activity model stops at 80 C). (3) 324F003 at a 2 s harness tick still walks off (0.131 ->
+  0.096 bar a over 900 s with PV-324203 at 60 %); at 0.25 s and 1 s it settles to 0.13144. The previous
+  model RAILED to the 0.020 clamp there, and the production loop never exceeds STEP_CAP = 0.25 s.
+  (4) PIC-324202 / PIC-324203 have Kc 2 %/bar, so a +0.01 bar SP step moves PT-324204 by ~0.1 mbar in
+  1 200 s, on the old model and the new -- check against the DCS tuning before relying on them.
+  (5) `PFD_324_MASS_PCT` stores the PFD's VAPOUR rows, which are MOLE %, but `make_stream_mass_pct`
+  reads every row as mass %, so the published S0703 / S0706 / ... component flows are wrong for the
+  vapour streams (the condenser model reads them as mole %). (6) A-14 is still open: the train's
+  stream masses are design numbers plus deltas, though the species now cascade.
 * **D-16 closed (As-Built *Phase 5f*), and the design flows it anchors on do not match PFD-26.**
   `M_502_DES` is `M_STRIP_DES` = 76 670 kg/h against stream 904's 57 989; `M_504_DES` is
   `M_HPCC_DES` = 10 800 kg/h against stream 916's 19 500. The level valves are anchored on the
@@ -72,12 +85,9 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   tick, +/-5 mK by 7 900 s). The test reads its PHASE -- 1.01 mK on this commit (fail), 0.10 mK
   once D-12 lands (pass). It is not the memo: a 10x finer temperature quantum gives the same 30.5
   vs 31.0 mK. The loop's damping is the open item, not this test.
-* **D-12 closed (As-Built *Phase 5e*); what it leaves open.** (1) The 324F001 pressure loop still
-  condenses 324E002's DESIGN condensate as a constant, so extra 324F001 vapour all lands on the 72
-  kg/h vent; `vacuum_condenser_node` / `vacuum_train_324` exist and have NO caller (A-13 / B-9 /
-  B-13). Opening HV-329605 50 -> 85 % now moves 324F001 by 2.8 mbar. A real condenser also holds that
-  shell stiffly (~70 kg/h of condensate per mbar at 0.3 bar a), so the size may be right, but it
-  should come from condensation at the live shell pressure. That is the next closure on this train. (2) The stream
+* **D-12 closed (As-Built *Phase 5e*); what it leaves open.** (1) Superseded -- A-13 / B-9 / B-13 are
+  closed (*Phase 5g*), and the condenser node DID have a caller (`core/vacuum.py`); only
+  `main.vacuum_train_324` was uncalled. (2) The stream
   790 carryover is a fixed 0.611 % of the overhead; its latent heat is still charged on the whole
   overhead (46 kW of 7 253). (3) 323F010's seed still gains 4.85 kg/h of biuret against 4.97 kg/h
   of water -- PFD rounding on a 101 t/h feed, left as it is.

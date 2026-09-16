@@ -2287,9 +2287,10 @@ f is a literal 0.0 at the seed, so the pin is untouched.
 Under the old law both hand valves could pull the separator below the pressure of the vessel it
 discharges into, which needs vapour to flow uphill. The HV-329605 row is smaller now for a reason
 that is not this valve: the 324F001 / 324E002 node still condenses the DESIGN condensate (26 768
-kg/h, a constant in the pressure loop -- `vacuum_condenser_node` and `vacuum_train_324` exist but
-nothing calls them; open findings A-13 / B-9 / B-13), so every extra kilogram 324F001 boils goes to a
-72 kg/h vent. A real condenser would also hold that shell stiffly -- at 0.3 bar a the water dew point
+kg/h, a constant in the pressure loop; open findings A-13 / B-9 / B-13), so every extra kilogram
+324F001 boils goes to a 72 kg/h vent. *(Correction, Phase 5g: this paragraph first said the condenser
+node had no caller. `core/vacuum.py` called it every tick through its own copy of the train; only
+`main.vacuum_train_324` was uncalled. Both are now one implementation.)* A real condenser would also hold that shell stiffly -- at 0.3 bar a the water dew point
 moves 81 K per bar (IF97 at the 0.28 bar water partial pressure), worth roughly 70 kg/h of condensate per mbar on an 18.5 MW duty -- but the
 number should come from condensation, not from a constant. The old law's 35 mbar was one swing of a
 +/-4 % evaporation oscillation it set off, not a steady answer.
@@ -2426,6 +2427,107 @@ Test files, each in its own process, against the previous commit:
 | `test_equation_audit_td014` | 3 failed / 8 passed | same ids |
 | `test_equation_audit_322e002` | 1 failed / 7 passed | same id |
 | `test_lv322501_pressure_retuning` / `test_reactor` / `test_scrubber` | 17 / 14 / 13 passed | identical |
+
+## Phase 5g — the 324 vacuum condensers condense at their own shell pressure (A-13 / B-9 / B-13)
+
+There were two condenser models and neither could feel its shell pressure. The two pressure loops
+that set PT-324201 and PT-324204 subtracted each exchanger's DESIGN condensate as a constant, so any
+vapour above design went to the ejector vent; and the flowsheet node that fed 328D003 (via
+`core/vacuum.py`, which carried its own copy of the train) ran on a frozen gas-outlet approach
+(A-13), one design kJ/kg per exchanger (B-9) and a linear inert derate of UA (B-13).
+
+### What the PFD says a surface condenser does
+
+Every vent row off these four exchangers sits at water saturation at its own temperature and
+pressure:
+
+| vent | T | P (model) | y_H2O . P | psat(T) |
+|---|---|---|---|---|
+| 706 off 324E002 | 45 C | 0.33 | 0.097 | 0.096 |
+| 712 off 324E005 | 40 C | 0.131 | 0.076 | 0.074 |
+| 715 off 324E006 | 41 C | 0.3 | 0.064 | 0.078 (condensate water activity ~0.85) |
+| 722 off 324E007 | 55 C | 1.0 | 0.152 | 0.157 |
+
+So the gas leaving the cold end is the inert gas plus the vapour it can hold there:
+
+```text
+y_c(T_v, P) = Y_des . (P_des/P) . psat_w(T_v)/psat_w(T_v,des)       (Y_des, split: PFD vent row)
+n_vent,c    = n_inert . y_c/(1 - y_c)                                 capped at the inlet
+Q_bal(T_v)  = H_gas(inlet, T_in) - H_gas(vent, T_v) - H_liq(condensate, T_v)      (B-9)
+Q_UA(T_v)   = UA . LMTD(T_in, T_v ; T_cw,in, T_cw,in + Q/(m_cw.cp))                  (A-13)
+```
+
+T_v is the root of Q_bal = Q_UA (Illinois regula falsi between the cooling-water inlet and the gas
+inlet). H is `gap_g6_h0_enthalpy`'s elements datum, so condensation heat is per species -- 43.2
+kJ/mol for water at 45 C (IF97: 43.1), 33.6 for NH3, 16.3 for CO2 -- and subcooling and vapour
+sensible heat come with it. On the PFD's own 703 / 706 / 719 rows the balance gives **18 019 kW
+against the 18 460 kW the cooling water carries** (-2.4 %, the H0 tier's missing mixing and carbamate
+heat), with every species closing to 0.07 kmol/h. UA is back-solved from that balance at each PFD
+design point: 478.4 / 46.1 / 35.9 / 2.6 kW/K. The vent is anchored as PFD vent x model(live) /
+model(design), so the design state reproduces every stream in the PFD table exactly.
+
+NH3 and CO2 in the vent follow WATER's saturation line: the activity model's envelope stops at 80 C
+and these vents run at 40-55 C. That is a stated approximation on the minor condensables only.
+
+### Wiring
+
+`vacuum_condenser.py` holds the physics. `main.vacuum_train_324` is now the one implementation --
+`core/vacuum.py` delegates to it -- and cascades by SPECIES: 324E006 takes 324E005's live vent plus
+the 324F004 motive steam, 324E007 takes 324E006's plus 324F005's, each as a departure from its PFD
+inlet row. Both pressure loops evaluate the vent at their trial pressure with the cold-end
+temperature from the previous tick's full solve (it moves on the exchanger's thermal time, not the
+pressure iteration's). Because the 324F003 vent is 97 % condensables it grows 42 % for a 10 %
+pressure drop, which puts dt.df/dP at -1.8 on the 1 s harness tick; the plain fixed-point update
+would diverge, so both loops now take a backward-Euler pressure step by safeguarded Newton
+(`_backward_euler_p`), which returns P untouched wherever dP/dt is a literal zero. The stream-790
+input to the train is the HV-323605 flow, the same one the pressure loop uses (report D-12).
+
+### Measured
+
+Full engine, from a fresh design State at STEP_CAP, previous commit -> this commit:
+
+| | before | after |
+|---|---|---|
+| 1 200 s hold: PT-324201 / PT-324204 / PT-323204 (bar a) | 0.330685 / 0.131714 / 0.460361 | **0.330112 / 0.131062** / 0.459983 |
+| 1 200 s hold: vents 706 / 712 / 715 / 722 (kg/h; PFD 72 / 584 / 41 / 31) | 72.4 / 587.2 / **47.2 / 42.2** | 72.0 / 584.3 / **41.0 / 31.0** |
+| 1 200 s hold: cold ends 324E002 / E005 / E006 / E007 | (frozen) | 45.016 / 40.009 / 41.004 / 55.001 C |
+| 1 200 s hold: PT-329201 | 140.666169 | 140.666169 |
+| HV-329605 50 -> 85 %, PIC-324202 MAN, 400 s: PT-324201 | 0.3301 -> 0.3273 | 0.3300 -> **0.2740** |
+| same: PT-323204 | 0.4601 -> 0.4581 | 0.4601 -> **0.4255** |
+| HV-329606 50 -> 85 %, PIC-324203 MAN, 400 s: PT-324204 | 0.13113 -> 0.10924 | 0.13100 -> 0.12090 |
+| PV-324203 held at 60 %, 1 s tick, 300-600 s: PT-324204 | 0.131942 | 0.131434 - 0.131468 |
+| same at a 2 s tick | **railed at the 0.020 clamp** | 0.1032 - 0.1307, still walking |
+| 1 200 s of simulation, sequential runs on one machine | 27.87 s wall | 30.70 s |
+
+With a condensing shell, the ejector matters where the vent is mostly inert and hardly at all where it
+is mostly vapour: at 324E002 (Y_des 0.51) 70 % more motive steam takes the shell down 56 mbar, which
+is what the operating mapping describes ("A step increase in HV-329605 cause step decrease in
+pressures inside 323F010, 324F001 and 324E002"); at 324E005 (Y_des 0.97) the shell is pinned near the
+vapour pressure at its cold end and the same step buys 10 mbar. The previous model ranked them the
+other way round: 2.8 mbar at PT-324201 and 22 mbar at PT-324204.
+
+Offline, on the design inlets (`vacuum_condenser.solve`):
+
+| | 324E002 | 324E005 | 324E006 | 324E007 |
+|---|---|---|---|---|
+| shell P -10 %: vent | +11 % | +42 % | +12 % | +5 % |
+| cooling water inlet +5 K: T_v / vent | 51.2 C / +51 % | 40.3 C / x2.1 | 46.9 C / +54 % | 60.9 C / +17 % |
+| cooling water flow x0.5: T_v / vent | 48.4 C / +20 % | 40.1 C / +15 % | 42.3 C / +8 % | 56.8 C / +4 % |
+
+Test files, each in its own process, against the previous commit:
+
+Full per-file suite, 70 files, on the tree carrying D-12, the 790 carryover, D-16 and this change,
+against the full run at the thermo-memo commit (no full run was made at the two commits between):
+
+| | cda87a0 | this commit |
+|---|---|---|
+| failing test ids | 50 | **48** |
+| new failures | -- | **none** |
+| `test_equation_audit_323_324` | 2 failed | 1 failed -- `test_evap1_steam_cut_dilutes_product_and_never_cools` now passes |
+| `test_equation_audit_species` | 7 failed | 6 failed -- `test_species_layer_does_not_perturb_the_mass_or_energy_balance` passes (Phase 5e) |
+| `test_vacuum_condenser_mapping` | 9 passed | **13 passed** (design closure, zero cooling water, inert load, shell pressure, cooling-water temperature, per-species heat, species cascade) |
+| `test_vacuum_valve_rules` | 5 passed | 5 passed |
+| `test_equation_audit_td014` | 4 failed | 4 failed, same ids (the phase-sampled 1 mK check reads the swing's other side again) |
 
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
