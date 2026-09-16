@@ -23,7 +23,7 @@ from main import (MW_COMP, scrub_322e003, hv_322604, _eq_pct, react_nc_ratio,
                   SCRUB_Q_CCW_DES_KW, SCRUB_CCW_KGH_DES, SCRUB_CCW_CP,
                   SCRUB_CCW_T_IN_DES, SCRUB_CCW_T_OUT_DES, SCRUB_OVERFLOW_T_C, SCRUB_OFFGAS_T_C,
                   SCRUB_T_PROC_C, SCRUB_HIC604_DES_PCT, SCRUB_HV604_P_OUT, SCRUB_HV604_DP_DES,
-                  SCRUB_HV604_RANGE, SCRUB_HV604_MU_JT, SCRUB_OFFGAS_P_BARA, SCRUB_OFFGAS_NC_DES,
+                  SCRUB_HV604_RANGE, SCRUB_OFFGAS_P_BARA, SCRUB_OFFGAS_NC_DES,
                   SCRUB_LEVEL_NLL_PCT, SCRUB_HOLDUP_NLL_KG, SCRUB_HOLDUP_MAX_KG, EJ_SUC_TOT_DES,
                   clamp)
 
@@ -137,7 +137,8 @@ for th in (30.0, 50.0, 70.0, 90.0):
     v = hv_322604(offg, SCRUB_OFFGAS_T_C, th, P_DES)
     exp = SCRUB_HV604_RANGE ** ((th - SCRUB_HIC604_DES_PCT)/100.0)        # dP==dP_des here so factor==phi_ep
     eqp_ok &= abs(v["valve_frac"] - exp) < 1e-9
-    jt_exp = SCRUB_OFFGAS_T_C - SCRUB_HV604_MU_JT * (P_DES - SCRUB_HV604_P_OUT)
+    import real_gas                    # report D-4: SRK isenthalpic, not a constant mu_JT
+    jt_exp = real_gas.isenthalpic_letdown(v["comp_kmolh"], SCRUB_OFFGAS_T_C, P_DES, SCRUB_HV604_P_OUT)["t_out_c"]
     jt_ok  &= abs(v["T_out"] - round(jt_exp,1)) < 1e-9
     # composition ratios preserved (throttle scales all comps equally)
     if v["valve_frac"] > 0:

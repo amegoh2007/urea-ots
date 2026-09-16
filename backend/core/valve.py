@@ -37,7 +37,7 @@ class Valve322604(UnitOperation):
     def solve(self):
         from main import (
             MW_COMP, SCRUB_HV604_P_OUT, SCRUB_HIC604_DES_PCT,
-            SCRUB_HV604_DP_DES, SCRUB_HV604_MU_JT, SCRUB_HV604_GAMMA,
+            SCRUB_HV604_DP_DES, SCRUB_HV604_GAMMA,
             SCRUB_HV604_MW_DES, SCRUB_OFFGAS_P_BARA, SCRUB_OFFGAS_T_C
         )
         offgas_in = self.inputs[0]
@@ -63,7 +63,13 @@ class Valve322604(UnitOperation):
         # Capacity ceiling: what the seat cannot pass stays upstream (the loop), it does not vent.
         pass_frac = 1.0 if (cap is None or off_kgh <= 0.0) else min(1.0, max(cap, 0.0) / off_kgh)
         comp = {k: offgas_comp.get(k, 0.0) * valve * pass_frac for k in MW_COMP}
-        T_out = T_in - SCRUB_HV604_MU_JT * dP
+        #  Report D-4.  Was T_in - 0.55 C/bar . dP, a coefficient for an NH3/CO2-rich gas applied to an
+        #  off-gas that is 69 mol% N2.  A letdown valve is isenthalpic: SRK real-gas enthalpy on the
+        #  live composition, 94.8 C at design against the constant's 38.8 C.
+        import real_gas
+        _lt = real_gas.isenthalpic_letdown(comp, T_in, p_up, SCRUB_HV604_P_OUT)
+        T_out = _lt["t_out_c"]
+        self.letdown = _lt
         m_kgh = sum(comp.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)
         
         purge_out.set_state(T=T_out, P=SCRUB_HV604_P_OUT, mass_flow=m_kgh)

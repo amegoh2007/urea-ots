@@ -13,7 +13,7 @@ def test_constants_present():
                  "SCRUB_OVERFLOW_KMOLH_DES", "SCRUB_OFFGAS_T_C", "SCRUB_OFFGAS_P_BARA",
                  "SCRUB_OVERFLOW_T_C", "SCRUB_OVERFLOW_P_BARA", "SCRUB_OFFGAS_RHO",
                  "SCRUB_DH_CARB_KJMOL", "SCRUB_HIC604_DES_PCT", "SCRUB_HV604_P_OUT",
-                 "SCRUB_HV604_MU_JT", "SCRUB_CCW_KGH_DES", "SCRUB_CCW_CP",
+                 "SCRUB_CCW_KGH_DES", "SCRUB_CCW_CP",
                  "SCRUB_CCW_T_IN_DES", "SCRUB_CCW_T_OUT_DES", "SCRUB_CCW_P_IN_BARA",
                  "SCRUB_CCW_P_OUT_BARA", "SCRUB_FV409_DES_PCT", "SCRUB_TV005_DES_PCT",
                  "SCRUB_Q_CCW_DES_KW"):
@@ -131,8 +131,14 @@ def test_scale_s080():
 def test_hv322604_jt():
     sc = _design()
     hv = main.hv_322604(sc["offgas_kmolh"], sc["T_offgas"], main.SCRUB_HIC604_DES_PCT, sc["P_offgas"])
-    # isenthalpic JT: T_out = T_in − μ_JT·ΔP = 114 − 0.55·(140.7−4) = 38.8 C
-    assert abs(hv["T_out"] - 38.8) < 0.05, hv["T_out"]
+    # isenthalpic letdown on SRK (report D-4): 114 C / 140.7 -> 4.0 bar a of a 69 mol% N2 off-gas is
+    # 94.8 C, a mean 0.14 K/bar.  The constant 0.55 C/bar it replaced gave 38.8 C.
+    assert abs(hv["T_out"] - 94.8) < 0.3, hv["T_out"]
+    lt = main.real_gas.isenthalpic_letdown(sc["offgas_kmolh"], sc["T_offgas"], sc["P_offgas"], 4.0)
+    assert 0.10 < lt["mu_jt_k_bar"] < 0.20 and not lt["condensing"]
+    # an NH3-rich gas cools far more across the same valve -- the composition dependence the constant lacked
+    rich = {"NH3": 69.07, "CO2": 20.51, "H2O": 4.41, "N2": 4.62, "O2": 0.77, "CH4": 0.4, "H2": 0.21}
+    assert main.real_gas.isenthalpic_letdown(rich, 114.0, 140.7, 4.0)["mu_jt_k_bar"] > 3.0 * lt["mu_jt_k_bar"]
     assert abs(hv["P_out"] - 4.0) < 1e-9                          # 322C001 LP-absorber P
     assert abs(hv["open_pct"] - 50.0) < 1e-9                      # HIC sets opening 1:1
     # composition preserved across the valve (steam-traced, no desublimation)
@@ -158,7 +164,7 @@ def test_packet_tags_and_streams():
     assert abs(sum(blk["off_mol_pct"].values()) - 100.0) < 0.2
     assert abs(blk["off_MW"] - 26.36) < 0.05                      # PFD 204 off-gas mean MW (A-2)
     assert abs(blk["TT_322011"] - 114.0) < 0.1
-    assert abs(blk["TT_322011_lp"] - 38.8) < 0.1                  # JT-cooled off-gas to 322C001
+    assert abs(blk["TT_322011_lp"] - 94.8) < 0.3                  # SRK letdown to 322C001 (D-4)
     assert abs(blk["TT_322002"] - 178.8) < 0.1
     assert abs(blk["P_offgas"] - 140.7) < 0.1 and abs(blk["P_overflow"] - 140.7) < 0.1
     assert abs(blk["HV_322604"] - blk["HIC_322604"]) < 1e-9       # valve tracks controller 1:1

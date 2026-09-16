@@ -47,6 +47,7 @@ import machines                            # Phase 4 rotating machinery: polytro
 import jet_pump                            # Phase 4 liquid-liquid constant-area jet pump (322F001)
 import gap_g6_h0_enthalpy as h0_enthalpy  # H0 stream enthalpy on the elements-at-298.15 K datum
 import vacuum_condenser                    # A-13 / B-9 / B-13 saturated-vent surface condensers
+import real_gas                            # D-4 SRK isenthalpic letdown (HV-322604)
 import consequence  # ISA-75.01.01 consequence physics + plug-flow line transport (StreamPacket)
 from core.thermo import EmpiricalThermo
 thermo = EmpiricalThermo()
@@ -2900,15 +2901,25 @@ W_STEAM = _w_norm(dict(H2O=100.0))                                   # 911 MP / 
 # + inerts) is contacted with the recycle ammonia-water loop 755 -> 322C001 -> 756.  NH3/CO2 are taken
 # up into the liquor (CO2 + 2 NH3 -> carbamate, tracked as dissolved NH3/CO2); the inerts N2/O2/CH4/H2
 # and the NH3/CO2 SLIP leave in the atmospheric vent.  The total recovered mass keeps the boot-pinned
-# scalar A328_PHI_ABS (so C1/energy/pin are untouched); the species layer splits it at the frozen
-# carbamate ratio and carries a LIVE per-species vent composition — the atmospheric NH3 slip is now a
-# real number off the balance, where it used to be a composition-blind constant.
+# scalar A328_PHI_ABS (so C1/energy/pin are untouched); the species layer splits it on the PFD 204 ->
+# 797 uptake and carries a LIVE per-species vent composition -- the atmospheric NH3 slip is a real
+# number off the balance, where it used to be a composition-blind constant.
 W_S755 = _w_norm(dict(CO2=3.81, H2O=91.13, NH3=4.17, Urea=0.89))     # PFD-20 col 755 Amm.Water in (40 C, MASS %)
 W_CPL  = _w_norm(dict(H2O=100.0))                                    # PFD-20 col 954 process condensate (46 C, 100 % H2O)
-# Design absorbed 130 kg/h (A328_ABS_DES) split at carbamate stoichiometry 2 NH3 : 1 CO2 — the same
-# 2:1 the scrubber uses (d_nh3 = 2*d_co2).  Written so the two sum to A328_ABS_DES exactly (float).
-A328_ABS_CO2_DES = A328_ABS_DES * MW_COMP["CO2"] / (MW_COMP["CO2"] + 2.0 * MW_COMP["NH3"])   # 73.286 kg/h
-A328_ABS_NH3_DES = A328_ABS_DES - A328_ABS_CO2_DES                                            # 56.714 kg/h
+# Design absorbed 130 kg/h (A328_ABS_DES) split per species by the column's own two vapour rows: PFD 204
+# (the 322E003 vent it receives, 64.78 kmol/h) minus PFD 797 (the inerts it releases, 59.32 kmol/h,
+# 46 C / 3.9 bar a).  The gas gives up NH3 89.3 and CO2 62.0 kg/h and picks up 21.3 kg/h of water
+# vapour from the ammonia water, and the three net to 129.97 kg/h -- the 756 - 755 - CPL closure that
+# A328_ABS_DES is, from rows that never reference each other.  Report A-2: this was a 2 NH3 : 1 CO2
+# carbamate split (CO2 73.3 kg/h), which only fit while the vent was the NH3/CO2-rich Path-B vector;
+# on PFD 204 there are 63.3 kg/h of CO2 to absorb.  Normalised so the three sum to A328_ABS_DES.
+_C001_Y204_MOLPCT = {"NH3": 8.26, "CO2": 2.22, "H2O": 0.26}      # PFD 204, 64.78 kmol/h (vapour: mol %)
+_C001_Y797_MOLPCT = {"NH3": 0.18, "CO2": 0.05, "H2O": 2.28}      # PFD 797, 59.32 kmol/h (vapour: mol %)
+_C001_ABS_KGH = {k: (64.78 * _C001_Y204_MOLPCT[k] - 59.32 * _C001_Y797_MOLPCT[k]) / 100.0 * MW_COMP[k]
+                 for k in _C001_Y204_MOLPCT}                     # NH3 89.31 / CO2 61.99 / H2O -21.33
+A328_ABS_CO2_DES = A328_ABS_DES * _C001_ABS_KGH["CO2"] / sum(_C001_ABS_KGH.values())   # 62.00 kg/h
+A328_ABS_H2O_DES = A328_ABS_DES * _C001_ABS_KGH["H2O"] / sum(_C001_ABS_KGH.values())   # -21.33 kg/h
+A328_ABS_NH3_DES = A328_ABS_DES - A328_ABS_CO2_DES - A328_ABS_H2O_DES                   # 89.33 kg/h
 A328_C001_ALPHA  = {k: 1.0 for k in SOL_SPECIES}     # des_advance needs an alpha; m_vap==0 -> unused for w
 
 
@@ -2919,6 +2930,7 @@ def _c001_liq_anchor() -> dict:
     m = {k: A328_M755_DES * W_S755.get(k, 0.0) + A328_CPL_DES * W_CPL.get(k, 0.0) for k in SOL_SPECIES}
     m["CO2"] += A328_ABS_CO2_DES
     m["NH3"] += A328_ABS_NH3_DES
+    m["H2O"] += A328_ABS_H2O_DES
     tot = sum(m.values())
     return {k: m[k] / tot for k in SOL_SPECIES}
 
@@ -4694,7 +4706,6 @@ SCRUB_DH_CARB_KJMOL  = 160.0     # kJ/mol CO2 absorbed, carbamate-formation exot
 # --- HV-322604 off-gas valve (choked isenthalpic letdown 322E003 -> 322C001) ---
 SCRUB_HIC604_DES_PCT = 50.0      # %, HIC-322604 design opening (HV-322604, inert purge)
 SCRUB_HV604_P_OUT    = 4.0       # bar a, 322C001 LP-absorber downstream pressure
-SCRUB_HV604_MU_JT    = 0.55      # C/bar, mixture Joule-Thomson coeff (NH3/CO2-rich off-gas)
 SCRUB_HV604_DP_DES   = SCRUB_OFFGAS_P_BARA - SCRUB_HV604_P_OUT   # 136.7 bar, design ΔP across HV-322604 (dP_des)
 SCRUB_HV604_RANGE    = 50.0      # equal-% inherent rangeability R (datasheet char = EQUAL %): K_v(h)=K_vs·R^(h-1)
 # PHASE 2 (report D-2).  HV-322604 lets carbamate off-gas down 140.7 -> 4.0 bar a, a pressure ratio
@@ -5680,8 +5691,9 @@ def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float,
     EQUAL PERCENTAGE (DN-24, Kvs 2.1, carbamate gas), so the opening term is R^((θ−θ_des)/100):
         m_og = m_og_des·s · R^((θ−θ_des)/100) · √(max(P_up−P_down,0)/ΔP_des)   (θ_des = 50%, R = 50)
     The incoming `offgas` vector is already the design purge × s, so the valve factor scales it
-    1:1 (composition held; θ=θ_des & P_up=design -> factor=1 -> bit-exact design HMB).  Dynamic
-    Joule-Thomson cooling on the ACTUAL pressure drop:  T_out = T_in − μ_JT·ΔP.
+    1:1 (composition held; θ=θ_des & P_up=design -> factor=1 -> bit-exact design HMB).  The outlet
+    temperature is the SRK isenthalpic letdown of the live composition from the live upstream state
+    (report D-4, `real_gas.isenthalpic_letdown`); it was T_in - 0.55 C/bar . dP.
     vent_cap_kgh is the seat's hydraulic ceiling on the OFFERED off-gas MASS (see Valve322604): what
     a DN-24 / Kvs 2.1 trim cannot pass is retained upstream, it does not vent.  None = no ceiling."""
     dP    = max(p_up - SCRUB_HV604_P_OUT, 0.0)
@@ -5708,7 +5720,7 @@ def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float,
     pass_frac = 1.0 if (vent_cap_kgh is None or off_kgh <= 0.0) \
         else min(1.0, max(vent_cap_kgh, 0.0) / off_kgh)                           # capacity ceiling
     comp  = {k: offgas.get(k, 0.0) * valve * pass_frac for k in MW_COMP}          # throttled flow, comp held
-    T_out = T_in - SCRUB_HV604_MU_JT * dP                                         # dynamic JT letdown
+    T_out = real_gas.isenthalpic_letdown(comp, T_in, p_up, SCRUB_HV604_P_OUT)["t_out_c"]   # D-4
     m_kgh = sum(comp.get(k, 0.0) * MW_COMP[k] for k in MW_COMP)                   # = m_og_des·s·valve
     return {"comp_kmolh": comp, "T_out": round(T_out, 1),
             "P_out": SCRUB_HV604_P_OUT, "P_in": round(p_up, 1), "open_pct": hic_pct,
@@ -9198,19 +9210,22 @@ def step_sim(dt: float) -> dict:
     Q_flood  = A328_QFLOOD_KW if s.XV_322915 else 0.0                     # trip 22.1 steam flood
     y_vent = None
     if A328_GCB_DES is None:                                              # pre-pin: design absorb, hold P
-        abs_co2, abs_nh3 = A328_ABS_CO2_DES, A328_ABS_NH3_DES
+        abs_co2, abs_nh3, abs_h2o = A328_ABS_CO2_DES, A328_ABS_NH3_DES, A328_ABS_H2O_DES
         abs_c001  = A328_ABS_DES
         vent_c001 = max(gcb_m - abs_c001, 0.0)
     else:                                                                # post-pin: live off-gas
         # TD-009 remainder — reactive absorption CO2 + 2 NH3 -> carbamate.  The scalar recovered mass
         # abs_c001 is the SAME boot-pinned split as before (A328_PHI_ABS*gcb_m, so C1 and the energy
-        # balance are byte-identical and the 15-key pin is untouched); the species layer splits it at
-        # the frozen carbamate ratio 2 NH3 : 1 CO2, and the inerts N2/O2/CH4/H2 pass 100 % to the vent.
+        # balance are byte-identical and the 15-key pin is untouched); the species layer splits it on
+        # PFD 204 -> 797 (NH3 and CO2 in, water vapour out), and the inerts pass 100 % to the vent.
+        # The slip is therefore a ~2 % residual of two proportional terms (91 NH3 offered, 89 taken
+        # up): see handoff -- the column needs an absorber law, not a fixed fraction of offered mass.
         # The vent then carries a LIVE per-species composition (gcb_i − absorbed_i), replacing the
         # composition-blind scalar — the atmospheric NH3 slip is now a real number, not a boot constant.
         abs_c001  = A328_PHI_ABS * gcb_m
-        abs_co2   = abs_c001 * A328_ABS_CO2_DES / A328_ABS_DES            # frozen carbamate split
+        abs_co2   = abs_c001 * A328_ABS_CO2_DES / A328_ABS_DES            # PFD 204 -> 797 split
         abs_nh3   = abs_c001 * A328_ABS_NH3_DES / A328_ABS_DES
+        abs_h2o   = abs_c001 * A328_ABS_H2O_DES / A328_ABS_DES            # < 0: the gas leaves wetter
         vent_c001 = A328_VENT_DES * (pic201_op / A328_PIC_OP_DES)
         # SV-32253 (N11, DN 100) -- 322C001 mechanical relief.  The datasheet describes exactly this
         # scenario: "a failure of the upstream HP Scrubber cooling system leading to a massive
@@ -9229,7 +9244,7 @@ def step_sim(dt: float) -> dict:
         s.flags["LP_ABSORBER_OVERLOAD"] = (gcb_m - abs_c001) > A328_VENT_DES * (100.0 / A328_PIC_OP_DES)
         # vent gas composition y (mass fractions over MW_COMP): un-absorbed off-gas -> 328V001/323C005/atm
         gcb_i  = {k: hv604["comp_kmolh"].get(k, 0.0) * MW_COMP[k] for k in MW_COMP}    # kg/h per species
-        vent_i = dict(gcb_i);  vent_i["CO2"] -= abs_co2;  vent_i["NH3"] -= abs_nh3
+        vent_i = dict(gcb_i);  vent_i["CO2"] -= abs_co2;  vent_i["NH3"] -= abs_nh3;  vent_i["H2O"] -= abs_h2o
         _vt = sum(v for v in vent_i.values() if v > 0.0)
         if _vt > 1e-9:
             y_vent = {k: max(vent_i[k], 0.0) / _vt for k in MW_COMP}
@@ -9267,7 +9282,8 @@ def step_sim(dt: float) -> dict:
     #     vapour off (the vent is un-absorbed gas that never entered the liquid).  des_advance with
     #     m_vap==0, xi==0 is a plain multi-feed CSTR; W_C001_DES == the design feed mix -> dw/dt==0.
     w_abs = {"CO2": (abs_co2 / abs_c001 if abs_c001 > 1e-9 else 0.0),
-             "NH3": (abs_nh3 / abs_c001 if abs_c001 > 1e-9 else 0.0)}
+             "NH3": (abs_nh3 / abs_c001 if abs_c001 > 1e-9 else 0.0),
+             "H2O": (abs_h2o / abs_c001 if abs_c001 > 1e-9 else 0.0)}      # the water the gas picks up
     s.a328_c001_w, _ = des_advance(s.a328_c001_w, s.a328_c001_M,
                                    [(W_S755, m_755), (W_CPL, s.cpl_flow_kgh), (w_abs, abs_c001)],
                                    0.0, A328_C001_ALPHA, m_756, 0.0, dt)
@@ -12108,6 +12124,8 @@ _PIN_SRC_FILES  = (
     #  The 324 condensers set PT-324201 / PT-324204 through their vent (A-13 / B-9 / B-13), and their
     #  per-species condensation heat comes from the H0 enthalpy module.
     "vacuum_condenser.py", "gap_g6_h0_enthalpy.py",
+    #  HV-322604's outlet temperature (report D-4) feeds 322C001, whose design constants are pinned.
+    "real_gas.py",
 )
 
 
