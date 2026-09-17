@@ -1,6 +1,6 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, A-13, B-2, B-9, B-13, D-4, D-11, D-12, D-14, D-15, D-16, E-2, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; A-2 step 1 closed, A-2 now PARTIAL)
+**Last updated:** 2026-09-17 (322C001 rate-based absorber and real liquor enthalpies, D-20 and the LV-323501 / LV-323505 seal-loss letdowns, speciated NH3/CO2 in the 324 condenser vents; 2026-09-16: A-6, A-7, A-11, A-17, A-13, B-2, B-9, B-13, D-4, D-11, D-12, D-14, D-15, D-16, E-2, MSPAN_504, the thermo memo, the 323F010 urea carryover, A-2 step 1)
 
 ---
 
