@@ -3490,10 +3490,24 @@ blowing into the evaporator, and this flash tank holds condensable vapour at 1.1
 
 ### Cost and pin
 
-The back-pressure is evaluated in every vent call, including each regula-falsi trial and each
-shell-pressure iteration: ~1 ms a tick (6.8 → 7.9 ms at 0.25 s on this machine). A per-call memo
-bought nothing measurable and was not kept. The boot pin moves in one constant,
-`EJ_MOTIVE_DES_LIVE`, by 2e-9 relative: the settle passes through off-design vacuum states.
+The boot pin moves in one constant, `EJ_MOTIVE_DES_LIVE`, by 2e-9 relative: the settle passes
+through off-design vacuum states.
+
+**The cost, corrected (2026-09-17, later).** This section first recorded ~1 ms a tick, measured at the
+design seed alone, which is not where it is paid. The speciation grid caches its nodes, so at a state
+the boot pin has already visited a back-pressure call is an interpolation; what costs is a *new* node,
+three Extended-UNIQUAC speciations, and the regula falsi walked its whole 15 K bracket taking the
+back-pressure at every trial temperature. Off design that made about 1.6 new nodes and 5 speciations a
+tick. Measured on an idle machine at 0.25 s with HIC-322605 wide open: **51 ms a tick, against 41 ms
+for the same case before this phase**, and 12 ms against 10 at the design seed. On a loaded machine it
+timed out `test_c001_species_layer` and `test_equation_audit_td013_d002` at an hour each.
+
+The fix keeps the law and changes when it is evaluated: `vacuum_condenser.solve` holds the
+back-pressure through each falsi and re-anchors it on the temperature that falsi converged to, up to
+four passes or until the outlet stops moving (1e-6 K). Pass 1 starts at the design outlet, whose nodes
+the boot pin has already cached, so at design the first pass is on the fixed point and all four
+condensers still reproduce their PFD design point bit-exactly. Measured the same way: **28 ms a tick
+off design and 9.8 ms at the seed**, both below the pre-phase figures.
 
 ### Tests
 

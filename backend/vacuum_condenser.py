@@ -124,18 +124,55 @@ def condensate_fractions(n_in: dict) -> dict:
     return {k: v / tot for k, v in m.items()} if tot > 0.0 else {}
 
 
-def vent_moles(spec: dict, p_bara: float, t_v_c: float, n_in: dict) -> dict:
+BP_HALF_BAND_K = 2.0
+
+
+def bp_bracket(w_cond: dict, t_c: float) -> tuple:
+    """The speciated back-pressure at t_c and at +/- BP_HALF_BAND_K, to read inside a solver loop.
+
+    `packed_absorber.back_pressure` interpolates a grid whose nodes cost three Extended-UNIQUAC
+    speciations each (~10 ms) the first time a run reaches them.  Taking it at every trial temperature
+    of a regula falsi walked that grid over the whole 15 K bracket and met new nodes all the way:
+    ~5 speciations a tick off design (Phase 5q's cost note).  Three anchors that move only as the cold
+    end itself moves are nodes the run almost always holds already."""
+    return (t_c,
+            packed_absorber.back_pressure(w_cond, t_c - BP_HALF_BAND_K),
+            packed_absorber.back_pressure(w_cond, t_c),
+            packed_absorber.back_pressure(w_cond, t_c + BP_HALF_BAND_K))
+
+
+def bp_at(bracket: tuple, t_c: float) -> tuple:
+    """A bracket read at a temperature: ln-linear through its anchors, same slope outside them.
+
+    These partial pressures are very nearly exponential in T, so over 2 K the interpolation is good to
+    a few parts in 1e5, and at the centre it returns that anchor itself -- which is what keeps the
+    design point bit-exact when the bracket is centred on the design cold end.  Outside the band the
+    same slope carries on: a solver that walks out of the band gets the trend, not a frozen value."""
+    t0, lo, mid, hi = bracket
+    if t_c == t0:
+        return mid
+    if t_c > t0:
+        f, a, b = (t_c - t0) / BP_HALF_BAND_K, mid, hi
+    else:
+        f, a, b = (t0 - t_c) / BP_HALF_BAND_K, mid, lo
+    return tuple(a[i] * (b[i] / a[i]) ** f for i in range(len(a)))
+
+
+def vent_moles(spec: dict, p_bara: float, t_v_c: float, n_in: dict, bp: tuple = None) -> dict:
     """Gas leaving the cold end: every inert, plus the condensables it holds saturated at T_v and P.
 
     A condenser spec (one carrying `bp_des`) gives NH3 and CO2 their own partial pressures over the
-    condensate; a bare saturated-gas spec keeps the fixed split on water's line."""
+    condensate; a bare saturated-gas spec keeps the fixed split on water's line.  `bp` is that
+    back-pressure when the caller has already paid for it -- a pressure loop holding T_v, or a falsi
+    reading its bracket; without one it is taken here at this call's own temperature."""
     n_i = sum(n_in.get(k, 0.0) for k in INERT)
     y = spec["y_des"] * (spec["p_des"] / max(p_bara, 1.0e-9)) \
         * (iapws_if97.psat_bara(t_v_c) / spec["psat_v_des"])
     split = spec["split"]
     w_cond = condensate_fractions(n_in) if "bp_des" in spec else {}
     if w_cond:
-        bp = packed_absorber.back_pressure(w_cond, t_v_c)
+        if bp is None:
+            bp = packed_absorber.back_pressure(w_cond, t_v_c)
         rel = {"H2O": y * split["H2O"],
                "NH3": spec["y_des"] * split["NH3"] * (spec["p_des"] / max(p_bara, 1.0e-9))
                * (bp[0] / spec["bp_des"][0]),
@@ -152,8 +189,8 @@ def vent_moles(spec: dict, p_bara: float, t_v_c: float, n_in: dict) -> dict:
     return vent
 
 
-def _q_balance(spec, p_bara, t_v, n_in, h_in):
-    vent = vent_moles(spec, p_bara, t_v, n_in)
+def _q_balance(spec, p_bara, t_v, n_in, h_in, bracket=None):
+    vent = vent_moles(spec, p_bara, t_v, n_in, bp_at(bracket, t_v) if bracket else None)
     q = h_in
     for k in SPECIES:
         nv = vent.get(k, 0.0)
@@ -172,7 +209,8 @@ def _inlet_enthalpy(n_in: dict, t_in: float) -> float:
 
 
 def solve(spec: dict, p_bara: float, n_in: dict, t_in_c: float,
-          cw_flow_kgh: float, cw_in_c: float, ua_kw_k: float = None) -> dict:
+          cw_flow_kgh: float, cw_in_c: float, ua_kw_k: float = None,
+          t_v_prev: float = None) -> dict:
     """Cold-end temperature, vent and condensate of one condenser at a live shell pressure.
 
     Regula falsi (Illinois) on R(T_v) = Q_bal - UA.LMTD over (T_cw,in, T_in): R > 0 at the cold end,
@@ -181,41 +219,52 @@ def solve(spec: dict, p_bara: float, n_in: dict, t_in_c: float,
     ua = spec["ua_kw_k"] if ua_kw_k is None else ua_kw_k
     h_in = _inlet_enthalpy(n_in, t_in_c)
     cp = spec["cw_cp"]
+    #  One back-pressure bracket for the whole falsi, centred on the cold end this condenser last
+    #  settled at -- the design outlet on the first tick, which is what keeps the design point exact.
+    #  If the falsi answers outside the band the bracket is re-centred on that answer and the solve
+    #  repeats, at most four times; measured against the per-trial evaluation it replaces, the cold
+    #  end agrees to 2e-5 K and the vent to 4e-4 of itself.
+    w_cond = condensate_fractions(n_in) if "bp_des" in spec else {}
+    bracket = bp_bracket(w_cond, spec["t_v_des"] if t_v_prev is None else t_v_prev) if w_cond else None
     if cw_flow_kgh <= 0.0 or ua <= 0.0 or t_in_c <= cw_in_c:
         vent = {k: n_in.get(k, 0.0) for k in CONDENSABLE + INERT}
         vent["Urea"] = 0.0
         return _pack(spec, n_in, vent, t_in_c, 0.0, cw_in_c, cw_in_c, 0.0, cw_flow_kgh, t_in_c)
 
     def resid(t_v):
-        q, vent = _q_balance(spec, p_bara, t_v, n_in, h_in)
+        q, vent = _q_balance(spec, p_bara, t_v, n_in, h_in, bracket)
         cw_out = cw_in_c + max(q, 0.0) * 3600.0 / (cw_flow_kgh * cp)
         return q - ua * _lmtd(t_in_c, t_v, cw_in_c, cw_out), q, vent, cw_out
 
-    lo, hi = cw_in_c + 1.0e-6, t_in_c - 1.0e-6
-    r_lo = resid(lo)[0]
-    r_hi = resid(hi)[0]
-    if r_lo <= 0.0:                     # the surface cools the vent to the water inlet
-        t_v = lo
-    elif r_hi >= 0.0:
-        t_v = hi
-    else:
-        side = 0
-        t_v = lo
-        for _ in range(60):
-            t_v = (lo * r_hi - hi * r_lo) / (r_hi - r_lo)
-            r = resid(t_v)[0]
-            if abs(r) <= 1.0e-6 or hi - lo <= 1.0e-8:           # kW, K
-                break
-            if r > 0.0:
-                lo, r_lo = t_v, r
-                if side == 1:
-                    r_hi *= 0.5
-                side = 1
-            else:
-                hi, r_hi = t_v, r
-                if side == -1:
-                    r_lo *= 0.5
-                side = -1
+    for _attempt in range(4):
+        lo, hi = cw_in_c + 1.0e-6, t_in_c - 1.0e-6
+        r_lo = resid(lo)[0]
+        r_hi = resid(hi)[0]
+        if r_lo <= 0.0:                 # the surface cools the vent to the water inlet
+            t_v = lo
+        elif r_hi >= 0.0:
+            t_v = hi
+        else:
+            side = 0
+            t_v = lo
+            for _ in range(60):
+                t_v = (lo * r_hi - hi * r_lo) / (r_hi - r_lo)
+                r = resid(t_v)[0]
+                if abs(r) <= 1.0e-6 or hi - lo <= 1.0e-8:       # kW, K
+                    break
+                if r > 0.0:
+                    lo, r_lo = t_v, r
+                    if side == 1:
+                        r_hi *= 0.5
+                    side = 1
+                else:
+                    hi, r_hi = t_v, r
+                    if side == -1:
+                        r_lo *= 0.5
+                    side = -1
+        if bracket is None or abs(t_v - bracket[0]) <= BP_HALF_BAND_K:
+            break
+        bracket = bp_bracket(w_cond, t_v)                        # the cold end left the band
     r, q, vent, cw_out = resid(t_v)
     return _pack(spec, n_in, vent, t_v, q, cw_in_c, cw_out, ua * _lmtd(t_in_c, t_v, cw_in_c, cw_out),
                  cw_flow_kgh, t_in_c)
@@ -271,8 +320,17 @@ def vent_kgh(spec: dict, result: dict) -> float:
     return spec["vent_kgh"] * (result["vent_model_kgh"] / spec["vent_model_des_kgh"])
 
 
-def vent_kgh_at(spec: dict, p_bara: float, t_v_c: float, n_in: dict) -> float:
+def condensate_back_pressure(n_in: dict, t_v_c: float):
+    """The speciated back-pressure over what a condenser is condensing, or None if it has none."""
+    w_cond = condensate_fractions(n_in)
+    return packed_absorber.back_pressure(w_cond, t_v_c) if w_cond else None
+
+
+def vent_kgh_at(spec: dict, p_bara: float, t_v_c: float, n_in: dict, bp: tuple = None) -> float:
     """The anchored vent at a trial shell pressure with T_v held -- the cheap inner evaluation the
-    pressure loops iterate on, because T_v moves on the exchanger's thermal time scale, not P's."""
-    v = vent_moles(spec, p_bara, t_v_c, n_in)
+    pressure loops iterate on, because T_v moves on the exchanger's thermal time scale, not P's.
+
+    Those loops hold T_v and the composition, so the back-pressure is the same at every trial
+    pressure: they take it once (`packed_absorber.back_pressure`) and pass it in."""
+    v = vent_moles(spec, p_bara, t_v_c, n_in, bp)
     return spec["vent_kgh"] * (sum(v[k] * MW[k] for k in SPECIES) / spec["vent_model_des_kgh"])

@@ -3867,7 +3867,8 @@ def vacuum_inlet_kmolh(tag, inlet_kgh, air_kgh, air_des_kgh, sub=None):
     return n
 
 
-def vacuum_condenser_node(tag, inlet_kgh, n_in_kmolh, p_bara, cw_flow_kgh=None, cw_in_c=None):
+def vacuum_condenser_node(tag, inlet_kgh, n_in_kmolh, p_bara, cw_flow_kgh=None, cw_in_c=None,
+                          tv_prev=None):
     """One 324 surface condenser at its live shell pressure (A-13 / B-9 / B-13).
 
     The vent is the anchored saturated-vent model; the condensate is what is left of the inlet, so
@@ -3878,7 +3879,10 @@ def vacuum_condenser_node(tag, inlet_kgh, n_in_kmolh, p_bara, cw_flow_kgh=None, 
     cw_flow = spec["cw_flow_kgh"] if cw_flow_kgh is None else max(cw_flow_kgh, 0.0)
     cw_in = spec["cw_in_c"] if cw_in_c is None else cw_in_c
     inlet = max(inlet_kgh, 0.0)
-    res = vacuum_condenser.solve(spec, p_bara, n_in_kmolh, spec["t_in_des"], cw_flow, cw_in)
+    res = vacuum_condenser.solve(spec, p_bara, n_in_kmolh, spec["t_in_des"], cw_flow, cw_in,
+                                 t_v_prev=(tv_prev or {}).get(tag + "_T_VENT"))
+    if tv_prev is not None:
+        tv_prev[tag + "_T_VENT"] = res["t_vent_c"]    # the next solve's back-pressure bracket centre
     vent = min(vacuum_condenser.vent_kgh(spec, res), inlet) if res["q_kw"] > 0.0 else inlet
     condensate = inlet - vent
     return {
@@ -3894,7 +3898,8 @@ def vacuum_condenser_node(tag, inlet_kgh, n_in_kmolh, p_bara, cw_flow_kgh=None, 
 
 def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
                      false_air2_kgh, motive924_kgh, motive927_kgh, motive929_kgh,
-                     cw_factors=None, p_e002_bara=None, p_e005_bara=None, sub_703=None):
+                     cw_factors=None, p_e002_bara=None, p_e005_bara=None, sub_703=None,
+                     tv_prev=None):
     """Four condensers and three ejector mixing nodes on the PFD-21 basis.
 
     The second and third condensers take the first's LIVE vent species plus the ejector's motive
@@ -3919,14 +3924,14 @@ def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
     e002 = vacuum_condenser_node(
         "324E002", streams["703"],
         vacuum_inlet_kmolh("324E002", streams["703"], false_air1_kgh, R324_F001_FA_DES, sub_703), p002,
-        cw("324E002"))
+        cw("324E002"), tv_prev)
     streams["719"], streams["706"] = e002["condensate_kgh"], e002["vent_kgh"]
     streams["708"] = streams["706"] + streams["924"]
 
     e005 = vacuum_condenser_node(
         "324E005", streams["709"],
         vacuum_inlet_kmolh("324E005", streams["709"], false_air2_kgh, R324_F003_FA_DES), p005,
-        cw("324E005"))
+        cw("324E005"), tv_prev)
     streams["720"], streams["712"] = e005["condensate_kgh"], e005["vent_kgh"]
     streams["714"] = streams["712"] + streams["927"]
 
@@ -3940,13 +3945,13 @@ def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
 
     e006 = vacuum_condenser_node(
         "324E006", streams["714"],
-        cascade("324E006", e005, "324E005", streams["927"], R324_F004_MOTIVE_DES), 0.3, cw("324E006"))
+        cascade("324E006", e005, "324E005", streams["927"], R324_F004_MOTIVE_DES), 0.3, cw("324E006"), tv_prev)
     streams["721"], streams["715"] = e006["condensate_kgh"], e006["vent_kgh"]
     streams["717"] = streams["715"] + streams["929"]
 
     e007 = vacuum_condenser_node(
         "324E007", streams["717"],
-        cascade("324E007", e006, "324E006", streams["929"], R324_F005_MOTIVE_DES), 1.0, cw("324E007"))
+        cascade("324E007", e006, "324E006", streams["929"], R324_F005_MOTIVE_DES), 1.0, cw("324E007"), tv_prev)
     streams["759"], streams["722"] = e007["condensate_kgh"], e007["vent_kgh"]
     return {"streams_kgh": streams,
             "nodes": {"324E002": e002, "324E005": e005, "324E006": e006, "324E007": e007},
@@ -9702,10 +9707,12 @@ def step_sim(dt: float) -> dict:
         #  pressure (`vacuum_condenser`), with the cold-end temperature from the last full UA.LMTD
         #  solve -- it moves on the exchanger's thermal time scale, not on this iteration's.
         _n703 = vacuum_inlet_kmolh("324E002", m703_fp, fa202_m, R324_F001_FA_DES, sub_703)
+        _bp703 = vacuum_condenser.condensate_back_pressure(_n703, _tv_e002)   # held: T_v is fixed here
         _vv_f001 = hydraulics.vapour_volume_m3(R324_F001_VOL_M3, M_f001_pre, R324_F001_RHO_L)
 
         def _dpdt_f001(p):
-            vent = vacuum_condenser.vent_kgh_at(VACUUM_CONDENSER_SPECS["324E002"], p, _tv_e002, _n703)
+            vent = vacuum_condenser.vent_kgh_at(VACUUM_CONDENSER_SPECS["324E002"], p, _tv_e002,
+                                                _n703, _bp703)
             pull = R324_F001_EJPULL_DES * (mot9605_m / R324_F002_MOTIVE_DES) * (p / R324_F001_P_BARA)
             return hydraulics.vessel_dpdt(p1_old, t1_solved + 273.15, _vv_f001, R324_F001_MW_VAP,
                                           vent / R324_F001_MW_VAP, pull / R324_F001_MW_VAP)
@@ -9837,9 +9844,11 @@ def step_sim(dt: float) -> dict:
         #  A-13 / B-9 / B-13, as 324F001 above.  This vent is 97 % condensables at design, so it is
         #  far steeper in P than 324E002's -- see `_backward_euler_p`.
         _n709 = vacuum_inlet_kmolh("324E005", m709_fp, fa203_m, R324_F003_FA_DES)
+        _bp709 = vacuum_condenser.condensate_back_pressure(_n709, _tv_e005)   # held: T_v is fixed here
 
         def _dpdt_f003(p):
-            vent = vacuum_condenser.vent_kgh_at(VACUUM_CONDENSER_SPECS["324E005"], p, _tv_e005, _n709)
+            vent = vacuum_condenser.vent_kgh_at(VACUUM_CONDENSER_SPECS["324E005"], p, _tv_e005,
+                                                _n709, _bp709)
             pull = R324_F003_EJPULL_DES * (s.HIC_329606 / R324_HIC9606_DES_PCT) * (p / R324_F003_P_BARA)
             return hydraulics.vessel_dpdt(p, t2_solved + 273.15, _vv_f003, R324_F003_MW_VAP,
                                           vent / R324_F003_MW_VAP, pull / R324_F003_MW_VAP)
@@ -9937,6 +9946,7 @@ def step_sim(dt: float) -> dict:
     _vac_mot929_in.set_state(mass_flow=mot929_m)
     _vac_unit.p_shell = {"324E002": s.r324_f001_P, "324E005": s.r324_f003_P}
     _vac_unit.sub_703 = sub_703
+    _vac_unit.tv_prev = s.tlag
     _vac_unit.solve()
     vac324 = _vac_unit.diagnostics
     #  Cold-end temperatures from this full UA.LMTD solve carry to the next tick's pressure loops.
