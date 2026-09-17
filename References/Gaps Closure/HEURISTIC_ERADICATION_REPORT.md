@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 35 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 28 OPEN.**
+**Totals: 36 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 27 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -78,9 +78,16 @@ the 322C001 work in *Phase 5m* that the ledger never listed: the column's liquor
 back-solved 21 kJ/kg absorption heat (now real enthalpies), and `test_ccw_loss_chain`'s pytest
 collection error had been hiding its Phases 2-4 on every tree since *Phase 5j*.
 
+*Updated 2026-09-17 (later).* A-12 closed (As-Built *Phase 5r*), but not with the √h law this report
+asked for. The vendor drawings put 322R001's outlet behind an internal overflow funnel, and the
+stripper gas enters the reactor bottom, so the reactor's clear-liquid head appears on both sides of
+HV-322605 and cancels. The discharge is the valve's own CONVAL characteristic at design dP, or the
+funnel's weir once the level reaches the lip, whichever passes less. The last empty-vessel guard in
+the synthesis loop is gone with it.
+
 | Category | Closed | Partial | Blocked | Reclassified | Open |
 |---|---|---|---|---|---|
-| A. Algebraic state | 11 | 1 | 0 | 0 | 7 |
+| A. Algebraic state | 12 | 1 | 0 | 0 | 6 |
 | B. Phase splits | 3 | 5 | 0 | 0 | 6 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
 | D. Hydraulics | 15 | 2 | 0 | 0 | 5 |
@@ -108,7 +115,7 @@ needs is not in `References/`. **RECLASSIFIED**: the original finding misread th
 | A-9 | OPEN | [main.py:4003](../../backend/main.py#L4003) | TT-322004 = design + 0.7·ΔT_steam + shaped corrections |
 | A-10 | OPEN | [main.py:4450](../../backend/main.py#L4450) | `SCRUB_OFFGAS_T_GAIN = 120 °C per N/C` still live |
 | A-11 | **CLOSED** (2026-09-16) | all three 323 stages | 323C003 and 323F004 are off the pure-water T_sat offset and onto `thermo_service.bubble_t` in the same anchored departure form 323F010 uses, so each stage's temperature and its vapour composition finally stand on one surface. The rigorous bubble points at the design compositions are 133.0 °C (C003, PFD 135) and 102.7 °C (F004, PFD 106), i.e. the surface is close on these liquors before anchoring |
-| A-12 | OPEN | [reactor.py:730](../../backend/reactor.py#L730) | `level_m` is still ignored; the empty-vessel guard sits on the caller at [main.py:7554](../../backend/main.py#L7554) |
+| A-12 | **CLOSED** (2026-09-17, As-Built *Phase 5r*) | `reactor.outlet_line_outflow_kgph`, `reactor.hv322605_kv` | m_out = min(m_des·Kv(θ)/Kv(θ_des), ρ·C_w·max(L − L_lip, 0)^1.5). Kv is the vendor CONVAL table (UD-MR-G00-DZ-0042-021: linear, Kvs 600, mean flow 225.7 t/h at 58.96 %). The weir is Francis over the 1 044 mm funnel mouth (UD-AU-322-DZ-0006-010), with the lip 0.7 m under NLL from LT-322504's geometry. The finding's √h was wrong: the stripper gas enters at N1, so the reactor head sits in the stripper back-pressure too and cancels while the funnel is flooded. The empty-reactor guard is deleted. HIC-322605 100 % now parks the level at the lip (LT-322504 36.7 %) instead of draining 34.6 t in 900 s; a CO2 cut parks it there too, where HEAD lost 75 t of liquor that never reached 322E001. A cold start now fills the reactor and pressurises the loop (τ 3 718 s, P_f 144.0 barg, both in the section 6.4 band; HEAD stalled at 23.6 barg). Open: the valve's dP departures (gas path, A-1; density, elevations) |
 | A-13 | **CLOSED** (2026-09-16, As-Built *Phase 5g*) | `vacuum_condenser.solve` | Gas outlet is the root of the H0 duty balance against UA.LMTD on the live cooling water, not design + inlet shift. Cooling water +5 K warms 324E002's cold end 45 -> 51.2 C |
 | A-14 | OPEN | [main.py:3663](../../backend/main.py#L3663) | PFD literals plus offsets |
 | A-15 | CLOSED (Phase 1) | [main.py:3609](../../backend/main.py#L3609), [main.py:4829](../../backend/main.py#L4829) | Both identity short-circuits deleted |

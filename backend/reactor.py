@@ -711,38 +711,47 @@ def holdup_dmdt_kgph(m_in_kgph: float, level_m: float, T_bulk_c: float,
     return m_in_kgph - weir_outflow_kgph(level_m, T_bulk_c, crest_m=crest_m, cw=cw)
 
 
-def outlet_line_outflow_kgph(level_m: float, m_fwd_ref_kgph: float, level_des_m: float,
-                             theta_pct: float, theta_des_pct: float) -> float:
-    """Reactor liquid-OUTLET line flow, kg/h, throttled by HV-322605 on the discharge line.
+# HV-322605 inherent characteristic, stroke % -> Kv m3/h: the "Characteristics values table" of the
+# vendor CONVAL sizing (UD-MR-G00-DZ-0042-021 p.3; DN 200 angle valve, parabolic single-seat plug,
+# linear, Kvs 600, Kv0/Kvs 2 %).  Between the table points the trim is linear, Kv = 12 + 5.88.s; the
+# shut end is the class-IV seat (0), not that line's 12 m3/h intercept.
+HV322605_KV_TABLE = ((0.0, 0.0), (5.0, 41.4), (25.0, 159.0), (50.0, 306.0), (75.0, 453.0),
+                     (98.53, 591.4), (100.0, 600.0))
 
-    HV-322605 sits on the reactor's bottom take-off to the HP stripper, NOT a top overflow weir, so
-    the discharge can DRAIN the vessel BELOW the normal level when the inlet stops (the old weir term
-    could only fall to its lip, then froze -> Bug #4).  Linear level/valve law, mirroring the proven
-    HPCC-level model (main.py phi_out = phi_fwd·(L/NLL)):
 
-        m_out = m_fwd_ref · (θ / θ_des) · ( max(level_m, 0) / level_des_m )
+def hv322605_kv(stroke_pct: float) -> float:
+    """HV-322605 Kv (m3/h) at a stroke, interpolated on the vendor table."""
+    s = min(max(stroke_pct, 0.0), 100.0)
+    for (s0, k0), (s1, k1) in zip(HV322605_KV_TABLE, HV322605_KV_TABLE[1:]):
+        if s <= s1:
+            return k0 + (k1 - k0) * (s - s0) / (s1 - s0)
+    return HV322605_KV_TABLE[-1][1]
 
-    The caller passes  m_fwd_ref = m_dot_des · φ_fwd  — the SAME forward-circulation push that scales
-    the inlet  m_in = m_dot_des · co2_scale · φ_fwd .  φ_fwd therefore CANCELS at equilibrium:
 
-        L_eq / L_des = co2_scale · (θ_des / θ)
+def outlet_line_outflow_kgph(level_m: float, m_des_kgph: float, theta_pct: float,
+                             theta_des_pct: float, lip_m: float, cw_m3h: float,
+                             T_bulk_c: float) -> float:
+    """322R001 liquid discharge to the HP stripper, kg/h (As-Built Phase 5r, report A-12).
 
-    so at design (co2_scale = 1, θ = θ_des) the level pins at L_des EXACTLY, independent of the loop
-    operating point φ_fwd (bit-exact design pin).  Cutting CO2 (co2_scale -> 0) with HV-322605 held
-    open drains the holdup: m_in -> 0 while m_out = m_dot_des·φ_fwd·(θ/θ_des)·(L/L_des) stays positive
-    (NH3 pumps keep φ_fwd alive), so d(m_liq)/dt < 0 down to L = 0.
+    The liquid leaves over the lip of an internal overflow funnel, down a 304.8 mm downcomer to N5 and
+    through HV-322605 (drawing UD-AU-322-DZ-0006-010).  The downcomer holds a few hundred kg, so it is
+    quasi-steady and the discharge is whichever of the two passes less:
+
+        m_valve = m_des . Kv(θ) / Kv(θ_des)                     (funnel flooded: the valve sets it)
+        m_weir  = rho(T_bulk) . C_w . max(L - L_lip, 0)^1.5      (funnel free: its lip sets it)
+        m_out   = min(m_valve, m_weir)
+
+    While the funnel is flooded the reactor's clear-liquid head does NOT reach the valve dP.  The
+    stripper gas enters 322R001 at the bottom (N1), so the stripper back-pressure carries the same
+    reactor column the downcomer does, and the two cancel:
+        dP_valve = (rho_L - rho_mix) g z_lip + rho_L g (z_R - z_S) - dP_gas-path
+    That leaves the valve at its design dP; its departures (gas-path losses, liquid density) need the
+    loop pressure network (A-1) and the piping elevations, and stay open.  Below the lip the weir
+    takes over and the flow goes to zero with the head, so the vessel cannot drain through N5 below
+    the funnel: it parks at the lip and only cooling contraction takes it lower.
+
+    At design m_des . Kv(θ_des)/Kv(θ_des) is m_des exactly and the weir, 0.7 m under the surface,
+    passes more than 50 times that, so the min() is the valve term and the pin is bit-exact.
     """
-    theta_ratio = max(theta_pct, 0.0) / max(theta_des_pct, 1.0e-6)
-    return m_fwd_ref_kgph * theta_ratio
-
-
-def outlet_line_dmdt_kgph(m_in_kgph: float, level_m: float, m_fwd_ref_kgph: float,
-                          level_des_m: float, theta_pct: float, theta_des_pct: float) -> float:
-    """Liquid-inventory mass-balance RHS, kg/h:  d(m_liq)/dt = m_in - m_outlet_line(level, θ).
-
-    OUTLET is the HV-322605 discharge LINE (drainable below the normal level), NOT a top weir, so a
-    sustained inlet cut with the valve held open empties the reactor (fixes the frozen-level bug).
-    Euler in step_sim:  m_liq += dmdt * dt_h ;  level = level_from_holdup(m_liq, T_bulk).
-    """
-    return m_in_kgph - outlet_line_outflow_kgph(level_m, m_fwd_ref_kgph, level_des_m,
-                                                theta_pct, theta_des_pct)
+    m_valve = m_des_kgph * hv322605_kv(theta_pct) / hv322605_kv(theta_des_pct)
+    return min(m_valve, weir_outflow_kgph(level_m, T_bulk_c, crest_m=lip_m, cw=cw_m3h))

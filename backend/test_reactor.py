@@ -331,8 +331,8 @@ def test_dynamic_level_responds_to_hv605():
         main.step_sim(1.0)
     assert abs(s.react_level_pct - 80.0) < 0.5, s.react_level_pct
     # OPEN HV-322605 (φ=90 % > φ_des) -> Q_out>Q_in -> level FALLS (user-reported requirement).
-    # The drain near the 80 % design holdup is hydrostatically self-limiting (Q_out falls as head
-    # drops), so the approach to the new equilibrium is asymptotic -> allow an adequate horizon.
+    # It falls to the overflow-funnel lip (77.2 % of the 25 m frame), where the weir takes over from
+    # the valve and passes production (As-Built Phase 5r).
     s.HIC_322605 = 90.0; s.react_level_pct = 80.0
     for _ in range(240):
         main.step_sim(1.0)
@@ -344,6 +344,45 @@ def test_dynamic_level_responds_to_hv605():
     assert s.react_level_pct > 51.0, s.react_level_pct
     s.HIC_322605 = main.REACT_HIC605_DES_PCT             # restore design defaults
     s.react_level_pct = main.REACT_LEVEL_NLL_PCT
+
+
+def test_hv322605_kv_follows_the_vendor_sizing_table():
+    # CONVAL sizing UD-MR-G00-DZ-0042-021 p.3: linear trim, Kvs 600, the mean-flow point at 58.961 %
+    # stroke is Kv 358.69 and the max-flow point at 65.516 % is Kv 397.24.
+    kv = main.reactor.hv322605_kv
+    assert kv(0.0) == 0.0 and kv(100.0) == 600.0
+    for s_pct, k in ((5.0, 41.4), (25.0, 159.0), (50.0, 306.0), (75.0, 453.0)):
+        assert abs(kv(s_pct) - k) < 1e-9, (s_pct, kv(s_pct))
+    assert abs(kv(58.961) - 358.69) < 0.05, kv(58.961)
+    assert abs(kv(65.516) - 397.24) < 0.05, kv(65.516)
+    assert all(kv(a) < kv(a + 1.0) for a in range(0, 100))
+
+
+def test_the_reactor_discharges_over_its_overflow_funnel():
+    # A-12: min(valve at design dP, Francis weir over the 1044 mm funnel lip).  The lip sits 0.7 m
+    # under NLL from LT-322504's geometry (top tap 1.0 m above it, 1.5 m span, NLL 80 %).
+    r, m_des = main.reactor, main._react_mdot_kgh
+    lip, cw, t_b = main.REACT_WEIR_CREST_M, main.REACT_WEIR_CW, main.REACT_T_BULK_DES
+    assert abs(main.REACT_LEVEL_DES_M - lip - 0.7) < 1e-9, lip
+    th = main.REACT_HIC605_DES_PCT
+    out = lambda lvl, theta: r.outlet_line_outflow_kgph(lvl, m_des, theta, th, lip, cw, t_b)
+    assert out(main.REACT_LEVEL_DES_M, th) == m_des                        # bit-exact at design
+    assert out(main.REACT_LEVEL_DES_M, 90.0) == m_des * r.hv322605_kv(90.0) / r.hv322605_kv(th)
+    assert out(main.REACT_LEVEL_DES_M, 0.0) == 0.0                         # shut valve
+    assert out(lip, 100.0) == 0.0 and out(lip - 1.0, 100.0) == 0.0          # no drain below the lip
+    # the free-overflow head at the design flow is a few cm (Francis: 0.048 m at 228 m3/h)
+    h = (m_des / (r.liquid_density(t_b) * cw)) ** (2.0 / 3.0)
+    assert 0.03 < h < 0.07, h
+    assert abs(out(lip + h, 100.0) - m_des) < 1e-6 * m_des
+    # the level is state, the valve does not see it while the funnel is flooded
+    assert out(main.REACT_LEVEL_DES_M + 1.0, 75.0) == out(main.REACT_LEVEL_DES_M - 0.5, 75.0)
+
+
+def test_the_empty_reactor_guard_is_gone():
+    import inspect
+    src = inspect.getsource(main.step_sim)
+    assert "react_level_pct <= 0.0 and m_out_kgh > m_in_kgh" not in src
+    assert "REACT_WEIR_CREST_M" in src and "REACT_PHI_FWD_FLOOR" not in dir(main)
 
 
 if __name__ == "__main__":

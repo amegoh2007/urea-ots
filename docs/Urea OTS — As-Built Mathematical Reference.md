@@ -3509,6 +3509,133 @@ new composition, inerts untouched). Every condenser still closes its PFD design 
 same failure ids as before. `test_scenario_consequences` 14 / 14; section 2's peak reads 0.535 bar a
 against 0.534.
 
+## Phase 5r — 322R001 discharges over its overflow funnel, through HV-322605's real trim (A-12)
+
+```text
+was:  m_out = m_des · θ/θ_des                      (level_m and level_des_m passed, never read)
+      if react_level_pct <= 0 and m_out > m_in:  m_out = m_in
+```
+
+A-12 read this as a bottom take-off whose head the code forgot, and asked for √h. The vendor
+archive says otherwise, and it also says √h would be wrong.
+
+### What the drawings and the sizing sheet say
+
+* **The outlet is an overflow pipe, not a bottom take-off.** *Internals pipe*
+  (UD-AU-322-DZ-0006-010): a conical funnel with a 1 044 mm ID mouth, lip at +20 900 mm above the
+  bottom T.L., a 304.8 mm ID downcomer down the column and out through N5 at −1 162.5 mm. N5 is at
+  the bottom of the vessel, but the funnel feeds it. LT-322504's top tap is 1 000 mm above that pipe
+  (datasheet p.14), with a 1 500 mm span.
+* **HV-322605** (CONVAL sizing UD-MR-G00-DZ-0042-021; specification sheet UD-MR-G00-DZ-0042-012, Uhde UD-MR-G00-EC-0091 p.3): DN 200
+  angle valve, parabolic single-seat plug, linear, Kvs 600, Kv0/Kvs 2 %. Urea solution at 183 C,
+  990 kg/m³, 141.9 → 141.5 bar a. Mean flow 225 720 kg/h at 58.96 % stroke (Kv 358.69); PFD 207 is
+  226 151. The characteristic table (5 / 25 / 50 / 75 / 98.53 % → 41.4 / 159 / 306 / 453 / 591.4 m³/h)
+  is Kv = 12 + 5.88·s to the printed digit.
+* **The stripper gas enters 322R001 at the bottom** (N1, *Arrangement drawing* UD-AU-322-DZ-0006-003).
+
+### Why the reactor's head does not reach the valve
+
+While the funnel is flooded, follow the pressure both ways from the reactor's gas space. Down the
+downcomer to the valve inlet, the liquid adds ρ_L·g·(L + z_R − z_v). On the other side, the valve
+discharges into 322E001, whose gas has to push through 322E002 and bubble up through the same
+reactor column to reach that gas space. So the stripper's back-pressure carries the reactor's
+clear-liquid head too:
+
+```text
+dP_valve = (ρ_L − ρ_mix)·g·z_lip + ρ_L·g·(z_R − z_S) − ΔP_gas-path
+```
+
+L cancels. The valve sees the funnel's elevation, the reactor-to-stripper elevation and the gas-path
+losses, not the inventory. The plant agrees. Over the 16 h of *Urea_NormalOp_29-06-2025*, HIC-322605
+sits at 55.17 ± 0.41 % (54.5–55.9): operators trim the level with tenths of a percent, which is
+what an integrating level needs. In the *3.6.2025 Synthesis startup* trend the level sat at LT-322504 82 % with
+HIC-322605 at 42 % and 86 % load. A √h law with the sizing sheet's 0.4 bar would need the level
+1.7 m above NLL for that, off the top of the band.
+
+What the level does decide is whether the funnel is flooded. Below the lip the liquid spills over it
+as a weir, and the flow goes to zero with the head.
+
+### The law
+
+```text
+m_valve = m_des · Kv(θ) / Kv(θ_des)                    Kv on the CONVAL table, 0 at the seat
+m_weir  = ρ(T_bulk) · C_w · max(L − L_lip, 0)^1.5      C_w = 1.84 · π · 1.044 m · 3600  (Francis)
+m_out   = min(m_valve, m_weir)
+```
+
+* The downcomer holds about 70 kg per metre, so it is taken as quasi-steady and the smaller of the
+  two passes.
+* `L_lip` is placed from the transmitter geometry: NLL − (1.0 − 1.5 × 0.2) = 20.0 − 0.7 = **19.3 m**
+  in the engine's level frame. The old `REACT_WEIR_CREST_M` was 19.95, derived from an assumed
+  0.05 m design head.
+* The free-overflow head at the design 228 m³/h is 0.048 m (LT-322504 36.5 %). At NLL the weir could
+  pass more than 50 times the design flow, so the valve term governs and the pin is bit-exact:
+  m_des·Kv(60)/Kv(60) is m_des, and the boot-pin constants are unchanged to the last bit.
+* The empty-reactor guard is deleted. It is unreachable: nothing leaves through N5 below the lip.
+  `REACT_PHI_FWD_FLOOR`, dead since the φ_fwd reference was dropped, is gone too.
+
+`reactor.hv322605_kv` and `reactor.outlet_line_outflow_kgph` carry it. `REACT_WEIR_CREST_M` and
+`REACT_WEIR_CW` are geometry now, not pin outputs.
+
+### What changes
+
+From the seed at 0.25 s:
+
+| Case | t (s) | HEAD: level (% of 25 m) / LT-322504 (%) | Phase 5r: level / LT-322504 | Phase 5r m_out (t/h) |
+|---|---|---|---|---|
+| HIC-322605 100 % at 2 s | 122 | 77.58 / 39.6 | 77.67 / 41.1 | 372.0 (valve) |
+|  | 242 | 75.31 / 1.8 | 77.40 / 36.7 | 248.9 (weir) |
+|  | 902 | 59.64 / 0 | 77.40 / 36.6 | 231.9 |
+| then HIC-322605 30 % | 1 202 | 63.66 / 0 | 81.27 / 100 | 116.8 |
+| CO2 cut (`co2_set` 0) at 2 s | 422 | 77.24 / 34.1 | 77.32 / 35.4 | — |
+|  | 1 682 | 35.21 / 0 | 77.20 / 33.3 | — |
+
+* **HIC-322605 wide open:** the vessel drains the 0.7 m above the funnel in under 180 s at 372 t/h,
+  then parks at the lip and passes what the reactor makes. At HEAD it kept draining at 377 t/h,
+  34.6 t in 900 s, with LT-322504 at 0 from 250 s.
+* **CO2 cut:** the level now parks at the lip, and LT-322504 slides 35 → 33 % as the melt cools
+  180 → 172 C. At HEAD 75 t of liquor ran out, by 1 682 s, of a vessel whose outlet sits 0.7 m under the surface.
+  That liquor did not reach 322E001 either: with production at zero, `f_strip` has no composition to
+  scale, so the stripper sump sat at 38.15 % while the holdup fell. The same leak remains for the 0.7 m
+  above the lip (≈ 4 t between 242 and 422 s). The holdup has no composition of its own; that is the
+  open part.
+* **Cold start** (`test_transient_coldstart`: an empty, depressurised loop with the design feed on,
+  0.5 s). At HEAD the reactor never filled. The level-blind outflow plus the guard passed whatever
+  arrived, so LT-322504 sat at 0 %, the stripper sump at 100 %, and PT-329201 stalled at 23.6 barg
+  (Smith τ 501 s, t_d −110 s). The reactor now fills (1.5 % of span a minute at first, 0.9 on average) and passes
+  nothing until the lip, near 5 300 s. PT-329201 climbs 1.9 bar a minute at first and 1.1 on average
+  to the lip, against 1.6 in the *3.6.2025 Synthesis startup* trend, and settles at 144.0 barg. The Smith identification gives
+  τ 3 718 s (DCS band 2 884–4 055) and t_d 596 s (limit 572). With HIC-322605 held at 60 %, the level
+  then creeps above NLL (LT-322504 97 % at 15 600 s), which is the integrating level an operator trims.
+
+### What stays open
+
+1. **Valve dP departures.** The gas-path losses (322E001 → 322E002 → N1) and the liquor density move
+   the dP the valve works on. The first needs the loop's pressure network (A-1). The second needs the
+   reactor-to-stripper elevation (piping isometrics). Both are held at design.
+2. **The engine's level frame is 1.6 m low.** NLL is 21.6 m above the T.L. on the drawings (lip 20.9 +
+   0.7) against the engine's 20.0 m, so the design holdup is about 7 % short. The lip is placed
+   relative to NLL, so the hydraulics are right. Residence time and kinetics ride the pinned holdup.
+3. **The holdup has no composition.** The drained or spilled liquor takes the live production's
+   composition. With production at zero there is none to take.
+4. `tests/audit_r001_reactor.py` already failed to import at HEAD (`REACT_G_NODES`); it still calls
+   the old signature.
+
+### Tests
+
+`test_reactor` (17): `test_dynamic_level_responds_to_hv605` passes unchanged; its comment now says
+where the level stops. Added `test_hv322605_kv_follows_the_vendor_sizing_table` (the table points,
+the mean- and max-flow points to 0.05 m³/h, shut at 0, monotone),
+`test_the_reactor_discharges_over_its_overflow_funnel` (lip 0.7 m under NLL, bit-exact at design,
+0 at and below the lip, the free-overflow head, level-blind while flooded) and
+`test_the_empty_reactor_guard_is_gone`. `test_hydraulics` (63), `test_startup_stability` (5),
+`test_session_regression_gate` (7), `test_ejector_spindle` (11, including LT-322504's rise and fall on
+HV-322602), `test_consequence_propagation`, `test_boot_pin_sources` and `test_hp_carbamate_recycle`
+have the same failure ids as before. `test_transient_coldstart` goes from 3 failed to 2: τ and P_f
+now pass, `test_coldstart_dead_time_within_limit` now fails at 596 s, and
+`test_design_hold_stays_pinned` failed at HEAD too. `test_scenario_consequences` reads 14 / 14 with every
+check and value identical, and `test_ccw_loss_chain` 37 / 41 with the same four gaps.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

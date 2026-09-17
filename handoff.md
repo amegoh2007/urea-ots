@@ -1,13 +1,13 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-17 (322C001 rate-based absorber and real liquor enthalpies, D-20 and the LV-323501 / LV-323505 seal-loss letdowns, speciated NH3/CO2 in the 324 condenser vents; 2026-09-16: A-6, A-7, A-11, A-17, A-13, B-2, B-9, B-13, D-4, D-11, D-12, D-14, D-15, D-16, E-2, MSPAN_504, the thermo memo, the 323F010 urea carryover, A-2 step 1)
+**Last updated:** 2026-09-17 (A-12: 322R001 discharges over its overflow funnel through HV-322605's vendor trim; 322C001 rate-based absorber and real liquor enthalpies, D-20 and the LV-323501 / LV-323505 seal-loss letdowns, speciated NH3/CO2 in the 324 condenser vents; 2026-09-16: A-6, A-7, A-11, A-17, A-13, B-2, B-9, B-13, D-4, D-11, D-12, D-14, D-15, D-16, E-2, MSPAN_504, the thermo memo, the 323F010 urea carryover, A-2 step 1)
 
 ---
 
 ## 0. Heuristic Eradication Report — open after the 2026-09-15 re-audit
 
 `docs/analysis/HEURISTIC_ERADICATION_REPORT.md` §0a is now the authoritative per-finding status:
-35 closed, 8 partial, 0 blocked, 2 reclassified, 28 open. The original body still carries
+36 closed, 8 partial, 0 blocked, 2 reclassified, 27 open. The original body still carries
 pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical copy sits in
 `References/Gaps Closure/`.
 
@@ -58,6 +58,17 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   better. (3) `SCRUB_HV604_GAMMA` 1.30 was chosen for an NH3-rich gas; the PFD 204 vent is nearer 1.38
   (choked either way). (4) `reactor.L0_DES` 3.072961 is neither PFD 202+205 (3.031) nor the live
   seed (3.079); it only anchors `L_fresh`, so it was left.
+* **A-12 is closed (As-Built *Phase 5r*); what 322R001's discharge leaves.** The outflow is
+  min(HV-322605 on its CONVAL Kv table at design dP, Francis weir over the overflow-funnel lip), so the
+  level parks at the lip (LT-322504 ~36 %) on a wide-open valve or a CO2 cut. Left: (1) **the valve dP
+  is held at design.** Its departures are the gas-path losses 322E001 -> 322E002 -> 322R001 N1 (needs
+  the loop pressure network, A-1) and the liquor density on the reactor-to-stripper elevation (needs
+  the piping isometrics). (2) **The engine's level frame is 1.6 m low**: the drawings put NLL at
+  21.6 m above the bottom T.L. (lip +20.9 m, +0.7 m), the engine at 20.0 m, so the design holdup is ~7 %
+  short; the lip is placed relative to NLL. (3) **The holdup has no composition.** The discharge takes
+  the live production's composition through `f_strip`, and with production at zero (CO2 cut) about 4 t
+  above the lip leaves the reactor without reaching 322E001. (4) `tests/audit_r001_reactor.py` did not
+  import at HEAD either (`REACT_G_NODES`) and still calls the old signature.
 * **The PT-329201 design bleed is closed (As-Built *Phase 5j*), and what it leaves.** It was a
   period-2 oscillation: TT-328008 was built from the previous tick's m_775 and TIC-328008 sets m_775
   off it, a one-tick loop with gain ~2.7 that railed the master at 4 000 kg/h and drained 328D001 ->
@@ -158,9 +169,9 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   (`test_design_fixed_point_holds` now passes). `test_equation_audit_td014.py`: 3 failed / 8 passed
   on BOTH trees, same names, so the recorded 4/7 was stale. Its PIC-329202 walk grows −0.035 → −0.185 %,
   but that is the ×5.87 slave Kc: in chest pressure both are ≈0.0017 bar. The harness also runs at
-  DT = 1.0 s, above STEP_CAP. `test_transient_coldstart.py`: 3 failed / 2 passed on both trees. With
-  A-3 removed, τ moves 504.7 → 2 318 s (band 2 884–4 055). P_f is ~30 barg on both, so the loop never
-  pressurises from cold, and that predates this work. Unchanged green: hydraulics 56, c003 coupling
+  DT = 1.0 s, above STEP_CAP. `test_transient_coldstart.py`: the loop not pressurising from cold was
+  the level-blind reactor outflow. Since A-12 (*Phase 5r*) τ is 3 718 s and P_f 144.0 barg, both in
+  band, and t_d 596 s is 24 s over its 572 s limit. Unchanged green: hydraulics 56, c003 coupling
   20, startup 5, reactor 14, kinetics 10, stripper 4, foptd 3, trend 9, totalizer 5.
 * **Python on this machine** now lives at `%LOCALAPPDATA%\Python\pythoncore-3.14-64\python.exe`
   (PyManager, 3.14.7) with the requirements and pytest installed. Bare `python` on PATH may still
@@ -1147,7 +1158,9 @@ Still open, and worth a decision:
   kg/bar dominates. That constant is calibrated to the *cold-start fill* (it sets the emergent FOPTD
   tau the 2025-06-03 field trend anchors at 57.8 min) and is ~25x a vapour-space-only estimate for
   the loop (~75 m3 at d(rho)/dP ~ 0.8 kg/m3/bar gives ~60 kg/bar). A real total loss of condensation
-  is minutes, not hours. Moving it means re-deriving the cold-start anchor and re-checking
+  is minutes, not hours. Since *Phase 5r* the cold start does pressurise (τ 3 718 s against the
+  anchor's 3 469.5), so there is now a trajectory to re-derive it against. Moving it means re-deriving
+  the cold-start anchor and re-checking
   `test_transient_coldstart.py` and section 6.4, so it is left alone and the emergent time reported
   as it stands.
 

@@ -4632,19 +4632,11 @@ REACT_OFFGAS_GAMMA = 0.6         # off-gas blend: T_offgas = T_top + γ_o·(T_ov
 #  settles on, so State() starts on the pinned profile and not on the old fitted shape.
 REACT_NODE_SS_DES  = reactor.node_profile_ss(HPCC_T_PROD_DES_C, REACT_OVERFLOW_T_C,
                                              REACT_ZETA_NODES, REACT_BETA_DAMK)
-# --- Fix-2b: stagnant-flow hydraulic anchoring (Francis weir geometry + conserved holdup mass) -
-# Decouples reactor OUTFLOW from inflow (weir) and makes level a state of a CONSERVED holdup mass,
-# so a closed CO2 XV un-freezes level: it parks at the lip, then thermal contraction drops it below.
-# Every constant is solved against the REAL design overflow + level -> design HMB stays bit-exact:
-#   * crest sits REACT_WEIR_HEAD_DES below the design level (80 % of the 25 m span) -> head_des = 0.05 m
-#   * C_w solved so  rho_bulk·C_w·head_des^1.5 == design overflow  -> d(m_liq)/dt = 0 at design
+# --- conserved holdup mass: level is a state of the liquid inventory, not a flow pass-through ----
 #   * holdup seeded rho_bulk·A·level_des  -> level_from_holdup reads exactly 80 % at design T_bulk.
 REACT_LIQ_H_M       = REACT_LIQ_H_MM / 1000.0                      # 25.0 m liquid span (LT 0->100 %)
 REACT_T_BULK_DES    = sum(REACT_NODE_SS_DES) / 4.0                 # design bulk temp = node mean (~179.7 C)
 REACT_RHO_BULK_DES  = reactor.liquid_density(REACT_T_BULK_DES)     # design bulk melt density, kg/m^3
-REACT_WEIR_HEAD_DES = 0.05                                         # design head over the lip, m (sets C_w)
-REACT_WEIR_CREST_M  = REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M - REACT_WEIR_HEAD_DES  # 19.95 m lip elev
-REACT_WEIR_CW       = _react_mdot_kgh / (REACT_RHO_BULK_DES * REACT_WEIR_HEAD_DES ** 1.5)  # Francis coeff, m^3/h/m^1.5
 REACT_M_LIQ_DES     = REACT_RHO_BULK_DES * _react_area_m2 * (REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M)  # design holdup, kg
 REACT_LEVEL_DES_M   = REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M  # 20.0 m design liquid level (outlet-line head ref)
 # --- LT-322504 NARROW-BAND transmitter geometry (datasheet UD-AU-322-EC-0006, nozzle N7 = "LT 322504")
@@ -4661,12 +4653,17 @@ REACT_LT_SPAN_M       = 1.5      # N7 measuring span, m (datasheet p6 "1500")
 REACT_LT_ABOVE_OVF_M  = 1.0      # URV (100 %) elevation above the overflow line, m (datasheet p14 "1000")
 #   URV = LRV + span = 20.3 m;  overflow line = URV - 1.0 = 19.3 m -> design level sits 0.7 m above the weir.
 #   Span 1.5 m vs the old 25 m full-height map -> ~16.7x more sensitive: HV-322605 head moves now read PROMPT.
-REACT_PHI_FWD_FLOOR = 0.25  # Fix-4: residual letdown floor on φ_fwd in the OUTLET reference (see line ~1619).
-#   Bottom take-off drains by loop-pressure/gravity head even when forward circulation stops, so the outlet
-#   reference is m_dot_des·max(φ_fwd, FLOOR), NOT m_dot_des·φ_fwd.  At runtime design φ_fwd≈1.10 ≫ FLOOR so the
-#   max() picks φ_fwd and it cancels m_in's φ_fwd -> bit-exact L_des pin.  On a CO2-cut pump trip φ_fwd->0 but
-#   the FLOOR keeps m_out>0 -> the vessel drains (φ_fwd-coupled m_out would collapse to 0 and freeze — Bug #4).
-#   FLOOR engages only below motive ≈ sqrt(FLOOR)·EJ_MOTIVE_NH3_DES ≈ 20.4 t/h (~half design = trip/deep turndown).
+# --- 322R001 overflow funnel (report A-12, As-Built Phase 5r) ------------------------------------------
+# The liquid leaves over an internal funnel (1044 mm ID mouth, lip +20 900 mm above the bottom T.L.), down a
+# 304.8 mm ID downcomer to N5 and out through HV-322605 (drawing UD-AU-322-DZ-0006-010).  LT-322504's top
+# tap is REACT_LT_ABOVE_OVF_M above that lip, so the lip is placed in the engine's level frame from the
+# transmitter geometry: NLL - (1.0 - 1.5 x 0.2) = 20.0 - 0.7 = 19.3 m.  (The drawings put NLL itself at
+# 21.6 m above the T.L.; the engine's holdup frame is 1.6 m lower, which the relative placement absorbs.)
+# C_w is Francis over the mouth's circumference, 1.84 . pi . 1.044 m in SI, per hour: the free-overflow
+# head at the design 228 m3/h is 0.048 m.
+REACT_WEIR_CREST_M  = REACT_LEVEL_DES_M - (REACT_LT_ABOVE_OVF_M - REACT_LT_SPAN_M * (1.0 - REACT_LEVEL_NLL_PCT / 100.0))
+REACT_FUNNEL_ID_M   = 1.044                                         # funnel mouth ID, m (drawing -010)
+REACT_WEIR_CW       = 1.84 * math.pi * REACT_FUNNEL_ID_M * 3600.0   # Francis coeff, m^3/h per m^1.5
 # --- Fix-2: synthesis-pressure forcing from the per-pass conversion deficit -------------------
 REACT_OFFGAS_DEFICIT_GAIN = 1.0  # off-gas NH3/CO2 slip amplifier per unit conversion deficit δ_X
 REACT_PI_KAPPA     = 2.0         # κ: dimensionless pressure forcing Π = κ·δ_X (δ_X = 1 - conversion_factor)
@@ -5395,8 +5392,8 @@ REACT_KIN_CAL["A2"] = _a8_a2
 def _rederive_react_bulk_anchors() -> None:
     """Re-solve the bulk-melt anchors against the CURRENT node profile.
 
-    REACT_T_BULK_DES / RHO / WEIR_CW / M_LIQ_DES are defined further up against the import-time
-    SEED profile from `node_profile_ss`, because the weir geometry has to exist before the A-8
+    REACT_T_BULK_DES / RHO / M_LIQ_DES are defined further up against the import-time
+    SEED profile from `node_profile_ss`, because the holdup has to exist before the A-8
     fixed point can be solved.  `REACT_NODE_SS_DES` is then replaced twice -- once by
     `thermal_kinetic_fixed_point` immediately above, and again by the boot-pin cache restore -- and
     the derived block was never re-solved against either.  State() therefore seeded
@@ -5408,10 +5405,9 @@ def _rederive_react_bulk_anchors() -> None:
     X_conv (-0.15 %), into `delta_X` (which is one-sided, `max(1 - X/X_ref, 0)`, so the step could
     not average out), and from there into TIC-329005's load term and the CCW condensation gate.
     Re-solving here makes the seeded holdup and the seeded node profile the SAME design point."""
-    global REACT_T_BULK_DES, REACT_RHO_BULK_DES, REACT_WEIR_CW, REACT_M_LIQ_DES
+    global REACT_T_BULK_DES, REACT_RHO_BULK_DES, REACT_M_LIQ_DES
     REACT_T_BULK_DES   = sum(REACT_NODE_SS_DES) / len(REACT_NODE_SS_DES)
     REACT_RHO_BULK_DES = reactor.liquid_density(REACT_T_BULK_DES)
-    REACT_WEIR_CW      = _react_mdot_kgh / (REACT_RHO_BULK_DES * REACT_WEIR_HEAD_DES ** 1.5)
     REACT_M_LIQ_DES    = (REACT_RHO_BULK_DES * _react_area_m2
                           * (REACT_LEVEL_NLL_PCT / 100.0 * REACT_LIQ_H_M))
 
@@ -7684,7 +7680,7 @@ def step_sim(dt: float) -> dict:
     s.react_L_feed = react["L_feed"]                   # tear -> next step's stripper eta_T penalty
     s.react_W_feed = react["W_feed"]
     # NB: s.react_overflow_kmolh (the stripper-feed tear) is set BELOW in the reactor-inventory block —
-    #     it is the HYDRAULIC bottom take-off m_out (HV-322605 × column head), NOT the raw split production.
+    #     it is the HYDRAULIC discharge m_out (HV-322605 or the overflow-funnel lip), NOT the raw split production.
 
     # Fix-1: integrate the distributed 4-node axial thermal profile (Damköhler-shaped exotherm).
     #   dT_n/dt = [ (T_{n-1} - T_n) + g_n·ΔT_col ] / τ_n ,  T_0 = T_feed (HPCC two-phase product),
@@ -7765,19 +7761,18 @@ def step_sim(dt: float) -> dict:
     if _STEAM_READY:                        # OFF during both boot-pin settles (headers frozen at design)
         step_steam(s.steam, dt, m_strip, m_hpcc, s.steam.m_users9)
 
-    # LT-322504 dynamic level — DOMINO inventory (Option 2, Lead-Ops mandate): the reactor 322R001 is a
-    #   true liquid HOLDUP and HV/HIC-322605 has STRICT HYDRAULIC authority over the BOTTOM take-off to the
-    #   stripper (NOT over the molar off-gas split — vaporization happens DOWNSTREAM in the 322E001 tubes):
-    #       m_in  = ṁ_ov,split                              (live urea-solution PRODUCTION; φ-independent)
-    #       m_out = ṁ_des·(θ/θ_des)·(max(L,0)/L_des)        (HV-322605 gate × column head; capacity = ṁ_des)
+    # LT-322504 dynamic level — DOMINO inventory: the reactor 322R001 is a true liquid HOLDUP and
+    #   HV/HIC-322605 has hydraulic authority over its discharge to the stripper (NOT over the molar
+    #   off-gas split — vaporization happens DOWNSTREAM in the 322E001 tubes):
+    #       m_in  = ṁ_ov,split                                      (live urea-solution PRODUCTION)
+    #       m_out = min(ṁ_des·Kv(θ)/Kv(θ_des), ρ·C_w·max(L − L_lip, 0)^1.5)   (A-12, As-Built Phase 5r)
     #       d(m_liq)/dt = m_in − m_out ;  L = m_liq/(rho(T_bulk)·A).
     #   m_out IS the liquid fed to the stripper (conservation through the holdup) — see f_strip below.  At
-    #   design θ==θ_des, L==L_des and ṁ_ov,split==ṁ_des -> m_out==m_in==ṁ_des -> dm/dt=0, f_strip=1.0
-    #   (bit-exact pin).  OPEN HV-322605: m_out>m_in -> reactor DRAINS (L↓) AND surges the stripper feed
-    #   (transient); level re-settles at L_eq=L_des·(θ_des/θ) while steady feed returns to production.
-    #   THROTTLE: m_out<m_in -> reactor FLOODS (L↑, see carryover below) and starves the stripper.  The
-    #   take-off capacity is ṁ_des (production-independent), so a CO2-cut feed trip (m_in -> 0) drains the
-    #   vessel CONTINUOUSLY toward empty — no φ_fwd FLOOR hack needed (Bug #4 safe by construction).
+    #   design θ==θ_des and ṁ_ov,split==ṁ_des -> m_out==m_in==ṁ_des -> dm/dt=0, f_strip=1.0 (bit-exact).
+    #   OPEN HV-322605: m_out>m_in -> the reactor drains to the overflow-funnel lip, 0.7 m under NLL, and
+    #   the funnel's weir then passes production.  THROTTLE: m_out<m_in -> reactor FLOODS (L↑, see
+    #   carryover below) and starves the stripper.  A CO2-cut feed trip parks the level at the lip: N5 is
+    #   fed by the funnel, so the vessel cannot drain below it.
     T_bulk_react   = sum(new_T) / 4.0                          # live bulk temp (= node mean; design 179.7 C)
     level_m_react  = REACT_LIQ_H_M * s.react_level_pct / 100.0  # prev-step head feeding the discharge (explicit)
     m_ov_split_kgh = sum(react["overflow_kmolh"][k] * MW_COMP[k] for k in react["overflow_kmolh"])  # instantaneous production
@@ -7793,10 +7788,9 @@ def step_sim(dt: float) -> dict:
     s.react_m_in_lag += a_rec * (m_surge_kgh - s.react_m_in_lag)           # recycle leg lags through τ_rec
     m_in_kgh          = (_react_mdot_kgh + REACT_FRESH_FRAC * m_surge_kgh
                          + (1.0 - REACT_FRESH_FRAC) * s.react_m_in_lag)    # prompt fresh + lagged recycle
-    m_out_kgh      = reactor.outlet_line_outflow_kgph(level_m_react, _react_mdot_kgh, REACT_LEVEL_DES_M,
-                                                      s.HIC_322605, REACT_HIC605_DES_PCT)  # HV-322605 take-off
-    if s.react_level_pct <= 0.0 and m_out_kgh > m_in_kgh:
-        m_out_kgh = m_in_kgh
+    m_out_kgh      = reactor.outlet_line_outflow_kgph(level_m_react, _react_mdot_kgh, s.HIC_322605,
+                                                      REACT_HIC605_DES_PCT, REACT_WEIR_CREST_M,
+                                                      REACT_WEIR_CW, T_bulk_react)  # HV-322605 / funnel lip
     # DOMINO (Fix-4): ejector forward-carbamate coupling 322E003 -> 322F001 -> 322E002 -> 322R001.
     #   Closing HV-322602 raises the spindle momentum flux ṁ²/(ρA) -> the 322F001 ejector entrains MORE
     #   carbamate from the 322E003 sump (ej["suction_kgh"] climbs above its design draw EJ_SUC_TOT_DES); that
@@ -7834,7 +7828,7 @@ def step_sim(dt: float) -> dict:
     #   heat/CO2-strip equations then drive this liquid surge into the overhead gas at its own equilibrium.
     f_strip = (m_out_kgh / m_ov_split_kgh) if m_ov_split_kgh > 1.0e-9 else 1.0
     s.react_overflow_kmolh = {k: react["overflow_kmolh"][k] * f_strip for k in react["overflow_kmolh"]}
-    # ISSUE (Phase A): OFF-GAS-LINE LIQUID CARRYOVER on flood.  Throttling the bottom take-off (HV-322605)
+    # ISSUE (Phase A): OFF-GAS-LINE LIQUID CARRYOVER on flood.  Throttling the discharge (HV-322605)
     #   cannot pass m_in, so holdup rises to the vessel-full mass M_full = rho(T_bulk)·A·H_liq (PHYSICAL
     #   vessel-full lip; the LT-322504 narrow band saturates 100% earlier, at overflow+1 m).  Liquid above
     #   M_full CANNOT accumulate in the reactor — it physically spills
