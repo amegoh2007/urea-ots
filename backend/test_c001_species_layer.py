@@ -5,12 +5,12 @@ scalar split (A328_PHI_ABS * gcb_m) with no vent `y`.  The species layer adds, O
 untouched total-mass / energy ODEs:
 
   * a six-species liquor vector s.a328_c001_w (Sum w == 1), the recycle ammonia-water 755/756 loop;
-  * the reactive-absorption split CO2 + 2 NH3 -> carbamate at the frozen carbamate mass ratio;
+  * per-species uptake from `packed_absorber` (Phase 5m): Onda transfer units per bed against the
+    Extended UNIQUAC back-pressure of the wash, calibrated at the boot pin to the PFD 204 -> 797 split;
   * a LIVE per-species vent composition y = (off-gas - absorbed), so the NH3 slip is a real number.
 
-The total recovered mass keeps the boot-pinned A328_PHI_ABS, so C1, the energy balance and the
-15-key boot pin are byte-identical — this gate proves the layer is a fixed point at design and moves
-the right way off it.
+This gate proves the layer is a fixed point at design and moves the right way off it; the law's own
+off-design behaviour (capacity, CPL loss, hot liquor) is in test_packed_absorber.py.
 
 Run from backend/:  python -m pytest test_c001_species_layer.py -q -p no:cacheprovider
 """
@@ -94,8 +94,20 @@ def test_vent_nh3_slip_tracks_offgas_throughput():
     _run(600.0)
     dn = _c001()["vent_nh3_kgh"]
     #  Report A-2: on PFD 204 the design slip is PFD 797's 1.9 kg/h, not the ~1557 kg/h of the
-    #  NH3-rich Path-B vent, so the direction is asserted as a fraction of it.  It is a ~2 % residual of
-    #  a fixed-fraction uptake, so it only resolves the throughput once the upstream vent composition
-    #  holds still -- which it did not until the 328 reflux period-2 oscillation was damped (Phase 5j).
+    #  NH3-rich Path-B vent, so the direction is asserted as a fraction of it.  Measured on the
+    #  transfer-unit law (Phase 5m): HIC-322604 at 60 % takes the slip from 1.8 to 4.2 kg/h.
     assert up > base * 1.10, (base, up)                                           # open -> slip rises
     assert dn < base * 0.95, (base, dn)                                           # throttle -> slip falls
+
+
+def test_the_liquor_balance_closes_on_real_enthalpies():
+    """Phase 5m.  The liquor balance used to close on a back-solved 21 kJ/kg absorption heat and the
+    liquor's cp for the gas.  On H0 enthalpies and the speciated heats of absorption the design seed
+    closes to within the PFD's rounded temperatures by itself, so the one anchor left is a few kW."""
+    assert abs(main.A328_C001_Q_RES_KW) < 5.0
+    # one kmol/h of NH3 taken up at the gas's own temperature releases its heat of absorption, ~10 kW
+    q = main.c001_offgas_heat_kw({"NH3": 1.0}, 43.0, 43.0, {"NH3": 1.0}, main.W_C001_DES)
+    assert 8.5 < q < 11.0
+    # water the vent picks up (absorbed < 0) is paid for at its latent heat
+    q_w = main.c001_offgas_heat_kw({}, 43.0, 43.0, {"H2O": -1.0}, main.W_C001_DES)
+    assert -12.5 < q_w < -11.5

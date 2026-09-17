@@ -23,21 +23,21 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   PFD 208 composition, so a bottoms stream carrying 2 t/h of NH3 would reach it as 1.5 % more of
   everything. Closing the tear takes either a composition-live 323 feed or the PFD 116 motive (the
   user chose the plant basis on 2026-09-16, so the first).
-* **322C001 needs an absorber law, and the data for a rate-based one is now in hand.** Its uptake is
-  the boot-pinned `A328_PHI_ABS` fraction of the off-gas mass, split on PFD 204 - 797 (NH3 89.3 /
-  CO2 62.0 / H2O -21.3 kg/h), so the slip is a ~2 % residual of two proportional terms. A saturated-
-  inert vent was written, measured and reverted: it leaves no capacity for the CCW-failure breakthrough
-  to SV-32253. **Geometry, verified on the scans 2026-09-17:** the as-built arrangement drawing
-  (UD-AU-322-DZ-0007-001 rev 02) and the column datasheet (UD-AU-322-EC-0007) agree: lower bed
-  1 500 mm in the ID 922 section, sprayer N4 (322P002 liquor, stream 755); upper bed 1 000 mm in the
-  ID 576 section, sprayer N5 (CPL). The Rauschert packing datasheet (UD-AU-322-DZ-0008-001) gives
-  Raflux 25-10 metal, a = 250 m2/m3, void 0.95, but no HETP. The purchase spec's 1.63 / 0.85 m
-  layers are order quantities. That is enough for Onda (1968) transfer units per bed. What is still
-  missing is the back-pressure: stream 755 is 4.17 % NH3 / 3.81 % CO2 at 40 C, and the gamma-phi grid
-  starts at 80 C. The props module has Rumpf-Maurer Henry constants (273-433 K) and the speciation
-  equilibria, so a dilute-speciation back-pressure is buildable. Without it a transfer-unit law
-  absorbs a breakthrough it should not. PFD 797's H2O (2.28 mol%) is water's saturation at 46 C /
-  3.9 bar a with activity ~0.89, so the vent water is a saturation law, not a split.
+* **322C001 is on a rate-based absorber law (As-Built *Phase 5m*); what it leaves.** `packed_absorber.py`:
+  two beds from the vendor drawings (1 500 mm / ID 922 on stream 755, 1 000 mm / ID 576 on CPL,
+  Raflux 25-10 a = 250), Onda transfer units, Colburn per bed, and back-pressure from the full Extended
+  UNIQUAC speciation (grid 10-100 C, van 't Hoff beyond). The pin solves c_NH3 0.800 / c_CO2 0.838 /
+  a_w 0.881 against PFD 204 -> 797. The liquor balance is on H0 enthalpies and the speciated heats of
+  absorption (NH3 36, CO2 80 kJ/mol); the back-solved 21 kJ/kg lambda is gone and the design residual
+  is 1.3 kW. On a CCW-loss dump (HV-322604 100 %) the liquor boils toward 126 C and SV-32253 lifts at
+  31.1 bar a. Left: (1) stream 755's temperature is the constant `A328_M755_T`, because 322E006 and its
+  cooling water are not modelled; (2) urea in the wash is ignored by the speciation; (3) Onda runs on
+  water's viscosity and surface tension and N2's gas viscosity; (4) the bed-coupling tear lags over a
+  laminar-film holdup, an upper bound; (5) **no flooding limit**: at 7x design gas the ID 576 upper
+  section is at F ~ 8 Pa^0.5, well past Raflux 25's flood point; (6) **the HV-322604 SRK letdown is
+  single-phase**, so a CCW-dump gas reads -41 C at the outlet where it would partly condense (and
+  deposit carbamate); (7) the sump liquor does not vaporise past its bubble point, it only desorbs
+  through the lower bed.
 * **PFD 797 does not enter 323E003, and the engine's 323E003 inlet it stands in for is unidentified.**
   797 is 322C001's vent to atmosphere through PV-322201 (Mapping of Absorber unit.md:9; datasheet N3
   "to Atmosphere Vent"), 59.32 kmol/h x MW 26.6 = 1 578 kg/h (the printed 1 758 is a digit swap).

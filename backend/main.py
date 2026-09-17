@@ -48,6 +48,7 @@ import jet_pump                            # Phase 4 liquid-liquid constant-area
 import gap_g6_h0_enthalpy as h0_enthalpy  # H0 stream enthalpy on the elements-at-298.15 K datum
 import vacuum_condenser                    # A-13 / B-9 / B-13 saturated-vent surface condensers
 import real_gas                            # D-4 SRK isenthalpic letdown (HV-322604)
+import packed_absorber                     # 322C001 two-bed rate-based absorber (Onda / Colburn)
 import consequence  # ISA-75.01.01 consequence physics + plug-flow line transport (StreamPacket)
 from core.thermo import EmpiricalThermo
 thermo = EmpiricalThermo()
@@ -1703,9 +1704,32 @@ A328_QFLOOD_KW  = 500.0                                     # XV-322915 steam-fl
 # GCB boot-pin globals (lazy-pinned in step_sim Stage I; reset in _pin_hpcc_ua):
 A328_GCB_DES    = None   # kg/h off-gas from HV-322604 at the settled design seed
 A328_GCB_T      = None   # °C off-gas temperature
-A328_PHI_ABS    = None   # absorbed fraction 980/GCB_DES (total); species split is a frozen carbamate ratio on top
+A328_C001_CAL   = None   # packed_absorber calibration {NH3, CO2: k_G factor; a_w: vent water activity; abs_up}
 A328_VENT_DES   = None   # kg/h vented = GCB_DES − 980
-A328_LAMBDA_ABS = None   # kJ/kg absorption enthalpy (back-solved at pin for T=43)
+A328_C001_Q_RES_KW = None   # kW, 322C001 liquor balance residual at the design seed (PFD T rounding)
+
+
+def c001_offgas_heat_kw(comp_kmolh: dict, t_gas_c: float, t_liq_c: float, absorbed_kmolh: dict,
+                        w_liq: dict) -> float:
+    """kW the HV-322604 off-gas puts into 322C001's liquor.
+
+    The gas is brought from its letdown temperature to the liquor's (H0 ideal-gas enthalpies, the
+    datum every stream is published on), and what the column takes out of it is released there:
+    NH3 and CO2 at their differential heats of absorption over the live liquor
+    (`packed_absorber.heat_of_absorption_j_mol`, carbamate formation included) and the water the
+    vent picks up at its latent heat, h_gas - h_liq at the liquor temperature.  kmol/h x J/mol / 3600
+    is kW."""
+    tg, tl = t_gas_c + 273.15, t_liq_c + 273.15
+    q = 0.0
+    for k, n in comp_kmolh.items():
+        if n > 0.0:
+            ph = h0_enthalpy._VAPOUR_PHASE[k]
+            q += n * (h0_enthalpy.h_species(k, ph, tg) - h0_enthalpy.h_species(k, ph, tl))
+    dh_n, dh_c = packed_absorber.heat_of_absorption_j_mol(w_liq, t_liq_c)
+    lat_w = (h0_enthalpy.h_species("H2O", "gas", tl) - h0_enthalpy.h_species("H2O", "liquid", tl))
+    q += (absorbed_kmolh.get("NH3", 0.0) * dh_n + absorbed_kmolh.get("CO2", 0.0) * dh_c
+          + absorbed_kmolh.get("H2O", 0.0) * lat_w)
+    return q / 3600.0
 
 # ==========================================================================
 #  323E003 + 323D001 + 323P001  LPCC (74 °C, tempered-water cooled, 3.2 bar a)
@@ -2872,10 +2896,9 @@ W_STEAM = _w_norm(dict(H2O=100.0))                                   # 911 MP / 
 # The reactive-absorption mirror of the 322E003 scrubber: the inert-purge off-gas (HV-322604, NH3/CO2
 # + inerts) is contacted with the recycle ammonia-water loop 755 -> 322C001 -> 756.  NH3/CO2 are taken
 # up into the liquor (CO2 + 2 NH3 -> carbamate, tracked as dissolved NH3/CO2); the inerts N2/O2/CH4/H2
-# and the NH3/CO2 SLIP leave in the atmospheric vent.  The total recovered mass keeps the boot-pinned
-# scalar A328_PHI_ABS (so C1/energy/pin are untouched); the species layer splits it on the PFD 204 ->
-# 797 uptake and carries a LIVE per-species vent composition -- the atmospheric NH3 slip is a real
-# number off the balance, where it used to be a composition-blind constant.
+# and the NH3/CO2 SLIP leave in the atmospheric vent.  What is taken up is `packed_absorber`'s two-bed
+# rate-based law (Phase 5m), calibrated at the boot pin so the design uptake is the PFD 204 -> 797
+# split below exactly; the vent carries the live per-species composition that leaves.
 W_S755 = _w_norm(dict(CO2=3.81, H2O=91.13, NH3=4.17, Urea=0.89))     # PFD-20 col 755 Amm.Water in (40 C, MASS %)
 W_CPL  = _w_norm(dict(H2O=100.0))                                    # PFD-20 col 954 process condensate (46 C, 100 % H2O)
 # Design absorbed 130 kg/h (A328_ABS_DES) split per species by the column's own two vapour rows: PFD 204
@@ -8647,7 +8670,7 @@ def step_sim(dt: float) -> dict:
     # constant is 4 % low at the cold end and 11 % low in the hydrolyser.  Each vessel now carries
     # aqueous_cp() anchored on ITS OWN design temperature, so every value equals the frozen constant
     # bit-exactly at the design seed (every back-solved lambda/UA and the boot-pinned
-    # A328_LAMBDA_ABS are therefore untouched) and tracks IAPWS off design.
+    # A328_C001_Q_RES_KW are therefore untouched) and tracks IAPWS off design.
     cp_328c002 = aqueous_cp(R328_CP, R328_C002_T_BOT_BOT, s.a328_c002_T)
     cp_328c003 = aqueous_cp(R328_CP, R328_C003_T,     s.a328_c003_T)
     cp_328c004 = aqueous_cp(R328_CP, R328_C004_T,     s.a328_c004_T)
@@ -9220,23 +9243,34 @@ def step_sim(dt: float) -> dict:
     m_756    = A328_M756_DES * (lic502c_op / A328_LIC_OP_DES)             # liquor draw -> 323E003
     Q_flood  = A328_QFLOOD_KW if s.XV_322915 else 0.0                     # trip 22.1 steam flood
     y_vent = None
+    ab_c001 = None
     if A328_GCB_DES is None:                                              # pre-pin: design absorb, hold P
         abs_co2, abs_nh3, abs_h2o = A328_ABS_CO2_DES, A328_ABS_NH3_DES, A328_ABS_H2O_DES
         abs_c001  = A328_ABS_DES
         vent_c001 = max(gcb_m - abs_c001, 0.0)
     else:                                                                # post-pin: live off-gas
-        # TD-009 remainder — reactive absorption CO2 + 2 NH3 -> carbamate.  The scalar recovered mass
-        # abs_c001 is the SAME boot-pinned split as before (A328_PHI_ABS*gcb_m, so C1 and the energy
-        # balance are byte-identical and the 15-key pin is untouched); the species layer splits it on
-        # PFD 204 -> 797 (NH3 and CO2 in, water vapour out), and the inerts pass 100 % to the vent.
-        # The slip is therefore a ~2 % residual of two proportional terms (91 NH3 offered, 89 taken
-        # up): see handoff -- the column needs an absorber law, not a fixed fraction of offered mass.
-        # The vent then carries a LIVE per-species composition (gcb_i − absorbed_i), replacing the
-        # composition-blind scalar — the atmospheric NH3 slip is now a real number, not a boot constant.
-        abs_c001  = A328_PHI_ABS * gcb_m
-        abs_co2   = abs_c001 * A328_ABS_CO2_DES / A328_ABS_DES            # PFD 204 -> 797 split
-        abs_nh3   = abs_c001 * A328_ABS_NH3_DES / A328_ABS_DES
-        abs_h2o   = abs_c001 * A328_ABS_H2O_DES / A328_ABS_DES            # < 0: the gas leaves wetter
+        # PHASE 5m.  Was `abs_c001 = A328_PHI_ABS * gcb_m`, a boot-pinned fraction of the offered MASS
+        # split on PFD 204 -> 797, so the slip was a ~2 % residual of two proportional terms with no
+        # capacity.  Now each bed takes up NH3 and CO2 on Onda transfer units against the Extended
+        # UNIQUAC back-pressure of the liquid that washes it (packed_absorber, datasheet geometry and
+        # packing), and the vent leaves the CPL wash saturated with water.  The lower bed sees the CPL
+        # leaving the upper bed one liquid residence late: that tear is lagged over the upper bed's
+        # film holdup (~24 s at design), which is how long that liquid takes to trickle down.
+        _cal_up = A328_C001_CAL["abs_up"]
+        _up_in  = {"NH3": s.tlag.get("C001_UP_NH3", _cal_up["NH3"]),
+                   "CO2": s.tlag.get("C001_UP_CO2", _cal_up["CO2"]),
+                   "dT":  s.tlag.get("C001_UP_DT", _cal_up["dT"])}
+        ab_c001 = packed_absorber.solve(
+            {k: max(v, 0.0) for k, v in hv604["comp_kmolh"].items()}, s.a328_c001_T, A328_CPL_T,
+            s.a328_c001_P, m_755, W_S755, s.cpl_flow_kgh, s.a328_c001_w, A328_C001_CAL, abs_up=_up_in)
+        _tau_up = packed_absorber.liquid_residence_s(packed_absorber.BED_UP, s.cpl_flow_kgh,
+                                                     A328_CPL_T + 273.15)
+        for _sp, _key in (("NH3", "C001_UP_NH3"), ("CO2", "C001_UP_CO2"), ("dT", "C001_UP_DT")):
+            _lag1(s.tlag, _key, ab_c001["abs_up"][_sp], _tau_up, dt)
+        abs_nh3   = ab_c001["absorbed_kmolh"].get("NH3", 0.0) * MW_COMP["NH3"]
+        abs_co2   = ab_c001["absorbed_kmolh"].get("CO2", 0.0) * MW_COMP["CO2"]
+        abs_h2o   = ab_c001["absorbed_kmolh"].get("H2O", 0.0) * MW_COMP["H2O"]    # < 0: leaves wetter
+        abs_c001  = abs_nh3 + abs_co2 + abs_h2o
         vent_c001 = A328_VENT_DES * (pic201_op / A328_PIC_OP_DES)
         # SV-32253 (N11, DN 100) -- 322C001 mechanical relief.  The datasheet describes exactly this
         # scenario: "a failure of the upstream HP Scrubber cooling system leading to a massive
@@ -9280,13 +9314,21 @@ def step_sim(dt: float) -> dict:
                 / A328_C001_RHO_L) * dt,
             0.1)
         s.a328_c001_T_prev = _T_c001_pre
-    if A328_LAMBDA_ABS is not None:
-        sens_c001 = ((m_755*(A328_M755_T - Tc001) + s.cpl_flow_kgh*(A328_CPL_T - Tc001))/3600.0*cp_322c001
-                     + gcb_m*(gcb_T - Tc001)/3600.0*cp_322c001)
-        P_c001    = sens_c001 + abs_c001/3600.0*A328_LAMBDA_ABS + Q_flood
-        # SEMI-IMPLICIT, as 324 above: the 755 draw, the carbamate recycle and the gas-cooler
-        # bypass are the T-dependent load.
-        k_cap_322c001 = (m_755 + s.cpl_flow_kgh + gcb_m)/3600.0*cp_322c001
+    if A328_C001_Q_RES_KW is not None:
+        # PHASE 5m.  Was `sens + abs_c001/3600 . A328_LAMBDA_ABS`, with LAMBDA_ABS back-solved to close
+        # the design seed: 21 kJ/kg, a hundredth of the real heat, and the off-gas priced at the
+        # LIQUOR's cp.  While uptake was a fixed fraction of the gas that never mattered.  Once the
+        # rate law took up 10 t/h on a CCW-loss dump, the liquor COOLED to 22 C while absorbing it,
+        # which held the back-pressure down and let the column swallow the whole loop inventory.  Now
+        # every term is an enthalpy (c001_offgas_heat_kw); the one anchor left is the design residual,
+        # a few kW, which is the PFD's rounded 40 / 43 / 46 C on a 31 t/h wash.
+        sens_c001 = (m_755*(A328_M755_T - Tc001) + s.cpl_flow_kgh*(A328_CPL_T - Tc001))/3600.0*cp_322c001
+        q_gas_c001 = c001_offgas_heat_kw({k: max(v, 0.0) for k, v in hv604["comp_kmolh"].items()},
+                                         gcb_T, Tc001, ab_c001["absorbed_kmolh"], s.a328_c001_w)
+        P_c001    = sens_c001 + q_gas_c001 + A328_C001_Q_RES_KW + Q_flood
+        # SEMI-IMPLICIT, as 324 above: the 755 draw, the carbamate recycle and the off-gas are the
+        # T-dependent load (the gas at its own heat capacity rate, gcb_m . 1.05).
+        k_cap_322c001 = ((m_755 + s.cpl_flow_kgh)*cp_322c001 + gcb_m*packed_absorber.CP_GAS)/3600.0
         s.a328_c001_T = Tc001 + P_c001*dt/max(s.a328_c001_M*cp_322c001 + k_cap_322c001*dt, 1e-6)
     s.a328_c001_M = max(s.a328_c001_M + (m_755 + s.cpl_flow_kgh + abs_c001 - m_756)/3600.0*dt, 1.0)
     # --- liquor species CSTR (TD-009 remainder): feeds 755 + CPL + absorbed(NH3/CO2), draw 756, no
@@ -10634,6 +10676,10 @@ def step_sim(dt: float) -> dict:
                 "vent_nh3_kgh": round(vent_c001 * (y_vent["NH3"] if y_vent else 0.0), 1),  # NH3 -> 328V001/atm (kg/h)
                 "vent_nh3_pct": round((y_vent["NH3"] if y_vent else 0.0) * 100.0, 2),  # NH3 mass% in the atm vent
                 "vent_co2_pct": round((y_vent["CO2"] if y_vent else 0.0) * 100.0, 2),  # CO2 mass% in the atm vent
+                "ntu_lower_nh3": round(ab_c001["ntu"].get("lo_NH3", 0.0), 2) if ab_c001 else None,  # Onda transfer units
+                "ntu_upper_nh3": round(ab_c001["ntu"].get("up_NH3", 0.0), 2) if ab_c001 else None,
+                "ystar_lower_nh3_pct": round(ab_c001["y_star_lo"]["NH3"] * 100.0, 3) if ab_c001 else None,  # 755 back-pressure
+                "dT_upper_bed": round(ab_c001["dT_up"], 2) if ab_c001 else None,   # CPL wash heat of absorption (K)
                 "liq_nh3_pct":  round(s.a328_c001_w.get("NH3", 0.0) * 100.0, 2),        # dissolved NH3 in the liquor
                 "liq_co2_pct":  round(s.a328_c001_w.get("CO2", 0.0) * 100.0, 2),        # dissolved CO2 in the liquor
                 "liquor756_th": round(m_756 / 1000.0, 2),                 # LV-322502 draw -> 323C005 (t/h)
@@ -12077,13 +12123,14 @@ def _pin_hpcc_ua():
     #   runtime seed, mirroring the reactor-mass pin.  The absorber runs PRE-PIN (T/P frozen, mass
     #   self-closed) through every settle above because A328_GCB_DES stays None until set here, so the
     #   warm-up never perturbs it.  Capture the settled-design off-gas from one MAN-seed step, then
-    #   back-solve LAMBDA_ABS so the post-pin live energy balance sums to 0 at design (Tc001 == 43 C,
+    #   solve the liquor balance's design residual so it sums to 0 at design (Tc001 == 43 C,
     #   bit-exact) while activating the live absorber dynamics off-design.
-    global A328_GCB_DES, A328_GCB_T, A328_PHI_ABS, A328_VENT_DES, A328_LAMBDA_ABS, hv_322604
+    global A328_GCB_DES, A328_GCB_T, A328_C001_CAL, A328_VENT_DES, A328_C001_Q_RES_KW, hv_322604
     _caphv = {}
     res = step_sim(0.1)
     rr = res["sm_diagnostics"]["hv604"]
     _caphv["m"] = rr["mass_kgh"]; _caphv["T"] = rr["T_out"]
+    _caphv["comp"] = {k: v for k, v in rr["comp_kmolh"].items() if v > 0.0}
     # ISSUE-c/e: pin the LT-322E002 inventory anchor on this SAME final MAN-seed step.  It belongs at
     # the runtime design seed for the reason the reactor and GCB refs do, and only here is every other
     # constant (reactor tear, HPCC_UA, steam sizing) already in force, so the captured liquid make is
@@ -12103,15 +12150,25 @@ def _pin_hpcc_ua():
     _ss.M_USERS_LP  = max(_m_hpcc_seed - _ss.M_TURBINE_DES, 0.0)
     _ss.M_504_DES   = max(_m_hpcc_seed - _ss.M_503_DES, 0.0)
     _gcb_m = _caphv["m"]; _gcb_T = _caphv["T"]
-    # SAME stage-7 sensible-heat kernel, evaluated at the pinned design off-gas and Tc001 == A328_C001_T:
-    _sens_pin = ((A328_M755_DES*(A328_M755_T - A328_C001_T)
-                  + A328_CPL_DES*(A328_CPL_T - A328_C001_T))/3600.0*A328_CP
-                 + _gcb_m*(_gcb_T - A328_C001_T)/3600.0*A328_CP)
+    # SAME stage-7 liquid sensible kernel, evaluated at the design seed and Tc001 == A328_C001_T:
+    _sens_pin = (A328_M755_DES*(A328_M755_T - A328_C001_T)
+                 + A328_CPL_DES*(A328_CPL_T - A328_C001_T))/3600.0*A328_CP
     A328_GCB_DES    = _gcb_m
     A328_GCB_T      = _gcb_T
-    A328_PHI_ABS    = A328_ABS_DES / _gcb_m          # absorbed fraction (PHI_ABS*GCB_DES == A328_ABS_DES)
+    # 322C001 at the same design seed: the one per-species transfer factor and the vent water activity
+    # the sources do not give, solved so that the design uptake is PFD 204 -> 797 per species.
+    A328_C001_CAL   = packed_absorber.calibrate(
+        _caphv["comp"], A328_C001_T, A328_CPL_T, A328_C001_P_BARA, A328_M755_DES, W_S755, A328_CPL_DES,
+        W_C001_DES, {"NH3": A328_ABS_NH3_DES / MW_COMP["NH3"], "CO2": A328_ABS_CO2_DES / MW_COMP["CO2"],
+                     "H2O": A328_ABS_H2O_DES / MW_COMP["H2O"]})
     A328_VENT_DES   = _gcb_m - A328_ABS_DES          # design vent = off-gas − absorbed
-    A328_LAMBDA_ABS = -_sens_pin*3600.0/A328_ABS_DES # back-solved -> P_c001 == 0 at design (bit-exact)
+    # The liquor balance on real enthalpies, on the same first-tick absorber pass, leaves a residual of
+    # a few kW (the PFD's rounded temperatures); it is the one anchor, and P_c001 == 0 at design.
+    _ab_pin = packed_absorber.solve(
+        _caphv["comp"], A328_C001_T, A328_CPL_T, A328_C001_P_BARA, A328_M755_DES, W_S755, A328_CPL_DES,
+        W_C001_DES, A328_C001_CAL, abs_up=A328_C001_CAL["abs_up"])
+    A328_C001_Q_RES_KW = -(_sens_pin + c001_offgas_heat_kw(_caphv["comp"], _gcb_T, A328_C001_T,
+                                                           _ab_pin["absorbed_kmolh"], W_C001_DES))
 
     state = State()                                  # discard the capture step (fresh design seed)
     last_packet = {}
@@ -12149,6 +12206,7 @@ _PIN_SRC_FILES  = (
     "core/thermo.py", "core/unit.py", "core/stream.py", "core/flowsheet.py", "core/ejector.py",
     "core/stripper.py", "core/hpcc.py", "core/scrubber.py", "core/reactor.py", "core/valve.py",
     "core/vacuum.py",
+    "packed_absorber.py",
 )
 
 
@@ -12170,7 +12228,7 @@ def _apply_pin(d: dict) -> None:
     global REACT_TEAR_DES, REACT_L_FEED_DES, REACT_W_FEED_DES, REACT_X_DES, REACT_KIN_CAL
     global REACT_CP_MELT, REACT_NODE_SS_DES, REACT_KIN_ANCHOR
     global HPCC_NC_DES_LIVE, M_HPCC_DES_LIVE
-    global A328_GCB_DES, A328_GCB_T, A328_PHI_ABS, A328_VENT_DES, A328_LAMBDA_ABS
+    global A328_GCB_DES, A328_GCB_T, A328_C001_CAL, A328_VENT_DES, A328_C001_Q_RES_KW
     import steam_system as _ss
     HPCC_UA            = d["HPCC_UA"]
     REACT_MASS_DES     = tuple(d["REACT_MASS_DES"])
@@ -12208,9 +12266,9 @@ def _apply_pin(d: dict) -> None:
     M_HPCC_DES_LIVE    = _gen_des          # design LP generation anchor (cache path)
     A328_GCB_DES       = d["A328_GCB_DES"]
     A328_GCB_T         = d["A328_GCB_T"]
-    A328_PHI_ABS       = d["A328_PHI_ABS"]
+    A328_C001_CAL      = d["A328_C001_CAL"]
     A328_VENT_DES      = d["A328_VENT_DES"]
-    A328_LAMBDA_ABS    = d["A328_LAMBDA_ABS"]
+    A328_C001_Q_RES_KW = d["A328_C001_Q_RES_KW"]
     _STEAM_READY       = True
     state              = State()         # fresh design seed (the settle transient is never persisted)
     last_packet        = {}
@@ -12236,9 +12294,9 @@ def _collect_pin() -> dict:
         "M_USERS_LP":         _ss.M_USERS_LP,
         "A328_GCB_DES":       A328_GCB_DES,
         "A328_GCB_T":         A328_GCB_T,
-        "A328_PHI_ABS":       A328_PHI_ABS,
+        "A328_C001_CAL":      A328_C001_CAL,
         "A328_VENT_DES":      A328_VENT_DES,
-        "A328_LAMBDA_ABS":    A328_LAMBDA_ABS,
+        "A328_C001_Q_RES_KW": A328_C001_Q_RES_KW,
     }
 
 

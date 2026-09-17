@@ -2996,6 +2996,216 @@ and `test_trend_coverage` are unchanged. `test_scenario_consequences` (a script)
 on both trees, same lines, one reading 0.518 against 0.517 bar a. `test_equation_audit_td014` is as
 recorded above.
 
+## Phase 5m — 322C001 absorbs on transfer units against its wash's back-pressure
+
+### What it was
+
+```text
+was:  abs_c001 = A328_PHI_ABS . gcb_m                 (boot-pinned fraction of the offered MASS)
+      abs_i    = abs_c001 . A328_ABS_i,DES / A328_ABS_DES     (PFD 204 -> 797 split, Phase 5j)
+```
+
+The design slip (PFD 797's 1.8 kg/h NH3) was the ~2 % difference between two proportional terms.
+The column had no capacity: 98 % of whatever arrived was absorbed, whatever washed it. A saturated-inert
+vent was tried in Phase 5j and reverted, because letting the species set the uptake left nothing to
+limit a CCW breakthrough. The handoff recorded the missing datum as "an HETP".
+
+### What the vendor documents give
+
+All scans, read visually (`vendor-archive` memory note):
+
+| document | what it fixes |
+|---|---|
+| UD-AU-322-EC-0007 p2, Uhde column datasheet rev 01 | lower part ID 922 / packing 1 500 mm; upper part ID 576 / packing 1 000 mm; 3.9 bar a, 40 C |
+| UD-AU-322-DZ-0007-001 rev 02, arrangement (as built) | same beds; full-cone sprayer N4 over the lower bed (322P002 / 322E006, stream 755), N5 over the upper (CPL, stream 954) |
+| UD-AU-322-DZ-0008-001, Rauschert data sheet | Raflux 25-10 metal: a = 250 m²/m³, void 0.95 |
+| UD-AU-322-EC-0008, packing purchase spec | layers 1.63 × Ø0.93 and 0.85 × Ø0.58 m: order quantities, not bed heights |
+
+No HETP is given, but a packed bed does not need one. Its transfer units follow from the packing and
+the flows.
+
+### The law
+
+`packed_absorber.py`. For each bed and each of NH3 and CO2, a counter-current gas-film balance on a
+straight equilibrium line:
+
+```text
+(y_out - y*_in) / (y_in - y*_in) = (1 - lam) / (exp(NTU (1 - lam)) - lam),        lam = m G / L
+NTU     = c_i . k_G a_w P Z / G_m                                   Onda, Takeuchi & Okumoto (1968)
+a_w / a = 1 - exp(-1.45 (sig_c/sig)^0.75 Re_L^0.1 Fr_L^-0.05 We_L^0.2)
+k_G     = 5.23 (a D_G / R T) Re_G^0.7 Sc_G^(1/3) (a d_p)^-2        D_G: Fuller; mu_G: Sutherland N2
+```
+
+* **Lower bed.** y*_in is the partial pressure over the liquid entering it: stream 755 plus the CPL
+  leaving the upper bed, at the live liquor temperature. The slope m is taken over the live column
+  liquor. Both come from `props_nh3co2h2o.speciate`, the full Extended UNIQUAC speciation
+  (Thomsen & Rasmussen / Darde, regressed 0–110 C), times the Rumpf & Maurer Henry constants. This is
+  the regime the engine's 80–210 C grid does not cover, and the full model does. Stream 755 at 43 C
+  holds 1.15 mol% NH3 above it, so the lower bed pinches there (NTU 7.9).
+* **Upper bed.** CPL enters clean. Its slopes come from the same speciation over its own effluent, so
+  CO2 is taken up only while there is NH3 in the wash to bind it. The bed warms by its heat of
+  absorption; at design +3.5 K.
+* **Heat of absorption.** −R·d ln p_i/d(1/T) at fixed liquid composition, on the same speciated
+  back-pressure (`heat_of_absorption_j_mol`). The apparent pressure already carries the chemistry, so
+  this is the whole heat: over the design liquor NH3 36 kJ/mol and CO2 80 kJ/mol, where CO2's bare
+  Henry constant gives 16 (physical solution, without the carbamate and bicarbonate it forms).
+* **Past the speciation range.** Beyond 10–100 C the pressures carry on along van 't Hoff at the edge's
+  own heat of absorption, continuous at the edge. Held flat, a boiling liquor kept the back-pressure
+  of a 100 C one (below).
+* **Vent water.** Saturated at the top of the CPL wash: y_w = a_w·psat(T)/P.
+* **Bed coupling.** The lower bed's liquid depends on what the upper bed took up. The engine takes
+  one pass per tick on that tear and lags it over the upper bed's film holdup
+  (h_L = (12 μ a² u_L/ρ g)^⅓, Billet & Schultes), 23 s at design. `calibrate` relaxes the same pass
+  to steady state.
+* **Speciation cost.** 11 ms a solve. Nodes are computed lazily on a grid geometric in N and C molality
+  and 1 K in T, and interpolated trilinearly on ln p. A dilute CPL effluent must not borrow the
+  pressure of an acidic neighbour on a linear grid: that first version could not reach the design CO2.
+  One pass costs 0.08–0.1 ms.
+
+The sources leave three numbers, solved at the boot pin so the design uptake is exactly the Phase 5j
+split: c_NH3 = **0.80**, c_CO2 = **0.84**, a_w = **0.88**. Before calibration the first-principles
+column already put the vent at 0.097 % NH3 against PFD 797's 0.18 %, and at 0.013 % CO2 against 0.05 %.
+
+### Off design, on the law alone (PFD rows, relaxed)
+
+| case | NH3 slip (kg/h) | CO2 slip (kg/h) |
+|---|---|---|
+| design | 1.80 | 1.29 |
+| off-gas ×1.5 / ×0.4 | 4.15 / 0.25 | 2.58 / 0.24 |
+| CPL wash lost | 13.3 | 6.5 |
+| liquor 60 C / 80 C | 3.8 / 8.9 | 11.1 / 105 (the wash strips CO2) |
+| 322P002 lost (CPL alone) | 1.1 | 2.2 |
+| NH3/CO2 ×20 | 8.2 | 7.3 |
+| NH3/CO2 ×20 with 322P002 lost | **582** | 369 (upper bed +22 K) |
+
+### In the engine
+
+`A328_PHI_ABS` is gone from the pin. `A328_C001_CAL` replaces it, solved on the design seed's
+captured HV-322604 vector: c_NH3 = 0.800, c_CO2 = 0.838, a_w = 0.881, plus the steady bed-coupling tear.
+The tick makes one pass on the lagged tear and publishes `ntu_lower_nh3`, `ntu_upper_nh3`,
+`ystar_lower_nh3_pct` and `dT_upper_bed` on 322C001's packet. From the seed, 0.25 s tick:
+
+| t = 3 000 s | design hold | HIC-322604 60 % at 600 s | CPL cut at 600 s |
+|---|---|---|---|
+| off-gas in (t/h) | 1.71 | 2.51 | 1.71 |
+| absorbed (t/h) | 0.130 | 0.210 | 0.110 |
+| NH3 slip (kg/h) | 1.8 | 4.2 | 13.1 |
+| lower / upper bed NTU (NH3) | 7.93 / 2.54 | 7.09 / 2.27 | 7.84 / 0 |
+| lower-bed y* NH3 (mol%) | 1.146 | 1.23 | 1.19 |
+| TT-322015 (C) | 43.000 | 44.51 | 42.57 |
+| PT-329201 (bar a) | 140.7014 | 140.34 | 140.7024 |
+
+The design hold is stationary: uptake, slip, pressure and level hold their seed to the printed digit
+over 3 000 s, TT-322015 moves 4e-5 K, and PT-329201 matches the previous tree to 1e-11 bar. The liquor-drift test
+that fails on HEAD (6.2e-8 against a 1e-9 gate) still fails at 5.5e-8.
+
+### The liquor balance was closing on a number, not a heat
+
+```text
+was:  P_c001 = (m_755 cp (40 - T) + m_CPL cp (46 - T) + m_gas cp_liquor (T_gas - T)) / 3600
+               + m_abs / 3600 . A328_LAMBDA_ABS          LAMBDA_ABS = -sens_design . 3600 / 130 = 21 kJ/kg
+```
+
+`A328_LAMBDA_ABS` was back-solved so the design seed closed. It came out at 21 kJ/kg, a hundredth of
+what NH3 releases dissolving (2.1 MJ/kg). The off-gas was priced at the liquor's cp, 4.2 against
+~1.1. While uptake was a fixed fraction of the gas none of that showed. The rate law exposed it.
+
+`test_ccw_loss_chain` is a script. Under pytest it errors at collection on its design-hold gate
+(PT-329201 140.70140 against 1e-3, as on every tree since Phase 5j), so the per-file suite reports
+"1 error" whether or not the chain beyond it runs. Run as a script, it found two things:
+
+* **A crash.** With both CCW pumps stopped, HV-322604's flow reaches zero, and `solve` returned
+  early on no gas without the bed-coupling tear the tick lags (`KeyError: 'abs_up'`). No gas now
+  returns zero uptake.
+* **A column that swallowed the loop.** With HV-322604 then opened to 100 % (11.7 t/h, mostly NH3
+  and CO2), the column took up 10.4 t/h while its liquor COOLED from 43 to 22 C. It never
+  pressurised past 5.2 bar a, SV-32253 never lifted, and slip peaked at 67 kg/h: 35/41 checks
+  against 37/41.
+
+Now every term is an enthalpy (`c001_offgas_heat_kw`):
+
+```text
+P_c001 = (m_755 cp (T_755 - T) + m_CPL cp (T_CPL - T)) / 3600
+       + sum_i n_i [h_i(T_gas) - h_i(T)] / 3600                  H0 ideal-gas enthalpies, HV-322604 vector
+       + [n_abs,NH3 dH_NH3 + n_abs,CO2 dH_CO2 + n_abs,H2O (h_H2O,g - h_H2O,l)] / 3600     live liquor
+       + Q_res + Q_flood
+```
+
+On real enthalpies the design seed closes by itself to **1.33 kW**, where the PFD's rounded
+40 / 43 / 46 C on a 31 t/h wash are worth ±46 kW each. `A328_C001_Q_RES_KW` is that residual and the
+one anchor left. The semi-implicit capacity rate carries the gas at 1.05 kJ/(kg K).
+
+Rerun, the dump heats the liquor instead. The speciation grid then ran out at 100 C: a 150 C liquor
+kept its 100 C back-pressure and absorbed 9 t/h while boiling at 15 bar a. Carried on along
+van 't Hoff, the column does what the 322C001 datasheet sizes SV-32253 for, "a massive breakthrough of
+hot, unreacted ammonia and carbon dioxide":
+
+| HV-322604 100 % on CCW loss (0.25 s tick) | +50 s | +150 s | +1 200 s |
+|---|---|---|---|
+| off-gas in (t/h) | 11.8 | 11.5 | 11.7 |
+| absorbed (t/h) | 8.9 | 7.9 | 7.1 |
+| TT-322015 (C) | 94 | 119 | 126 |
+| 322C001 (bar a) | 12.5 | 30.1 | **31.13**, SV-32253 relieving |
+| NH3 slip (kg/h) | 241 | 144 | 264 |
+
+`test_ccw_loss_chain` Phase 3, against the mass-fraction law it was written on:
+
+| | fraction (Phase 5l) | rate law, real enthalpies |
+|---|---|---|
+| HV-322604 vent (t/h) | 11.67 | 11.66 |
+| 322C001 peak (bar a) | 31.45 | 31.13 |
+| SV-32253 peak relief (t/h) | 8.45 | 2.26 |
+| atmospheric NH3 slip (kg/h) | 4 863 | 266 |
+
+The fraction let 92 % of whatever arrived through to the vent, so the column relieved 8 t/h of
+nearly raw loop gas. The rate law still absorbs 7 t/h into a boiling liquor at 31 bar a, so the SV
+passes a quarter as much and the slip is 150× design instead of 2 700×. Both pass the chain's
+"order of magnitude" check. Which one is closer to the plant turns on the flooding limit left open
+below.
+
+What stays anchored or unmodelled:
+
+* **Stream 755 temperature** is `A328_M755_T` (40 C). 322E006 and its cooling water are not modelled,
+  so the fouled-cooler slip the datasheet narrative describes enters only through the column liquor
+  temperature.
+* **Urea** in the wash (0.89 %) is ignored by the speciation, which has no urea.
+* **Wetted area** is Onda with water's viscosity and surface tension (ammonia water is ~5 % lower in
+  σ). Gas viscosity is N2's. Both sit inside the calibrated factor at design and only move with T off it.
+* **Flooding.** Onda has no capacity limit. At 7× the design gas the ID 576 upper section runs at an
+  F-factor near 8 Pa^½, well past Raflux 25's flood point, so a real column would lose its wash
+  there before the liquor boiled.
+* **The HV-322604 outlet on a CCW dump** reads −41 C. The SRK letdown is single-phase, and the loop
+  gas it lets down would partly condense (and, below ~60 C, deposit carbamate). The gas term is ~5 %
+  of the absorption heat on that dump.
+* **Liquor boiling.** The sump does not vaporise. Past its bubble point it desorbs through the lower
+  bed's back-pressure instead, capped at what the liquid brings in.
+
+
+### Tests
+
+`test_packed_absorber` (13, no engine import, 20 s): the packing and beds are the vendor documents;
+design uptake is the PFD split per species to 1e-6, with Onda-sized factors; the lower bed pinches on
+its back-pressure; slip rises and falls with the gas; losing the CPL wash, a hot liquor, and a
+breakthrough without 322P002 all do what the table above says; one pass from the steady tear is the
+steady state to 1e-9; back-pressure is continuous in T; the upper bed's residence is its film holdup;
+no gas takes nothing up; the heat of absorption carries the carbamate; and the back-pressure carries
+on past the speciation range, continuous at its edge.
+
+`test_c001_species_layer`: + `test_the_liquor_balance_closes_on_real_enthalpies` (residual < 5 kW; one
+kmol/h of NH3 taken up releases ~10 kW, one of water picked up by the vent costs 12). 5 passed, 1 failed as on HEAD
+(`test_design_liquor_is_stationary_and_bitexact`, 5.5e-8 against 1e-9; 6.2e-8 on HEAD).
+`test_equation_audit_c10_live_cp` 7 passed and `test_boot_pin_sources` 2 passed.
+
+Full per-file suite (72 files) on the rate law before the liquor-balance fix, against the last full
+run on the Phase 5k tree: every difference is one Phase 5l records (`test_hydraulics` +3,
+`test_boot_pin_sources`, `test_c39_recycle_tears` and `test_equation_audit_td014` one failure fewer
+each), plus the new `test_packed_absorber`. After the fix, the engine-level files it could move
+(`test_transient_coldstart`, `test_startup_stability`, `test_session_regression_gate`,
+`test_equation_audit_species`, `test_consequence_propagation`, `test_scrubber`, `test_trend_coverage`,
+`test_totalizer_init`) have the same failure ids. `test_ccw_loss_chain` as a script: 37/41 as on the previous tree, the same four GAPs. Phase 2 moves in its third digit (AT-322701 N/C
+peak 81.8 against 86.3, X_conv 57.29 against 57.07 %): the 322E003 vent the chain drives through
+HV-322604 at design stroke is absorbed and returned by 322C001, not by a fixed fraction.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.
