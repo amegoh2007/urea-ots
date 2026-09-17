@@ -639,6 +639,30 @@ def test_lv323505_seals_and_passes_the_flash_drum_vapour_once_323f004_uncovers()
     assert any("m_evap / _mw_evap + n_blow_323505" in ln for ln in code)
 
 
+def test_lv323501_seals_and_blows_the_rectifier_vapour_through_choked():
+    """The last D-19..D-21 guard.  323C003's drain clipped itself to the inflow at M <= 1 kg; it now
+    carries the seal and blow-through laws.  4.1 -> 1.13 bar a is past the choke, so the gas does not
+    care what 323F004 is doing."""
+    import consequence
+    import inspect
+    main = _main()
+    dp_des = main.R323_C003_P_BARA - main.R323_F004_P_BARA
+    rho_g = consequence.gas_density_ideal(main.R323_C003_P_BARA, main.R323_C003_T_SP_C, 20.0)
+
+    def blow(level, p_f004=main.R323_F004_P_BARA):
+        return consequence.blowthrough_kgh(
+            main.R323_M314_DES, main.R323_RHO_C003_DES, dp_des, 100.0 / main.R323_LV501_OP_DES, rho_g,
+            main.R323_C003_P_BARA, main.R323_C003_P_BARA - p_f004, consequence.seal_fraction(level))
+
+    assert blow(50.0) == 0.0
+    full = blow(0.0)
+    assert 0.02 * main.R323_M314_DES < full < 0.3 * main.R323_M314_DES
+    assert blow(0.0, p_f004=0.5) == full                              # choked
+    code = [ln for ln in inspect.getsource(main.step_sim).splitlines() if not ln.lstrip().startswith("#")]
+    assert not any("M_c003_pre <= 1.0 and m_314" in ln for ln in code)
+    assert any("consequence.seal_fraction(lvl_c003)" in ln for ln in code)
+
+
 def test_the_ejector_suction_follows_the_gravity_head_again():
     """Report D-19.  `m_suc = capacity` dropped the gravity-head multiplier the block comment
     directly above it specifies, which left the 322E003 sump a pure integrator -- it flooded

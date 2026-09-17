@@ -948,8 +948,8 @@ sites was checked for which kind it is.
   4.1 → 1.13 bar letdown. Neither ΔP vanishes when the vessel empties. What happens on the plant is
   that the valve starts passing vapour instead of liquid, and this engine has no two-phase valve
   model; deleting either guard drains its vessel below empty at full letdown rate. Keeping them is
-  the honest floor until that model exists. *(LV-322501's guard was replaced by the seal and
-  blow-through laws in Phase 5n.)*
+  the honest floor until that model exists. *(Both were replaced by the seal and blow-through laws,
+  LV-322501 in Phase 5n and LV-323501 in Phase 5p.)*
 
 ### What is still open after this pass
 
@@ -3379,6 +3379,53 @@ of that, because it is not choked; the seal and the 323F010 inflow are in `step_
 `test_consequence_propagation`, `test_boot_pin_sources`, `test_session_regression_gate` and
 `test_equation_audit_c10_aqueous` have the same failure ids as before. `test_scenario_consequences`
 section 2 is described above.
+
+## Phase 5p — LV-323501, the last of the empty-vessel guards
+
+```text
+was:  if M_c003 <= 1.0 and m_314 > (m_feed - m_305):  m_314 = m_feed - m_305
+```
+
+Phase 2 kept this guard for the same reason as LV-322501's. LV-323501 lets 323C003 down from 4.1 to
+1.13 bar a, and that dP does not vanish when the column empties. It now carries the same two laws as
+*Phases 5n and 5o*: the liquid ramps out over the nozzle bore on LIC-323501's level, and the uncovered
+trim passes 323C003's vapour (`sol_vapour_y_vle("C003", …)` for its molar mass). x = 2.97/4.1 = 0.72 is
+past the choke at F_γ x_T = 0.65, so the gas is set by the column's pressure alone. SRK's Z is 0.98
+there, so ideal-gas density is used. The gas leaves 323C003's gas node (`m_env_in − m_gas`) and
+joins 323F004's flash vapour into the 323E011/323D011 node (`m_701_e011 + m_gas`). At a normal level
+both are exactly 0.0.
+
+From the seed at 0.1 s, LIC-323501 to MAN with LV-323501 100 % open at 2 s, back to AUTO at 602 s:
+
+| t (s) | LI-323501 (%) | gas (t/h) | 701 flash (t/h) | 323C003 (bar a) | 323F004 / 323E011 (bar a) | 323F010 (bar a) |
+|---|---|---|---|---|---|---|
+| 0 | 60.0 | 0 | 4.43 | 4.102 | 1.134 | 0.460 |
+| 27 | 50.7 | 0 | 4.85 | 4.114 | 1.810 | 0.472 |
+| 152 | 3.3 | 0 | 5.29 | 4.109 | 1.756 | 0.517 |
+| 177 | 1.81 | 2.73 | 2.62 | 4.019 | 1.796 | 0.546 |
+| 602 | 1.75 | 2.89 | 2.90 | 4.015 | 1.820 | 0.445 |
+| 827 (AUTO) | 40.5 | 0 | 4.23 | 4.091 | **0.516** | 0.368 |
+| 1 502 | 59.5 | 0 | 4.62 | 4.085 | 1.054 | 0.479 |
+
+* The doubled liquid flow flashes more in 323F004, and the flash system rises to 1.8 bar a within
+  30 s, before any gas arrives. Once the column floors at 1.75 %, the liquid (and its flash) halves
+  and 2.9 t/h of rectifier vapour replaces it, so the node holds near 1.82 bar a.
+* Back in AUTO, the drum-side node undershoots to 0.52 bar a at +225 s, with LV-323501 throttled to
+  19 % and the flash down to 4.2 t/h, before settling at 1.05. The seal is already whole by then (the
+  level passes 3 % inside 150 s), so this is the 323E011/323D011 node and PIC-323203 recovering from
+  the surge. The mechanism was not traced in this pass.
+
+`test_hydraulics` + `test_lv323501_seals_and_blows_the_rectifier_vapour_through_choked` (0.0 sealed;
+2–30 % of the design liquid as gas fully open; the same at 0.5 bar a downstream; the guard is gone
+from `step_sim` and the seal is there): 63 passed. `test_equation_audit_323_324`,
+`test_c003_pressure_coupling`, `test_lv322501_pressure_retuning`, `test_consequence_propagation` and
+`test_session_regression_gate` have the same failure ids. `test_scenario_consequences` is unchanged
+at 14 / 14, including "no consequence flag raised at design", which lists `LV323501_BLOWTHROUGH`.
+
+None of the four sites in reports D-19 to D-21 now clips an outflow to its inflow. Two are gravity
+drains whose head goes to zero on its own (322F001 suction, the 322E002 HPCC). The other two are
+letdowns with a seal and a gas law (LV-322501, LV-323501). LV-323505, which never had a guard, has
+the same seal and gas law.
 
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 

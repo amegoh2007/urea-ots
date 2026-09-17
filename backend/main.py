@@ -7062,6 +7062,7 @@ class State:
                       "STRIPPER_SOLIDIFICATION": False,
                       "LV322501_EROSION":        False,   # D-20: stripper gas through the LV-322501 trim
                       "LV323505_BLOWTHROUGH":    False,   # 323F004 vapour through an uncovered LV-323505
+                      "LV323501_BLOWTHROUGH":    False,   # 323C003 vapour through an uncovered LV-323501
                       "CARBAMATE_DEPOSITION":    False,
                       "RATIO_PV_BAD":            False,   # L3-3 N/C measurement-validity (Batch 3)
                       # Loss-of-condensation consequence chain (322E003 CCW):
@@ -8223,6 +8224,23 @@ def step_sim(dt: float) -> dict:
         urea_soln_rho(s.w_c003.get("Urea", 0.0), s.r323_c003_T, R323_RHO_S314),
         R323_LV501_OP_DES / 100.0, R323_C003_P_BARA, R323_F004_P_BARA, R323_RHO_C003_DES,
         characteristic=R323_LV_CHAR)                                              # bottom drain -> flash (kg/h)
+    # LV-323501 seal loss (the last of the D-19..D-21 guards).  4.1 -> 1.13 bar a is x = 0.72, past the
+    # choke at F_gamma x_T = 0.65, so an uncovered trim passes 323C003's vapour at a flow the column's
+    # own pressure sets.  The liquid ramps out over the nozzle bore and the gas follows the Cv the
+    # valve's liquid design duty fixes (consequence.seal_fraction / blowthrough_kgh, as LV-322501 and
+    # LV-323505).  Ideal gas: SRK Z is 0.98 at 4.1 bar a and 135 C.  Sealed, the gas is exactly 0.0.
+    seal_323501 = consequence.seal_fraction(lvl_c003)
+    m_314 *= seal_323501
+    blow_323501_kgh = 0.0
+    if seal_323501 < 1.0:
+        _y_c003_gas = sol_vapour_y_vle("C003", s.w_c003, s.r323_c003_T, s.r323_c003_P, SOL_C003["alpha"])
+        _mw_c003_gas = 1.0 / max(sum(v / MW_COMP[k] for k, v in _y_c003_gas.items() if v > 0.0), 1e-9)
+        blow_323501_kgh = consequence.blowthrough_kgh(
+            R323_M314_DES, R323_RHO_C003_DES, R323_C003_P_BARA - R323_F004_P_BARA,
+            lv501_op / R323_LV501_OP_DES,
+            consequence.gas_density_ideal(s.r323_c003_P, s.r323_c003_T, _mw_c003_gas),
+            s.r323_c003_P, max(s.r323_c003_P - s.r323_f004_P, 0.0), seal_323501)
+    s.flags["LV323501_BLOWTHROUGH"] = blow_323501_kgh > 0.0
     P_c003    = (q305_avail_kw - m_305 / 3600.0 * R323_LAMBDA_305)               # net kW on holdup
 
     M_c003_pre = s.r323_c003_M
@@ -8240,16 +8258,9 @@ def step_sim(dt: float) -> dict:
     # no matter how far the column drains.  Unconditionally stable already; adding a k_cap here
     # would only over-damp a bubble-point relaxation that is correct as it stands.
     s.r323_c003_T = s.r323_c003_T + P_c003 * dt / max(M_c003_pre * cp_c003, 1e-6)
-    # PHASE 2, report D-19 to D-21: this guard is deliberately KEPT, and the reason matters.
-    # Those findings say an empty-vessel limiter becomes unreachable once the discharge is driven by
-    # hydrostatic head, because h -> 0 drives the flow to zero on its own.  That argument holds for a
-    # GRAVITY drain -- 323F010's barometric leg is already of that form -- but LV-323501 is a
-    # pressure letdown, 4.1 -> 1.13 bar a, and its dP does NOT vanish when the column empties.  What
-    # actually happens on the plant is that the valve starts passing vapour instead of liquid, and
-    # this engine has no two-phase valve model.  Deleting the guard here would let 323C003 drain
-    # below empty at full letdown rate; keeping it is the honest floor until that model exists.
-    if M_c003_pre <= 1.0 and m_314 > (m_feed_323 - m_305):
-        m_314 = max(m_feed_323 - m_305, 0.0)
+    # The empty-column guard that clipped m_314 to (feed - 305) at M <= 1 kg is gone: the seal above
+    # takes the liquid to zero as the level reaches the nozzle, and the vapour the trim passes then
+    # leaves 323C003's gas node (m_env_in) for 323F004's (in_e011).
     # ---- 323C003 -> 323F004 drain line: plug-flow transport of the CLOSED packet ---------------
     # m_314 stays the OUTFLOW in the 323C003 inventory and species ODEs below (the material has
     # left the column); only 323F004's inlet terms consume the ARRIVED packet, so the line
@@ -9425,7 +9436,8 @@ def step_sim(dt: float) -> dict:
     # the definition of M_COND_DES -- the node holds 3.2 bar a and the column 4.1 bit-exactly.
     # D-20: gas blowing through an uncovered LV-322501 arrives with the 301 flash gas.  A gas crosses
     # the letdown line in well under a tick, so it is not delayed like the liquid packet.
-    m_env_in   = m_flash_gas + m_pool_vap + R3232_M797_DES + blow_322501_kgh   # 301 + 302 + 797
+    m_env_in   = (m_flash_gas + m_pool_vap + R3232_M797_DES + blow_322501_kgh
+                  - blow_323501_kgh)                    # 301 + 302 + 797, less what LV-323501 blows out
     T_dew_env  = R3232_E003_T + (tsat_steam(s.r3232_d001_P) - _R3232_TSAT_E003_DES)
     m_env_cond = min(R3232_E003_M_COND_DES
                      * max(T_dew_env - 0.5*(T_tw_sup + T_tw_ret), 0.0)
@@ -9446,7 +9458,7 @@ def step_sim(dt: float) -> dict:
 
     # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
     Te011    = s.r3232_e011_T
-    m_701_e011 = m_701 - blow_323505_kgh      # < m_701 while LV-323505 blows the flash system's gas through
+    m_701_e011 = m_701 - blow_323505_kgh + blow_323501_kgh   # flash vapour, less LV-323505's gas, plus LV-323501's
     in_e011  = (R3232_E011_IN_DES + (m_701_e011 - R3232_E011_M701_DES)
                 + (m_786_d001 - R3232_E011_M786_DES)
                 + (m_321 - R3232_E011_M321_DES)
@@ -10485,6 +10497,7 @@ def step_sim(dt: float) -> dict:
                 "feed_T":     round(T_feed_323, 1),                          # feed temp (C, TT-323001)
                 "v305_th":    round(m_305 / 1000.0, 2),                      # top vapor -> LPCC (t/h)
                 "drain314_th":round(m_314 / 1000.0, 2),                      # bottom drain -> flash (t/h)
+                "blow501_th": round(blow_323501_kgh / 1000.0, 2),            # 323C003 gas through an uncovered LV-323501 (t/h)
                 "Q_kW":       round(Q_e002_kw, 0),                           # heater 323E002 duty (kW)
                 "TIC_323007": {"pv": round(s.TIC_323007["pv"], 1), "sp": round(s.TIC_323007["sp"], 1),
                                "op": round(s.TIC_323007["op"], 2), "mode": s.TIC_323007["mode"]},
