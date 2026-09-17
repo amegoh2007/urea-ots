@@ -39,7 +39,8 @@ class VacuumTrain324(UnitOperation):
         train = main_module.vacuum_train_324(
             m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh, false_air2_kgh,
             motive924_kgh, motive927_kgh, motive929_kgh, cw_factors=self.cw_factors,
-            p_e002_bara=p_shell.get("324E002"), p_e005_bara=p_shell.get("324E005"))
+            p_e002_bara=p_shell.get("324E002"), p_e005_bara=p_shell.get("324E005"),
+            sub_703=getattr(self, "sub_703", None))
         streams = train["streams_kgh"]
         condensate_out, vent_out = self.outputs[0], self.outputs[1]
         condensate_out.set_state(mass_flow=streams["719"] + streams["720"] + streams["721"] + streams["759"])

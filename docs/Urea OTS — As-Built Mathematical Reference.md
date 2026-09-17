@@ -3362,13 +3362,13 @@ threshold checks fail. 323F010 must degrade by 20 % and 35 %, and 324F001 must f
 now +16 %. The file reads 14 PASS / 14 FAIL against 16 / 12. Those checks passed on the flood above,
 not on a vacuum break.
 
-What the scenario describes, a crashed vacuum, has a physical route the engine does not carry yet.
-323F004's flash vapour is 31 % NH3 and 10 % CO2 by mass, against 7 % and 5 % in 323F010's own
-overhead, so the 1.1 t/h carries about 450 kg/h of gas that 324E002 cannot condense at 0.33 bar a,
-onto a 324F002 ejector rated for 94 kg/h. But 324E002's inlet (`vacuum_inlet_kmolh`) is the PFD
-vapour row scaled on mass: the composition of what HV-323605 passes never reaches it. A
-composition-live 324E002 inlet is the open item. The scenario script records the reason above the
-three checks.
+What the scenario describes is a crashed vacuum. 323F004's flash vapour is 31 % NH3 and 10 % CO2 by
+mass, against 7 % and 5 % in 323F010's own overhead, and 324E002's inlet (`vacuum_inlet_kmolh`) was
+the PFD vapour row scaled on mass, so that composition never reached the condenser. The first
+version of this section guessed the gas could not be condensed and would overload 324F002. *Phase
+5q* carried the composition through and measured it: the gas condenses, PT-324201 rises by 0.012 bar,
+and 323F010 still peaks at 0.52 bar a. The thresholds describe atmospheric air, which this flash tank
+does not hold.
 
 ### Tests
 
@@ -3426,6 +3426,88 @@ None of the four sites in reports D-19 to D-21 now clips an outflow to its inflo
 drains whose head goes to zero on its own (322F001 suction, the 322E002 HPCC). The other two are
 letdowns with a seal and a gas law (LV-322501, LV-323501). LV-323505, which never had a guard, has
 the same seal and gas law.
+
+## Phase 5q — the 324 condensers vent NH3 and CO2 at their own back-pressure
+
+### What it was
+
+*Phase 5g* put the four 324 condensers on a saturated vent: the gas leaving the cold end is the
+inert gas plus the vapour it can hold at T_v and the shell pressure. Only water had a saturation
+line. NH3 and CO2 took a fixed share of water's (the PFD vent row's split), because the engine's
+activity grid stops at 80 C and these cold ends run at 40–55 C. So an ammonia-rich condensate vented
+no more ammonia than a lean one.
+
+`packed_absorber.back_pressure` (*Phase 5m*) covers 10–100 C. Unanchored, over the PFD's own
+324E002 condensate (719) at 45 C, it gives p_NH3 = 0.054 bar and p_CO2 = 0.0085 bar, against
+0.059 and 0.013 in PFD 706.
+
+### The law
+
+```text
+p_w  = Y_des s_w P_des . psat_w(T_v) / psat_w(T_v,des)                      (unchanged)
+p_k  = Y_des s_k P_des . p*_k(w_cond, T_v) / p*_k(w_cond,des, T_v,des)       k = NH3, CO2
+y_c  = sum p / P ;     n_vent,k = n_inert . y_c/(1 - y_c) . p_k / sum p      (capped at the inlet)
+```
+
+* `w_cond` is the condensate the exchanger makes, taken at its inlet's condensable composition
+  (H2O, NH3, CO2, urea). The vent carries a few per cent of the condensables, so the two are the
+  same to that order.
+* The design back-pressure is stored on each condenser spec (`bp_des`). At the design inlet and T_v
+  the ratio is 1 and the split is the PFD row's. `vent_kgh` keeps its anchor on the model's own
+  design vent, so all four condensers still reproduce their PFD condensate, vent and outlet
+  temperature exactly.
+* A bare saturated-gas spec (the 323C005 absorber top, D-11) has no `bp_des` and keeps the water line.
+
+### 324E002's inlet carries LV-323505's gas
+
+`vacuum_inlet_kmolh` scaled PFD row 703 on its air-free mass, so whatever HV-323605 passed arrived at
+PFD composition. It now takes an optional `sub = (kg/h, mass fractions)`: that share of the row's
+condensables is swapped for the known composition, at the same mass, and the inerts still come from
+the false air alone. The engine passes LV-323505's blow-through share of HV-323605's flow,
+`pull · m_gas / (m_evap + m_gas)`, at 323F004's flash-vapour composition. That applies both in
+324F001's pressure loop and in the train solve (`core/vacuum.py` forwards it). With no blow-through
+`sub` is `None` and nothing changes.
+
+### What it corrects
+
+*Phase 5o* said LV-323505's gas (31 % NH3, 10 % CO2 by mass) was about 450 kg/h that 324E002 could
+not condense, on an ejector rated for 94 kg/h, and that this was how 323F010's vacuum would crash.
+Measured, the gas condenses. From the seed with LV-323505 100 % open, 0.1 s tick:
+
+| t (s) | gas (t/h) | 324E002 vent NH3 / CO2 / H2O (kmol/h) | vent (kg/h) | PT-324201 (bar a) | 323F010 (bar a) |
+|---|---|---|---|---|---|
+| 52 | 0 | 0.63 / 0.15 / 1.05 | 79.2 | 0.332 | 0.482 |
+| 202 | 0.93 | **1.24** / 0.14 / 1.49 | 98.2 | 0.348 | **0.522** |
+| 402 | 1.07 | 0.94 / 0.09 / 1.08 | 82.9 | 0.359 | 0.496 |
+| 602 | 1.10 | 0.91 / 0.09 / 1.04 | 81.4 | 0.365 | 0.498 |
+
+The extra ammonia raises the NH3 back-pressure over the condensate by about half. CO2's falls,
+because NH3 in excess binds it. The vent spikes to 98 kg/h as the gas arrives and settles near
+82 kg/h, where the liquid surge alone had put it. PT-324201 ends at 0.365 bar a, 0.012 above the
+composition-blind inlet's 0.353 (*Phase 5o*). 323F010 peaks at 0.522 bar a against 0.520 there. The vacuum-break thresholds in `test_scenario_consequences`
+section 2 (+20 %, +35 %) still fail. They describe what *Scenarios.md* 2.2 writes, atmospheric air
+blowing into the evaporator, and this flash tank holds condensable vapour at 1.13 bar a, not air.
+
+### Cost and pin
+
+The back-pressure is evaluated in every vent call, including each regula-falsi trial and each
+shell-pressure iteration: ~1 ms a tick (6.8 → 7.9 ms at 0.25 s on this machine). A per-call memo
+bought nothing measurable and was not kept. The boot pin moves in one constant,
+`EJ_MOTIVE_DES_LIVE`, by 2e-9 relative: the settle passes through off-design vacuum states.
+
+### Tests
+
+`test_vacuum_condenser_mapping` (17): + `test_the_vent_ammonia_and_co2_ride_their_own_back_pressure`
+(unanchored speciation over PFD 719 within 15 % / 40 % of PFD 706), +
+`test_an_ammonia_rich_inlet_vents_more_ammonia_than_in_proportion` (+30 % NH3 in, more than +30 % NH3
+vented), + `test_the_324e002_inlet_swaps_in_a_known_composition` (no swap at zero mass; same mass,
+new composition, inerts untouched). Every condenser still closes its PFD design point exactly.
+`test_equation_audit_323_324`, `test_vacuum_valve_rules`, `test_lv324501_routing`,
+`test_session_regression_gate`, `test_startup_stability`, `test_hydraulics`, `test_boot_pin_sources`,
+`test_consequence_propagation`, `test_trend_coverage`, `test_totalizer_init`,
+`test_transient_coldstart`, `test_equation_audit_td014` and `test_equation_audit_species` have the
+same failure ids as before. `test_scenario_consequences` 14 / 14; section 2's peak reads 0.535 bar a
+against 0.534.
 
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 

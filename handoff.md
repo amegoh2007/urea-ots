@@ -105,8 +105,7 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
 * **A-13 / B-9 / B-13 closed (As-Built *Phase 5g*); what they leave open.** (1) The condensers'
   cooling water is still the PFD-28 constant: `VacuumTrain324.cw_factors` exists and nothing sets it,
   and the CCW / CW system is not wired to the 324 exchangers, so the new cold-end physics only moves
-  with load and shell pressure until it is. (2) NH3 and CO2 in the vents follow water's saturation
-  line (the activity model stops at 80 C). (3) 324F003 at a 2 s harness tick still walks off (0.131 ->
+  with load and shell pressure until it is. (2) Closed in *Phase 5q*: NH3 and CO2 vent at the speciated back-pressure of the condensate. (3) 324F003 at a 2 s harness tick still walks off (0.131 ->
   0.096 bar a over 900 s with PV-324203 at 60 %); at 0.25 s and 1 s it settles to 0.13144. The previous
   model RAILED to the 0.020 clamp there, and the production loop never exceeds STEP_CAP = 0.25 s.
   (4) PIC-324202 / PIC-324203 have Kc 2 %/bar, so a +0.01 bar SP step moves PT-324204 by ~0.1 mbar in
@@ -355,10 +354,14 @@ undershoots to 0.52 bar a before settling (untraced).
 `test_scenario_consequences` reads 14 PASS / 14 FAIL: section 1 is 4/4, section 2 flags the
 blow-through but fails its three vacuum-magnitude checks (below). Open: (1) the blow-through gas enters
 the receiving vapour node as MASS only (moles for 323F010), with no species or enthalpy in the
-downstream balances, and the stripper top to 322E002 is not reduced by LV-322501's gas; (2) **324E002's inlet is composition-blind** (`vacuum_inlet_kmolh` scales the PFD vapour row on mass).
-LV-323505's gas is 31 % NH3 / 10 % CO2 by mass, ~450 kg/h of non-condensable load at 1.1 t/h against a
-324F002 rated 94 kg/h, which is how the scenario's vacuum crash would happen. Until the inlet carries
-what HV-323605 passes, 323F010 degrades only +16 % (the old +29 % was an empty drum making liquor).
+downstream balances, and the stripper top to 322E002 is not reduced by LV-322501's gas; (2) scenario section 2's vacuum-break thresholds
+(+20 % / +35 % on 323F010) fail, and **the scenario's premise, not the model, is the question**:
+*Scenarios.md* 2.2 has atmospheric air blowing through, while 323F004 holds condensable NH3/CO2/H2O
+vapour at 1.13 bar a. With the gas carried to 324E002 at its own composition and vented at its own
+back-pressure (*Phase 5q*), 323F010 peaks at 0.52 bar a (+13 %; the old +29 % was an empty drum
+making liquor). Decide whether to rewrite those thresholds or source the air-ingress case. (3) Only
+the blow-through share of 324E002's inlet is composition-live; the rest of rows 703/709 are still
+PFD rows scaled on mass (A-14).
 
 ### Three findings from this pass worth not re-deriving
 

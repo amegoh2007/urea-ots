@@ -20,9 +20,21 @@ plus whatever vapour it can hold at that end's temperature and the shell pressur
     n_vent,c    = n_inert . y_c / (1 - y_c)          split among H2O / NH3 / CO2 as the PFD vent row
 
 and the vent grows without bound -- until it is the whole inlet -- as the shell pressure falls towards
-the vapour pressure at the cold end.  NH3 and CO2 are scaled with WATER's saturation line: the
-activity model's envelope stops at 80 C and these vents are 40-55 C, so their own partial-pressure
-slopes are not available here.  That is a stated approximation on the minor condensables only.
+the vapour pressure at the cold end.
+
+NH3 and CO2 used to ride WATER's saturation line with the PFD vent's fixed split, because the
+engine's activity grid stops at 80 C and these cold ends are 40-55 C.  `packed_absorber.back_pressure`
+covers 10-100 C (Extended UNIQUAC speciation x Rumpf-Maurer Henry constants), so each now carries its
+own partial pressure over the condensate the exchanger is making, as a departure from design:
+
+    p_w = Y_des s_w P_des . psat_w(T_v) / psat_w(T_v,des)
+    p_k = Y_des s_k P_des . p*_k(w_cond, T_v) / p*_k(w_cond,des, T_v,des)            k = NH3, CO2
+    y_c = (p_w + p_NH3 + p_CO2) / P,     n_vent,k = n_inert . y_c / (1 - y_c) . p_k / sum p
+
+Unanchored, the speciation over PFD condensate 719 at 45 C gives p_NH3 0.054 and p_CO2 0.0085 bar
+against PFD 706's 0.059 and 0.013.  The condensate is taken at the inlet's condensable composition,
+which is what it is while the vent carries a few per cent of the condensables.  An ammonia-rich inlet
+then raises p_NH3 more than in proportion, because less of it is bound to CO2.
 
 The cold-end temperature T_v is not a constant.  It is where the energy the vapour gives up equals
 what the surface can pass to the cooling water:
@@ -44,6 +56,7 @@ import math
 
 import gap_g6_h0_enthalpy as h0
 import iapws_if97
+import packed_absorber
 
 CONDENSABLE = ("H2O", "NH3", "CO2")
 INERT = ("N2", "O2")
@@ -104,14 +117,35 @@ def moles_from_mole_pct(total_kmolh: float, pct: dict) -> dict:
     return {k: total_kmolh * pct.get(k, 0.0) / tot for k in SPECIES}
 
 
+def condensate_fractions(n_in: dict) -> dict:
+    """Mass fractions of what a condenser makes, taken at its inlet's condensable composition."""
+    m = {k: max(n_in.get(k, 0.0), 0.0) * MW[k] for k in CONDENSABLE + CARRIED}
+    tot = sum(m.values())
+    return {k: v / tot for k, v in m.items()} if tot > 0.0 else {}
+
+
 def vent_moles(spec: dict, p_bara: float, t_v_c: float, n_in: dict) -> dict:
-    """Gas leaving the cold end: every inert, plus the condensables it holds saturated at T_v and P."""
+    """Gas leaving the cold end: every inert, plus the condensables it holds saturated at T_v and P.
+
+    A condenser spec (one carrying `bp_des`) gives NH3 and CO2 their own partial pressures over the
+    condensate; a bare saturated-gas spec keeps the fixed split on water's line."""
     n_i = sum(n_in.get(k, 0.0) for k in INERT)
     y = spec["y_des"] * (spec["p_des"] / max(p_bara, 1.0e-9)) \
         * (iapws_if97.psat_bara(t_v_c) / spec["psat_v_des"])
+    split = spec["split"]
+    w_cond = condensate_fractions(n_in) if "bp_des" in spec else {}
+    if w_cond:
+        bp = packed_absorber.back_pressure(w_cond, t_v_c)
+        rel = {"H2O": y * split["H2O"],
+               "NH3": spec["y_des"] * split["NH3"] * (spec["p_des"] / max(p_bara, 1.0e-9))
+               * (bp[0] / spec["bp_des"][0]),
+               "CO2": spec["y_des"] * split["CO2"] * (spec["p_des"] / max(p_bara, 1.0e-9))
+               * (bp[1] / spec["bp_des"][1])}
+        y = sum(rel.values())
+        split = {k: rel[k] / y for k in CONDENSABLE} if y > 0.0 else split
     y = min(max(y, 0.0), _Y_MAX)
     n_c = n_i * y / (1.0 - y)
-    vent = {k: min(n_c * spec["split"][k], n_in.get(k, 0.0)) for k in CONDENSABLE}
+    vent = {k: min(n_c * split[k], n_in.get(k, 0.0)) for k in CONDENSABLE}
     for k in INERT:
         vent[k] = n_in.get(k, 0.0)
     vent["Urea"] = 0.0
@@ -207,6 +241,7 @@ def design_spec(tag: str, p_des: float, n_in_des: dict, t_in_des: float, vent_ro
             "psat_v_des": iapws_if97.psat_bara(t_v_des),
             "cw_flow_kgh": cw_flow_kgh, "cw_in_c": cw_in_c, "cw_cp": cw_cp,
             "n_in_des": dict(n_in_des), "inlet_kgh": inlet_kgh_pfd, "vent_kgh": vent_kgh_pfd}
+    spec["bp_des"] = packed_absorber.back_pressure(condensate_fractions(n_in_des), t_v_des)
     h_in = _inlet_enthalpy(n_in_des, t_in_des)
     q_des, _ = _q_balance(spec, p_des, t_v_des, n_in_des, h_in)
     cw_out = cw_in_c + q_des * 3600.0 / (cw_flow_kgh * cw_cp)

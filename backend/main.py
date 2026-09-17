@@ -3842,17 +3842,29 @@ def c005_vent_kgh(m702_kgh, inert_706_kmolh, t_top_c):
     return A323_C005_VENT_DES * (model(m702_kgh / A323_C005_M702_DES, r706, t_top_c) / des)
 
 
-def vacuum_inlet_kmolh(tag, inlet_kgh, air_kgh, air_des_kgh):
+def vacuum_inlet_kmolh(tag, inlet_kgh, air_kgh, air_des_kgh, sub=None):
     """Live species into a first-stage condenser: the PFD vapour row scaled on its air-free mass,
     plus the live false-air bleed.  Written as n_des.r + (air - air_des) + air_des.(1 - r) so that
-    at design (r == 1.0, air == air_des) every term but the first is a literal 0.0."""
+    at design (r == 1.0, air == air_des) every term but the first is a literal 0.0.
+
+    `sub` = (kg/h, mass fractions) is a part of the inlet whose composition is known and is not the
+    PFD row's -- LV-323505's blow-through gas in 324E002's -- so that share of the row is swapped for
+    it.  Inerts come from the false air alone either way."""
     spec = VACUUM_CONDENSER_SPECS[tag]
     r = (inlet_kgh - air_kgh) / (spec["inlet_kgh"] - air_des_kgh)
     d_air = (air_kgh - air_des_kgh) / _VAC_AIR_MW
     a_des = air_des_kgh / _VAC_AIR_MW
-    return {k: spec["n_in_des"][k] * r
-               + _VAC_AIR_FRAC.get(k, 0.0) * d_air + _VAC_AIR_FRAC.get(k, 0.0) * a_des * (1.0 - r)
-            for k in vacuum_condenser.SPECIES}
+    n = {k: spec["n_in_des"][k] * r
+            + _VAC_AIR_FRAC.get(k, 0.0) * d_air + _VAC_AIR_FRAC.get(k, 0.0) * a_des * (1.0 - r)
+         for k in vacuum_condenser.SPECIES}
+    if sub is not None and sub[0] > 0.0:
+        m_sub, y_sub = sub
+        _cond = vacuum_condenser.CONDENSABLE + vacuum_condenser.CARRIED
+        f = m_sub / sum(spec["n_in_des"][k] * vacuum_condenser.MW[k] for k in _cond)
+        for k in _cond:
+            n[k] = max(n[k] + m_sub * y_sub.get(k, 0.0) / vacuum_condenser.MW[k]
+                       - spec["n_in_des"][k] * f, 0.0)
+    return n
 
 
 def vacuum_condenser_node(tag, inlet_kgh, n_in_kmolh, p_bara, cw_flow_kgh=None, cw_in_c=None):
@@ -3882,7 +3894,7 @@ def vacuum_condenser_node(tag, inlet_kgh, n_in_kmolh, p_bara, cw_flow_kgh=None, 
 
 def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
                      false_air2_kgh, motive924_kgh, motive927_kgh, motive929_kgh,
-                     cw_factors=None, p_e002_bara=None, p_e005_bara=None):
+                     cw_factors=None, p_e002_bara=None, p_e005_bara=None, sub_703=None):
     """Four condensers and three ejector mixing nodes on the PFD-21 basis.
 
     The second and third condensers take the first's LIVE vent species plus the ejector's motive
@@ -3906,7 +3918,7 @@ def vacuum_train_324(m_evap_kgh, vapour1_kgh, vapour2_kgh, false_air1_kgh,
 
     e002 = vacuum_condenser_node(
         "324E002", streams["703"],
-        vacuum_inlet_kmolh("324E002", streams["703"], false_air1_kgh, R324_F001_FA_DES), p002,
+        vacuum_inlet_kmolh("324E002", streams["703"], false_air1_kgh, R324_F001_FA_DES, sub_703), p002,
         cw("324E002"))
     streams["719"], streams["706"] = e002["condensate_kgh"], e002["vent_kgh"]
     streams["708"] = streams["706"] + streams["924"]
@@ -8346,6 +8358,7 @@ def step_sim(dt: float) -> dict:
     m_319 *= seal_323505
     blow_323505_kgh = 0.0
     n_blow_323505 = 0.0                                                           # kmol/h into 323F010's vapour
+    y_blow_323505 = None                                                          # its mass fractions
     if seal_323505 < 1.0:
         _y_f004_gas = sol_vapour_y_vle("F004", s.w_f004, s.r323_f004_T, s.r323_f004_P, SOL_F004["alpha"])
         _mw_f004_gas = 1.0 / max(sum(v / MW_COMP[k] for k, v in _y_f004_gas.items() if v > 0.0), 1e-9)
@@ -8355,6 +8368,7 @@ def step_sim(dt: float) -> dict:
             consequence.gas_density_ideal(s.r323_f004_P, s.r323_f004_T, _mw_f004_gas),
             s.r323_f004_P, max(s.r323_f004_P - s.r323_f010_P, 0.0), seal_323505)
         n_blow_323505 = blow_323505_kgh / _mw_f004_gas
+        y_blow_323505 = _y_f004_gas
     s.flags["LV323505_BLOWTHROUGH"] = blow_323505_kgh > 0.0
     # ---- 323F004 -> 323F010 drain line (LV-323505): plug-flow transport of the CLOSED packet ----
     # Departure state is the pre-advance drum state, i.e. the state of the liquid actually leaving on
@@ -8530,6 +8544,11 @@ def step_sim(dt: float) -> dict:
     #  The flow the backward step actually passed, at the pressure it ended on -- this is what enters
     #  the 324E002 shell below, so the condenser sees the same stream 790 the separator lost.
     pull_f010 = hv323605_flow_kgh(s.HIC_323605, s.r323_f010_P, _p_e002, s.r323_f010_T, _mw_evap)
+    # The share of what HV-323605 passes that is LV-323505's blow-through gas, at that gas's own
+    # composition, for 324E002's inlet (323F010's vapour space mixes on a sub-second time constant).
+    sub_703 = None
+    if y_blow_323505 is not None and blow_323505_kgh > 0.0:
+        sub_703 = (pull_f010 * blow_323505_kgh / max(m_evap + blow_323505_kgh, 1e-9), y_blow_323505)
     y_evap     = sol_vapour_y_vle("F010", s.w_f010, s.r323_f010_T, s.r323_f010_P,
                                   SOL_F010["alpha"])   # AUDIT F-8 -> Phase 1 rigorous flash
     s.y_evap_f010 = y_evap                             # close the A-6 pressure tear
@@ -9688,7 +9707,7 @@ def step_sim(dt: float) -> dict:
         #  is now the inert gas plus the vapour it holds saturated at the cold end and the trial shell
         #  pressure (`vacuum_condenser`), with the cold-end temperature from the last full UA.LMTD
         #  solve -- it moves on the exchanger's thermal time scale, not on this iteration's.
-        _n703 = vacuum_inlet_kmolh("324E002", m703_fp, fa202_m, R324_F001_FA_DES)
+        _n703 = vacuum_inlet_kmolh("324E002", m703_fp, fa202_m, R324_F001_FA_DES, sub_703)
         _vv_f001 = hydraulics.vapour_volume_m3(R324_F001_VOL_M3, M_f001_pre, R324_F001_RHO_L)
 
         def _dpdt_f001(p):
@@ -9923,6 +9942,7 @@ def step_sim(dt: float) -> dict:
     _vac_mot927_in.set_state(mass_flow=mot927_m)
     _vac_mot929_in.set_state(mass_flow=mot929_m)
     _vac_unit.p_shell = {"324E002": s.r324_f001_P, "324E005": s.r324_f003_P}
+    _vac_unit.sub_703 = sub_703
     _vac_unit.solve()
     vac324 = _vac_unit.diagnostics
     #  Cold-end temperatures from this full UA.LMTD solve carry to the next tick's pressure loops.

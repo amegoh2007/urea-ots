@@ -77,6 +77,46 @@ def test_condensation_heat_is_per_species():
     assert "h_eff_kjkg" not in main.VACUUM_CONDENSERS["324E002"]
 
 
+def test_the_vent_ammonia_and_co2_ride_their_own_back_pressure():
+    """NH3 and CO2 used to follow water's saturation line on a fixed split.  The speciated
+    back-pressure over the PFD's own 324E002 condensate (719) at 45 C, with no anchor, lands on the
+    PFD 706 vent: p_NH3 0.054 against 0.059 bar, p_CO2 0.0085 against 0.013."""
+    import packed_absorber
+    w719 = {k: v / 100.0 for k, v in main.PFD_324_MASS_PCT["719"].items()}
+    p_nh3, p_co2 = (x / 1e5 for x in packed_absorber.back_pressure(w719, 45.0)[:2])
+    row = main.PFD_324_MASS_PCT["706"]
+    assert abs(p_nh3 / (row["NH3"] / 100.0 * 0.33) - 1.0) < 0.15
+    assert abs(p_co2 / (row["CO2"] / 100.0 * 0.33) - 1.0) < 0.40
+    assert "bp_des" in main.VACUUM_CONDENSER_SPECS["324E002"]
+
+
+def test_an_ammonia_rich_inlet_vents_more_ammonia_than_in_proportion():
+    """More NH3 in what 324E002 condenses raises the NH3 back-pressure over the condensate faster than
+    the NH3 itself, because less of it is bound to CO2: the vent carries it to the ejector."""
+    spec = main.VACUUM_CONDENSER_SPECS["324E002"]
+    base = main.vacuum_condenser_node("324E002", spec["inlet_kgh"], spec["n_in_des"], spec["p_des"])
+    rich = dict(spec["n_in_des"])
+    rich["NH3"] *= 1.3
+    loaded = main.vacuum_condenser_node("324E002", spec["inlet_kgh"], rich, spec["p_des"])
+    r_vent = loaded["vent_kmolh"]["NH3"] / base["vent_kmolh"]["NH3"]
+    assert r_vent > 1.3
+    assert loaded["vent_kgh"] > base["vent_kgh"]
+
+
+def test_the_324e002_inlet_swaps_in_a_known_composition():
+    """LV-323505's blow-through gas reaches 324E002 at its own composition, not the PFD row's."""
+    spec = main.VACUUM_CONDENSER_SPECS["324E002"]
+    fa = main.R324_F001_FA_DES
+    base = main.vacuum_inlet_kmolh("324E002", spec["inlet_kgh"], fa, fa)
+    assert main.vacuum_inlet_kmolh("324E002", spec["inlet_kgh"], fa, fa, (0.0, {"NH3": 1.0})) == base
+    y = {"NH3": 0.31, "CO2": 0.10, "H2O": 0.59}
+    swap = main.vacuum_inlet_kmolh("324E002", spec["inlet_kgh"], fa, fa, (1000.0, y))
+    assert swap["NH3"] > base["NH3"] + 10.0
+    assert swap["N2"] == base["N2"] and swap["O2"] == base["O2"]
+    m = lambda n: sum(n[k] * main.vacuum_condenser.MW[k] for k in main.vacuum_condenser.SPECIES)
+    assert abs(m(swap) - m(base)) < 1e-6 * m(base)                     # same mass, new composition
+
+
 def test_vacuum_train_pfd_nodes_close_exactly():
     train = main.vacuum_train_324(
         main.R323_MEVAP_DES,
