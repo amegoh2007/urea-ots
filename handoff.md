@@ -1162,6 +1162,19 @@ What landed, beyond the four algorithmic resolutions the reference asked for:
 
 Still open, and worth a decision:
 
+- **The licensor's own HP-vessel elevations are in `References/Datasheets/322E002 datasheet.pdf`
+  p.23** ("Liquid levels in HP-vessels"), found 2026-09-18 while scoping A-4. Ground level is 0.0 and
+  it gives the design liquid elevations of the whole HP loop: 322E002 **+21.20 m**, 322E003 **+16.65**,
+  322E001 **+13.20** (its bottom outlet +3.50), the HP ejector at **+10.00**, the reactor's bottom at
+  **+21.20** and its top gas line at **+50.0**. 322E002's own sketch (p.7) puts its support brackets at
+  EL +29.0, its liquid in a hemispherical bottom head (R 1 165 mm, ID 2 220) whose outlet N3 (DN 200,
+  219.1 x 14.2) sits at about +21.0, with the gas outlet N4 above it -- so the design pool is a few
+  tens of centimetres deep, not a tank. **This is the datum the A-1 / A-4 / D-1 hydraulic network
+  needs**, and it also says what A-12 and A-16 each found the hard way: these vessels are a U-tube
+  network, so a level term that does not also appear on the other side of its own connection is wrong.
+  A-4 in particular is not a one-vessel fix: the HPCC pool head (0-1.16 m, 0-0.11 bar) modulates a
+  drive of about 1 bar which the reactor's own 21 m column opposes, so it wants the network, not
+  another anchored departure.
 - **Time to trip is 3 h 50 min, and `C_loop` is the only number that sets it.** The ramp is
   `SYN_P_PHASE_GAIN * m_uncond / C_loop` less the boundary pushback; `SYN_LOOP_C_KG_PER_BAR` = 1500
   kg/bar dominates. That constant is calibrated to the *cold-start fill* (it sets the emergent FOPTD
