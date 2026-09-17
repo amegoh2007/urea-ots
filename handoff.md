@@ -323,7 +323,7 @@ ratio applied to the whole VOLATILE sub-vector before renormalisation, rather th
 would preserve the NH3/CO2 split of the flash while still anchoring the total. Worth measuring
 before assuming the per-species form is wrong.
 
-## 1e. Phase 2 — hydraulic network, CLOSED except the flashing letdowns
+## 1e. Phase 2 — hydraulic network, CLOSED
 
 `backend/hydraulics.py` carries the IEC 60534 / ISA-75.01 laws and the vapour-space pressure
 derivative. **A-6, D-1, D-2, D-8 and D-19/D-20/D-21 are closed.** Design seed bit-exact on every
@@ -341,15 +341,13 @@ failed to fit its own vessel** (322C001 was out by 69 % the other way) — the s
 check any `_M_TAU_S`-style holdup against the shell before using it as an A-6 basis has now paid
 twice.
 
-**Still open:**
-
-* **The three 328 bottoms valves are FLASHING services on a single-phase law.** All three carry
-  liquor at its own bubble point, so the physically correct Pv is the vessel pressure — and feeding
-  that to the single-phase choked limit collapses dP_eff to about 4 % of p1 and makes every one of
-  them a hard-choked orifice. They run with `pv = 0`, so the `FL^2.p1` ceiling applies the right
-  qualitative limit without claiming a two-phase capacity. Closing it properly needs the IEC 60534
-  two-phase sizing method, which does not exist in this repository. Same class of gap as the
-  D-19 letdown guards below.
+**The three 328 bottoms valves CLOSED (As-Built *Phase 5l*).** None is a flashing service: each sits
+after a cooler or on a pump discharge, so its inlet is subcooled and the IEC liquid choke with the
+liquor's own Pv at the inlet temperature is the right law. LV-328504 (749 at 148 C) flashes in its
+vena contracta and is choked at design. LV-328503 (746 at 190 C, Pv 14.97 bar a) chokes when
+the hydrolyser falls below ~15.4 bar a. LV-328505 keeps pv = 0: the model's p1 omits the 328P007
+head. **LV-322501 (report D-20) is the one genuine two-phase letdown left.** It lets 322E001 bottoms
+down 140.7 -> 4 bar straight off the sump.
 
 ### Three findings from this pass worth not re-deriving
 

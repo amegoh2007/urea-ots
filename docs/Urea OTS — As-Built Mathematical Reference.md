@@ -2921,6 +2921,81 @@ reports the same failing ids. `test_equation_audit_desorption` goes from 1 faile
 `test_cutting_the_lp_strip_steam_blows_the_ammonia_spec` now also asserts that AI-328701 rises with the
 slip, and it passes.
 
+## Phase 5l — the 328 level valves see their liquor's vapour pressure, and the boot pin sees every model file
+
+### The three 328 bottoms valves were not flashing services
+
+Phase 2 put LV-328503/504/505 on the IEC 60534 liquid law and passed `pv = 0`. The argument was that
+each one carries liquor at its vessel's bubble point, so a real Pv would collapse the choke to
+FL²·(1 − FF)·p1 (~4 % of p1) and turn them into orifices. It recorded "needs a two-phase method".
+The mapping (*Mapping of Desorber Hydrolyzer unit.md*) puts none of them on its vessel's bottom
+nozzle:
+
+| valve | stream at the inlet | inlet state | Pv at the inlet (liquor bubble pressure) | regime at design |
+|---|---|---|---|---|
+| LV-328503 | 746, 328E021 cold outlet on the 328P006 discharge | 190 C, 24.4 bar a | 14.97 bar a (water alone 12.55) | liquid: vena contracta 15.02 bar a |
+| LV-328504 | 749, 328E021 hot outlet | 148 C, 17.9 bar a | 5.06 bar a | **flashing, choked** (p2 = 3.7 < Pv) |
+| LV-328505 | 740, 328E007 outlet on the 328P007 discharge | 89 C | 0.68 bar a | liquid (kept at pv = 0, below) |
+
+Every inlet is subcooled liquid, so the IEC 60534-2-1 liquid equations are the right family. Leung's
+omega and HNE-DS are for a liquid already at saturation at the inlet. The fix is Pv at the valve
+inlet:
+
+```text
+W = W_des . [Cv(h) sqrt(dP_eff rho)] / [same at design]
+dP_eff = min(p1 - p2, FL^2 (p1 - FF Pv))          FF = 0.96 - 0.28 sqrt(Pv / 220.64)
+Pv = bubble_p(liquor, T_inlet)                      thermo_service, gamma-phi + SRK
+```
+
+* `hydraulics._phi_liquid` carries FF in full. The 0.96 intercept was its Pv << Pc limit, 8 % high at
+  15 bar a. At Pv = 0 the expression is the intercept exactly, so every existing site is bit-identical.
+* `valve_liquid_anchored` takes a separate `pv_des_bara`, so a live Pv does not cancel out of the
+  ratio.
+* `liquor_pv_bara` holds T inside the envelope (80.05–209.95 C). Beyond the edge it carries the result
+  along the water line, so the edge is continuous.
+* LV-328503 reads T_746 from the expression the hydrolyser stage writes, on this tick's pre-update
+  column temperatures. LV-328504 reads T_749 one tick old: 328C004 solves it later in the tick from
+  this valve's own flow.
+* LV-328505 keeps pv = 0. It cannot flash. The model's p1 is the column plus its head and omits the
+  328P007 head, so 0.68 bar against that p1 would put an artificial choke on it.
+
+LV-328504 is choked at its own design point, so 328C004's pressure no longer reaches it below
+p2 ≈ 7.2 bar a, and a hotter 749 flashes earlier and passes less. LV-328503 chokes when the hydrolyser
+falls to about 15.4 bar a. From the seed, with PIC-328203's setpoint −2 bar at 600 s, LIC-328503 holds
+the level with 46.1 % stroke against 44.4 % before, because the valve stops passing more as the
+hydrolyser falls. The design hold is identical to the previous tree over 3 600 s.
+
+That changes one recorded consequence. `test_cutting_the_lp_strip_steam_blows_the_ammonia_spec` read
+more than 100 ppm NH3 in stream 740 after a 30 % FIC-329401 cut. Part of that was LV-328504 following
+328C004's falling pressure and feeding it harder. Choked, the feed holds, and the cut reads **66.7 ppm**,
+13× the 5 ppm licence limit. The assertion now says what the test is for: > 20 ppm.
+
+### The boot-pin cache key did not cover the model
+
+`_PIN_SRC_FILES` hashed 11 files. The settle also steps through `hydraulics.py` (every valve and
+vessel law), `iapws_if97.py`, `machines.py`, `jet_pump.py`, `consequence.py`,
+`c003_pressure_coupling.py` and ten `core/` ports. Editing any of them left the key unchanged and
+restored constants settled by the old code, while the import reported a cache hit. All are added.
+`test_boot_pin_sources` walks `main.py`'s import closure with `ast` (no import, 0.5 s) and fails when
+a module is missing. `historian.py` is excluded because it samples the packet and never enters the
+settle.
+
+### td014 at the engine's own tick
+
+`test_equation_audit_td014._run` called `step_sim(1.0)`, four times STEP_CAP. It now sub-steps at
+STEP_CAP like td013_d002: 4 failed → 3 failed. `test_the_column_and_pre_evaporator_hold_their_setpoints`
+passes. The other three are real residuals of the model, not the harness: 323F010 drifting
+0.0014 pp/h, a 0.15 mpt steam-valve walk, and a stale `1.5 == 0.02` constant. The file now takes 21 min
+instead of 4.5.
+
+Against the Phase 5k tree, same processes: `test_hydraulics` 59 passed (three new: the full-FF choke,
+LV-328504 choked at design, LV-328503 liquid at design) and `test_boot_pin_sources` 2 passed.
+`test_c39_recycle_tears` goes from 2 failed to 1 (`test_c39_algebraic_vapour_tear_is_bounded_and_convergent`
+passes). `test_328d003_compartments`, `test_consequence_propagation`, `test_session_regression_gate`
+and `test_trend_coverage` are unchanged. `test_scenario_consequences` (a script) prints 13 PASS / 15 FAIL
+on both trees, same lines, one reading 0.518 against 0.517 bar a. `test_equation_audit_td014` is as
+recorded above.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

@@ -179,7 +179,11 @@ def test_cutting_the_lp_strip_steam_blows_the_ammonia_spec():
         ai.append(out["DESORB_328"]["C004"]["AI_328701"])
     assert ppm[0] < 1.5, f"on design the condensate must be on spec, got {ppm[0]:.2f} ppm"
     assert all(b > a for a, b in zip(ppm, ppm[1:])), f"slip must rise monotonically: {ppm}"
-    assert ppm[-1] > 100.0, f"a 30 % steam cut must blow the spec, got {ppm[-1]:.1f} ppm"
+    # The licence limit is 5 ppm NH3 (328 datasheet narrative).  A 30 % cut gave > 100 ppm while
+    # LV-328504 followed 328C004's falling pressure and fed it harder; the valve now flashes at its vena
+    # contracta and chokes on its own 749 vapour pressure (Phase 5l), so the feed holds and the cut
+    # reads ~67 ppm.  The assertion is about blowing the spec, not about one valve law's overshoot.
+    assert ppm[-1] > 20.0, f"a 30 % steam cut must blow the 5 ppm spec, got {ppm[-1]:.1f} ppm"
     # AI-328701 reads the same condensate.  It used to read a soft sensor at the design steam ratio
     # and stayed on its design value while the spec blew.
     assert all(b > a for a, b in zip(ai, ai[1:])), f"AI-328701 must follow the slip: {ai}"

@@ -434,6 +434,61 @@ def test_the_328p006_elevation_is_back_solved_from_the_pump_datasheet():
     assert main.R328_P006_Z_DROP_M > main.R328_C002_H_DES_M       # elevation dominates the level
 
 
+def test_the_liquid_choke_carries_ff_from_the_vapour_pressure():
+    """IEC 60534-2-1: FF = 0.96 - 0.28.sqrt(Pv/Pc).  The 0.96 intercept alone is its Pv << Pc limit,
+    8 % high on a 15 bar a liquor.  At Pv = 0 the choke is FL^2.p1 exactly as before."""
+    p1, pv, fl = 24.4, 15.0, hy.FL_GLOBE
+    ff = 0.96 - 0.28 * math.sqrt(pv / 220.64)
+    dp_choked = fl * fl * (p1 - ff * pv)
+    choked = hy._phi_liquid(0.5, p1, p1 - dp_choked - 1.0, 900.0, "linear", fl, pv)
+    assert choked == hy._phi_liquid(0.5, p1, p1 - dp_choked - 6.0, 900.0, "linear", fl, pv)
+    assert hy._phi_liquid(0.5, p1, p1 - dp_choked + 0.5, 900.0, "linear", fl, pv) < choked
+    assert hy._phi_liquid(0.5, p1, 20.0, 900.0, "linear", fl, 0.0) == 0.5 * math.sqrt((p1 - 20.0) * 900.0)
+
+
+def test_lv328504_flashes_at_its_vena_contracta_and_is_choked_at_design():
+    """Stream 749 reaches LV-328504 from the 328E021 hot side at 148 C, not from the 200 C hydrolyser
+    bottom: 12.9 bar subcooled at 17.9 bar a upstream, but 3.7 bar a downstream is below its 5.06 bar a
+    vapour pressure, so it flashes in the vena contracta and chokes.  328C004's pressure cannot reach
+    it; a hotter 749 flashes earlier and passes less."""
+    main = _main()
+    rho = main.R328_C003_RHO_746_KGM3
+    p1 = main.R328_C003_P_BARA + main.R328_C003_HEAD_DES
+
+    def f(p2, pv=None):
+        return hy.valve_liquid_anchored(
+            main.R328_C003_M747_DES, 0.5, p1, p2, rho, 0.5, p1, main.R328_C004_P_BARA, rho,
+            characteristic=main.R328_LV_CHAR,
+            pv_bara=main.R328_LV504_PV_DES if pv is None else pv, pv_des_bara=main.R328_LV504_PV_DES)
+
+    assert 4.9 < main.R328_LV504_PV_DES < 5.3, "749 liquor at 148 C, above water's 4.51 bar a"
+    assert f(main.R328_C004_P_BARA) == main.R328_C003_M747_DES
+    assert f(1.5) == f(main.R328_C004_P_BARA) == f(6.0), "choked: the receiving column is invisible"
+    assert f(8.0) < f(6.0), "above the choke point p2 still matters"
+    assert f(main.R328_C004_P_BARA, pv=6.0) < f(main.R328_C004_P_BARA)
+
+
+def test_lv328503_is_liquid_at_design_and_chokes_when_the_hydrolyser_falls():
+    """Stream 746 leaves 328E021 at 190 C on the 328P006 discharge.  Its bubble pressure is 14.97 bar a
+    (0.63 % NH3 over water's 12.55); the vena contracta at design sits just above that, at 15.0."""
+    main = _main()
+    rho = main.R328_C002_RHO
+    p1 = main.R328_LV503_P1_DES
+    assert 14.5 < main.R328_LV503_PV_DES < 15.5
+    p_vc = p1 - (p1 - main.R328_C003_P_BARA) / hy.FL_GLOBE ** 2
+    assert p_vc > main.R328_LV503_PV_DES, "liquid through the vena contracta at design"
+
+    def f(p2):
+        return hy.valve_liquid_anchored(
+            main.R328_C002_M743_DES, 0.5, p1, p2, rho, 0.5, p1, main.R328_C003_P_BARA, rho,
+            characteristic=main.R328_LV_CHAR,
+            pv_bara=main.R328_LV503_PV_DES, pv_des_bara=main.R328_LV503_PV_DES)
+
+    assert f(main.R328_C003_P_BARA) == main.R328_C002_M743_DES
+    assert f(16.0) > f(main.R328_C003_P_BARA), "unchoked at design: p2 moves it"
+    assert f(14.0) == f(10.0), "a hydrolyser 3 bar low flashes the feed and chokes it"
+
+
 def test_the_steam_letdowns_choke_instead_of_accelerating():
     """Report D-2.  Four of the eight 329 valves run above the critical pressure ratio at their own
     design point, and under the old incompressible sqrt(dP) law their flow kept climbing as the

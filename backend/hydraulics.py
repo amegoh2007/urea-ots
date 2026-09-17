@@ -57,8 +57,8 @@ _BAR_TO_PA = 1.0e5
 #  reference documents.  It is a stated assumption, applied uniformly, not a fitted constant: it
 #  sets only WHERE choking begins, and every site here runs well below that point at design.
 FL_GLOBE = 0.90
-FF_CONST = 0.96    # liquid critical pressure ratio factor, FF = 0.96 - 0.28.sqrt(Pv/Pc); the 0.96
-                   # intercept is used where Pv << Pc, which holds for every liquid service here.
+FF_CONST = 0.96    # intercept of the liquid critical pressure ratio factor FF = 0.96 - 0.28.sqrt(Pv/Pc)
+PC_WATER_BARA = 220.64   # IAPWS critical pressure: Pc of the aqueous liquors every liquid site carries
 
 #  Gas pressure-differential ratio factor at choking, same Table-1 basis and the same caveat.
 XT_GLOBE = 0.75
@@ -228,7 +228,10 @@ def _phi_liquid(h, p1, p2, rho, characteristic, fl, pv):
     dp = p1 - p2
     if frac <= 0.0 or dp <= 0.0 or rho <= 0.0:
         return 0.0
-    dp_choked = fl * fl * (p1 - FF_CONST * pv)
+    # IEC 60534-2-1 in full.  FF was held at its 0.96 intercept, which is only its Pv << Pc limit: a
+    # 190 C liquor at 15 bar a has FF = 0.887.  At pv = 0 the expression is the intercept exactly.
+    ff = FF_CONST - 0.28 * math.sqrt(max(pv, 0.0) / PC_WATER_BARA)
+    dp_choked = fl * fl * (p1 - ff * pv)
     dp_eff = min(dp, dp_choked) if dp_choked > 0.0 else dp
     return frac * math.sqrt(dp_eff * rho)
 
@@ -247,9 +250,14 @@ def _phi_gas(h, p1, p2, t1_k, mw, gamma, z, characteristic, xt):
 def valve_liquid_anchored(w_des_kgh: float, h: float, p1: float, p2: float, rho: float,
                           h_des: float, p1_des: float, p2_des: float, rho_des: float,
                           characteristic: str = "equal_pct", fl: float = FL_GLOBE,
-                          pv_bara: float = 0.0) -> float:
-    """IEC 60534 liquid flow, anchored on the licensor's design duty.  Bit-exact at design."""
-    ref = _phi_liquid(h_des, p1_des, p2_des, rho_des, characteristic, fl, pv_bara)
+                          pv_bara: float = 0.0, pv_des_bara: float = None) -> float:
+    """IEC 60534 liquid flow, anchored on the licensor's design duty.  Bit-exact at design.
+
+    `pv_bara` is the live vapour pressure of the liquid at the valve inlet and `pv_des_bara` its
+    design value (defaults to the live one).  Pass both wherever the inlet temperature or
+    composition can move, or the choke point cancels out of the ratio."""
+    pv_d = pv_bara if pv_des_bara is None else pv_des_bara
+    ref = _phi_liquid(h_des, p1_des, p2_des, rho_des, characteristic, fl, pv_d)
     if ref <= 0.0:
         return 0.0
     return w_des_kgh * (_phi_liquid(h, p1, p2, rho, characteristic, fl, pv_bara) / ref)

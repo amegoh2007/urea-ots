@@ -43,17 +43,21 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import main  # noqa: E402
 
-DT = 1.0
-
-
 def _fresh():
     main.state = main.State()
 
 
 def _run(seconds):
+    """Advance `seconds` of plant time in STEP_CAP-bounded sub-steps, the way `sim_task` does.
+
+    This called step_sim(1.0), four times the engine's maximum physical sub-step, so it graded the
+    harness's truncation error alongside the plant (the same fix test_equation_audit_td013_d002 took)."""
     out = None
-    for _ in range(int(seconds / DT)):
-        out = main.step_sim(DT)
+    remaining = float(seconds)
+    while remaining > 1e-9:
+        h = min(main.STEP_CAP, remaining)
+        out = main.step_sim(h)
+        remaining -= h
     return out
 
 

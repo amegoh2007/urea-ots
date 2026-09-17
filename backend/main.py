@@ -2008,14 +2008,21 @@ R328_C004_H_DES_M   = R328_C004_M_DES / (R328_C004_RHO * R328_C004_AREA_M2)     
 R328_C004_HEAD_DES  = R328_C004_RHO * 9.80665 * R328_C004_H_DES_M / 1.0e5            # 0.1148 bar
 R328_LV505_OP_DES   = 50.0                    # % LIC-328505 design stroke
 
-#  NO VAPOUR PRESSURE IS PASSED TO ANY OF THE THREE, and that is deliberate rather than an omission.
-#  All three carry liquor sitting at its own bubble point in the vessel above, so the physically
-#  correct Pv is the vessel pressure itself -- and feeding that to the single-phase choked limit
-#  collapses dP_eff to FL^2.(1 - FF).p1, about 4 % of p1, turning every one of them into a
-#  hard-choked orifice.  These are FLASHING services; sizing them properly needs the IEC 60534
-#  two-phase method, which this repository does not have.  With pv = 0 the FL^2.p1 ceiling still
-#  applies the right qualitative limit (flow stops responding once p2 falls far enough) without
-#  pretending to a two-phase capacity the model cannot compute.  Left as a stated gap, not hidden.
+#  VAPOUR PRESSURE AT THE VALVE INLET.  These were all run with pv = 0 on the argument that each carries
+#  liquor at its vessel's bubble point, so that the IEC choke would collapse to FL^2.(1 - FF).p1.  The
+#  mapping says otherwise: no valve sits on its vessel's bottom nozzle.
+#    LV-328503  stream 746, after 328E021 (190 C) on the 328P006 discharge (24.4 bar a).
+#               Pv = 14.97 bar a (liquor bubble pressure; NH3 lifts it 2.4 bar over water).  At design
+#               the vena contracta sits at 15.0 bar a, so the valve is 7 % short of flashing.
+#    LV-328504  stream 749, after the 328E021 hot side (148 C).  Pv = 5.06 bar a against 17.9 bar a
+#               upstream and 3.7 downstream: it FLASHES at the vena contracta and is choked at its
+#               own design point, so 328C004's pressure does not reach it.
+#    LV-328505  stream 740, after 328E007 (89 C) on the 328P007 discharge.  Pv = 0.68 bar a.  It
+#               cannot flash, and the model's p1 omits the pump head, so it keeps pv = 0: feeding
+#               0.68 bar against a pumpless p1 would put an artificial choke on it.
+#  Each is the IEC 60534-2-1 liquid law with the liquor's live Pv at its inlet temperature and FF from
+#  that Pv.  The IEC equations are the right family here: the inlet is subcooled liquid in every case.
+#  The two-phase sizing methods (Leung's omega, HNE-DS) are for a liquid AT saturation at the inlet.
 
 
 # ==========================================================================
@@ -3067,6 +3074,27 @@ def des_rel_vol_ratio(key: str, w: dict, t_c: float, p_bara: float,
     kr = thermo_service.k_ratio(w, t_eval, p_bara, t_ref_c, p_ref_bara, species=R328_KR_SPECIES)
     DES_VLE_DOMAIN[key] = thermo_service.classify(w, t_eval, p_bara)
     return {k: kr[k] / kr["H2O"] for k in R328_DES_VOLATILE}
+
+
+def liquor_pv_bara(w: dict, t_c: float) -> float:
+    """Vapour pressure a 328 liquor carries into its level valve (Pv of the IEC 60534 choke).
+
+    The liquor's own bubble pressure (`thermo_service.bubble_p`, gamma-phi with SRK), not water's:
+    0.63 % NH3 lifts stream 746 from 12.55 to 14.97 bar a at 190 C.  T is held inside the envelope
+    and the result carried along the water line beyond it, so the edge is continuous."""
+    t_eval = min(max(t_c, R328_KR_T_LO_C), R328_KR_T_HI_C)
+    try:
+        pb = thermo_service.bubble_p(w, t_eval)
+    except (thermo_service.OutOfDomain, ValueError, ZeroDivisionError):
+        return psat_water_bara(t_c)
+    return pb if t_eval == t_c else pb * psat_water_bara(t_c) / psat_water_bara(t_eval)
+
+
+#  Design Pv of the two liquors that can reach their vapour pressure in the valve, at the design inlet
+#  temperature written in the runtime's own operand order (T_746 is 328E021's cold outlet expression).
+R328_LV503_T_IN_DES = R328_C002_T_BOT_BOT + R328_E021_EPS_T * (R328_C003_T - R328_C002_T_BOT_BOT)
+R328_LV503_PV_DES   = liquor_pv_bara(W_S743, R328_LV503_T_IN_DES)          # 14.97 bar a
+R328_LV504_PV_DES   = liquor_pv_bara(W_S747, R328_C004_T749)                # 5.06 bar a
 
 
 def des_alpha_live(key: str, T_c: float, m_vap: float, m_liq: float,
@@ -8759,10 +8787,15 @@ def step_sim(dt: float) -> dict:
     _p1_503  = (s.a328_c002_P
                 + R328_C002_RHO * 9.80665 * (_h_c002 + R328_P006_Z_DROP_M) / 1.0e5
                 + R328_P006_DP_PUMP_BAR)
+    # Pv at the valve inlet: stream 746 leaves the 328E021 cold side at T_746 (the same expression the
+    # hydrolyser stage writes, on this tick's pre-update column temperatures).
+    _t746_in = s.a328_c002_T + R328_E021_EPS_T * (s.a328_c003_T - s.a328_c002_T)
     m_743    = hydraulics.valve_liquid_anchored(
         R328_C002_M743_DES, lic503_op / 100.0, _p1_503, s.a328_c003_P, R328_C002_RHO,
         R328_LV503_OP_DES / 100.0, R328_LV503_P1_DES, R328_C003_P_BARA, R328_C002_RHO,
-        characteristic=R328_LV_CHAR)                                      # bottoms -> hydrolyser
+        characteristic=R328_LV_CHAR,
+        pv_bara=liquor_pv_bara(s.w_328c002, _t746_in),
+        pv_des_bara=R328_LV503_PV_DES)                                    # bottoms -> hydrolyser
     sens_c002= ((m_738*(T_738 - Tc002)                                    # AUDIT C10: live 328E007 outlet
                  + m775_prev*(R328_D001_T   - Tc002)
                  + m748_prev*(R328_C002_T_BOT748 - Tc002)
@@ -8882,10 +8915,14 @@ def step_sim(dt: float) -> dict:
     # live head genuinely drive it -- none of which the position gain carried.
     _h_c003  = s.a328_c003_M / (R328_C003_RHO_746_KGM3 * R328_C003_AREA_M2)   # live depth, m
     _p1_504  = s.a328_c003_P + R328_C003_RHO_746_KGM3 * 9.80665 * _h_c003 / 1.0e5
+    # Pv at the valve inlet: stream 749 leaves the 328E021 hot side at T_749, which the 328C004 stage
+    # solves later in the tick from this valve's own flow -- so it is last tick's value.
     m_747    = hydraulics.valve_liquid_anchored(
         R328_C003_M747_DES, lic504_op / 100.0, _p1_504, s.a328_c004_P, R328_C003_RHO_746_KGM3,
         R328_LV504_OP_DES / 100.0, R328_C003_P_BARA + R328_C003_HEAD_DES, R328_C004_P_BARA,
-        R328_C003_RHO_746_KGM3, characteristic=R328_LV_CHAR)              # bottoms -> desorber-II
+        R328_C003_RHO_746_KGM3, characteristic=R328_LV_CHAR,
+        pv_bara=liquor_pv_bara(s.w_328c003, s.tlag.get("T_749", R328_C004_T749)),
+        pv_des_bara=R328_LV504_PV_DES)                                    # bottoms -> desorber-II
     # AUDIT F-7: urea slipping through unreacted -> AI-328701.  A MASS-BALANCE result now, not the
     # read-only ppm_infer_328701 soft sensor running alongside an unrelated split fraction.
     ppm_urea_747 = urea_in_328 * (1.0 - x_hyd_328) / max(m_747, 1e-6) * 1e6
@@ -8951,6 +8988,7 @@ def step_sim(dt: float) -> dict:
     #   counter-current interchanger cannot cool the hot stream past the cold-side inlet (pinch).
     T749_raw = Tc003 - (m_746*(T_746 - s.a328_c002_T) + R328_E021_LOSS_DT) / max(m_749, 1e-6)
     T_749    = min(max(T749_raw, min(s.a328_c002_T, Tc003)), max(s.a328_c002_T, Tc003))
+    s.tlag["T_749"] = T_749                              # LV-328504's inlet Pv, next tick
     # FFIC-329401 ratio master, T/M3 (the DCS basis).  The feed measurement is the FIC-328402
     # wash leg (m_744 into 323E003), NOT the 328C002 m_738 term, and it is read VOLUMETRICALLY
     # because that loop is now m3/h -- so on CAS the FIC-329401 slave SP is FIC-328402 * ratio
@@ -12102,6 +12140,15 @@ _PIN_SRC_FILES  = (
     "vacuum_condenser.py", "gap_g6_h0_enthalpy.py",
     #  HV-322604's outlet temperature (report D-4) feeds 322C001, whose design constants are pinned.
     "real_gas.py",
+    #  Everything else the settle steps through.  These were missing, so an edit to the valve and
+    #  vessel laws, the IF97 water line, the machine maps, the jet pump, the transport physics or the
+    #  SM unit ports left the key unchanged and restored constants settled by the OLD code.
+    #  `test_boot_pin_sources` walks main's import closure and fails when a module is left out.
+    "hydraulics.py", "iapws_if97.py", "machines.py", "jet_pump.py", "consequence.py",
+    "c003_pressure_coupling.py",
+    "core/thermo.py", "core/unit.py", "core/stream.py", "core/flowsheet.py", "core/ejector.py",
+    "core/stripper.py", "core/hpcc.py", "core/scrubber.py", "core/reactor.py", "core/valve.py",
+    "core/vacuum.py",
 )
 
 
