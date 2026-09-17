@@ -51,6 +51,17 @@ import hydraulics                    # PHASE 2 report D-2: ISA-75.01 compressibl
 from iapws_if97 import tsat_c, v_vapour_sat_m3kg   # shared pure-water saturation line + sat vapour v
 from iapws_if97 import rho_liquid_sat_kgm3          # saturated condensate density at a drum's own P
 
+P_TRIPLE_BARA = 0.00611657                          # water triple point: IF97's saturation line starts here
+
+
+def _rho_drum_liquid(p_bara: float) -> float:
+    """Saturated condensate density at a drum pressure, held at the triple point below it.
+
+    A tripped plant can pull a header under 6.1 mbar a (test_ccw_loss_chain's post-trip leg does),
+    where there is no saturated liquid for IF97 to describe and `psat` raises OutOfRange.  The
+    drum's water is then subcooled at ~1000 kg/m3, which the triple-point value (999.8) is."""
+    return rho_liquid_sat_kgm3(tsat_c(max(p_bara, P_TRIPLE_BARA)))
+
 # ---------------------------------------------------------------- saturated-steam enthalpies (kJ/kg)
 #   Standard IAPWS/IF97 saturation table (sourced), used only for let-down desuperheat trims.
 H_G_SUP = 2801.0    # h_g, 25 bar a supply steam (stream 901)
@@ -480,7 +491,7 @@ def step_steam(state: SteamState, dt: float,
         state.lic502_mode, state.lic502_sp, state.lic502_lvl, state.lic502_op, state.lic502_ep,
         dt, MSPAN_502, M_502_DES, direct=True, m_ext=m_strip_consume, valve_out=True,
         p_up=state.P_MP, p_dn=state.P_9, p_up_des=P_HP_BARA, p_dn_des=P_MP_BARA,
-        rho=rho_liquid_sat_kgm3(tsat_c(max(state.P_MP, 1e-6))),
+        rho=_rho_drum_liquid(state.P_MP),
         rho_des=rho_liquid_sat_kgm3(tsat_c(P_HP_BARA)))
     m_flash9 = FLASH9_FRACTION * m_lv502
 
@@ -652,7 +663,7 @@ def step_steam(state: SteamState, dt: float,
         state.lic503_mode, state.lic503_sp, state.lic503_lvl, state.lic503_op, state.lic503_ep,
         dt, MSPAN_503, M_503_DES, direct=True, m_ext=m_lv502 - m_flash9, valve_out=True,
         p_up=state.P_9, p_dn=state.P_LP, p_up_des=P_MP_BARA, p_dn_des=P_LP_BARA,
-        rho=rho_liquid_sat_kgm3(tsat_c(max(state.P_9, 1e-6))),
+        rho=_rho_drum_liquid(state.P_9),
         rho_des=rho_liquid_sat_kgm3(tsat_c(P_MP_BARA)))
     state.lic504_lvl, state.lic504_op, state.lic504_ep, m_lv504 = _level_loop(
         state.lic504_mode, state.lic504_sp, state.lic504_lvl, state.lic504_op, state.lic504_ep,

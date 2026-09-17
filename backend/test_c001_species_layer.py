@@ -18,8 +18,6 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import pytest  # noqa: E402
-
 import main  # noqa: E402
 
 DT = 0.25
@@ -84,9 +82,6 @@ def test_vent_carries_a_live_nh3_slip():
     assert c["vent_nh3_pct"] + c["vent_co2_pct"] < 100.0                          # inerts take the balance
 
 
-@pytest.mark.xfail(strict=True, reason="Report A-2: the 322C001 design slip is PFD 797's 1.9 kg/h, the ~2 % "
-                   "residual of a fixed-fraction uptake (A328_PHI_ABS); on a throttle it follows the "
-                   "upstream vent composition, not the throughput.  Needs an absorber law -- handoff.")
 def test_vent_nh3_slip_tracks_offgas_throughput():
     """Open HV-322604 -> more inert-purge off-gas -> more NH3 slip; throttle it -> less.  This is the
     live behaviour the boot-pinned scalar could not express."""
@@ -99,6 +94,8 @@ def test_vent_nh3_slip_tracks_offgas_throughput():
     _run(600.0)
     dn = _c001()["vent_nh3_kgh"]
     #  Report A-2: on PFD 204 the design slip is PFD 797's 1.9 kg/h, not the ~1557 kg/h of the
-    #  NH3-rich Path-B vent, so the direction is asserted as a fraction of it.
+    #  NH3-rich Path-B vent, so the direction is asserted as a fraction of it.  It is a ~2 % residual of
+    #  a fixed-fraction uptake, so it only resolves the throughput once the upstream vent composition
+    #  holds still -- which it did not until the 328 reflux period-2 oscillation was damped (Phase 5j).
     assert up > base * 1.10, (base, up)                                           # open -> slip rises
     assert dn < base * 0.95, (base, dn)                                           # throttle -> slip falls

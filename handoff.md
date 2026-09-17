@@ -1,22 +1,65 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, A-13, B-9, B-13, D-11, D-12, D-14, D-15, D-16, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; D-4 is ready but blocked behind A-2 step 1)
+**Last updated:** 2026-09-16 (A-6, A-7, A-11, A-17, A-13, B-2, B-9, B-13, D-4, D-11, D-12, D-14, D-15, D-16, E-2, MSPAN_504, the thermo-memo path dependence and the 323F010 urea carryover closed; A-2 step 1 closed, A-2 now PARTIAL)
 
 ---
 
 ## 0. Heuristic Eradication Report — open after the 2026-09-15 re-audit
 
 `docs/analysis/HEURISTIC_ERADICATION_REPORT.md` §0a is now the authoritative per-finding status:
-19 closed, 10 partial, 2 blocked, 2 reclassified, 40 open. The original body still carries
+34 closed, 8 partial, 0 blocked, 2 reclassified, 29 open. The original body still carries
 pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical copy sits in
 `References/Gaps Closure/`.
 
-* **A-2: do NOT delete `SYN_LOOP_RESID_DES_KGH` on its own.** A previous session did. Measured:
-  PT-329201 140.700 → 139.477 bar a in 2 750 s (−1.45 bar/h = R_des/C_loop). The credit mirrors
-  `REACT_TEAR_DES`, applied as `fc = feed − tear·s` in `react_322r001`, which injects +2 085.7 kg/h;
-  that is 96.2 % of the −2 168.2 kg/h. Its CH4/H2 are exactly the vent vector's, and no feed carries
-  them. The remaining 82.5 kg/h is unlocated. Closure order: re-reconcile the 322E003 vent on its PFD
-  row (1 708 kg/h, not 5 901.4), re-pin until the tear is ≡ 0, then delete the credit.
+* **A-2 is PARTIAL: step 1 closed (As-Built *Phase 5i*), and every kg of the remaining tear is placed.**
+  The 322E003 vent is its inerts saturated at PFD 204 (1 708.3 kg/h), the overflow is PFD 206, and
+  the motive carries PFD 116's CH4/H2/N2/H2O. `REACT_TEAR_DES` is now +2 107.5 kg/h: the motive's
+  surplus over PFD 116 (NH3 117.5 kmol/h, 2 004 kg/h -- the plant basis, 42 762 against 40 756 kg/h),
+  the stripper top's 127 kg/h over PFD 201, and 4.6 kmol/h of mass-neutral urea-extent bookkeeping.
+  The credit is +2 024.9 kg/h; its 82.6 kg/h gap to the tear is the scrubber washing with PFD 308
+  (36 915) while the boundary counts the 323E003 draw (36 835.2), plus 2.7 kg/h of rounding. **Still
+  do not delete the credit on its own** (measured before A-2: PT-329201 -1.45 bar/h). The surplus has
+  no exit: the vent is saturation-limited, and the 323 section rides LV-322501 bottoms MASS at the
+  PFD 208 composition, so a bottoms stream carrying 2 t/h of NH3 would reach it as 1.5 % more of
+  everything. Closing the tear takes either a composition-live 323 feed or the PFD 116 motive (the
+  user chose the plant basis on 2026-09-16, so the first).
+* **322C001 needs an absorber law.** Its uptake is the boot-pinned `A328_PHI_ABS` fraction of the
+  off-gas mass, split on PFD 204 - 797 (NH3 89.3 / CO2 62.0 / H2O -21.3 kg/h). On the PFD 204 vent
+  the design slip is PFD 797's 1.9 kg/h, a ~2 % residual of two proportional terms, so a 1 % shift in
+  the upstream vent composition swings it by half; its throttle-direction test passes only because
+  that composition now holds still (Phase 5j). A saturated-inert vent (the 322E003 / 323C005 law) was written, measured
+  and reverted: under the fixed-fraction scalar a cooler column breaks NH3 through, and letting the
+  species set the scalar leaves no capacity for the CCW-failure breakthrough to SV-32253. The
+  datasheet (UD-AU-322-EC-0007) gives beds of 1.0 m (ID 576) and 1.5 m (ID 922) of 25 mm Pall rings
+  but no theoretical stages, so a Kremser form needs an HETP from somewhere.
+* **PFD 797's mass flow is a typo, and the engine uses it.** The row prints 1 758 kg/h, but 59.32 kmol/h
+  x MW 26.6 = 1 578, which is also 1 708 (PFD 204) - 130 (the 322C001 uptake). `R3232_M797_DES = 1758.0`
+  feeds 323E003's inlet, so the LPCC balance carries a 180 kg/h phantom. Moving it re-anchors 323E003.
+* **Smaller A-2 leftovers.** (1) `REACT_XI_UREA_DES` 1 302.27 is net of biuret, while the reactor's
+  stoichiometry subtracts biuret again; PFD 205 -> 207 imply a gross 1 306.9 (the 4.6 kmol/h above).
+  (2) SV-32201's relieved NH3 fraction and its API 520 MW are read off the 322E003 vent vector, which
+  is now 5 % NH3 by mass; the PSV taps the loop's vapour space, which the reactor off-gas represents
+  better. (3) `SCRUB_HV604_GAMMA` 1.30 was chosen for an NH3-rich gas; the PFD 204 vent is nearer 1.38
+  (choked either way). (4) `reactor.L0_DES` 3.072961 is neither PFD 202+205 (3.031) nor the live
+  seed (3.079); it only anchors `L_fresh`, so it was left.
+* **The PT-329201 design bleed is closed (As-Built *Phase 5j*), and what it leaves.** It was a
+  period-2 oscillation: TT-328008 was built from the previous tick's m_775 and TIC-328008 sets m_775
+  off it, a one-tick loop with gain ~2.7 that railed the master at 4 000 kg/h and drained 328D001 ->
+  m_776 -> 323D001 -> m_308 -> PT-329201 (-0.26 bar in 3 300 s on HEAD). The reflux term now lags on
+  328C002's liquid residence; the hold is 140.7015 bar a at 3 300 s. Left: (1) a +1.4 mbar residual
+  over 3 000 s at dt 0.1, just outside `test_ccw_loss_chain`'s 1 mbar gate. (2) `dt_top_dynamic =
+  10 + 12 . reflux/design` is itself a correlation (the 10 C floor and the linearity are unsourced).
+  (3) TIC-328008's Kc 240 / Ti 110 were tuned "heavily over-damped in an isolated step" without that
+  coupling; with the lag it closes near critical damping, so re-check it against the DCS before any
+  retune.
+* **`test_ccw_loss_chain` now runs end to end: 37 of 41 checks.** Three crash sites on the CCW-loss
+  path were fixed (stripper-bottoms composition, the D-16 drum density below the triple point, the
+  Raoult bubble point past water's critical pressure). Remaining GAPs: the +1.4 mbar hold above;
+  "per-pass conversion falls" reads X_conv on the single tick the trip latches, which gave 57.1 %
+  at N/C 86 (an earlier run latched 12 600 s later and read 0 %) -- the check samples an instant, not
+  a trend; "feed cut arrests the excursion" (PT 154.7 -> 156.3 after the ESD); and "venting relieves
+  the synthesis pressure" (141.7 -> 142.8 with HV-322604 at 100 %, whose seat caps at ~11.7 t/h
+  against ~13 t/h retained).
 * **A-5 leaves a real authority finding.** PV-329212 peaks at 99.7 % on a +1 °C TIC-324002 step
   (HEAD: 92 %). With a physical chest, 324E003's 90 % design stroke has almost no headroom. Check
   against the DCS before tuning around it. A dynamic chest inventory is blocked: the four exchanger
@@ -65,24 +108,6 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   inventory -- and A-16 (323C005 bottoms linear in holdup) is untouched: 343 gravity-drains to the
   328V001 base, whose N1 overflow fixes the downstream head, and no source gives the elevation
   difference that would set the drain law.
-* **D-4 is ready and BLOCKED on A-2 step 1.** An SRK isenthalpic letdown for HV-322604
-  (h_ig from `gap_g6_h0_enthalpy` + SRK residual enthalpy from `props_nh3co2h2o`'s cubic, k_ij = 0,
-  Illinois solve, 0.1 ms) gives 94.8 C at the 322C001 inlet on PFD 204's composition (69 mol% N2;
-  mean 0.14 K/bar; pure N2 from 100 C, 100 -> 1 bar checks at 0.088 K/bar). But the engine's design
-  off-gas `SCRUB_OFFGAS_KMOLH_DES` is 214.8 kmol/h at 44 % NH3 / 29 % CO2 / 21 % N2 -- the 5 901 kg/h
-  vent A-2 says must be re-reconciled to PFD 204's 1 708 -- and on THAT gas the letdown gives 17.9 C
-  (0.70 K/bar) and trips CARBAMATE_DEPOSITION (< 20 C) at the design state. Wire the letdown into
-  `hv_322604` and `core/valve.py` only after the off-gas matches PFD 204. The module was not committed.
-* **A-2 step 1, narrowed (2026-09-16).** 322E003's two INPUTS already sit exactly on their PFD rows:
-  the reactor off-gas `REACT_OFFGAS_DES` is PFD 203 (NH3 665.73 / CO2 197.69 / H2O 42.51 / N2 44.53
-  kmol/h) and the wash `SCRUB_CARB_KMOLH_DES` is PFD 308. On the PFD rows the scrubber closes per
-  component to 0.2 kmol/h (NH3 1 329.2 in / 1 329.4 out). The whole 4 193 kg/h vent excess is the
-  OVERFLOW: `_EJ_OVERFLOW_KMOLH` carries NH3 1 234.47 / CO2 458.36 against PFD 206's 1 324.0 / 519.1,
-  short by 89.5 / 60.7 kmol/h -- exactly the NH3 94.76 - 5.35 and CO2 62.18 - 1.44 the vent over-carries.
-  Path B lowered that overflow to close the 322F001 -> 322E002 -> 322R001 chain against the engine's
-  own stripper-top vector with the motive re-pinned to N/C 2.0 (`tests/audit_f001_ejector.py`), so
-  step 1 is not "set the vent to PFD 204": it is "put the overflow back on PFD 206 and re-close that
-  chain on PFD 202 / 205 / 217", after which the motive can return to 40 756 and the credit can go.
 * **A-14's offsets hide a real mass gap, not a relabelling.** The engine's own design vapour flows are
   705 = 14 094 kg/h (V1_DES + false air) against PFD 14 799, 709 = 2 759 against 3 342, 703 = 26 107
   against 26 840. The PFD's 317 -> 401 melt rows lose 655 kg/h of urea where entrainment into 705
@@ -187,13 +212,12 @@ is the single most important thing to carry forward. Full derivation in the As-B
   uninformative. Judge these changes on a transient — `test_3_scrubber_heat` is the cheapest one
   that discriminates (~10 min from a cold pin).
 
-* **The scrubber re-partition must stay composition-only.** `offgas` is the only one of these
-  streams that leaves the HP loop (HV-322604 → 322C001). Letting a K-ratio move the vented *total*
-  closes a positive feedback through loop inventory (higher P → lower K → less vented → more
-  retained → higher P), measured at −0.41 % of vent per bar — weak per tick and it integrates. The
-  vent rate belongs to HV-322604 and the pressure controller, and a real valve passes more at higher
-  upstream pressure, the opposite sign to an equilibrium K.
-
+* **The 322E003 vent total now follows its inerts (As-Built *Phase 5i*), not a renormalised pin.**
+  The positive feedback that forced composition-only (higher P -> lower K -> less vented -> more
+  retained -> higher P, -24.2 kg/h per bar on the old NH3-rich vent) was re-measured on the
+  saturated-inert law: -0.072 % of vent per bar, -1.1 kg/h per bar, against HV-322604's choked
+  +12.1 kg/h per bar. If the vent ever becomes condensable-rich again (a CCW failure does it), the
+  K-ratio share grows with it.
 * **The stripper lost ~8.6× of its pressure damping** (−0.081 %/bar on the design NH3 split against
   `eta_P`'s −0.694 %/bar). The new number is right for an *equilibrium* split fraction — at φ = 0.85
   saturation compresses the response, and the old law applied the full −0.69 % onto φ regardless,

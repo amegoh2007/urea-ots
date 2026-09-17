@@ -2479,7 +2479,11 @@ def bubble_T_raoult(P_bara: float, w: dict) -> float:
     the bubble point and Raoult-on-water overshoots by 33 °C and 16 °C respectively.  Those two
     stages keep the frozen-offset form anchored on _R323_TSAT_C003_DES / _R323_TSAT_F004_DES.
     """
-    return tsat_steam(P_bara / max(x_water_mol(w), 1e-6))
+    #  A liquor with almost no water left (a total CCW loss drives 323C003 there once the stripper
+    #  stops making bottoms) asks for Tsat at P/x ~ 1e6 bar, and IF97 raises above its 220.64 bar
+    #  critical pressure.  There is no boiling liquid past that point, so the bubble temperature is
+    #  held at the critical one; any stage with water in it is unchanged.
+    return tsat_steam(min(P_bara / max(x_water_mol(w), 1e-6), iapws_if97.P_CRIT_MPA * 10.0))
 
 
 # TD-014 design bubble-point anchors.  Each is the value the DEPARTURE is measured from, so at the
@@ -5526,7 +5530,7 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
                   hic604_pct: float = None,
                   liq_carry_kmolh: dict = None, t_carry_c: float = None,
                   choke_level_pct: float = None, spindle_phi: float = 1.0,
-                  cool_frac: float = 1.0) -> dict:
+                  cool_frac: float = 1.0, wash_ratio: float = None) -> dict:
     """322E003 HP scrubber — saturated-inert vent, overflow by difference (report A-2).
     Tube feeds: live reactor off-gas (offgas_feed kmol/h, 322R001 -> TT-322009) + weak carbamate
     wash (323P001 A/B design vector × s).  Discharges:
@@ -5540,7 +5544,14 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     With ṁ_ccw constant the sensible-heat balance then lifts TT-329125 proportionally:
         TT-329125 = t_ccw_in + Q_scrubber/(ṁ_ccw·cp).  vent_ratio defaults to 1.0 (design-exact)."""
     s = co2_scale
-    carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * s for k in MW_COMP}      # 323P001 A/B wash
+    #  The wash is what 323P001 A/B delivers.  `wash_ratio` is the live m_308 over its design (the
+    #  loop boundary's own term, one tick old because the 323 section is solved after this unit);
+    #  unit-level callers that omit it keep the old CO2-throughput scaling.  Before this the wash was
+    #  the design vector x s whatever the pump did, so a 787 kg/h sag in m_308 (the LIC-323502 ->
+    #  SIC-323901 cascade transient a design hold carries) left the loop boundary short while the
+    #  scrubber still condensed the design wash into the ejector suction.
+    _wash = s if wash_ratio is None else wash_ratio
+    carb     = {k: SCRUB_CARB_KMOLH_DES.get(k, 0.0) * _wash for k in MW_COMP}  # 323P001 A/B wash
     feed     = {k: offgas_feed.get(k, 0.0) + carb[k] for k in MW_COMP}         # combined tube feed
     # --- Report A-2: the vent is the inerts, saturated at the cold top (see `scrub_vent_kmolh`) --------
     # Every inert in the tube feed leaves with the vent, carrying the condensables' equilibrium vapour;
@@ -5554,9 +5565,9 @@ def scrub_322e003(offgas_feed: dict, co2_scale: float, t_ccw_in: float,
     # 20*theta_dev` (report A-10), and feeding a fitted gain into a rigorous K-ratio measured badly
     # (322C001 liquor stationarity 8.1e-9 -> 3.7e-4 under G-VLE-3).  PT-329201 is a measurement.
     #  The vented TOTAL now moves with the inerts, not with the ratio: the condensables are ~11 mol %
-    #  of the vent, so the K-ratio's pressure feedback on the loop inventory is ~1/40 of the -0.41 %
-    #  of vent per bar that forced the old renormalisation, and HV-322604's choked law (flow rises
-    #  with upstream pressure) dominates it with the stabilising sign.
+    #  of the vent, and the K-ratio's pressure feedback on the loop inventory measures -0.072 % of
+    #  vent per bar (-1.1 kg/h/bar) against the -24.2 kg/h/bar that forced the old renormalisation.
+    #  HV-322604's choked law (+12.1 kg/h/bar, flow rises with upstream pressure) dominates it.
     #  At design the ratio is exactly 1.0 and the feed is SCRUB_FEED_KMOLH_DES, so the vent and the
     #  overflow are SCRUB_OFFGAS_KMOLH_DES / SCRUB_OVERFLOW_KMOLH_DES to the last bit.
     _sc_ratio = _hp_k_ratio(feed, SCRUB_OFFGAS_T_C, state.p_syn_bara,
@@ -7962,7 +7973,8 @@ def step_sim(dt: float) -> dict:
                           hic604_pct=s.HIC_322604,
                           liq_carry_kmolh=react_carry_kmolh, t_carry_c=s.react_T_overflow,
                           choke_level_pct=s.scrub_level_pct, spindle_phi=_phi_sp_theta,
-                          cool_frac=rho_cond)
+                          cool_frac=rho_cond,
+                          wash_ratio=s.tlag.get("M308_KGH", R3232_E003_M308_DES) / R3232_E003_M308_DES)
     # PT-329201 vapour differentiation: NH3 + H2O overhead are CONDENSABLE solvents (absorbed into
     # carbamate/condensate, NOT pressure-building); only ACID CO2 unpaired by NH3 (free CO2 =
     # CO2 - NH3/2, from 2 NH3 + CO2 -> carbamate) plus NH3 that exceeds condensation capacity
@@ -8110,7 +8122,12 @@ def step_sim(dt: float) -> dict:
     # rho*V/m_dot, so a stripper split change can no longer reach 323C003 within the same tick.
     m_dep_323  = max(drain_kgh, 0.0)                       # live 322E001 bottoms leaving (kg/h)
     T_dep_323  = TT_323001                                 # C, post-LV-322501 flash
-    w_dep_323  = _w_norm({k: strip["bot_mass_pct"].get(k, 0.0) for k in SOL_SPECIES})
+    #  A stripper that has stopped producing bottoms (a total 322E003 CCW loss takes the loop there)
+    #  returns an all-zero composition while LV-322501 can still drain the sump's inventory.  The
+    #  departure then needs A composition, and the sump holds bottoms liquor, so the PFD 208 row is the
+    #  honest placeholder -- the same `fallback` the five transport arrivals use.  It raised
+    #  ZeroDivisionError in test_ccw_loss_chain Phase 2 on 726e098 and after.
+    w_dep_323  = _w_norm({k: strip["bot_mass_pct"].get(k, 0.0) for k in SOL_SPECIES}, W_S208)
     _pkt_dep_323 = _cq_packet(m_dep_323, T_dep_323, w_dep_323,
                               _cp(w_dep_323.get("Urea", 0.0), T_dep_323, R323_CP_S208_DES))
     _pkt_arr_323 = _transport_process(s, "322E001_TO_323C003", _pkt_dep_323, m_dep_323, dt)
@@ -9099,7 +9116,16 @@ def step_sim(dt: float) -> dict:
     # psat(117)=1.8004 vs psat(120)=1.9854, i.e. 3 C swings the PV by 4.75 mol% -- twice the loop's
     # whole SP band.  Now rides the live 328C002 bottoms at the design top/bottom offset; at the seed
     # s.a328_c002_T - R328_C002_DT_TOP == 139 - 22 == 117.0 exactly, so the pin cannot move.
-    dt_top_dynamic = 10.0 + (R328_C002_DT_TOP - 10.0) * (m775_prev / R328_D001_M775_DES)
+    #  The column top answers a reflux change over the column's own liquid residence, not in one tick.
+    #  Read straight off the previous tick's m_775 this closed an algebraic loop through TIC-328008
+    #  with a one-tick delay and a gain of ~2.7 (Kc 240 kg/h per mol% x 0.0113 mol% per kg/h): a
+    #  period-2 oscillation that grew from the design seed at ~t = 65 s until the master railed at
+    #  4000 kg/h, and whose mean (+1191 kg/h of reflux) drained 328D001 -> m_776 -> 323D001 -> m_308
+    #  -> PT-329201 by 0.26 bar per hour on every design hold.  The lag is 328C002's live holdup over
+    #  its live throughput (~141 s at design), and it lazy-inits on its target, so the seed is exact.
+    _tau_c002_s = s.a328_c002_M / max(in_c002, 1e-6) * 3600.0
+    m775_top = _lag1(s.tlag, "R328_775_TOP", m775_prev, _tau_c002_s, dt)
+    dt_top_dynamic = 10.0 + (R328_C002_DT_TOP - 10.0) * (m775_top / R328_D001_M775_DES)
     T_737      = s.a328_c002_T - dt_top_dynamic                             # TT-328008, column top (C)
     # AUDIT C1 — the VLE node pressure is now the LIVE 328C002 state, not the drum plus a frozen
     # R328_E004_DP.  At the seed s.a328_c002_P == R328_C002_P_TOP == 3.5, the same value the old
@@ -9350,6 +9376,7 @@ def step_sim(dt: float) -> dict:
     if s.r3232_d001_M <= 1.0 and m_308 > (in_e003 - m_321):
         m_308 = max(in_e003 - m_321, 0.0)
     s.r3232_d001_M = max(s.r3232_d001_M + (in_e003 - m_321 - m_308)/3600.0*dt, 1.0)
+    s.tlag["M308_KGH"] = m_308          # 322E003's wash on the next tick (the same pump, the same stream)
 
     # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
     Te011    = s.r3232_e011_T

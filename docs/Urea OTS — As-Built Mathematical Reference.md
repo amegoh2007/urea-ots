@@ -1837,6 +1837,12 @@ That is −1.45 bar/h, which is `R_des/C_loop` exactly, and the reactor and HPCC
 The credit stays until the 322E003 vent is re-reconciled on its PFD row and the re-pin drives
 `REACT_TEAR_DES` to zero.
 
+*Update 2026-09-16, Phase 5i.* The vent is re-reconciled (1 708.3 kg/h, PFD 204). On the plant NH3
+basis `R_des` is now **+2 024.9 kg/h**, and the tear is +2 107.5 kg/h: the motive's surplus over
+PFD 116, the stripper top's offset from PFD 201 and a mass-neutral extent term. The 82.5 kg/h above
+is now located: 79.8 kg/h of it is the wash basis (PFD 308 against the 323E003 draw). The tear cannot
+reach zero while the 323 section takes bottoms mass at the PFD 208 composition.
+
 ### Loop-fill multiplier removed (report A-3)
 
 The reactor, stripper-sump and HPCC holdups integrated `k_loop_fill·(in − out)` with
@@ -2572,6 +2578,269 @@ Test files, each in its own process, against the previous commit:
 | `test_audit_stream_state` / `test_streams` / `test_consequence_transport` / `test_historian` | 1 failed / 6 / 8 / 26 passed | same |
 | `test_session_regression_gate` / `test_startup_stability` / `test_vacuum_valve_rules` | 7 / 5 / 5 passed | 7 / 5 / 5 passed |
 | `test_trend_coverage` / `test_scenario_coverage` | 9 passed / 6 failed | same ids |
+
+## Phase 5i — 322E003 vents its inerts, and the motive carries PFD 116 (A-2 step 1)
+
+### What the vent was
+
+```text
+was:  offgas_i   = SCRUB_OFFGAS_KMOLH_DES_i . s     214.8 kmol/h, 44 % NH3 / 29 % CO2, 5 901 kg/h
+      overflow_i = SCRUB_OVERFLOW_KMOLH_DES_i . s   = EJ_SUCTION, 53 368 kg/h
+      + a surplus-wash absorption gain (0.15 kmol CO2 per kmol of extra wash)
+      + a K-ratio re-partition renormalised back to the pinned vent total
+```
+
+Path B had solved both vectors so the scrubber closed against a **pure-NH3** motive. The scrubber's
+two inputs were already on their PFD rows (reactor off-gas = PFD 203, wash = PFD 308), and on those
+rows the unit closes per component to 0.2 kmol/h. The whole 4 193 kg/h vent excess was overflow
+pushed out of the top: the overflow sat 89.4 NH3 / 60.7 CO2 kmol/h below PFD 206, exactly what the
+vent carried above PFD 204. And the vent's CH4 (3.86) and H2 (2.02 kmol/h) had no source at all:
+the reactor recycle tear created them.
+
+### The law
+
+The top of a falling-film carbamate scrubber is a condenser with a non-condensable load. The inerts
+cannot be absorbed, so every kmol that enters leaves, carrying the condensables' equilibrium vapour
+at the top. This is the simplified Colburn–Hougen closure already used for the 324 condensers
+(*Phase 5g*) and the 323C005 vent (*Phase 5h*):
+
+```text
+vent_i   = feed_i                                   i in N2, O2, CH4, H2
+vent_c   = n_inert . y_c / (1 - sum y_c)            c in NH3, CO2, H2O   (capped at feed_c)
+y_c      = Y_c,PFD204 . K_c(114 C, PT-329201) / K_c(114 C, 140.7 bar a)
+overflow = feed - vent
+```
+
+`scrub_vent_kmolh` carries it. The design vectors are that function applied to PFD 203 + PFD 308, and
+`_EJ_OVERFLOW_KMOLH` (which the 322F001 constants are built from, earlier in the module) is asserted
+against the result to 1e-9 kmol/h at import.
+
+| | model | PFD |
+|---|---|---|
+| vent 204 | 64.79 kmol/h, 1 708.3 kg/h, MW 26.37 | 64.78, 1 708, 26.36 |
+| vent NH3 / CO2 / H2O | 5.351 / 1.438 / 0.168 kmol/h | 5.35 / 1.44 / 0.17 |
+| overflow 206 | 57 561.3 kg/h, 2 517.5 kmol/h | 57 564, 2 517.7 |
+
+The temperature does not enter, for the reason G-VLE-3 recorded: TT-322011 is a fitted correlation
+(report A-10), and PT-329201 is a measurement. The vented **total** now follows the inerts rather than
+a renormalised pin. The positive-feedback concern that forced the renormalisation was measured again
+on the new law: the vent moves −0.072 % per bar of loop pressure (−1.1 kg/h per bar), against
+−24.2 kg/h per bar for the old re-partition. The choked HV-322604 passes +12.1 kg/h per bar with the
+stabilising sign. A surplus 323P001 wash now simply leaves with the overflow.
+
+### The motive
+
+PFD 116 is a liquid row, so mass %: NH3 99.67, CH4 0.15, H2 0.01, N2 0.04, H2O 0.08 (normalised; the
+row sums to 99.95). `EJ_MOTIVE_W` applies it to the 42 762 kg/h stream, since the pump and meter see
+the whole liquid. The ejector discharge and the published NH3 feed streams carry it. The motive
+therefore brings CH4 4.00 and H2 2.12 kmol/h: PFD 116's 3.81 / 2.02, scaled by the stream's 4.9 %
+surplus over the PFD's 40 756 kg/h.
+
+### What the tear is now
+
+| | CO2 | NH3 | H2O | urea | N2 | CH4 | H2 | kg/h |
+|---|---|---|---|---|---|---|---|---|
+| `REACT_TEAR_DES` before | −54.90 | +46.74 | −6.80 | −4.73 | +0.28 | −3.86 | −2.02 | −2 085.6 |
+| after | +5.84 | +129.12 | −5.07 | −4.73 | +0.89 | +0.14 | +0.10 | +2 107.5 |
+
+It no longer creates CH4, H2 or CO2. It decomposes exactly, from the engine-vs-PFD vectors unit by unit:
+
+* **The motive's surplus over PFD 116:** NH3 117.5, CH4 0.19, H2 0.10 kmol/h, 2 004 kg/h. The
+  ejector discharge sits on PFD 217 in every species but these.
+* **The stripper top's offset from PFD 201:** NH3 +2.4, CO2 +1.5, N2 +0.9 kmol/h, 127 kg/h.
+* **Urea-extent bookkeeping:** 4.6 kmol/h, mass-neutral (CO2 +4.6, H2O −4.6, urea −4.6, NH3 +9.3).
+  The engine's `REACT_XI_UREA_DES` 1 302.27 is net of the biuret its stoichiometry then subtracts
+  again. The PFD 205 → 207 rows imply a gross extent of 1 306.9.
+
+The credit is `SYN_LOOP_RESID_DES_KGH = +2 024.9 kg/h` (was −2 168.1). It differs from the tear by
+82.6 kg/h, the gap the 2026-09-15 audit could not place. Now it is placed:
+
+* 79.8 kg/h: the scrubber washes with the PFD 308 row (36 915 kg/h), while the boundary counts the
+  323E003 draw (36 835.2).
+* 1.1 kg/h: the CO2 feed built from mole fractions (54 619.1) against its 54 618 mass.
+* 1.6 kg/h: the stripper model's bottoms (130 480.4) against `STRIP_BOT_DES_KGH` (130 482).
+
+**Why the tear is not zero.** The plant NH3 basis puts 2 004 kg/h into a loop whose only real exits
+are the vent (now saturation-limited) and the LV-322501 bottoms. The 323 section downstream is
+driven by bottoms **mass** at the PFD 208 composition. A bottoms stream carrying the surplus would
+therefore arrive as 1.5 % more of everything, urea included, and move every 323 anchor off its seed.
+Closing the tear takes one of two things:
+
+* **LP section live:** the LP section carries the live 208 composition.
+* **PFD NH3 basis:** the motive returns to PFD 116's 40 756 kg/h. On that basis the rows above
+  already close.
+
+### Consequences
+
+* **Reactor off-gas line ΔP.** It was scaled by `(m_live / m_des)²` with `m_des` taken from the
+  **scrubber vent** vector: 22 355 / 5 901, so the published line sat at 149.3 bar a. It is now
+  anchored on `REACT_OFFGAS_DES` and reads PFD 203's 141.3.
+* **`reactor.W0_DES` re-probed:** 0.407828 → 0.398241. The overflow now carries PFD 206's CO2, so
+  the HPCC feed is drier per CO2. W0 seeds the recycle H/C lag, so it must be the seed's own value.
+  It is also PFD 202 + 205's H2O/CO2 (0.39839), where 0.407828 was not. `X_INF` is re-solved by the
+  module's own rule, 0.9196 → 0.9140, so X(L0, W0, T0) stays 0.543. `L0_DES` is untouched: the
+  reactor sees `L_fresh`, which equals L0 at design.
+* **Design constants the boot re-derives:**
+
+  | constant | before | after |
+  |---|---|---|
+  | `EJ_MU` | 1.2480 | 1.3461 |
+  | `EJ_DES_TOTAL` | 96 130 kg/h | 100 323 kg/h |
+  | `SCRUB_HV604_MW_DES` | 27.48 | 26.37 |
+  | SV-32201 back-solved orifice | 2.558 in² | 2.611 in² (still between API K and L) |
+
+* **Design hold.** The overflow now responds to the reactor off-gas it receives, where the pinned
+  vector did not. That exposed the pre-existing PT-329201 design bleed to two `test_ejector_spindle`
+  holds, and the bleed turned out to be a period-2 oscillation in the 328 reflux loop. See *The
+  design-hold bleed* under Phase 5j.
+
+## Phase 5j — HV-322604 lets down on SRK (D-4), 322C001 absorbs what PFD 204 carries, and the design hold stops bleeding
+
+### D-4
+
+```text
+was:  T_out = T_in - 0.55 C/bar . dP            114 - 0.55 . 136.7 = 38.8 C
+now:  h_ig(T_out) + h_res(T_out, 4.0) = h_ig(114) + h_res(114, P_up)      (per live composition)
+      h_res = R.T.(Z - 1) + (T.da_m/dT - a_m)/b_m . ln((Z + B)/Z)          SRK, k_ij = 0
+```
+
+`real_gas.py` takes `h_ig` from `gap_g6_h0_enthalpy` (the datum every published enthalpy uses) and
+the cubic from `props_nh3co2h2o`. It solves by Illinois regula falsi and costs 0.15 ms per call. On
+the PFD 204 vent it gives **94.8 C** at the 322C001 inlet: 0.14 K/bar, no water condensation (outlet
+partial pressures 0.33 bar NH3, 0.01 bar H2O). Pure N2 let down from 100 C, 100 → 1 bar, checks at
+0.088 K/bar. The constant was a coefficient for an NH3/CO2-rich gas. An NH3-rich gas still cools more
+than 3× as much across the same valve, the composition dependence the constant could not carry.
+There is no instrument downstream of HV-322604, so this is a first-principles result, not an anchor.
+The 322C001 energy constants re-pin on the 94.8 C inlet at boot.
+
+### 322C001's uptake split
+
+The column split its 130 kg/h design uptake (`A328_ABS_DES`, the 756 − 755 − CPL closure) at a
+frozen 2 NH3 : 1 CO2 ratio: CO2 73.3 kg/h. On PFD 204 there are 63.3 kg/h of CO2 to take up, so the
+vent CO2 went negative and was clamped. PFD 797 is the gas the column releases (59.32 kmol/h,
+46 C / 3.9 bar a), and against PFD 204 per species it gives up
+
+```text
+NH3 +89.3   CO2 +62.0   H2O -21.3 kg/h   (the gas picks water up from the ammonia water)
+sum 129.97 kg/h  --  the 756 - 755 - CPL closure, from rows that never reference each other
+```
+
+That split replaces the carbamate ratio. The design slip is PFD 797's 1.9 kg/h NH3.
+
+The slip is now a ~2 % residual of two proportional terms: 91 kg/h NH3 offered, 89 taken up by
+`A328_PHI_ABS · gcb`. A 1 % shift in the upstream vent composition therefore swings it by half. On
+the first run `test_vent_nh3_slip_tracks_offgas_throughput` failed: throttling to 40 % left 1.9–2.4
+kg/h against 1.8, because the vent composition was riding the 328 reflux limit cycle described
+below. With that damped the vent holds still, and the test passes on thresholds relative to the
+design slip (+10 % open, −5 % throttled).
+
+A saturated-inert vent for this column was written and measured, and it was reverted. Under the
+fixed-fraction scalar, a cooler column must break NH3 through to keep the mass (2.5 kg/h at 40 %).
+Letting the species set the scalar instead has no capacity at all, so a CCW-failure vent would be
+absorbed rather than pressurise the column to SV-32253.
+
+The column needs an absorber law with a capacity. The datasheet (UD-AU-322-EC-0007) gives 1.0 m and
+1.5 m beds of 25 mm Pall rings but no theoretical stages, so a Kremser form would need an HETP the
+sources do not give.
+
+### The design-hold bleed was a period-2 oscillation in the 328 reflux loop
+
+With the vent physical, the first full suite failed two `test_ejector_spindle` design holds:
+`test_lt329501_design_holds` and `test_tt322002_design_holds`. Over 3 300 s from the seed the 322E003
+sump rose 0.7 % and TT-322002 fell 1.1 C, while the reactor off-gas rose 950 kg/h and PT-329201 fell
+0.26 bar. HEAD shows the identical pressure trace. Its pinned overflow ignored the extra gas (the
+scrubber's `closure_resid` is never injected), so its sump sat at NLL. The traces led back through
+four units.
+
+**1. The loop boundary.** Every term of the PT-329201 ODE, captured at 600 s intervals (kg/h
+against the seed):
+
+| t (s) | CO2 feed | m_308 (323P001) | LV-322501 drain | vent | net |
+|---|---|---|---|---|---|
+| 600 | +1.6 | −98.6 | −5.3 | 0.0 | −90.5 |
+| 1 200 | +9.3 | −528.5 | −4.9 | −0.4 | −505.8 |
+| 1 800 | +14.3 | −786.6 | +5.5 | −1.3 | −763.5 |
+| 3 000 | +6.4 | −309.0 | +44.8 | −3.4 | −338.3 |
+
+**2. 323D001.** The LP carbamate recycle sags because stream 776, 328D001's draw into 323E003,
+sags by up to 598 kg/h.
+
+**3. 328D001.** It drains because its reflux to 328C002, m_775, jumps from 1 675 to about 2 866
+kg/h within two minutes of the seed.
+
+**4. The reflux loop.** Tick by tick at t = 84 s:
+
+```text
+R328_775 1685.95 / 1663.29 / 1687.53 / 1661.60 / 1689.34 / 1659.67 ...
+```
+
+That is a period-2 oscillation. TT-328008 (T_737) was `T_c002 − (10 + 12 · m775_prev/m775_des)`,
+built from the PREVIOUS tick's reflux, and TIC-328008 reads it through `psat(T_737)` and sets that
+reflux. The loop has a one-tick delay and a gain of about 2.7 (Kc 240 kg/h per mol% × 0.0113 mol%
+per kg/h), so it grew from ~65 s until the master railed at 4 000 kg/h. The limit cycle's mean
+carried the +1 191 kg/h. A column top cannot answer a reflux change in one tick. It answers over the
+column's liquid residence, so the reflux term now reads m_775 through `_lag1` with τ = 328C002's live
+holdup over its live throughput (≈ 141 s at design). The lag lazy-inits on its target, so the seed
+is exact.
+
+With that lag, TIC-328008's PI (Kc 240, Ti 110 s) closes near critically damped (ζ ≈ 0.99). From the
+seed, 3 300 s at dt = 0.25 s:
+
+| | before | after | HEAD |
+|---|---|---|---|
+| PT-329201 (bar a) | 140.445 | **140.7015** | 140.470 |
+| LT-329501 (%) | 50.7 | 50.000 | 49.9 |
+| TT-322002 (C) | 177.7 | 178.800 | 178.7 |
+
+### 322E003 washes with what 323P001 delivers
+
+The trace also showed the scrubber washing with `SCRUB_CARB_KMOLH_DES · s` whatever the pump did,
+while the loop boundary counted the live m_308. Now `wash_ratio = m_308 / R3232_E003_M308_DES`, one
+tick old because the 323 section is solved after 322E003. It is exactly 1.0 at the seed, and
+unit-level callers that omit it keep the CO2-throughput scaling.
+
+### Three crashes on the CCW-loss path
+
+`test_ccw_loss_chain` raised in Phase 2 on 726e098 and on this branch alike. Each fix exposed the
+next site:
+
+1. **Stripper bottoms.** `w_dep_323 = _w_norm(strip["bot_mass_pct"])`: a stripper that stops making
+   bottoms returns an all-zero composition while LV-322501 still drains the sump.
+   `ZeroDivisionError`; it now falls back to the PFD 208 row, the transport path's own convention.
+2. **Steam drum density.** Report D-16's saturated-liquid density at the drum pressure raises IF97
+   `OutOfRange` once the post-trip 9-bar header falls under the triple point (6.1 mbar a).
+   `_rho_drum_liquid` holds it at the triple-point value, 999.8 kg/m3.
+3. **323C003 bubble point.** `bubble_T_raoult` asks for Tsat at P/x_H2O once the liquor has almost
+   no water (~1e6 bar). It is capped at water's critical pressure.
+
+With all three the chain runs end to end, and with the reflux lag it meets **37 of 41** physical
+expectations. Phase 1b's "new terms inert at design" set passes for the first time: cool_frac
+exactly 1, no uncondensed gas, no retained vapour, and LT-329501 flat over 6 000 s at the 2 s tick.
+Still recorded as GAPs:
+
+* **Design hold:** PT-329201 is +1.4 mbar after 3 000 s at dt 0.1, against a 1 mbar gate, which
+  keeps the file's final assert failing.
+* **Conversion check:** "per-pass conversion falls" reads X_conv on the single tick the trip
+  latches: 57.1 % at N/C 86 here, while a run that latched 12 600 s later read 0 %.
+* **Post-ESD pressure:** 154.7 → 156.3 bar a after the feed cut.
+* **Venting relief:** PT-329201 does not fall with HV-322604 at 100 %. The seat caps at 11.7 t/h
+  against 13.3 t/h of retained vapour.
+
+### Measured
+
+Full suite on the final tree, each file in its own process, against 726e098 (failing test ids 48 -> 43; `test_equation_audit_td013_d002` and `test_c001_species_layer` were re-run after the last two test edits):
+
+| file | 726e098 | this branch |
+|---|---|---|
+| `test_3_scrubber_heat` | TIMEOUT | no tests ran -- a script: TIMEOUT on the baseline only because the machine suspended mid-run; run directly it is 8/8 on both trees |
+| `test_equation_audit_desorption` | 2 failed, 8 passed | 1 failed, 9 passed -- `test_design_hold_keeps_every_desorber_on_its_pfd_composition` passes: the 328 reflux limit cycle is gone |
+| `test_equation_audit_species` | 6 failed, 10 passed | 4 failed, 12 passed -- `test_hydrolyser_publishes_a_mass_balance_urea_slip` and `test_species_fractions_are_physical` pass |
+| `test_equation_audit_td013_d002` | 2 failed, 10 passed | 1 failed, 11 passed -- harness moved to STEP_CAP sub-steps (at 1 s the 328 cascade walks 323D002 on both trees); `test_the_tank_tracks_its_single_inlet` and `test_the_tank_strength_is_no_longer_pinned` pass, `test_the_tank_has_its_own_temperature_state` fails on both |
+| `test_scenario_consequences` | 1 error | mainloop: caught unexpected SystemExit! -- a script that exits at import: 13/28 checks pass here and it exits 1 on both trees; only the runner's summary text differs |
+| `test_scrubber` | 13 passed | 14 passed -- + `test_vent_is_the_inerts_saturated`; the HMB tests now assert PFD 204 / 206 |
+| `test_transient_coldstart` | 5 failed | 3 failed, 2 passed -- `test_coldstart_dead_time_within_limit` and `test_coldstart_plateaus` pass |
+
+The other 63 files report the same outcome and the same failing ids on both trees.
 
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
@@ -3757,6 +4026,8 @@ necessary condition here and an almost uninformative one; the transient is what 
   and a real valve passes *more* at higher upstream pressure, the opposite sign to the one an
   equilibrium *K* supplies. So the total is renormalised back to the licensor's pinned value and
   only the composition rides the ratio.
+  *Superseded by Phase 5i:* the vent is now the inerts saturated at PFD 204, its total follows the
+  inerts, and the same feedback measures −1.1 kg/h per bar against HV-322604's +12.1.
 * **`eta_P` is replaced, not stacked.** Both it and the ratio model the pressure dependence of the
   strip split; multiplying both would count the loop pressure twice. Both are exactly 1.0 at
   `STRIP_P_DES_BARA`, so the swap is bit-exact.

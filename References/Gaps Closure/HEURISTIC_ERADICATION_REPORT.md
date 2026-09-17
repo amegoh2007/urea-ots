@@ -59,19 +59,26 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 31 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 32 OPEN.**
+**Totals: 34 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 29 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
 and the third was not a missing number at all. See *What the archive supplied* below.
 
+*Updated 2026-09-16 (later).* A-2 step 1 landed (As-Built *Phase 5i*): the 322E003 vent is its inerts
+saturated at PFD 204, the overflow is PFD 206, and the motive carries PFD 116's trace gases. That
+closes B-2 and E-2, moves A-2 to PARTIAL, and unblocked D-4, which closed the same day (*Phase 5j*).
+The same pass traced the PT-329201 design-hold bleed (−0.26 bar per 3 300 s on every tree) to a
+period-2 oscillation between TT-328008 and TIC-328008. It is a numerical defect rather than a
+ledger heuristic, and it is closed in *Phase 5j*.
+
 | Category | Closed | Partial | Blocked | Reclassified | Open |
 |---|---|---|---|---|---|
-| A. Algebraic state | 11 | 0 | 0 | 0 | 8 |
-| B. Phase splits | 2 | 5 | 0 | 0 | 7 |
+| A. Algebraic state | 11 | 1 | 0 | 0 | 7 |
+| B. Phase splits | 3 | 4 | 0 | 0 | 7 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
-| D. Hydraulics | 13 | 3 | 0 | 0 | 6 |
-| E. Gains / signals | 1 | 0 | 0 | 1 | 10 |
+| D. Hydraulics | 14 | 3 | 0 | 0 | 5 |
+| E. Gains / signals | 2 | 0 | 0 | 1 | 9 |
 
 Status key. **CLOSED**: the live path now solves the first-principles relationship. Where it is written
 as an anchored departure (`design × law(live)/law(design)`), the departure carries the physics and the
@@ -85,7 +92,7 @@ needs is not in `References/`. **RECLASSIFIED**: the original finding misread th
 | # | Status | Live anchor | Evidence |
 |---|---|---|---|
 | A-1 | OPEN | [main.py:9839](../../backend/main.py#L9839) | `C_loop = SYN_LOOP_C_KG_PER_BAR` (1500 kg/bar) still integrates PT-329201; no vapour-space EOS |
-| A-2 | OPEN — **root cause traced** | credit [main.py:9892](../../backend/main.py#L9892); source [main.py:5191](../../backend/main.py#L5191), [main.py:4433](../../backend/main.py#L4433) | See *A-2 trace* below. The credit is the loop-level mirror of the reactor recycle tear, not the source itself. Deleting only the credit was tried and measured: PT-329201 fell 140.700 → 139.477 bar a in 2 750 s (−1.45 bar/h = R_des/C_loop), with reactor and HPCC levels bleeding. Reverted |
+| A-2 | PARTIAL — **step 1 closed** (2026-09-16, As-Built *Phase 5i*) | `scrub_vent_kmolh`, `EJ_MOTIVE_W` and the credit in `main.py` | The vent is back on PFD 204 (1 708.3 kg/h) and the motive carries PFD 116's CH4/H2/N2/H2O, so `REACT_TEAR_DES` no longer creates CH4, H2 or CO2. It decomposes exactly: the motive's surplus over PFD 116 (NH3 117.5 kmol/h, 2 004 kg/h), the stripper top's offset from PFD 201 (127 kg/h) and 4.6 kmol/h of mass-neutral urea-extent bookkeeping. The credit is +2 024.9 kg/h, and its 82.6 kg/h gap to the tear is located (PFD 308 wash vs the 323E003 draw, 79.8). Open: the surplus has no exit while the 323 section rides LV-322501 bottoms MASS at the PFD 208 composition |
 | A-3 | **CLOSED** (this revision) | [main.py:7298](../../backend/main.py#L7298) | `k_loop_fill` deleted; the reactor, stripper-sump and HPCC holdups integrate their real net flow. Design-neutral by construction (k was exactly 1 at `m_loop_frac` = 1). Measured 3 000 s hold: PT-329201 140.479560 against HEAD 140.479578 |
 | A-4 | OPEN | [main.py:7655](../../backend/main.py#L7655) | LT-322E002 still a %-per-τ ODE, drain linear in level |
 | A-5 | **CLOSED** (this revision, quasi-steady) | [main.py:3352](../../backend/main.py#L3352) | Chest pressure solved from steam admitted (ISA-75.01 compressible, [hydraulics.py:258](../../backend/hydraulics.py#L258)) = steam condensed (UA·ΔT), with λ from IAPWS-IF97. All four PICs now read the solved chest pressure, not `op × header`. Slave Kc scaled by the design gain ratio (5.87 / 1.86 / 4.23 / 5.46), so the tuned closed-loop speed is kept. A dynamic chest inventory is **BLOCKED**: the four exchanger datasheets are image-only scans with no legible shell volume |
@@ -124,12 +131,31 @@ are exactly the vent vector's CH4 and H2, and no feed carries either. The remain
 not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row, re-pin until
 `REACT_TEAR_DES` ≡ 0, and only then delete the credit.
 
+**Step 1 done (2026-09-16, As-Built *Phase 5i*).** On the plant NH3 basis (motive 42 762 kg/h, N/C
+2.02) with the vent on PFD 204, the same decomposition reads:
+
+| Boundary term | Model design pin | PFD row | Δ |
+|---|---|---|---|
+| Motive NH3 stream, 321P002 A/B | 42 762.05 | 40 756 | +2 006.05 |
+| CO2 feed, 322K001 | 54 618.0 | 54 618 | 0 |
+| LP carbamate m308 | 36 835.15 | 36 915 | −79.85 |
+| Stripper bottoms, LV-322501 | 130 482.0 | 130 582 | −100.0 |
+| Vent, HV-322604 | 1 708.3 | 1 708 | +0.3 |
+| **in − out** | **+2 024.9** | −1 | |
+
+The tear is +2 107.5 kg/h and destroys what the loop cannot export: NH3 117.5 kmol/h of motive
+surplus, plus the stripper top's 127 kg/h over PFD 201. The 82.6 kg/h between tear and credit is
+the scrubber washing with PFD 308 while the boundary counts the 323E003 draw (79.8), plus two
+rounding terms. The tear cannot reach zero on this basis while the 323 section consumes bottoms
+mass at the PFD 208 composition. That needs either a composition-live LP section or the PFD 116
+motive, on which these rows already close.
+
 ### B. Empirical phase splits
 
 | # | Status | Live anchor | Evidence |
 |---|---|---|---|
 | B-1 | PARTIAL | [main.py:43](../../backend/main.py#L43) | `thermo_service` (γ-φ flash, bubble/dew) is wired into the 323 stages and into the reactor disengagement, stripper split and scrubber vent (anchored `k_ratio`, Phase 5). The 328 train is not; 324 melt flashes are refused (G-VLE-2) |
-| B-2 | PARTIAL | [main.py:5297](../../backend/main.py#L5297) | Vent *composition* re-partitioned by `k_ratio`; totals are still design vector × s |
+| B-2 | **CLOSED** (2026-09-16, As-Built *Phase 5i*) | `scrub_vent_kmolh` in `main.py` | Every inert of the tube feed leaves, saturated with NH3/CO2/H2O at PFD 204's mole fractions moved by `k_ratio` at PT-329201; the overflow is the rest, so the unit closes per species. The vent total follows the inerts: −0.072 % per bar of loop pressure, against the old re-partition's −24 kg/h per bar |
 | B-3 | OPEN | [main.py:5407](../../backend/main.py#L5407) | Species-uniform flash-back `(1 − cf)` |
 | B-4 | OPEN — retained deliberately | [main.py:4812](../../backend/main.py#L4812) | Wiring `k_ratio` here broke loop recovery (handoff §1b); needs a loop-refitted parameter set |
 | B-5 | OPEN | [main.py:4743](../../backend/main.py#L4743) | `HPCC_BUB_KN/KW` still `-- calib` |
@@ -161,7 +187,7 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | D-1 | PARTIAL | [main.py:5620](../../backend/main.py#L5620) | Every listed LV/PV now IEC 60534. `_fic_flow` is still `design × op/op_des` with no ΔP |
 | D-2 | CLOSED (Phase 2) | [main.py:5498](../../backend/main.py#L5498), [core/valve.py:55](../../backend/core/valve.py#L55), [steam_system.py:225](../../backend/steam_system.py#L225) | ISA-75.01 compressible with choke on HV-322604 (both ports) and the steam let-downs |
 | D-3 | PARTIAL | [core/valve.py:65](../../backend/core/valve.py#L65) | A capacity ceiling now retains what the seat cannot pass. The composition vector is still multiplied by the anchored valve ratio, which exceeds 1 above design upstream pressure |
-| D-4 | OPEN — **blocked on A-2 step 1** | [main.py:5534](../../backend/main.py#L5534), [core/valve.py:66](../../backend/core/valve.py#L66) | Constant μ_JT. An SRK isenthalpic letdown was written and measured (2026-09-16): on PFD 204 (69 mol% N2) it gives 94.8 C at 322C001, 0.14 K/bar; on the engine's design off-gas (`SCRUB_OFFGAS_KMOLH_DES`, 214.8 kmol/h, 44 % NH3 / 29 % CO2) it gives 17.9 C, 0.70 K/bar, and trips CARBAMATE_DEPOSITION at design. The off-gas has to be reconciled to the PFD row first (A-2 closure order), then the letdown goes in |
+| D-4 | **CLOSED** (2026-09-16, As-Built *Phase 5j*) | `hv_322604` in `main.py`, `Valve322604` in `core/valve.py`, `real_gas.py` | Isenthalpic on SRK (H0 ideal-gas datum + the `props_nh3co2h2o` cubic, k_ij = 0) for the live composition: 94.8 C at the 322C001 inlet on the PFD 204 vent (was 38.8 C on 0.55 C/bar), 0.14 K/bar, no condensation. The A-2 fallout it exposed, a 2 NH3 : 1 CO2 322C001 uptake that needed more CO2 than PFD 204 carries, is on PFD 204 − 797 now |
 | D-5 | CLOSED (Phase 4b) | [main.py:7024](../../backend/main.py#L7024) | Compressor node and check-valve diode |
 | D-6 | CLOSED (Phase 4b) | [main.py:3203](../../backend/main.py#L3203) | `jet_pump` momentum closure; `f_stall` retired |
 | D-7 | OPEN | [main.py:7262](../../backend/main.py#L7262) | ṁ²/ρ ratio, no friction factor |
@@ -186,7 +212,7 @@ not yet located. **Closure order:** re-reconcile the 322E003 vent on its PFD row
 | # | Status | Live anchor | Evidence |
 |---|---|---|---|
 | E-1 | OPEN | [main.py:7825](../../backend/main.py#L7825) | Two-sine froth noise |
-| E-2 | OPEN | [main.py:5309](../../backend/main.py#L5309) | `SCRUB_CARB_ABS_GAIN` |
+| E-2 | **CLOSED** (2026-09-16, As-Built *Phase 5i*) | — | `SCRUB_CARB_ABS_GAIN` deleted: a surplus 323P001 wash leaves with the overflow and cannot change what a saturated scrubber top holds |
 | E-3 | OPEN | [main.py:4720](../../backend/main.py#L4720) | `SCRUB_COND_SPINDLE_GAIN` |
 | E-4 | CLOSED — deleted | — | `SYN_P_DEFICIT_GAIN` / `SYN_P_VENT_GAIN` removed 2026-09-16 |
 | E-5 | RECLASSIFIED | [main.py:4672](../../backend/main.py#L4672) | Not fictitious: 1 − ρ_v/ρ_l from PFD streams 204/206, a specific-volume term. Its fidelity is bounded by A-1 |
