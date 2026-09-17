@@ -613,6 +613,32 @@ def test_lv322501_blows_the_stripper_gas_through_once_the_sump_uncovers():
     assert abs(blow(1.5) - 0.5 * full) < 1e-6 * full                  # the seal ramps over the bore
 
 
+def test_lv323505_seals_and_passes_the_flash_drum_vapour_once_323f004_uncovers():
+    """LV-323505 had neither a seal nor a guard: an empty 323F004 went on draining at the full valve
+    rate while `max(M, 1.0)` put the missing mass back, so an empty drum made liquor.  It now carries
+    the same two laws as LV-322501.  The letdown is 1.13 -> 0.46 bar a, x = 0.59 below the choke at
+    x_T F_gamma = 0.65, so unlike LV-322501 the gas rides the live vacuum: a 323F010 that loses its
+    vacuum takes less."""
+    import consequence
+    import inspect
+    main = _main()
+    dp_des = main.R323_F004_P_BARA - main.R323_F010_P_BARA
+    rho_g = consequence.gas_density_ideal(main.R323_F004_P_BARA, main.R323_F004_T_SP_C, 19.0)
+
+    def blow(level, p_f010=main.R323_F010_P_BARA):
+        return consequence.blowthrough_kgh(
+            main.R323_M319_DES, main.R323_RHO_F004_DES, dp_des, 100.0 / main.R323_LV505_OP_DES, rho_g,
+            main.R323_F004_P_BARA, main.R323_F004_P_BARA - p_f010, consequence.seal_fraction(level))
+
+    assert blow(50.0) == 0.0
+    full = blow(0.0)
+    assert 0.01 * main.R323_M319_DES < full < 0.2 * main.R323_M319_DES
+    assert blow(0.0, p_f010=0.9) < 0.8 * full
+    code = [ln for ln in inspect.getsource(main.step_sim).splitlines() if not ln.lstrip().startswith("#")]
+    assert any("consequence.seal_fraction(lvl_f004)" in ln for ln in code)
+    assert any("m_evap / _mw_evap + n_blow_323505" in ln for ln in code)
+
+
 def test_the_ejector_suction_follows_the_gravity_head_again():
     """Report D-19.  `m_suc = capacity` dropped the gravity-head multiplier the block comment
     directly above it specifies, which left the 322E003 sump a pure integrator -- it flooded

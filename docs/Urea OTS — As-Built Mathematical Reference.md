@@ -3299,6 +3299,87 @@ seal-loss routes).
 * **LV-323501** (323C003 → 323F004, 4.1 → 1.13 bar a) keeps its guard. The same two laws would
   apply, and that is the next unit.
 
+## Phase 5o — LV-323505 stops making liquor out of an empty 323F004
+
+### What it was
+
+LV-323505 lets 323F004 down from 1.13 to 0.46 bar a into 323F010. It had neither a seal nor a guard:
+
+```text
+m_319 = valve_liquid_anchored(M319_DES, op, P_f004, P_f010, rho, ...)       whatever the level
+M_f004' = max(M_f004 + (m_314 - m_701 - m_319) dt / 3600, 1.0)
+```
+
+With the valve wide open and the drum empty, `m_319` stayed at the full valve rate (about 2× design)
+and the `max(…, 1.0)` put the missing kilograms back every tick. The drum produced ~100 t/h of liquor
+it did not have, and 323F010 flooded on it. `test_scenario_consequences` section 2 recorded that flood
+as the "vacuum break" (323F010 0.46 → 0.594 bar a) and passed on it.
+
+### The law
+
+The same two laws as LV-322501 (*Phase 5n*), on the level 323F004's own LIC measures:
+
+```text
+seal   = clamp(L_f004 / 3 %, 0, 1);          m_319 = m_valve . seal
+m_gas  = M319_DES . theta . Y . sqrt(rho_g dP_eff / (rho_l dP_des)) . (1 - seal)
+rho_g  = P M / (R T)                          323F004 flash vapour, M from its live y (sol_vapour_y_vle)
+```
+
+* **Not choked.** x = 0.67/1.13 = 0.59 sits under the choke at F_γ x_T = 0.65, so unlike LV-322501
+  the gas rides the live 323F010 pressure: a vacuum that is already failing takes less.
+* **Ideal gas.** At 1.13 bar a and 106 C, SRK's Z is above 0.99.
+* **Where the gas goes.** Into 323F010's vapour-space balance as moles (`n_blow_323505`), next to the
+  evaporated vapour. It is 323F004 flash vapour that no longer reaches 323E011, so the 323E011/323D011
+  node's inflow is `m_701 − m_gas` (`m_701_e011`). The drum rides that node (A-7), so pulling gas out
+  of it lowers the drum's own pressure and with it the driving force.
+* At a normal level seal is exactly 1.0 and the gas exactly 0.0; `m_701_e011 == m_701` to the bit.
+
+### In the engine
+
+From the seed at 0.1 s, LIC-323505 to MAN with LV-323505 100 % open at 2 s, back to AUTO at 602 s:
+
+| t (s) | LI-323505 (%) | gas (t/h) | 323F004 / 323E011 (bar a) | 323F010 (bar a) | 324F001 (bar a) |
+|---|---|---|---|---|---|
+| 0 | 60.0 | 0 | 1.134 | 0.460 | 0.330 |
+| 177 | 4.1 | 0 | 1.132 | 0.506 | 0.341 |
+| 202 | 1.95 | 0.93 | 0.913 | **0.520** | 0.345 |
+| 402 | 1.84 | 1.08 | 0.922 | 0.491 | 0.350 |
+| 602 | 1.82 | 1.11 | 0.937 | 0.490 | 0.353 |
+| 752 (AUTO) | 8.3 | 0 | 1.170 | 0.428 | 0.346 |
+| 1 502 | 57.9 | 0 | 1.137 | 0.477 | 0.339 |
+
+* The drum floors at 1.8 %, where `m_valve . seal` equals what LV-323501 delivers. It never goes
+  below its seal again, and no mass is made.
+* The first 177 s are the valve doubling the liquid into 323F010, which raises it to 0.506 bar a on
+  the extra evaporation load. The gas then adds 1.1 t/h and pulls the flash system down to 0.91 bar a.
+  323F010 peaks at 0.520 (+13 %) and settles at 0.49 while the drum stays empty.
+* Back in AUTO the seal returns above 3 % and the flash system recovers to 1.137 bar a.
+
+### What this leaves
+
+`test_scenario_consequences` section 2 now flags `LV323505_BLOWTHROUGH` (PASS), but three of its
+threshold checks fail. 323F010 must degrade by 20 % and 35 %, and 324F001 must follow it; the peak is
+now +16 %. The file reads 14 PASS / 14 FAIL against 16 / 12. Those checks passed on the flood above,
+not on a vacuum break.
+
+What the scenario describes, a crashed vacuum, has a physical route the engine does not carry yet.
+323F004's flash vapour is 31 % NH3 and 10 % CO2 by mass, against 7 % and 5 % in 323F010's own
+overhead, so the 1.1 t/h carries about 450 kg/h of gas that 324E002 cannot condense at 0.33 bar a,
+onto a 324F002 ejector rated for 94 kg/h. But 324E002's inlet (`vacuum_inlet_kmolh`) is the PFD
+vapour row scaled on mass: the composition of what HV-323605 passes never reaches it. A
+composition-live 324E002 inlet is the open item. The scenario script records the reason above the
+three checks.
+
+### Tests
+
+`test_hydraulics` + `test_lv323505_seals_and_passes_the_flash_drum_vapour_once_323f004_uncovers`
+(0.0 sealed; 1–20 % of the design liquid as gas fully open; a 323F010 at 0.9 bar a takes under 80 %
+of that, because it is not choked; the seal and the 323F010 inflow are in `step_sim`): 62 passed.
+`test_equation_audit_323_324`, `test_vacuum_valve_rules`, `test_lv324501_routing`,
+`test_consequence_propagation`, `test_boot_pin_sources`, `test_session_regression_gate` and
+`test_equation_audit_c10_aqueous` have the same failure ids as before. `test_scenario_consequences`
+section 2 is described above.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

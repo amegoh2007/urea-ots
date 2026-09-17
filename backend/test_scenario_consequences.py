@@ -129,6 +129,13 @@ for i in range(1, 121):
     blow_seen = blow_seen or s.flags.get("LV323505_BLOWTHROUGH", False)
 print(f"    323F004 level min over 600 s = {lvlf_min:.2f} %")
 check("LV-323505 blow-through flagged", blow_seen)
+# The +20 % below used to pass on a defect: LV-323505 had no seal, so an empty 323F004 kept draining
+# at the full valve rate while `max(M, 1.0)` created the liquor, and 323F010 flooded on it (peak
+# 0.594 bar a).  With the seal (As-Built Phase 5o) the drum floors near 1.8 %, ~1.1 t/h of its flash
+# vapour blows through and 323F010 peaks near 0.53.  What the scenario describes -- the vacuum
+# crashing -- needs that vapour's NH3/CO2 (31 / 10 % by mass) to reach 324E002 as non-condensable
+# load on the 324F002 ejector, and 324E002's inlet is still the PFD vapour row scaled on mass.  The
+# three threshold checks below are left as they are: they fail on that open gap.
 p010_max = max(a for _, a, _ in trace)
 p001_max = max(b for _, _, b in trace)
 check("323F010 vacuum degrades", p010_max > pf010_0 * 1.2,

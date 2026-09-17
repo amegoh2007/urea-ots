@@ -348,14 +348,17 @@ vena contracta and is choked at design. LV-328503 (746 at 190 C, Pv 14.97 bar a)
 the hydrolyser falls below ~15.4 bar a. LV-328505 keeps pv = 0: the model's p1 omits the 328P007
 head.
 
-**The seal-loss letdowns after D-20 (As-Built *Phase 5n*).** LV-322501 now ramps its liquid out over
-the nozzle bore and blows stripper gas through on IEC compressible flow. `test_scenario_consequences`
-reads 16 PASS / 12 FAIL (section 1 is 4/4). Open: (1) that gas enters the 323 gas node as MASS only,
-with no species or enthalpy in 323C003's balances, and the stripper top to 322E002 is not reduced by
-it; (2) **LV-323501** (323C003 -> 323F004, 4.1 -> 1.13 bar a) still clips its drain to the inflow at
-M <= 1 kg; (3) **LV-323505** (323F004 -> 323F010) has no seal and no guard: an empty drum keeps
-draining at the full valve rate while `max(M, 1.0)` puts the mass back, i.e. creates liquor, and
-scenario section 2 still wants `LV323505_BLOWTHROUGH`.
+**The seal-loss letdowns after D-20 (As-Built *Phases 5n, 5o*).** LV-322501 and LV-323505 ramp their
+liquid out over the nozzle bore and blow the vessel's gas through on IEC compressible flow.
+`test_scenario_consequences` reads 14 PASS / 14 FAIL: section 1 is 4/4, section 2 flags the
+blow-through but fails its three vacuum-magnitude checks (below). Open: (1) the blow-through gas enters
+the receiving vapour node as MASS only (moles for 323F010), with no species or enthalpy in the
+downstream balances, and the stripper top to 322E002 is not reduced by LV-322501's gas; (2)
+**LV-323501** (323C003 -> 323F004, 4.1 -> 1.13 bar a) still clips its drain to the inflow at M <= 1 kg;
+(3) **324E002's inlet is composition-blind** (`vacuum_inlet_kmolh` scales the PFD vapour row on mass).
+LV-323505's gas is 31 % NH3 / 10 % CO2 by mass, ~450 kg/h of non-condensable load at 1.1 t/h against a
+324F002 rated 94 kg/h, which is how the scenario's vacuum crash would happen. Until the inlet carries
+what HV-323605 passes, 323F010 degrades only +16 % (the old +29 % was an empty drum making liquor).
 
 ### Three findings from this pass worth not re-deriving
 

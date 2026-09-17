@@ -7061,6 +7061,7 @@ class State:
         self.flags = {"SCRUBBER_SOLIDIFICATION": False,
                       "STRIPPER_SOLIDIFICATION": False,
                       "LV322501_EROSION":        False,   # D-20: stripper gas through the LV-322501 trim
+                      "LV323505_BLOWTHROUGH":    False,   # 323F004 vapour through an uncovered LV-323505
                       "CARBAMATE_DEPOSITION":    False,
                       "RATIO_PV_BAD":            False,   # L3-3 N/C measurement-validity (Batch 3)
                       # Loss-of-condensation consequence chain (322E003 CCW):
@@ -8323,6 +8324,27 @@ def step_sim(dt: float) -> dict:
         urea_soln_rho(s.w_f004.get("Urea", 0.0), s.r323_f004_T, R323_RHO_S319),
         R323_LV505_OP_DES / 100.0, R323_F004_P_BARA, R323_F010_P_BARA, R323_RHO_F004_DES,
         characteristic=R323_LV_CHAR)                                              # drain -> pre-evaporator (kg/h)
+    # LV-323505 seal loss.  The valve lets 323F004 down 1.13 -> 0.46 bar a, and that dP stays when the
+    # drum empties.  Without a seal the liquid term kept draining at the full valve rate while
+    # `max(M, 1.0)` put the missing mass back, so an empty drum MADE liquor.  Same two laws as
+    # LV-322501 (report D-20): the liquid fraction ramps out over the nozzle bore, and the uncovered
+    # trim passes the drum's own vapour on IEC 60534 compressible flow through the flow coefficient
+    # its liquid design duty fixes.  Near atmospheric the flash vapour is ideal (SRK Z > 0.99), and
+    # the trim is linear like its liquid law.  At a normal level seal == 1.0 and the gas is 0.0.
+    seal_323505 = consequence.seal_fraction(lvl_f004)
+    m_319 *= seal_323505
+    blow_323505_kgh = 0.0
+    n_blow_323505 = 0.0                                                           # kmol/h into 323F010's vapour
+    if seal_323505 < 1.0:
+        _y_f004_gas = sol_vapour_y_vle("F004", s.w_f004, s.r323_f004_T, s.r323_f004_P, SOL_F004["alpha"])
+        _mw_f004_gas = 1.0 / max(sum(v / MW_COMP[k] for k, v in _y_f004_gas.items() if v > 0.0), 1e-9)
+        blow_323505_kgh = consequence.blowthrough_kgh(
+            R323_M319_DES, R323_RHO_F004_DES, R323_F004_P_BARA - R323_F010_P_BARA,
+            lv505_op / R323_LV505_OP_DES,
+            consequence.gas_density_ideal(s.r323_f004_P, s.r323_f004_T, _mw_f004_gas),
+            s.r323_f004_P, max(s.r323_f004_P - s.r323_f010_P, 0.0), seal_323505)
+        n_blow_323505 = blow_323505_kgh / _mw_f004_gas
+    s.flags["LV323505_BLOWTHROUGH"] = blow_323505_kgh > 0.0
     # ---- 323F004 -> 323F010 drain line (LV-323505): plug-flow transport of the CLOSED packet ----
     # Departure state is the pre-advance drum state, i.e. the state of the liquid actually leaving on
     # this sub-step and the state cp_f004 was evaluated at.
@@ -8487,7 +8509,7 @@ def step_sim(dt: float) -> dict:
         pull = hv323605_flow_kgh(s.HIC_323605, p, _p_e002, s.r323_f010_T, _mw_evap)
         return hydraulics.vessel_dpdt(
             p, s.r323_f010_T + 273.15, _vv_f010, _mw_evap,
-            m_evap / _mw_evap, pull / _mw_evap,                                   # kmol/h each
+            m_evap / _mw_evap + n_blow_323505, pull / _mw_evap,                   # kmol/h each
             dtdt_k_s=_dtdt_f010, dvvdt_m3_s=_dvvdt_f010)
 
     _p_f010_old = s.r323_f010_P
@@ -9424,7 +9446,8 @@ def step_sim(dt: float) -> dict:
 
     # ----- Stage 9 : 323E011 + 323D011  LP carbamate condenser (45°C) -----
     Te011    = s.r3232_e011_T
-    in_e011  = (R3232_E011_IN_DES + (m_701 - R3232_E011_M701_DES)
+    m_701_e011 = m_701 - blow_323505_kgh      # < m_701 while LV-323505 blows the flash system's gas through
+    in_e011  = (R3232_E011_IN_DES + (m_701_e011 - R3232_E011_M701_DES)
                 + (m_786_d001 - R3232_E011_M786_DES)
                 + (m_321 - R3232_E011_M321_DES)
                 + (m_402 - R3232_E011_M402_DES))
@@ -9479,7 +9502,7 @@ def step_sim(dt: float) -> dict:
     m_718A   = _lag1(s.tlag, "F_718A", m718A_dmd, _tau_718A, dt)          # -> 328E004/328D001 (bal)
     m_718_tot= m_718A + m_718B                                            # -> 323D011 draw (kg/h)
     Q_e011   = R3232_E011_UA_KW * (Te011 - 35.0)
-    sens_e011= (((m_701 + R3232_E011_RECON_KGH)*(R3232_E011_T701 - Te011)
+    sens_e011= (((max(m_701_e011, 0.0) + R3232_E011_RECON_KGH)*(R3232_E011_T701 - Te011)
                  + m_786_d001*(R3232_E011_T786    - Te011)
                  + m_321*(74.0 - Te011)
                  + m_402*(56.0 - Te011))/3600.0*R3232_CP)
@@ -9501,7 +9524,7 @@ def step_sim(dt: float) -> dict:
         0.1)
     s.r3232_e011_T_prev = _T_e011_pre
     # SEMI-IMPLICIT, as 324 above.  Q_e011 = UA.(Te011 - 35) is temperature-driven, so it counts.
-    k_cap_e011 = ((m_701 + R3232_E011_RECON_KGH + m_786_d001 + m_321 + m_402)/3600.0*R3232_CP
+    k_cap_e011 = ((max(m_701_e011, 0.0) + R3232_E011_RECON_KGH + m_786_d001 + m_321 + m_402)/3600.0*R3232_CP
                   + R3232_E011_UA_KW)
     s.r3232_e011_T = Te011 + P_e011*dt/max(s.r3232_e011_M*R3232_CP + k_cap_e011*dt, 1e-6)
     s.r3232_e011_M = max(s.r3232_e011_M + (in_e011 - m_v011 - m_718A - m_718B)/3600.0*dt, 1.0)
@@ -10475,6 +10498,7 @@ def step_sim(dt: float) -> dict:
                 "P_bara":     round(s.r323_f004_P, 2),                       # flash pressure (bar a, dynamic)
                 "LI_323505":  round(s.r323_f004_M / R323_F004_M_FULL * 100.0, 1),
                 "v701_th":    round(m_701 / 1000.0, 2),                      # flash vapor -> LPCC (t/h)
+                "blow505_th": round(blow_323505_kgh / 1000.0, 2),            # 323F004 gas through an uncovered LV-323505 (t/h)
                 "drain319_th":round(m_319 / 1000.0, 2),                      # drain -> pre-evaporator (t/h)
                 "LIC_323505": {"pv": round(s.LIC_323505["pv"], 1), "sp": round(s.LIC_323505["sp"], 1),
                                "op": round(s.LIC_323505["op"], 1), "mode": s.LIC_323505["mode"]},
