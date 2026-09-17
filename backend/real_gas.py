@@ -59,6 +59,22 @@ def h_residual(y: dict, t_k: float, p_pa: float) -> float:
     return R * t_k * (z - 1.0) + (t_k * da_dt - a_m) / b_m * math.log((z + big_b) / z)
 
 
+def z_factor(comp_kmolh: dict, t_c: float, p_bara: float) -> float:
+    """SRK vapour compressibility Z (largest cubic root) of a gas mixture; 1.0 for an empty vector.
+
+    The report D-20 blow-through through LV-322501 takes its gas density as P.M/(Z.R.T): the
+    stripper gas at 140.7 bar a is NH3/CO2-rich, where the ideal-gas density is well off."""
+    y = mole_fractions(comp_kmolh)
+    if not y or p_bara <= 0.0:
+        return 1.0
+    t_k = t_c + 273.15
+    a_m, b_m = _mix(y, t_k)
+    p_pa = p_bara * 1.0e5
+    big_a = a_m * p_pa / (R * R * t_k * t_k)
+    big_b = b_m * p_pa / (R * t_k)
+    return props._cubic_largest_root(1.0, -1.0, big_a - big_b - big_b * big_b, -big_a * big_b)
+
+
 def h_molar(y: dict, t_k: float, p_pa: float) -> float:
     """Real-gas molar enthalpy [J/mol] on the elements-at-298.15 K datum."""
     return sum(v * h0.h_species(k, _GAS[k], t_k) for k, v in y.items()) + h_residual(y, t_k, p_pa)

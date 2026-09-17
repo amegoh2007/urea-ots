@@ -948,7 +948,8 @@ sites was checked for which kind it is.
   4.1 → 1.13 bar letdown. Neither ΔP vanishes when the vessel empties. What happens on the plant is
   that the valve starts passing vapour instead of liquid, and this engine has no two-phase valve
   model; deleting either guard drains its vessel below empty at full letdown rate. Keeping them is
-  the honest floor until that model exists.
+  the honest floor until that model exists. *(LV-322501's guard was replaced by the seal and
+  blow-through laws in Phase 5n.)*
 
 ### What is still open after this pass
 
@@ -3205,6 +3206,98 @@ each), plus the new `test_packed_absorber`. After the fix, the engine-level file
 `test_totalizer_init`) have the same failure ids. `test_ccw_loss_chain` as a script: 37/41 as on the previous tree, the same four GAPs. Phase 2 moves in its third digit (AT-322701 N/C
 peak 81.8 against 86.3, X_conv 57.29 against 57.07 %): the 322E003 vent the chain drives through
 HV-322604 at design stroke is absorbed and returned by 322C001, not by a fixed fraction.
+
+## Phase 5n — LV-322501 blows the stripper gas through once 322E001's sump uncovers (D-20)
+
+### What it was
+
+```text
+if s.strip_level <= 0.0 and drain_kgh > delayed_bot_kgh:
+    drain_kgh = delayed_bot_kgh
+```
+
+Phase 2 kept this guard on purpose. LV-322501 lets 322E001 bottoms down from the 140.7 bar a loop to
+4.0 bar a, and that dP does not go away when the sump empties. On the plant the valve then passes
+stripper gas. With no two-phase valve law in the engine, deleting the guard would have drained the
+sump below empty at full letdown rate, so the guard clipped the drain to the inflow. The result was a
+sump that emptied and passed exactly what arrived: no gas, no pressure loss, no erosion.
+`test_scenario_consequences` section 1 recorded all three as FAIL.
+
+### The law
+
+The two laws were already in `consequence.py`. Nothing called them.
+
+```text
+seal     = clamp(L / 3 %, 0, 1)                                     nozzle bore as 3 % of span
+m_liq    = m_valve . seal
+m_gas    = m_des . theta . Y . sqrt(rho_g dP_eff / (rho_l dP_des)) . (1 - seal)       IEC 60534-2-1
+dP_eff   = min(dP, F_gamma x_T P1),   Y = 1 - x_eff / (3 F_gamma x_T)
+rho_g    = P M / (Z R T),   Z from SRK on the stripper vapour at the sump temperature
+```
+
+* **One valve coefficient.** C_v belongs to the valve, not the fluid, so it follows from the liquid
+  design duty (130 482 kg/h at 46.1 % over 136.7 bar). The gas flow then needs no new constant.
+* **Gas density.** The gas is 322E001's own vapour, `strip["top_kmolh"]`, at `strip["T_bot"]` and
+  PT-329201. `real_gas.z_factor` is the SRK cubic already used for HV-322604. PFD 201 checks it:
+  128.7 kg/m³ printed at 187 C and 144.2 bar a, 128.4 on SRK, and 97.8 as an ideal gas (−24 %).
+* **Where the gas goes.** It leaves the loop (`m_out_loop`, so PT-329201 falls) and arrives with the
+  301 flash gas at the 323C003/323E003/323D001 gas node (`m_env_in`). A gas crosses the letdown line
+  in well under a tick, so it is not held in the liquid packet's transport delay.
+* **The seal is continuous.** The level ODE has no step. It settles where `m_valve . seal` equals the
+  inflow, and restoring the level restores the seal.
+
+At a normal level seal is exactly 1.0, the gas branch is not evaluated and `blow_322501_kgh` is
+exactly 0.0, so the design seed and the boot pin are unchanged.
+
+### In the engine
+
+From the seed at 0.1 s, LIC-322501 to MAN with LV-322501 100 % open at 2 s, then back to AUTO at 602 s:
+
+| t (s) | LT-322501 (%) | LV-322501 (%) | gas through LV-322501 (kg/h) | PT-329201 (bar a) | 323 gas node PT (bar a) |
+|---|---|---|---|---|---|
+| 0 | 50.0 | 46.1 | 0 | 140.70 | 3.20 |
+| 52 | 23.5 | 100 | 0 | 139.33 | 3.91 |
+| 102 | 1.45 | 100 | 27 351 | 138.18 | **5.29** |
+| 302 | 1.43 | 100 | 27 159 | 137.17 | 4.22 |
+| 602 | 1.42 | 100 | 26 741 | 135.46 | 4.02 |
+| 652 (AUTO) | 12.7 | 13.4 | 0 | 135.97 | 2.91 |
+| 852 | 50.9 | 43.3 | 0 | 137.61 | 2.71 |
+| 1 202 | 50.0 | 44.9 | 0 | 137.07 | 3.07 |
+
+* The sump does not empty. It floors at 1.42 %, where `m_valve . seal` equals what 322E001 delivers
+  (seal 0.47). The other 53 % of the trim passes gas: 27 t/h, choked at x_T F_gamma.
+* PT-329201 falls 5.2 bar in 600 s, about 9 bar/h. The 323 gas node takes the gas on top of the
+  larger liquid flash and peaks at 5.29 bar a, 2.1 bar above design.
+* Back in AUTO the seal returns once the level passes 3 %. The gas stops, the node settles to 3.07 bar a
+  and the level to 50 %.
+* Design hold: 600 s at 0.1 s with the gas at exactly 0.0 on every tick and `LV322501_EROSION` never set.
+  The boot pin's constants are identical to the Phase 5m cache; only its key moved.
+
+### Tests
+
+`test_scenario_consequences` (a script) section 1 goes from 1/4 to 4/4: gas is generated (peak
+27 785 kg/h), in the 1–200 t/h choked band, PT-329201 falls (140.70 → 135.46 bar a), and erosion is
+flagged. The file reads 16 PASS / 12 FAIL against 13 / 15, and every other line is unchanged. On an
+ideal-gas density the peak was 23 595 kg/h; SRK raises it by √(1/Z), 16 %.
+
+`test_hydraulics` (61): the guard test now asserts the guard is gone and the seal is in its place;
+`test_the_stripper_gas_density_is_srk_and_matches_pfd_201`; and
+`test_lv322501_blows_the_stripper_gas_through_once_the_sump_uncovers` (0.0 sealed and at 3 %, 30–80
+t/h fully open, the same flow at 1 bar downstream because it is choked, half the flow at half the
+bore). With `test_consequence_propagation`, `test_consequence_transport`, `test_c003_pressure_coupling`,
+`test_lv322501_pressure_retuning` and `test_boot_pin_sources`: 116 passed, 2 xfailed (the two missing
+seal-loss routes).
+
+
+### What stays open
+
+* **Gas composition and energy downstream.** The blow-through adds MASS to the 323 gas node's
+  inventory ODE. Its species and enthalpy do not enter 323C003's component or energy balances, which
+  still ride the LV-322501 liquid packet.
+* **Loop inventory.** The gas leaves through the PT-329201 inventory (`m_out_loop`). The stripper top
+  gas to 322E002 is not reduced by what the bottom nozzle takes.
+* **LV-323501** (323C003 → 323F004, 4.1 → 1.13 bar a) keeps its guard. The same two laws would
+  apply, and that is the next unit.
 
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 

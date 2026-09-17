@@ -7060,6 +7060,7 @@ class State:
         # L3 phase-boundary diagnostics (mushy-zone / solidification detection, Batch 2)
         self.flags = {"SCRUBBER_SOLIDIFICATION": False,
                       "STRIPPER_SOLIDIFICATION": False,
+                      "LV322501_EROSION":        False,   # D-20: stripper gas through the LV-322501 trim
                       "CARBAMATE_DEPOSITION":    False,
                       "RATIO_PV_BAD":            False,   # L3-3 N/C measurement-validity (Batch 3)
                       # Loss-of-condensation consequence chain (322E003 CCW):
@@ -7508,6 +7509,27 @@ def step_sim(dt: float) -> dict:
     f_drain = _f_flow(strip["T_bot"], 132.7)
     drain_kgh *= f_drain
     s.flags["STRIPPER_SOLIDIFICATION"] = (f_drain < 1.0)
+    # REPORT D-20.  LV-322501 is a pressure letdown, not a gravity drain: its 136 bar dP does not
+    # vanish when the sump empties, so the valve keeps flowing and passes the stripper's GAS once the
+    # outlet nozzle uncovers.  The seal is a continuous ramp over the nozzle bore
+    # (consequence.seal_fraction, 3 % of span), so the liquid fraction goes to zero with the level
+    # instead of a guard clipping the drain to the inflow.  The gas the same trim passes follows
+    # IEC 60534 compressible flow: the flow coefficient is fixed by the valve's liquid design duty,
+    # so m_gas = m_des . theta . Y . sqrt(rho_g dP_eff / (rho_l dP_des)) with a choke at
+    # F_gamma x_T (consequence.blowthrough_kgh).  The gas is the stripper's own vapour at the sump
+    # temperature, on SRK: P.M/(Z.R.T), Z ~ 0.73 at 140.7 bar a and 172 C.  At any normal level
+    # seal == 1.0 and the gas is exactly 0.0, so the design seed is untouched.
+    seal_322501 = consequence.seal_fraction(s.strip_level)
+    drain_kgh *= seal_322501
+    blow_322501_kgh = 0.0
+    if seal_322501 < 1.0:
+        rho_g_322501 = (consequence.gas_density_ideal(s.p_syn_bara, strip["T_bot"], strip["top_MW"] or 30.0)
+                        / real_gas.z_factor(strip["top_kmolh"], strip["T_bot"], s.p_syn_bara))
+        blow_322501_kgh = consequence.blowthrough_kgh(
+            STRIP_BOT_DES_KGH, STRIP_RHO_BOTTOM, SYN_P_DES_BARA - LV322501_P_DOWN_BARA,
+            lv_open / LV322501_OPEN_DES, rho_g_322501, s.p_syn_bara, dP_lv, seal_322501)
+    s.tlag["STRIP_BLOWTHROUGH_GAS_KGH"] = blow_322501_kgh
+    s.flags["LV322501_EROSION"] = blow_322501_kgh > 0.0     # flashing gas through a liquid trim
     # Report A-3.  The reactor, stripper-sump and HPCC holdups used to integrate k_loop_fill*(in - out)
     #   with k_loop_fill = 0.06 + 0.94*m_loop_frac**8 -- a gate Smith-fitted so the cold-start
     #   pressurisation tau landed in the DCS FOPTD band.  At k = 0.06 it deleted 94 % of every net
@@ -7526,16 +7548,9 @@ def step_sim(dt: float) -> dict:
         
     # bottom-sump mass balance -> LT-322501 level (%)
     m_span_kg = STRIP_SUMP_AREA_M2 * STRIP_LEVEL_SPAN_M * STRIP_RHO_BOTTOM
-    # PHASE 2, reports D-19 to D-21: this guard is deliberately KEPT, for the same reason the one on
-    # LV-323501 is kept and against the same test.  The reports' argument -- that a head-driven
-    # discharge makes an empty-vessel limiter unreachable -- holds for a GRAVITY drain, and it is why
-    # the HPCC guard above could simply be deleted.  LV-322501 is not one: it is a pressure letdown
-    # from the 140.7 bar synthesis loop to 4.0 bar, and its dP does NOT vanish when the sump empties.
-    # What happens on the plant at that point is that the valve starts passing vapour instead of
-    # liquid, and this engine has no two-phase valve model.  Delete the guard and 322E001 drains
-    # below empty at full letdown rate.  Keeping it is the honest floor until that model exists.
-    if s.strip_level <= 0.0 and drain_kgh > delayed_bot_kgh:
-        drain_kgh = delayed_bot_kgh
+    # REPORT D-20: the empty-sump guard that clipped the drain to the inflow is gone.  The seal ramp
+    # above takes the liquid to zero as the level reaches the nozzle, and what the valve passes past
+    # that point is the blow-through gas, which leaves the loop below (m_out_loop).
     s.strip_level = clamp(s.strip_level
                           + (delayed_bot_kgh - drain_kgh) / 3600.0 * dt / m_span_kg * 100.0,
                           0.0, 100.0)
@@ -9386,7 +9401,9 @@ def step_sim(dt: float) -> dict:
     # the friction head, so the two cannot separate.  At design: generation == M305_DES + M797,
     # condensation == M_COND_DES (duty ratio 1.0), vent == M321_DES, and those sum to zero by
     # the definition of M_COND_DES -- the node holds 3.2 bar a and the column 4.1 bit-exactly.
-    m_env_in   = m_flash_gas + m_pool_vap + R3232_M797_DES          # 301 + 302 + 797
+    # D-20: gas blowing through an uncovered LV-322501 arrives with the 301 flash gas.  A gas crosses
+    # the letdown line in well under a tick, so it is not delayed like the liquid packet.
+    m_env_in   = m_flash_gas + m_pool_vap + R3232_M797_DES + blow_322501_kgh   # 301 + 302 + 797
     T_dew_env  = R3232_E003_T + (tsat_steam(s.r3232_d001_P) - _R3232_TSAT_E003_DES)
     m_env_cond = min(R3232_E003_M_COND_DES
                      * max(T_dew_env - 0.5*(T_tw_sup + T_tw_ret), 0.0)
@@ -10201,7 +10218,7 @@ def step_sim(dt: float) -> dict:
     s.syn_vap_excess_kg = max(s.syn_vap_excess_kg + m_vap_net * (dt / 3600.0), 0.0)
     C_loop = SYN_LOOP_C_KG_PER_BAR
     m_in_loop = (F_pump_total_th * 1000.0) + F_CO2_feed_kgh + m_308
-    m_out_loop = drain_kgh + hv604["mass_kgh"]
+    m_out_loop = drain_kgh + hv604["mass_kgh"] + blow_322501_kgh   # D-20: gas through an uncovered LV-322501
     m_phase_shift = SYN_P_PHASE_GAIN * m_vap_net
     # SV-32201 synthesis-loop safety valve -- the LAST protection layer, and the one whose lifting is
     # itself the hazard: it discharges the loop's NH3/CO2 inventory to atmosphere.  Set at the HP
@@ -10422,6 +10439,7 @@ def step_sim(dt: float) -> dict:
             "LI_322501":   round(s.strip_level, 1),       # LT-322501 bottom-sump level (%)
             "LV_322501":   round(lv_open, 1),             # LV-322501 opening (%)
             "drain_th":    round(drain_kgh / 1000.0, 2),  # bottom drain -> 323C003 (t/h)
+            "blowthrough_th": round(blow_322501_kgh / 1000.0, 2),  # D-20 gas through an uncovered LV-322501 (t/h)
             "LIC_322501": {
                 "pv":   round(lic["pv"], 1),
                 "sp":   round(lic["sp"], 1),

@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 34 CLOSED · 9 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 28 OPEN.**
+**Totals: 35 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 28 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -72,12 +72,18 @@ The same pass traced the PT-329201 design-hold bleed (−0.26 bar per 3 300 s on
 period-2 oscillation between TT-328008 and TIC-328008. It is a numerical defect rather than a
 ledger heuristic, and it is closed in *Phase 5j*.
 
+*Updated 2026-09-17.* D-20 closed (As-Built *Phase 5n*): the stripper drain's empty-sump guard is
+replaced by the seal and gas blow-through laws `consequence.py` already carried. Two things came out of
+the 322C001 work in *Phase 5m* that the ledger never listed: the column's liquor balance closed on a
+back-solved 21 kJ/kg absorption heat (now real enthalpies), and `test_ccw_loss_chain`'s pytest
+collection error had been hiding its Phases 2-4 on every tree since *Phase 5j*.
+
 | Category | Closed | Partial | Blocked | Reclassified | Open |
 |---|---|---|---|---|---|
 | A. Algebraic state | 11 | 1 | 0 | 0 | 7 |
 | B. Phase splits | 3 | 5 | 0 | 0 | 6 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
-| D. Hydraulics | 14 | 3 | 0 | 0 | 5 |
+| D. Hydraulics | 15 | 2 | 0 | 0 | 5 |
 | E. Gains / signals | 2 | 0 | 0 | 1 | 9 |
 
 Status key. **CLOSED**: the live path now solves the first-principles relationship. Where it is written
@@ -203,7 +209,7 @@ motive, on which these rows already close.
 | D-17 | OPEN | [main.py:6013](../../backend/main.py#L6013) | Constant η_v |
 | D-18 | OPEN | [main.py:6022](../../backend/main.py#L6022) | Current linear in rpm |
 | D-19 | CLOSED (Phase 2) | As-Built *D-19/D-20/D-21* | The report's site was the 322F001 suction: head term restored |
-| D-20 | PARTIAL — kept deliberately | stripper drain | LV-322501 is a 140.7 → 4 bar letdown whose ΔP does not vanish on empty; needs a two-phase valve model |
+| D-20 | **CLOSED** (2026-09-17, As-Built *Phase 5n*) | `seal_322501`, `blow_322501_kgh` in `main.py` | The empty-sump guard is gone. The drain ramps out over the nozzle bore (`consequence.seal_fraction`) and the uncovered trim passes stripper gas on IEC 60534 compressible flow through the Cv its liquid duty fixes (`consequence.blowthrough_kgh`), at an SRK density that reproduces PFD 201 (128.4 vs 128.7 kg/m³). The gas leaves the PT-329201 inventory and enters the 323 gas node. Wide open: the sump floors at 1.4 %, 27 t/h of gas, PT-329201 −5.2 bar in 600 s |
 | D-21 | CLOSED (Phase 2) | — | HPCC guard proven unreachable and deleted |
 | D-22 | OPEN | [main.py:4089](../../backend/main.py#L4089) | The `0.999` clamp is kept on the `STRIP_SLIP_GAIN` path |
 

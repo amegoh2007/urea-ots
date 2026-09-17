@@ -571,9 +571,46 @@ def test_the_hpcc_empty_vessel_guard_was_dead_code_before_it_was_deleted():
     code = [ln for ln in inspect.getsource(main.step_sim).splitlines()
             if not ln.lstrip().startswith("#")]
     assert not any("hpcc_level_pct <= 0.0" in ln for ln in code)
-    # The stripper guard is KEPT and must stay: LV-322501 is a 140.7 -> 4.0 bar letdown whose dP
-    # does NOT vanish as the sump empties, and there is no two-phase valve model to replace it.
-    assert any("if s.strip_level <= 0.0 and drain_kgh > delayed_bot_kgh" in ln for ln in code)
+    # The stripper guard went with report D-20.  LV-322501 is a 140.7 -> 4.0 bar letdown whose dP
+    # does not vanish as the sump empties, so what replaced the guard is not a gravity argument but
+    # the seal ramp and the gas the uncovered trim passes (consequence.seal_fraction/blowthrough_kgh).
+    assert not any("if s.strip_level <= 0.0 and drain_kgh > delayed_bot_kgh" in ln for ln in code)
+    assert any("consequence.seal_fraction(s.strip_level)" in ln for ln in code)
+
+
+def test_the_stripper_gas_density_is_srk_and_matches_pfd_201():
+    """Report D-20.  The gas LV-322501 passes once 322E001's sump uncovers is the stripper's own
+    vapour at 140-odd bar.  PFD 201 prints its density: 128.7 kg/m3 at 187 C and 144.2 bar a.  The
+    ideal gas gives 97.8 (-24 %); SRK on the same mole fractions gives 128.4."""
+    import consequence
+    import real_gas
+    y201 = {"CO2": 32.55, "H2O": 4.86, "N2": 0.76, "NH3": 61.7, "O2": 0.13}
+    rho = consequence.gas_density_ideal(144.2, 187.0, 25.96) / real_gas.z_factor(y201, 187.0, 144.2)
+    assert abs(rho - 128.7) / 128.7 < 0.01
+    assert abs(real_gas.z_factor(y201, 187.0, 1.0) - 1.0) < 0.01
+    assert real_gas.z_factor({}, 187.0, 144.2) == 1.0
+
+
+def test_lv322501_blows_the_stripper_gas_through_once_the_sump_uncovers():
+    """Report D-20.  Sealed, the valve passes no gas at all; uncovered, it passes the stripper gas at
+    the flow its liquid design duty implies, choked, so the 4 bar downstream pressure does not set it."""
+    import consequence
+    main = _main()
+    rho_g = 128.7
+    dp_des = main.SYN_P_DES_BARA - main.LV322501_P_DOWN_BARA
+    theta_full = 100.0 / main.LV322501_OPEN_DES
+
+    def blow(level, theta=theta_full, p_down=main.LV322501_P_DOWN_BARA):
+        return consequence.blowthrough_kgh(
+            main.STRIP_BOT_DES_KGH, main.STRIP_RHO_BOTTOM, dp_des, theta, rho_g,
+            main.SYN_P_DES_BARA, main.SYN_P_DES_BARA - p_down, consequence.seal_fraction(level))
+
+    assert consequence.seal_fraction(50.0) == 1.0 and blow(50.0) == 0.0
+    assert blow(3.0) == 0.0
+    full = blow(0.0)
+    assert 30000.0 < full < 80000.0                                   # tens of t/h of gas, not 130 t/h
+    assert blow(0.0, p_down=1.0) == full                              # choked
+    assert abs(blow(1.5) - 0.5 * full) < 1e-6 * full                  # the seal ramps over the bore
 
 
 def test_the_ejector_suction_follows_the_gravity_head_again():
