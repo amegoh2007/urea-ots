@@ -169,16 +169,54 @@ def test_design_hold_keeps_every_desorber_on_its_pfd_composition():
 def test_cutting_the_lp_strip_steam_blows_the_ammonia_spec():
     """The whole point of F-8.  Under the frozen split this test could not be written: cutting
     FIC-329401 moved flows and left composition untouched, because there was none."""
-    ppm = []
+    ppm, ai = [], []
     for cut in (1.00, 0.90, 0.80, 0.70):
         _fresh(300.0)
         main.state.FIC_329401["mode"] = "AUTO"
         main.state.FIC_329401["sp"] = main.R328_C004_M931_DES * cut
-        _run(45 * 60)
+        out = _run(45 * 60)
         ppm.append(main.state.w_328c004["NH3"] * 1e6)
+        ai.append(out["DESORB_328"]["C004"]["AI_328701"])
     assert ppm[0] < 1.5, f"on design the condensate must be on spec, got {ppm[0]:.2f} ppm"
     assert all(b > a for a, b in zip(ppm, ppm[1:])), f"slip must rise monotonically: {ppm}"
     assert ppm[-1] > 100.0, f"a 30 % steam cut must blow the spec, got {ppm[-1]:.1f} ppm"
+    # AI-328701 reads the same condensate.  It used to read a soft sensor at the design steam ratio
+    # and stayed on its design value while the spec blew.
+    assert all(b > a for a, b in zip(ai, ai[1:])), f"AI-328701 must follow the slip: {ai}"
+
+
+def test_desorber_volatility_follows_the_rigorous_model_not_a_vant_hoff_constant():
+    """A desorber held at a higher pressure boils hotter, and there NH3's volatility relative to
+    water FALLS: water's vapour pressure climbs faster than NH3's Henry constant.  The Perry's van't
+    Hoff factor this replaced raised it 12 % per 0.5 bar (the wrong sign) and had no pressure term."""
+    for key in ("C002", "C004"):
+        st = main.DES_STAGES[key]
+        des = main.des_alpha_live(key, st["T_eq"], st["V"], st["L"], st["w"], st["P"])
+        assert des == st["a"]["alpha"], f"{key}: the design state must return the anchor bit-exact"
+        assert main.DES_VLE_DOMAIN[key] == "electrolyte_gamma_phi", f"{key} is off the envelope"
+        p_hi = st["P"] + 0.5
+        hot = main.des_alpha_live(key, main.tsat_steam(p_hi), st["V"], st["L"], st["w"], p_hi)
+        assert hot["NH3"] < des["NH3"], f"{key}: NH3 volatility must fall with column pressure"
+        assert hot["H2O"] == des["H2O"] and hot["Urea"] == des["Urea"]
+    # CO2 carries its own departure, and in 328C002 it has the opposite sign
+    st = main.DES_STAGES["C002"]
+    p_hi = st["P"] + 0.5
+    hot = main.des_alpha_live("C002", main.tsat_steam(p_hi), st["V"], st["L"], st["w"], p_hi)
+    assert hot["CO2"] > st["a"]["alpha"]["CO2"]
+
+
+def test_hydrolyser_volatility_is_continuous_at_the_envelope_edge():
+    """Off-grid, `k_ratio` answers 1.0.  Evaluated there, a hydrolyser overheating past 210 C would
+    snap back onto its design volatility; the temperature is held inside the edge instead."""
+    def r(T):
+        return main.des_rel_vol_ratio("C003", main.W_S747, T, main.R328_C003_P_BARA,
+                                      main.R328_C003_T, main.R328_C003_P_BARA)
+    assert r(main.R328_C003_T) == {"NH3": 1.0, "CO2": 1.0}
+    hot = r(205.0)
+    assert hot["NH3"] < 1.0 < hot["CO2"]
+    edge = r(main.R328_KR_T_HI_C)
+    assert r(215.0) == edge, "flat beyond the grid edge"
+    assert edge["NH3"] < 0.97, "and still departed, not back on the design volatility"
 
 
 def test_hydrolyser_temperature_governs_the_urea_slip():

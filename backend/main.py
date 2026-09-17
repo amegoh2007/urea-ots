@@ -167,23 +167,17 @@ def evap_thermo_diag(T_C: float, P_bara: float, w_eq: float) -> tuple:
 
 
 # ===================================================================
-#  AI-328701  process-condensate conductivity soft sensor  (stream 740)
+#  AI-328701  process-condensate conductivity  (stream 740)
 #  Node: 328E007 hot outlet (739) -> 740 boundary -> 328P007, 89 C.
-#  Live trace NH3 / urea ppm are DERIVED BOTTOM-UP (not back-solved from
-#  the 1 ppm guarantee): Desorber-II (328C004) tray efficiency comes from
-#  the datasheet geometry via O'Connell (1946) [E_o=0.635, 22 perf trays],
-#  the residual NH3 slip from Kremser (1930) stripping, and the urea slip
-#  from the published second-order urea-water hydrolysis law in 328C003.  Both are emitted in
-#  ANCHORED-CORRECTION form (residual RATIO vs the plant's own design
-#  state) so each is bit-exact the PFD 1 ppm guarantee at the design point
-#  and only moves off-design.  Read-only readout: no state, no coupling to
-#  the pinned H&MB.  See scratchpad/derive_328_trace.py for the derivation.
+#  The analyzer reads the 328C004 bottoms the species layer carries (NH3 and urea ppm, a mass-balance
+#  result of the Kremser-lumped desorber and the Arrhenius hydrolyser).  It used to read a parallel
+#  soft sensor, `ppm_infer_328701`, with its own van't Hoff K(T) at the DESIGN steam/feed ratio, so
+#  an FIC-329401 steam cut that blew the condensate spec left the conductivity on its design value.
+#  Desorber-II's stage count still comes from the datasheet geometry via O'Connell (1946)
+#  [E_o = 0.635, 22 perforated trays].
 # -------------------------------------------------------------------
-R328_AI701_NH3_PPM_DES  = 1.0        # PFD stream 740 NH3 guarantee   (ppm mass)
-R328_AI701_UREA_PPM_DES = 1.0        # PFD stream 740 urea guarantee  (ppm mass)
 R328_AI701_KINF_C004    = 9.5        # derived dilute NH3-water stripping factor K_inf @143 C, Desorber-II
 R328_AI701_NTHEO_C004   = 13.98      # theoretical stages = E_o(0.635) x 22 actual (O'Connell + geom)
-R328_AI701_DHSTRIP      = 34200.0    # J/mol, NH3-water differential enthalpy of solution (Perry's) -> K(T)
 R328_AI701_TAU_S        = 3600.0     # s, 328C003 hydrolyser residence time (tau)
 R328_AI701_UREA_PHI     = 0.05       # urea-slip partial-hydrolysis fraction in the hot condensate line
 # Kohlrausch limiting molar ionic conductivities  Lambda_0  (S.cm2/mol, CRC 25 C):
@@ -200,39 +194,6 @@ def _kremser_resid(S: float, N_theo: float) -> float:
     if abs(S - 1.0) < 1e-9:
         return 1.0 / (N_theo + 1.0)
     return (S - 1.0) / (S ** (N_theo + 1.0) - 1.0)
-
-
-def ppm_infer_328701(T_c004: float, T_c003: float):
-    """Live trace (NH3 ppm, urea ppm) in stream 740, anchored-correction form.
-
-    NH3: the Desorber-II residual slip is Kremser r(S,N_theo) with the derived
-    E_o-based stage count and the dilute strip factor S = K(T)*(V/L).  The design
-    strip ratio V/L is the PFD 100%-load steam/bottoms split (R328_C004_M931_DES/
-    R328_C004_M739_DES); the LP-strip steam (FIC-329401) is pinned at that design
-    duty in the current H&MB, so the live OFF-DESIGN driver is the Desorber-II
-    operating temperature, which sets the NH3 relative volatility via a
-    Clausius-Clapeyron K(T) = K_inf*exp(-(dH/R)(1/T - 1/T_des)) [dH = NH3-water
-    enthalpy of solution].  The slip is the residual RATIO r(S_live)/r(S_des), so
-    it is bit-exact R328_AI701_NH3_PPM_DES (=1 ppm) at the 143 C design point and
-    rises as the column cools (K falls -> less stripping) -- physically correct.
-
-    Urea: the Inoue/Otsuka second-order urea-water PFR residual in 328C003, scaled by
-    the ratio vs the 200 C design residual, so it is bit-exact 1 ppm at design T and
-    rises as the hydrolyser cools (k falls -> more urea slip)."""
-    vol_des = R328_C004_M931_DES / R328_C004_M739_DES        # PFD design molar V/L (MW ~cancels)
-    N = R328_AI701_NTHEO_C004
-    Tc4_des_K, Tc4_live_K = R328_C004_T + 273.15, T_c004 + 273.15
-    K_live = R328_AI701_KINF_C004 * math.exp(
-        -(R328_AI701_DHSTRIP / 8.314) * (1.0 / Tc4_live_K - 1.0 / Tc4_des_K))
-    r_des = _kremser_resid(R328_AI701_KINF_C004 * vol_des, N)
-    r_live = _kremser_resid(K_live * vol_des, N)
-    nh3_ppm = R328_AI701_NH3_PPM_DES * (r_live / r_des if r_des > 0.0 else 1.0)
-
-    x_des = hydrolysis_x_328c003(R328_C003_T, R328_C003_M746_DES)
-    x_live = hydrolysis_x_328c003(T_c003, R328_C003_M746_DES)
-    resid_des = max(1.0 - x_des, 1e-300)
-    urea_ppm = R328_AI701_UREA_PPM_DES * ((1.0 - x_live) / resid_des)
-    return max(nh3_ppm, 0.0), max(urea_ppm, 0.0)
 
 
 def cond_infer_328701(nh3_ppm: float, urea_ppm: float, co2_ppm: float) -> float:
@@ -3068,32 +3029,75 @@ DES_STAGES = {
     "C002": {"a": DES_C002, "w": W_S743, "N": R328_NTHEO_C002, "T": R328_C002_T_BOT_BOT,
              "M": R328_C002_M_DES,
              "V": R328_C002_M748_DES + R328_C002_M750_DES,   # stripping agent: the two hot OVHDs
-             "L": R328_C002_M743_DES},
+             "L": R328_C002_M743_DES,
+             "P": R328_C002_P_TOP + R328_C002_DP_COL},       # bottom node, the runtime's operand
     "C004": {"a": DES_C004, "w": W_S739, "N": R328_AI701_NTHEO_C004, "T": R328_C004_T,
              "M": R328_C004_M_DES,
              "V": R328_C004_M931_DES,                        # stripping agent: the LP steam
-             "L": R328_C004_M739_DES},
+             "L": R328_C004_M739_DES,
+             "P": R328_C004_P_BARA + R328_C004_DP_COL},
 }
 for _st in DES_STAGES.values():
     _st["S"] = R328_AI701_KINF_C004 * (_st["V"] / _st["L"])
     _st["r"] = _kremser_resid(_st["S"], _st["N"])
     _st["k"] = _des_kfac(_st["L"], _st["V"], _st["r"])
+    # The reference temperature is the SAME expression the tick writes (bubble point at the bottom
+    # node), so at the seed pressure the K-ratio's live and reference arguments are identical floats.
+    _st["T_eq"] = tsat_steam(_st["P"])
+
+#  Where the 328 relative volatilities are evaluated, and why the temperature is held inside the
+#  envelope.  `thermo_service.k_ratio` returns 1.0 (the licensor's split) off-grid, so a column
+#  crossing 80 or 210 C would JUMP back onto its design volatility -- measured 5.3 % on NH3 at the
+#  hydrolyser between 209.9 and 210.1 C.  Holding T just inside the edge keeps the ratio continuous
+#  and flat beyond it.  The pressure needs no such guard: it cancels from a relative volatility.
+R328_KR_SPECIES = ("NH3", "CO2", "H2O")
+R328_KR_T_LO_C, R328_KR_T_HI_C = 80.05, 209.95
+DES_VLE_DOMAIN = {}                                  # per 328 stage, published in the tick packet
 
 
-def des_alpha_live(key: str, T_c: float, m_vap: float, m_liq: float) -> dict:
+def des_rel_vol_ratio(key: str, w: dict, t_c: float, p_bara: float,
+                      t_ref_c: float, p_ref_bara: float) -> dict:
+    """alpha_i,model(live) / alpha_i,model(design) for NH3 and CO2, relative to water.
+
+    From `thermo_service.k_ratio` (Extended UNIQUAC, Rumpf-Maurer Henry constants, IF97, SRK) on
+    the stage's live liquid, so only the TEMPERATURE and PRESSURE derivative is taken: the reference
+    is the same composition.  Dilute ammonia water, 80-210 C, is the region the parameter set was
+    regressed on.  Exactly 1.0 when (t_c, p_bara) == (t_ref_c, p_ref_bara)."""
+    t_eval = min(max(t_c, R328_KR_T_LO_C), R328_KR_T_HI_C)
+    kr = thermo_service.k_ratio(w, t_eval, p_bara, t_ref_c, p_ref_bara, species=R328_KR_SPECIES)
+    DES_VLE_DOMAIN[key] = thermo_service.classify(w, t_eval, p_bara)
+    return {k: kr[k] / kr["H2O"] for k in R328_DES_VOLATILE}
+
+
+def des_alpha_live(key: str, T_c: float, m_vap: float, m_liq: float,
+                   w: dict, p_bara: float) -> dict:
     """Live lumped volatilities for a desorber section, anchored so that at the design seed every
-    factor is exactly 1.0 and the returned dict is bit-identical to the back-solved design alphas."""
+    factor is exactly 1.0 and the returned dict is bit-identical to the back-solved design alphas.
+
+        S_i = K_inf . [alpha_i,model(T, P) / alpha_i,model(design)] . V/L        i in NH3, CO2
+
+    T_c and p_bara are the column's bottom node, the state the bubble point is written from.
+
+    The bracket was `exp(-(34 200 / R)(1/T - 1/T_des))`, a van't Hoff factor on NH3's heat of
+    solution (Perry's), shared by CO2.  It had no pressure term, and along the column's own
+    saturation line it had the wrong sign.  A desorber held 0.5 bar higher boils 4 C hotter: the
+    factor raised S by 12 %.  The rigorous relative volatility falls, because water's vapour pressure
+    climbs faster than NH3's Henry constant (-1.4 %/bar at 328C002, -0.3 %/bar at 328C004).  That
+    turned pressure into positive feedback on the NH3 boil-up.  CO2's ratio rises instead
+    (+13 % per 0.5 bar at 328C002, carbamate/bicarbonate re-speciation), so each volatile species
+    now carries its own bracket inside the same Kremser form rather than borrowing NH3's."""
     st = DES_STAGES[key]
-    S_live = clamp(R328_AI701_KINF_C004 * math.exp(
-        -(R328_AI701_DHSTRIP / 8.314) * (1.0 / (T_c + 273.15) - 1.0 / (st["T"] + 273.15))
-    ) * (m_vap / max(m_liq, 1e-9)), 1e-6, 1e6)
-    k_live = _des_kfac(m_liq, m_vap, _kremser_resid(S_live, st["N"]))
-    # Anti-overflow bounds only -- S^(N+1) with N ~ 14 goes infinite on a cold-start transient.  Both
-    # bounds are orders of magnitude outside anything the plant reaches, so the design seed passes
-    # through untouched (clamp returns its argument when it is already inside the band) and
-    # alpha_live stays bit-identical to the anchor there.
-    f = clamp(k_live / st["k"], 1e-6, 1e6)
-    return {k: (v * f if k in R328_DES_VOLATILE else v) for k, v in st["a"]["alpha"].items()}
+    a_rel = des_rel_vol_ratio(key, w, T_c, p_bara, st["T_eq"], st["P"])
+    vl = m_vap / max(m_liq, 1e-9)
+    out = dict(st["a"]["alpha"])
+    for k in R328_DES_VOLATILE:
+        S_live = clamp(R328_AI701_KINF_C004 * a_rel[k] * vl, 1e-6, 1e6)
+        k_live = _des_kfac(m_liq, m_vap, _kremser_resid(S_live, st["N"]))
+        # Anti-overflow bounds only -- S^(N+1) with N ~ 14 goes infinite on a cold-start transient.
+        # Both bounds are orders of magnitude outside anything the plant reaches, so the design seed
+        # passes through untouched and alpha_live stays bit-identical to the anchor there.
+        out[k] = out[k] * clamp(k_live / st["k"], 1e-6, 1e6)
+    return out
 
 
 def des_advance(w: dict, M_new: float, feeds, m_vap: float, alpha: dict,
@@ -8822,7 +8826,8 @@ def step_sim(dt: float) -> dict:
     s.a328_c002_M = max(M_c002_pre + (in_c002 - m_737 - m_743)/3600.0*dt, 1.0)
     # Species: four inlets.  The two vapour recycles carry LAGGED compositions, the same tear the
     # flows already use (m748_prev / m750_prev) -- 328C003 and 328C004 are solved later in the tick.
-    a_c002   = des_alpha_live("C002", Tc002, m748_prev + m750_prev, m_743)
+    a_c002   = des_alpha_live("C002", s.a328_c002_T, m748_prev + m750_prev, m_743,
+                              s.w_328c002, s.a328_c002_P + R328_C002_DP_COL)
     s.w_328c002, y_737 = des_advance(s.w_328c002, s.a328_c002_M,
                                      [(W_S738, m_738), (W_S775, m775_prev),
                                       (s.y_328_748, m748_prev), (s.y_328_750, m750_prev)],
@@ -8919,11 +8924,17 @@ def step_sim(dt: float) -> dict:
     s.a328_c003_T = Tc003 + P_c003*dt/max(M_c003_pre*cp_328c003 + k_cap_328c003*dt, 1e-6)
     s.a328_c003_M = max(M_c003_pre + (in_c003 - m_748 - m_747)/3600.0*dt, 1.0)
     # Species: the hydrolyser is a LIQUID-FILLED column (Stamicarbon, "Zero waste urea production"),
-    # not a stripping cascade, so its volatilities stay at the design anchor -- no Kremser stage
-    # correction.  The reaction extent is the live Arrhenius xi_hyd_328 computed above.
+    # not a stripping cascade, so there is no Kremser stage correction.  Its volatilities still
+    # move with its own temperature and pressure: the rigorous relative-volatility departure,
+    # alpha_NH3 -5.5 % and alpha_CO2 +13 % per +10 C at 16.8 bar a.  The reaction extent is the live
+    # Arrhenius xi_hyd_328 computed above.
+    _a_rel_c003 = des_rel_vol_ratio("C003", s.w_328c003, s.a328_c003_T, s.a328_c003_P,
+                                    R328_C003_T, R328_C003_P_BARA)
+    a_c003   = {k: (v * _a_rel_c003[k] if k in R328_DES_VOLATILE else v)
+                for k, v in DES_C003["alpha"].items()}
     s.w_328c003, y_748 = des_advance(s.w_328c003, s.a328_c003_M,
                                      [(s.w_328c002, m_746), (W_STEAM, m_911)],
-                                     m_748, DES_C003["alpha"], m_747, xi_hyd_328, dt)
+                                     m_748, a_c003, m_747, xi_hyd_328, dt)
     s.y_328_748 = y_748
 
     # ----- Stage 5 : 328C004  Desorber-II (143°C, LP-steam 931, FFIC) -----
@@ -9004,7 +9015,8 @@ def step_sim(dt: float) -> dict:
     s.a328_c004_T_prev = _T_c004_pre
     s.a328_c004_T = tsat_steam(s.a328_c004_P + R328_C004_DP_COL)          # bubble point at the bottom
     s.a328_c004_M = max(M_c004_pre + (in_c004 - m_750 - m_739)/3600.0*dt, 1.0)
-    a_c004   = des_alpha_live("C004", Tc004, m_931, m_739)
+    a_c004   = des_alpha_live("C004", s.a328_c004_T, m_931, m_739,
+                              s.w_328c004, s.a328_c004_P + R328_C004_DP_COL)
     s.w_328c004, y_750 = des_advance(s.w_328c004, s.a328_c004_M,
                                      [(s.w_328c003, m_749), (W_STEAM, m_931)],
                                      m_750, a_c004, m_739, 0.0, dt)
@@ -10053,9 +10065,10 @@ def step_sim(dt: float) -> dict:
     streams["S1051"] = make_stream({"H2O": 4_865_000.0 / MW_COMP["H2O"]}, 39.0, 2.2,
                                     "1051 main CW return", "CW consumers", "cooling towers", "liquid")
 
-    # AI-328701 process-condensate conductivity soft sensor (stream 740, read-only)
-    _nh3_740, _urea_740 = ppm_infer_328701(s.a328_c004_T, s.a328_c003_T)
-    _ai701_uS = cond_infer_328701(_nh3_740, _urea_740, 0.0)                  # CO2 fully co-stripped with NH3
+    # AI-328701 process-condensate conductivity (stream 740 = 328C004 bottoms through 328E007).
+    # CO2 stays 0: PFD 739/740 tabulate none.  The species layer's 1 ppm is there only so the CO2
+    # volatility is defined, and counting it would double the design reading.
+    _ai701_uS = cond_infer_328701(s.w_328c004["NH3"] * 1e6, s.w_328c004["Urea"] * 1e6, 0.0)
     _d003_levels = d003_level_telemetry(s)
 
     # Dynamic sequential-modular tear audit.  These recycle signals cross real vessel/line
@@ -10531,8 +10544,8 @@ def step_sim(dt: float) -> dict:
                 "export740_th":round(max(m_739 - m_741, 0.0) / 1000.0, 2), # 740 leaving the envelope = 739 - 741 (t/h)
                 "TT_328006":   round(T_740, 1),                            # stream 740 condensate temp (89C, 328E007 hot out) - AUDIT C10: live
                 "AI_328701":   round(_ai701_uS, 2),                        # process-condensate conductivity (uS/cm @25C)
-                "nh3_740_ppm": round(_nh3_740, 3),                        # derived trace NH3 slip (ppm mass)
-                "urea_740_ppm":round(_urea_740, 3),                       # derived trace urea slip (ppm mass)
+                "nh3_740_ppm": round(s.w_328c004["NH3"] * 1e6, 3),        # 740 NH3 slip, species layer (ppm mass)
+                "urea_740_ppm":round(s.w_328c004["Urea"] * 1e6, 3),       # 740 urea slip, species layer (ppm mass)
                 "FFIC_329401":{"pv": round(s.FFIC_329401["pv"], 4), "sp": round(s.FFIC_329401["sp"], 4),
                                "op": round(s.FFIC_329401["op"], 1), "mode": s.FFIC_329401["mode"]},
                 "FIC_329401": {"pv": round(s.FIC_329401["pv"], 1), "sp": round(s.FIC_329401["sp"], 1),
@@ -11004,6 +11017,7 @@ def step_sim(dt: float) -> dict:
             # a stage that silently reverts to the frozen split is the exact failure mode the
             # Heuristic Eradication Report was written about, so it has to be visible in telemetry.
             "vle_domain": {tag: SOL_VLE_DOMAIN.get(tag) for tag in ("C003", "F004", "F010")},
+            "des_vle_domain": {tag: DES_VLE_DOMAIN.get(tag) for tag in ("C002", "C003", "C004")},
             "vle_model": thermo_service.MODEL_NAME,
             "vle_flash_cache": thermo_service.flash_cache_stats(),
             # AUDIT F-8: the desorption train's own species vectors.  The two ppm figures are now a

@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 34 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 29 OPEN.**
+**Totals: 34 CLOSED · 9 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 28 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -75,7 +75,7 @@ ledger heuristic, and it is closed in *Phase 5j*.
 | Category | Closed | Partial | Blocked | Reclassified | Open |
 |---|---|---|---|---|---|
 | A. Algebraic state | 11 | 1 | 0 | 0 | 7 |
-| B. Phase splits | 3 | 4 | 0 | 0 | 7 |
+| B. Phase splits | 3 | 5 | 0 | 0 | 6 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
 | D. Hydraulics | 14 | 3 | 0 | 0 | 5 |
 | E. Gains / signals | 2 | 0 | 0 | 1 | 9 |
@@ -161,13 +161,13 @@ motive, on which these rows already close.
 | B-5 | OPEN | [main.py:4743](../../backend/main.py#L4743) | `HPCC_BUB_KN/KW` still `-- calib` |
 | B-6 | PARTIAL | [main.py:4251](../../backend/main.py#L4251) | θ vector moved by anchored `k_ratio`; inerts structurally θ = 1 |
 | B-7 | PARTIAL | [main.py:4055](../../backend/main.py#L4055) | `eta_P` replaced by the rigorous pressure ratio; `eta_co2`, `eta_T_steam` and `g_flood` remain |
-| B-8 | PARTIAL | [main.py:2640](../../backend/main.py#L2640) / [main.py:2584](../../backend/main.py#L2584) | 323C003/F004/F010 on `sol_vapour_y_vle`; the 328 train and 324 still on frozen α |
+| B-8 | PARTIAL | `sol_vapour_y_vle`, `des_rel_vol_ratio` in `main.py` | 323C003/F004/F010 on `sol_vapour_y_vle`; 328C002/C003/C004 on `thermo_service.k_ratio` (2026-09-17, As-Built *Phase 5k*). 324 (G-VLE-2) and the sub-80 C 328D003 / 328D001 / 322C001 still on frozen α |
 | B-9 | **CLOSED** (2026-09-16, *Phase 5g*) | `vacuum_condenser._q_balance` | `h_eff_kjkg` deleted. Duty is H_gas(in) - H_gas(vent) - H_liq(condensate) on the H0 datum, per species (H2O 43.2, NH3 33.6, CO2 16.3 kJ/mol at 45 C); 18 019 kW on the PFD rows against 18 460 kW of cooling water |
 | B-10 | OPEN | [consequence.py:329](../../backend/consequence.py#L329) | Linear in NH3 + CO2 loading |
 | B-11 | OPEN | [main.py:7971](../../backend/main.py#L7971) | `R323_PHI_V305` cap plus duty ratio at fixed λ |
 | B-12 | OPEN | [main.py:8162](../../backend/main.py#L8162) | min of two design ratios |
 | B-13 | **CLOSED** (2026-09-16, *Phase 5g*) | `vacuum_condenser.vent_moles` | Inerts leave saturated with vapour at the cold end and the shell pressure, as every PFD vent row shows; the linear UA derate and the design-condensate constant in both pressure loops are gone. Simplified Colburn-Hougen: the interface is the cold end, and NH3/CO2 follow water's saturation line (stated) |
-| B-14 | OPEN | [main.py:2990](../../backend/main.py#L2990) | One scalar for all volatiles (328) |
+| B-14 | PARTIAL (2026-09-17, As-Built *Phase 5k*) | `des_alpha_live` in `main.py` | NH3 and CO2 each carry their own rigorous relative-volatility departure (T and P, live liquor) inside the Kremser residual; the van't Hoff bracket, which had the wrong sign on the saturation line, is deleted. Still a lumped single-stage equivalent, not a tray-by-tray MESH solve |
 
 ### C. Scripted kinetics
 

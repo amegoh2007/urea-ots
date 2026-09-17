@@ -2842,6 +2842,85 @@ Full suite on the final tree, each file in its own process, against 726e098 (fai
 
 The other 63 files report the same outcome and the same failing ids on both trees.
 
+## Phase 5k — the 328 train takes its volatilities from the rigorous model
+
+### What moved the 328 volatilities
+
+The three hot 328 columns carry lumped, single-stage-equivalent volatilities back-solved from the
+PFD (`_des_stage_anchor`). 328C002 and 328C004 moved them through a Kremser residual on the
+datasheet tray count; 328C003, a liquid-filled hydrolyser, held them frozen:
+
+```text
+was:  S_live = K_inf . exp(-(dH/R)(1/T - 1/T_des)) . V/L        dH = 34 200 J/mol (Perry's, NH3 in water)
+      alpha_i,live = alpha_i,PFD . k_eff(S_live) / k_eff(S_des)   i in NH3, CO2 (CO2 borrows NH3's S)
+      328C003: alpha_i,live = alpha_i,PFD
+```
+
+The van't Hoff bracket has no pressure term. Both desorbers sit at their own bubble point
+(`T = Tsat(P_bottom)`), so a pressure change moves T along the water saturation line, and on that
+line the bracket has the wrong sign. It carries NH3's heat of solution, 34.2 kJ/mol, while water's
+vapour pressure climbs with 40.7 kJ/mol. The relative volatility therefore **falls** as the column
+runs hotter, and the bracket raised it.
+
+### The law
+
+```text
+now:  a_i(T, P)  = [K_i/K_H2O](T, P, w_live) / [K_i/K_H2O](T_eq,des, P_des, w_live)     thermo_service.k_ratio
+      S_i,live   = K_inf . a_i . V/L                      i in NH3, CO2, each with its own a_i
+      alpha_i    = alpha_i,PFD . k_eff(S_i,live) / k_eff(S_des)
+      328C003:  alpha_i = alpha_i,PFD . a_i(T_C003, P_C003)
+```
+
+The reference is the same live composition, so only the temperature and pressure derivative is taken
+(`z_ref_mass=None`). The reference temperature is `tsat_steam(P_des)`, the expression the tick writes,
+so at the seed pressure both calls get identical floats and the ratio is exactly 1.0. The column
+states are inside the model's regressed region: dilute ammonia water, 139–200 C, 3.5–16.8 bar a,
+`electrolyte_gamma_phi` at all three stages (published per tick as `SOL.des_vle_domain`).
+`k_ratio` answers 1.0 off-grid, which at the hydrolyser would snap α_NH3 back 5.3 % between 209.9
+and 210.1 C, so T is held inside 80.05–209.95 C. Beyond the edge the ratio stays flat instead.
+
+Measured slopes (design liquor, along each desorber's saturation line; hydrolyser at 16.8 bar a):
+
+| stage | ΔP or ΔT | α_NH3 rigorous | α_CO2 rigorous | old bracket (both) |
+|---|---|---|---|---|
+| 328C002 | +0.5 bar | 0.9665 | 1.1270 | 1.1201 |
+| 328C004 | +0.5 bar | 0.9920 | 0.9881 | 1.1077 |
+| 328C003 | +5 C | 0.9726 | 1.0641 | 1.0000 |
+
+### AI-328701 reads the stream it measures
+
+The conductivity came from `ppm_infer_328701`, a second model of the same trace: its own van't
+Hoff K(T) at the **design** steam/feed ratio, in parallel with the species layer. An FIC-329401 steam
+cut that took stream 740 over 100 ppm NH3 left the analyzer on its design value. It now reads
+`s.w_328c004` NH3 and urea (ppm) through the unchanged Kohlrausch matrix. CO2 stays at zero: PFD
+739/740 tabulate none, and the species layer's 1 ppm exists only so CO2 has a defined volatility.
+The published `nh3_740_ppm` / `urea_740_ppm` come from the same vector. `ppm_infer_328701` and
+`R328_AI701_DHSTRIP` are deleted.
+
+### Measured
+
+Boot pin: one constant moved, `EJ_MOTIVE_DES_LIVE` by 4.5e-11 relative. PIC-328202 setpoint
++0.5 bar at t = 600 s, 0.25 s tick:
+
+| t = 3 600 s | old | new |
+|---|---|---|
+| PT-328202 column top (bar a) | 3.8806 | 3.8803 |
+| 328C002 bottoms NH3 (%) | 0.384 (from 0.630) | 0.934 (from 0.630) |
+| stream 739 NH3 (ppm) | 0.330 (from 1.00) | 1.245 (from 1.00) |
+| stream 739 CO2 (ppm) | 0.329 | 0.745 |
+| PT-329201 (bar a) | 140.6367 | 140.6369 |
+
+The old bracket said running the desorbers half a bar higher would cut the condensate NH3 to a third.
+Hotter, higher-pressure columns strip ammonia **worse** at the same steam, and the new law says so.
+The design hold is unchanged: 3 600 s from the seed, stream 739 reads 1.0006 ppm (old 1.0008) and
+PT-329201 140.7016 bar a on both.
+
+Full suite on this tree, each file in its own process, against ef140e7: every one of the 70 files
+reports the same failing ids. `test_equation_audit_desorption` goes from 1 failed / 9 passed to
+1 failed / 11 passed, the two new tests (the rigorous volatility and its continuous envelope edge).
+`test_cutting_the_lp_strip_steam_blows_the_ammonia_spec` now also asserts that AI-328701 rises with the
+slip, and it passes.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

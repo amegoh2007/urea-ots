@@ -7,7 +7,7 @@
 ## 0. Heuristic Eradication Report — open after the 2026-09-15 re-audit
 
 `docs/analysis/HEURISTIC_ERADICATION_REPORT.md` §0a is now the authoritative per-finding status:
-34 closed, 8 partial, 0 blocked, 2 reclassified, 29 open. The original body still carries
+34 closed, 9 partial, 0 blocked, 2 reclassified, 28 open. The original body still carries
 pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical copy sits in
 `References/Gaps Closure/`.
 
@@ -23,18 +23,34 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   PFD 208 composition, so a bottoms stream carrying 2 t/h of NH3 would reach it as 1.5 % more of
   everything. Closing the tear takes either a composition-live 323 feed or the PFD 116 motive (the
   user chose the plant basis on 2026-09-16, so the first).
-* **322C001 needs an absorber law.** Its uptake is the boot-pinned `A328_PHI_ABS` fraction of the
-  off-gas mass, split on PFD 204 - 797 (NH3 89.3 / CO2 62.0 / H2O -21.3 kg/h). On the PFD 204 vent
-  the design slip is PFD 797's 1.9 kg/h, a ~2 % residual of two proportional terms, so a 1 % shift in
-  the upstream vent composition swings it by half; its throttle-direction test passes only because
-  that composition now holds still (Phase 5j). A saturated-inert vent (the 322E003 / 323C005 law) was written, measured
-  and reverted: under the fixed-fraction scalar a cooler column breaks NH3 through, and letting the
-  species set the scalar leaves no capacity for the CCW-failure breakthrough to SV-32253. The
-  datasheet (UD-AU-322-EC-0007) gives beds of 1.0 m (ID 576) and 1.5 m (ID 922) of 25 mm Pall rings
-  but no theoretical stages, so a Kremser form needs an HETP from somewhere.
-* **PFD 797's mass flow is a typo, and the engine uses it.** The row prints 1 758 kg/h, but 59.32 kmol/h
-  x MW 26.6 = 1 578, which is also 1 708 (PFD 204) - 130 (the 322C001 uptake). `R3232_M797_DES = 1758.0`
-  feeds 323E003's inlet, so the LPCC balance carries a 180 kg/h phantom. Moving it re-anchors 323E003.
+* **322C001 needs an absorber law, and the data for a rate-based one is now in hand.** Its uptake is
+  the boot-pinned `A328_PHI_ABS` fraction of the off-gas mass, split on PFD 204 - 797 (NH3 89.3 /
+  CO2 62.0 / H2O -21.3 kg/h), so the slip is a ~2 % residual of two proportional terms. A saturated-
+  inert vent was written, measured and reverted: it leaves no capacity for the CCW-failure breakthrough
+  to SV-32253. **Geometry, verified on the scans 2026-09-17:** the as-built arrangement drawing
+  (UD-AU-322-DZ-0007-001 rev 02) and the column datasheet (UD-AU-322-EC-0007) agree: lower bed
+  1 500 mm in the ID 922 section, sprayer N4 (322P002 liquor, stream 755); upper bed 1 000 mm in the
+  ID 576 section, sprayer N5 (CPL). The Rauschert packing datasheet (UD-AU-322-DZ-0008-001) gives
+  Raflux 25-10 metal, a = 250 m2/m3, void 0.95, but no HETP. The purchase spec's 1.63 / 0.85 m
+  layers are order quantities. That is enough for Onda (1968) transfer units per bed. What is still
+  missing is the back-pressure: stream 755 is 4.17 % NH3 / 3.81 % CO2 at 40 C, and the gamma-phi grid
+  starts at 80 C. The props module has Rumpf-Maurer Henry constants (273-433 K) and the speciation
+  equilibria, so a dilute-speciation back-pressure is buildable. Without it a transfer-unit law
+  absorbs a breakthrough it should not. PFD 797's H2O (2.28 mol%) is water's saturation at 46 C /
+  3.9 bar a with activity ~0.89, so the vent water is a saturation law, not a split.
+* **PFD 797 does not enter 323E003, and the engine's 323E003 inlet it stands in for is unidentified.**
+  797 is 322C001's vent to atmosphere through PV-322201 (Mapping of Absorber unit.md:9; datasheet N3
+  "to Atmosphere Vent"), 59.32 kmol/h x MW 26.6 = 1 578 kg/h (the printed 1 758 is a digit swap).
+  The engine feeds `R3232_M797_DES = 1758` into 323E003 as "inert-laden recycle", while 322C001's
+  live `vent_c001` leaves to nowhere. On the PFD rows 797 cannot be a 323E003 inlet: 305 brings
+  0.79 kmol/h N2 and 321 vents 0.83, where 797 would add 44.6. PFD 321 is 1 323 kg/h (50.29 kmol/h x
+  MW 26.3; the "132.3" in the 323E003 datasheet summary is the misprint, and 323E011 closes on
+  1 323). Without 797, 323E003 is short **1 819 kg/h**: 305 + 718B + 776 = 36 419 against 308 + 321
+  = 38 238. Per species that is NH3 366, H2O 1 380 and CO2 62 kg/h, an ammonia water of ~20 % NH3
+  that no 1.5-2.2 t/h PFD row matches. So the phantom 797 carries roughly the right mass as the wrong
+  substance (inerts that "condense" in the gas envelope). Removing it means finding that inlet first
+  (a 328 / 323D002 recycle is the likeliest), then re-anchoring `R3232_E003_LAMC`, `M_COND_DES`, the
+  envelope capacitance and the 321 split.
 * **Smaller A-2 leftovers.** (1) `REACT_XI_UREA_DES` 1 302.27 is net of biuret, while the reactor's
   stoichiometry subtracts biuret again; PFD 205 -> 207 imply a gross 1 306.9 (the 4.6 kmol/h above).
   (2) SV-32201's relieved NH3 fraction and its API 520 MW are read off the 322E003 vent vector, which
@@ -159,13 +175,13 @@ single `flash / flash_ph / bubble_p / bubble_t / dew_t` service, and those three
 vapour composition from a Rachford-Rice gamma-phi solve instead of the frozen `sol_vapour_y` alpha
 vector. Live confirmation is published per tick as `SOL.vle_domain`.
 
-**Still open:** 328D003 and the whole 328 desorption train still use `sol_vapour_y` with anchored
-alphas. They were never blocked by the envelope — the 328 columns run 60-145 °C on dilute ammonia
-water, which is the region the parameter set was actually regressed on and the most trustworthy part
-of the whole table. G-VLE-3 removed the last reason to hesitate (the grid now spans 80-210 °C and
-bounded mole fractions), so this is now purely unstarted wiring rather than a data gap. The one real
-check before starting: several 328 stages run BELOW the 80 °C bottom node, where the envelope is
-still bounded on both sides deliberately — see `vle_nh3co2h2o._in_box`.
+**328C002 / 328C003 / 328C004 closed (As-Built *Phase 5k*).** Their volatilities move on
+`thermo_service.k_ratio` (live liquor, T and P derivative), inside the Kremser form for the two
+desorbers. The Perry's van't Hoff bracket had no pressure term and the wrong sign along the columns'
+saturation line. **Still anchored:** 328D003, 328D001 and 322C001 run at 40-61 C, below the grid's
+80 C bottom node, which stays a deliberate bound (`vle_nh3co2h2o._in_box`). The 328 temperature is
+clamped to 80.05-209.95 C for the ratio, so a column crossing an edge goes flat instead of snapping
+back onto its design volatility.
 
 ## 1a. G-VLE-2 — no volatile split on a urea melt (324E001 / 324E003)
 
@@ -1122,15 +1138,6 @@ Still open, and worth a decision:
   is minutes, not hours. Moving it means re-deriving the cold-start anchor and re-checking
   `test_transient_coldstart.py` and section 6.4, so it is left alone and the emergent time reported
   as it stands.
-
-- **The design hold is only exact at the production tick.** At `dt = 0.1 s` PT-329201 reads
-  140.70024 bar a after 3000 s. On the `_systest` default of `dt = 2.0 s` the same seed walks a
-  ~1 bar, ~6000 s wobble from the 322E002 level integrator's Euler truncation. Not from this work —
-  with `SYN_P_PHASE_GAIN` forced to 0 and the HV-322604 ceiling forced off the trajectory is
-  bit-identical, and the new terms read exactly zero at every sample. But every `dt = 2 s` system
-  test is grading a trajectory the plant never runs, and any test wanting a tight PT band has to say
-  which tick it means. Worth a pass over the harness before more design-point residuals are chased
-  at section 3.
 
 - **The As-Built section *322E003 LP/MP Recycle-Carbamate Wash Cascade* describes a scrubber that is
   not the one in `main.py`.** Its `capacity_ratio` component-wise absorption model, the `q_wash`
