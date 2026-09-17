@@ -3650,6 +3650,115 @@ now pass, `test_coldstart_dead_time_within_limit` now fails at 596 s, and
 `test_design_hold_stays_pinned` failed at HEAD too. `test_scenario_consequences` reads 14 / 14 with every
 check and value identical, and `test_ccw_loss_chain` 37 / 41 with the same four gaps.
 
+## Phase 5s — 323C005 drains through N4, and stops absorbing where its liquor boils (A-16)
+
+```text
+was:  A323_C005_M_TAU_S = 300.0                        # assumed residence time
+      A323_C005_M_DES   = BOT_DES/3600 * 300           # 2 848 kg
+      bot_c005          = BOT_DES * (M / M_DES)        # linear in holdup
+```
+
+### What the drawings say
+
+The atmospheric absorber's DDS (UD-AU-323-EC-0003) and the vent stack's (UD-AU-328-EC-0011) place
+the two vessels ten metres apart vertically:
+
+* 323C005: ID 1 180 mm, 1 150 mm skirt on EL +14.5 m, so the bottom T.L. is at EL +15.65 m. The
+  bottoms leave the bottom head through **N4, DN 150, pipe 168.3 x 5.6** (weld end, no valve). The gas
+  inlets N1/N3 are 300 mm above that T.L. and the packing support 500 mm above it.
+* 328V001: bottom T.L. near EL +3.1 m. **N2**, the liquid inlet from 323C005, runs down inside the
+  stack and ends 100 mm above that T.L. — under the pool that **N1**, the overflow to 328D003, holds
+  at about EL +5.6 m. That submerged dip pipe is the plant's gas seal.
+
+Both gas spaces are atmospheric, so the leg's liquid column stands a few centimetres above 328V001's
+pool, ten metres below the absorber. 323C005 therefore drains freely: its sump holds only the head
+that pushes the liquor into N4, and the LT the P&ID shows is a monitor, not a controller — the
+nozzle table has no level-instrument nozzle at all (N7 is a handhole, N10A/D are skirt vents).
+
+The old holdup was an assumed 300 s residence: 2 848 kg, 2.9 m³, which stands **2.5 m deep** in a
+1.18 m column — over the gas inlets and into the packed bed. The column it described was flooded.
+
+### The law
+
+```text
+Q(h)  = min( 1.84 . pi . d . h^1.5 ,  0.61 . pi d^2/4 . sqrt(2 g h) )     d = 157.1 mm (N4 bore)
+m_out = BOT_DES . Q(h(M)) / Q(h_des)
+V(h)  = pi R^2 ( h^2/a - h^3/3a^2 )   in the 2:1 head (a = R/2),  + pi R^2 (h - a) above it
+```
+
+A weir over the pipe rim and an orifice on its bore; whichever passes less is what the inlet can
+take. At the design 34.9 m³/h the weir governs, the head is **48.5 mm** and the sump holds **8.1 kg**.
+The tick solves the inventory backward-Euler in h, because the drain's time constant falls as h^1.5
+toward an empty sump and no explicit step can follow it; the bottoms it reports are the flow that
+closes the mass balance exactly. At the seed Q(h(M_des))/Q(h_des) is 1.0 and the bottoms are
+BOT_DES to the last bit.
+
+The packet's `LI_323503` is gone with it. That tag belongs to 323D011's level transmitter, and it was
+being published for a vessel that has no level instrument; the block now carries the physical
+`sump_head_mm`.
+
+### What it exposed: the absorber was absorbing without solvent
+
+`abs_c005 = gas − vent` takes every NH3 and CO2 molecule that arrives, whatever liquor is there to
+take it. With 2 848 kg of fictitious holdup that error was slow — cut the wash (LIC-322502 to MAN
+0 %) and the old engine warms 323C005 to 97 °C over 480 s and keeps going. With the real 8 kg sump
+the same heat reached **498 °C in 6 s**.
+
+The absorber's liquor cannot take up gas past its own boiling point at the column's 1.0 bar a: there
+its NH3/CO2 back-pressure is above anything the gas carries. So the stage's energy balance is now
+bounded by it — what cannot be absorbed leaves in the vent:
+
+```text
+abs <= [ (T_boil - T) . (M c_p + k_cap dt)/dt - P_sens ] . 3600 / LAM ,   m_341 = gas - abs
+```
+
+At the design state the liquor sits 45 K below that bound, so every term is untouched and the
+bound never engages. Cutting the wash now pins 323C005 at 99.6 °C. A real absorption law with
+the liquor's own NH3/CO2 back-pressure (322C001 has one since *Phase 5m*) would put the bound lower
+— an ammonia-water liquor boils nearer 90 °C — and is the open item here.
+
+### What changes
+
+From the seed, LIC-322502 to MAN 0 % at 2 s (the 322C001 draw that washes 323C005), back to AUTO at
+482 s, 0.25 s tick:
+
+| t (s) | HEAD: sump (kg) / T (°C) / bottoms (t/h) | Phase 5s: sump / T / bottoms | head (mm) |
+|---|---|---|---|
+| 0 | 2 848 / 55.0 / 34.18 | 8.1 / 55.0 / 34.18 | 48.5 |
+| 4 | 2 832 / 55.1 / 34.01 | 0.9 / 99.6 / 6.3 | 15.7 |
+| 42 | 2 503 / 56.7 / 30.06 | 0.0 / 99.6 / 0.03 | 0.5 |
+| 482 | 630 / 97.2 / 7.57 | 0.0 / 99.6 / 0.03 | 0.5 |
+| 542 (AUTO) | 1 064 / 75.1 / 12.73 | 34.9 / 49.5 / 59.6 | 104.5 |
+| 722 | 3 124 / 54.0 / 37.46 | 55.4 / 49.1 / 67.5 | 134.2 |
+
+The bottoms now follow the wash within seconds instead of lagging it by minutes, which is what a
+gravity drain ten metres above its receiver does. 328D003's Comp II bay sees the same total mass;
+it is the timing that moves.
+
+### Cost and pin
+
+Two bisections a tick (the head from the mass, then the implicit step), both on closed-form
+polynomials: below the noise of a ten-millisecond tick. The boot pin moves in one constant,
+`EJ_MOTIVE_DES_LIVE`, by 2.9e-8 relative; every other pinned constant is bit-identical.
+
+### Tests
+
+`test_hydraulics` (65): + `test_the_323c005_sump_drains_through_n4_on_its_own_head` (the design head
+and mass, the weir governing there, the seed bit-exact, mass conserved over four step shapes including
+a 10 s one, empties in 10 s without ringing, and a 120 % feed settling on its own head), +
+`test_323c005_absorbs_no_further_than_its_liquor_boils` (wash cut, 20 s: the stage sits at the boiling
+point and the sump is under a kilogram).
+
+`test_c001_species_layer` (1 failed / 5 passed, the pre-existing
+`test_design_liquor_is_stationary_and_bitexact`), `test_equation_audit_td013_d002` (1 / 11),
+`test_equation_audit_desorption` (1 / 11), `test_equation_audit_323_324` (1 / 4),
+`test_328d003_compartments` (12), `test_equation_audit_c10_live_cp` (7),
+`test_vacuum_condenser_mapping` (17), `test_trend_coverage` (9), `test_totalizer_init` (5),
+`test_boot_pin_sources` (2), `test_consequence_propagation` (8 + 2 xfail), `test_startup_stability`
+(5) and `test_session_regression_gate` (7) have the same failure ids as HEAD.
+`test_scenario_consequences` reads 14 / 14 with every check and value identical to HEAD's, and
+`test_ccw_loss_chain` 37 / 41 with the same four gaps.
+
 ## Loss of 322E003 Condensation: the CCW Consequence Chain
 
 Cutting the shell-side cooling water to the HP scrubber used to move nothing on the pressure side.

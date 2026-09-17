@@ -1839,8 +1839,96 @@ A323_C005_VENT_DES = 80.0
 A323_C005_MAKEUP = 0.0
 A323_C005_BOT_DES  = 34180.0
 A323_C005_T = 55.0 ; A323_C005_MAKEUP_T = 30.0
-A323_C005_M_TAU_S = 300.0
-A323_C005_M_DES = A323_C005_BOT_DES/3600.0 * A323_C005_M_TAU_S
+# 323C005's sump (report A-16, As-Built Phase 5s).  DDS UD-AU-323-EC-0003: ID 1180 mm, skirt 1150 mm on
+# EL +14.5 m, so the bottom T.L. is at EL +15.65 m; the bottoms leave the bottom head through N4 (DN 150,
+# pipe 168.3 x 5.6) and fall to 328V001, whose N2 dip pipe ends 100 mm above its own bottom T.L. (EL
+# ~+3.1 m), under the pool its N1 overflow holds at EL ~+5.6 m (328V001 DDS p.5).  Both gas spaces are
+# atmospheric, so the leg's liquid column stands a few cm above that pool, ~10 m below 323C005, and the
+# sump drains freely.  It holds only the head that pushes the bottoms into the N4 pipe: the smaller of a
+# Francis weir over the pipe rim and a sharp-edged orifice on its bore.  At the design 34.9 m3/h the weir
+# governs and the head is 49 mm, about 8 kg of liquor in the dished head.  The engine used to hold
+# 2 848 kg here (an assumed 300 s residence), which stands 2.5 m deep: above the gas inlets (300 mm over
+# the T.L.) and into the packing (500 mm).
+A323_C005_ID_M     = 1.180                        # shell ID, m (DDS line 27)
+A323_C005_HEAD_A_M = A323_C005_ID_M / 4.0         # bottom-head depth, 2:1 ellipsoidal (head type not on the DDS)
+A323_C005_N4_ID_M  = 0.1683 - 2.0 * 0.0056        # N4 bore, m (nozzle table: 168.3 x 5.6)
+A323_C005_RHO      = 977.99                       # liquid density, kg/m3 (DDS line 6)
+A323_C005_P_BARA   = 1.00                         # operating pressure, bar a (DDS line 13)
+A323_C005_CD_ORIF  = 0.61                         # sharp-edged orifice discharge coefficient
+A323_C005_C_WEIR   = 1.84                         # Francis weir coefficient, SI
+
+
+def c005_sump_volume_m3(h_m):
+    """Liquor volume in 323C005's bottom head and shell at a depth h above the N4 inlet."""
+    r2 = (A323_C005_ID_M / 2.0) ** 2
+    a = A323_C005_HEAD_A_M
+    h = max(h_m, 0.0)
+    if h <= a:
+        return math.pi * r2 * (h * h / a - h ** 3 / (3.0 * a * a))
+    return math.pi * r2 * (2.0 * a / 3.0 + (h - a))
+
+
+def c005_sump_head_m(m_kg):
+    """Depth over the N4 inlet that holds a sump mass (bisection in the head, linear in the shell)."""
+    v = max(m_kg, 0.0) / A323_C005_RHO
+    v_head = c005_sump_volume_m3(A323_C005_HEAD_A_M)
+    if v >= v_head:
+        return A323_C005_HEAD_A_M + (v - v_head) / (math.pi * (A323_C005_ID_M / 2.0) ** 2)
+    lo, hi = 0.0, A323_C005_HEAD_A_M
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        if c005_sump_volume_m3(mid) < v:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+def c005_drain_m3s(h_m):
+    """N4 inlet capacity at a head: weir over the pipe rim or orifice on the bore, whichever is less."""
+    h, d = max(h_m, 0.0), A323_C005_N4_ID_M
+    return min(A323_C005_C_WEIR * math.pi * d * h ** 1.5,
+               A323_C005_CD_ORIF * math.pi * d * d / 4.0 * math.sqrt(2.0 * 9.80665 * h))
+
+
+def _c005_design_head_m():
+    q, lo, hi = A323_C005_BOT_DES / A323_C005_RHO / 3600.0, 0.0, 2.0
+    for _ in range(80):
+        mid = 0.5 * (lo + hi)
+        if c005_drain_m3s(mid) < q:
+            lo = mid
+        else:
+            hi = mid
+    return 0.5 * (lo + hi)
+
+
+A323_C005_M_DES = A323_C005_RHO * c005_sump_volume_m3(_c005_design_head_m())
+A323_C005_Q_REF = c005_drain_m3s(c005_sump_head_m(A323_C005_M_DES))   # same path the tick takes
+
+
+def c005_sump_step(m_kg, in_kgh, dt):
+    """Advance the sump over dt, backward Euler; returns (mass, bottoms kg/h).
+
+    The drain's time constant falls as h^1.5 toward an empty sump, so an explicit step cannot follow
+    it.  The bottoms are anchored on the design flow, BOT_DES . Q(h)/Q(h_des), which is exactly
+    BOT_DES at the seed, and the returned flow is the one that closes the mass balance exactly."""
+    bot = A323_C005_BOT_DES * c005_drain_m3s(c005_sump_head_m(m_kg)) / A323_C005_Q_REF
+    if bot == in_kgh or dt <= 0.0:
+        return m_kg, bot
+    rhs = max(m_kg, 0.0) + max(in_kgh, 0.0) * dt / 3600.0
+    lo, hi = 0.0, c005_sump_head_m(rhs)
+    for _ in range(60):
+        mid = 0.5 * (lo + hi)
+        f = (A323_C005_RHO * c005_sump_volume_m3(mid)
+             + A323_C005_BOT_DES * c005_drain_m3s(mid) / A323_C005_Q_REF * dt / 3600.0 - rhs)
+        if f < 0.0:
+            lo = mid
+        else:
+            hi = mid
+    m_new = A323_C005_RHO * c005_sump_volume_m3(lo)
+    return m_new, (rhs - m_new) * 3600.0 / dt
+
+
 A323_C005_ABS_DES = A323_C005_M702_DES + A323_C005_M708_DES - A323_C005_VENT_DES
 A323_C005_SENS_DES = ((A323_C005_M756_DES*(A328_C001_T - A323_C005_T)
                        + A323_C005_M702_DES*(45.0 - A323_C005_T)
@@ -8767,15 +8855,30 @@ def step_sim(dt: float) -> dict:
                    gas_c005)
     abs_c005 = max(gas_c005 - m_341, 0.0)
     in_c005  = m756_prev + gas_c005
-    bot_c005 = A323_C005_BOT_DES * (s.a323_c005_M / A323_C005_M_DES)
     P_c005   = ((m756_prev/3600.0*R3232_CP*(A328_C001_T - Tc005)
                  + m702_prev/3600.0*R3232_CP*(45.0 - Tc005)
                  + m708_prev/3600.0*R3232_CP*(121.0 - Tc005))
                 + abs_c005/3600.0*A323_C005_LAM)
     # SEMI-IMPLICIT, as 324 above: the three gas/liquid feeds are the T-dependent load.
     k_cap_c005 = (m756_prev + m702_prev + m708_prev)/3600.0*R3232_CP
-    s.a323_c005_T = Tc005 + P_c005*dt/max(s.a323_c005_M*R3232_CP + k_cap_c005*dt, 1e-6)
-    s.a323_c005_M = max(s.a323_c005_M + (m756_prev + abs_c005 - bot_c005)/3600.0*dt, 1.0)
+    #  The liquor cannot absorb past its boiling point at the column's 1.0 bar a (DDS line 13): there
+    #  its NH3/CO2 back-pressure is above anything the gas carries, and the absorption heat would have
+    #  nothing left to warm.  With the wash on, the design liquor sits 45 K below it and this is inert.
+    #  With stream 756 cut, the sump no longer carries a 2.8 t fictitious holdup to hide the heat in
+    #  (A-16), and an unbounded `abs_c005 . LAM` took 8 kg of liquor to 498 C in 6 s.  What cannot be
+    #  absorbed vents.
+    _den_c005 = s.a323_c005_M*R3232_CP + k_cap_c005*dt
+    _tbp_c005 = iapws_if97.tsat_c(A323_C005_P_BARA)
+    if abs_c005 > 0.0 and Tc005 + P_c005*dt/max(_den_c005, 1e-6) > _tbp_c005:
+        _abs_cap = max(((_tbp_c005 - Tc005)*_den_c005/dt
+                        - (P_c005 - abs_c005/3600.0*A323_C005_LAM))*3600.0/A323_C005_LAM, 0.0)
+        if _abs_cap < abs_c005:
+            P_c005  -= (abs_c005 - _abs_cap)/3600.0*A323_C005_LAM
+            abs_c005 = _abs_cap
+            m_341    = gas_c005 - abs_c005
+    m_c005_next, bot_c005 = c005_sump_step(s.a323_c005_M, m756_prev + abs_c005, dt)   # A-16: N4 drain
+    s.a323_c005_T = Tc005 + P_c005*dt/max(_den_c005, 1e-6)
+    s.a323_c005_M = m_c005_next
 
     # ----- Stage 2 : 328D003 active bays I/II + communicating accumulation bay III ----
     TI       = s.a328_d003_TI
@@ -10623,7 +10726,7 @@ def step_sim(dt: float) -> dict:
             },
             "C005": {                            # 323C005 off-gas scrubber -> 328V001
                 "TT_323C005": round(s.a323_c005_T, 1),                     # scrub liquid temp (C, hold 55)
-                "LI_323503":  round(s.a323_c005_M / A323_C005_M_DES * 50.0, 1),
+                "sump_head_mm": round(c005_sump_head_m(s.a323_c005_M) * 1000.0, 1),   # over N4 (no LT on 323C005)
                 "bot_th":     round(bot_c005 / 1000.0, 2),                 # bottoms -> 328V001 (t/h)
                 "in756_kgh":  round(m756_prev, 1),
                 "in702_kgh":  round(m702_prev, 1),

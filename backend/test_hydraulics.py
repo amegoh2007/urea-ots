@@ -854,3 +854,48 @@ def test_the_k002_governor_holds_the_demanded_flow_not_the_curve_flow():
     st = main.state
     assert st.k002_speed == 1.0
     assert st.k002_deliv_kgh == main.CO2_DES_KGH
+
+
+def test_the_323c005_sump_drains_through_n4_on_its_own_head():
+    """Report A-16.  The bottoms were BOT_DES . M/M_DES on an assumed 300 s residence (2 848 kg, 2.5 m
+    deep, over the gas inlets).  323C005 sits ~10 m above 328V001's sealed pool, so its sump holds only
+    the head that pushes the liquor into N4: a weir over the pipe rim or an orifice on the bore."""
+    main = _main()
+    m_des, bot_des = main.A323_C005_M_DES, main.A323_C005_BOT_DES
+    h_des = main.c005_sump_head_m(m_des)
+    assert 0.03 < h_des < 0.07 and 5.0 < m_des < 15.0, (h_des, m_des)
+    d = main.A323_C005_N4_ID_M
+    assert main.A323_C005_C_WEIR * math.pi * d * h_des ** 1.5 < (
+        main.A323_C005_CD_ORIF * math.pi * d * d / 4.0 * math.sqrt(2.0 * 9.80665 * h_des))  # weir governs
+    assert main.c005_sump_step(m_des, bot_des, 0.25) == (m_des, bot_des)                # bit-exact seed
+    for m0, q_in, dt in ((m_des, 0.0, 0.25), (0.0, 1.2 * bot_des, 0.25), (m_des, 5000.0, 10.0),
+                         (500.0, 0.0, 2.0)):
+        m1, bot = main.c005_sump_step(m0, q_in, dt)
+        assert abs((m1 - m0) - (q_in - bot) * dt / 3600.0) < 1e-9                          # conserves mass
+        assert m1 >= 0.0 and bot >= -1e-9
+    m = m_des
+    for _ in range(40):
+        m, bot = main.c005_sump_step(m, 0.0, 0.25)
+    assert m < 0.01 and bot < 10.0                                     # empties in seconds, no ringing
+    m = 0.0
+    for _ in range(400):
+        m, bot = main.c005_sump_step(m, 1.2 * bot_des, 0.25)
+    assert abs(bot - 1.2 * bot_des) < 1e-6 * bot_des and main.c005_sump_head_m(m) > h_des
+
+
+def test_323c005_absorbs_no_further_than_its_liquor_boils():
+    """Without its wash (322C001's LIC-322502 shut) the absorber has no liquor to take the absorption
+    heat; the bound stops the gas dissolving past the 1.0 bar a boiling point and it vents instead."""
+    main = _main()
+    main.state = main.State()
+    try:
+        for _ in range(8):
+            main.step_sim(0.25)
+        main.state.LIC_322502["mode"] = "MAN"
+        main.state.LIC_322502["op"] = 0.0
+        for _ in range(80):
+            main.step_sim(0.25)
+        assert main.state.a323_c005_T <= main.iapws_if97.tsat_c(main.A323_C005_P_BARA) + 1e-9
+        assert main.state.a323_c005_M < 1.0
+    finally:
+        main.state = main.State()

@@ -1,13 +1,13 @@
 # Handoff: Open Gaps
 
-**Last updated:** 2026-09-17 (A-12: 322R001 discharges over its overflow funnel through HV-322605's vendor trim; 322C001 rate-based absorber and real liquor enthalpies, D-20 and the LV-323501 / LV-323505 seal-loss letdowns, speciated NH3/CO2 in the 324 condenser vents; 2026-09-16: A-6, A-7, A-11, A-17, A-13, B-2, B-9, B-13, D-4, D-11, D-12, D-14, D-15, D-16, E-2, MSPAN_504, the thermo memo, the 323F010 urea carryover, A-2 step 1)
+**Last updated:** 2026-09-17 (A-12: 322R001 discharges over its overflow funnel through HV-322605's vendor trim; A-16: 323C005 drains through N4 on its own head; 322C001 rate-based absorber and real liquor enthalpies, D-20 and the LV-323501 / LV-323505 seal-loss letdowns, speciated NH3/CO2 in the 324 condenser vents; 2026-09-16: A-6, A-7, A-11, A-17, A-13, B-2, B-9, B-13, D-4, D-11, D-12, D-14, D-15, D-16, E-2, MSPAN_504, the thermo memo, the 323F010 urea carryover, A-2 step 1)
 
 ---
 
 ## 0. Heuristic Eradication Report — open after the 2026-09-15 re-audit
 
 `docs/analysis/HEURISTIC_ERADICATION_REPORT.md` §0a is now the authoritative per-finding status:
-36 closed, 8 partial, 0 blocked, 2 reclassified, 27 open. The original body still carries
+37 closed, 8 partial, 0 blocked, 2 reclassified, 26 open. The original body still carries
 pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical copy sits in
 `References/Gaps Closure/`.
 
@@ -58,6 +58,15 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   better. (3) `SCRUB_HV604_GAMMA` 1.30 was chosen for an NH3-rich gas; the PFD 204 vent is nearer 1.38
   (choked either way). (4) `reactor.L0_DES` 3.072961 is neither PFD 202+205 (3.031) nor the live
   seed (3.079); it only anchors `L_fresh`, so it was left.
+* **323C005 absorbs without asking what its liquor can hold (found closing A-16, *Phase 5s*).**
+  `abs_c005 = gas - vent` takes up every NH3 and CO2 molecule that arrives; only the vent is a law
+  (D-11, saturated inerts at the lean-solvent temperature). The engine's 2 848 kg fictitious sump had
+  been hiding it: with the real 8 kg one, cutting the wash (LIC-322502 to MAN 0 %) drove the stage to
+  498 C in 6 s. It is now bounded by the liquor's boiling point at 1.0 bar a — beyond that the NH3/CO2
+  back-pressure is above anything the gas carries — and what cannot be absorbed vents, which pins the
+  cut-wash case at 99.6 C. **Open:** the bound is water's boiling point, and an ammonia-water liquor
+  boils nearer 90 C; the absorber wants the same treatment 322C001 got in *Phase 5m* (Onda transfer
+  units on the 1.5 m Pall-25 bed, DDS UD-AU-323-EC-0003, against the speciated back-pressure).
 * **A-12 is closed (As-Built *Phase 5r*); what 322R001's discharge leaves.** The outflow is
   min(HV-322605 on its CONVAL Kv table at design dP, Francis weir over the overflow-funnel lip), so the
   level parks at the lip (LT-322504 ~36 %) on a wide-open valve or a CO2 cut. Left: (1) **the valve dP

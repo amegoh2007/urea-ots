@@ -59,7 +59,7 @@ datasheets.
 
 ## 0a. Status ledger — re-verified 2026-09-15
 
-**Totals: 36 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 27 OPEN.**
+**Totals: 37 CLOSED · 8 PARTIAL · 0 BLOCKED · 2 RECLASSIFIED · 26 OPEN.**
 
 *Updated 2026-09-16.* Four more closed (A-6, A-7, A-11, A-17) and the BLOCKED column is empty: the
 two findings that were waiting on a number got it from the vendor archive rather than from a guess,
@@ -85,9 +85,17 @@ HV-322605 and cancels. The discharge is the valve's own CONVAL characteristic at
 funnel's weir once the level reaches the lip, whichever passes less. The last empty-vessel guard in
 the synthesis loop is gone with it.
 
+*Updated 2026-09-17 (later still).* A-16 closed (As-Built *Phase 5s*): 323C005 stands ten metres above
+328V001's sealed pool, so its sump holds only the head that pushes the bottoms into N4 — 48 mm and
+8 kg, against the 2 848 kg (2.5 m, over the gas inlets) an assumed 300 s residence had put there.
+Closing it exposed a finding this report does not list: `abs_c005` takes up every NH3 and CO2 molecule
+that arrives whatever liquor is there to take it, which the fictitious holdup had been hiding. The
+stage's energy balance is now bounded by the liquor's boiling point at 1.0 bar a, and what cannot be
+absorbed vents; a real back-pressure law for this absorber is open.
+
 | Category | Closed | Partial | Blocked | Reclassified | Open |
 |---|---|---|---|---|---|
-| A. Algebraic state | 12 | 1 | 0 | 0 | 6 |
+| A. Algebraic state | 13 | 1 | 0 | 0 | 5 |
 | B. Phase splits | 3 | 5 | 0 | 0 | 6 |
 | C. Kinetics | 4 | 0 | 0 | 1 | 1 |
 | D. Hydraulics | 15 | 2 | 0 | 0 | 5 |
@@ -119,7 +127,7 @@ needs is not in `References/`. **RECLASSIFIED**: the original finding misread th
 | A-13 | **CLOSED** (2026-09-16, As-Built *Phase 5g*) | `vacuum_condenser.solve` | Gas outlet is the root of the H0 duty balance against UA.LMTD on the live cooling water, not design + inlet shift. Cooling water +5 K warms 324E002's cold end 45 -> 51.2 C |
 | A-14 | OPEN | [main.py:3663](../../backend/main.py#L3663) | PFD literals plus offsets |
 | A-15 | CLOSED (Phase 1) | [main.py:3609](../../backend/main.py#L3609), [main.py:4829](../../backend/main.py#L4829) | Both identity short-circuits deleted |
-| A-16 | OPEN | [main.py:8423](../../backend/main.py#L8423) | 323C005 bottoms linear in holdup |
+| A-16 | **CLOSED** (2026-09-17, As-Built *Phase 5s*) | `c005_sump_step`, `c005_drain_m3s` in `main.py` | The bottoms are what N4 can take at the sump's own head: min(Francis weir over the DN 150 pipe rim, orifice on its 157.1 mm bore), anchored on the design flow. 323C005's bottom T.L. is at EL +15.65 m (DDS UD-AU-323-EC-0003) and 328V001's N2 dip pipe ends under a pool its N1 overflow holds near EL +5.6 m (UD-AU-328-EC-0011), so the column drains freely and the design sump is 48.5 mm deep, 8.1 kg — not the 2 848 kg an assumed 300 s residence gave it. The inventory is solved backward-Euler because the drain's time constant falls as h^1.5. The `LI_323503` the packet published for this vessel is deleted: that tag is 323D011's, and the nozzle table has no level instrument on 323C005 |
 | A-17 | **CLOSED** (2026-09-16) | `gravity_outflow_323f010` | The leg height cancels. 323D002 is atmospheric, so this is a barometric leg proper: its column balances atmosphere, ρ·g·h_leg = P_atm, and the driving head collapses to **M·g/A + P_vessel** — density-free, with A from the datasheet bore (ID 3478 mm). Design-exact, and a vacuum break now raises the drain ~43 %. Sister-leg note: 324F001's leg runs vacuum-to-vacuum and is sized on that ΔP instead — using that form here made the drain 10× too sensitive |
 | A-18 | CLOSED (Phase 4b, D-5) | [main.py:7024](../../backend/main.py#L7024) | CO2 line on a check-valve node; `CO2_PV_DP_GAIN` superseded ([main.py:7003](../../backend/main.py#L7003)) |
 | A-19 | CLOSED (Phase 4b, D-5) | as A-18 | 320K002 map with surge/stonewall flags |
