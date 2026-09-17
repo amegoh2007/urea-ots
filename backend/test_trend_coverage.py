@@ -157,11 +157,10 @@ def test_unbound_slots_are_the_known_white_frame_set():
     """White frames are unmodelled units, not trend defects. Flag any NEW ones."""
     unbound = sorted({e["tag"] for e in ENTRIES
                       if e["t"] in ("ind", "avalve") and not e["bind"] and e["tag"] not in BINDS})
-    # 2026-09-15: 16 -- the 13 unmodelled Unit-335 slots on 324-1b, FIC-335407/FV-335407 on
-    # 323-1, and FQT-321401 on 321-1.  FQT-321401 is NOT unmodelled: the packet already
-    # publishes the running NH3 total as top-level `totalizer`; the overlay just has no bind.
-    assert len(unbound) <= 16, \
-        f"{len(unbound)} unbound indicator slots, was 16 — a bind was dropped: {unbound}"
+    # 2026-09-17: 15 -- the 13 unmodelled Unit-335 slots on 324-1b and FIC-335407/FV-335407 on
+    # 323-1.  FQT-321401 on 321-1 now binds the packet's top-level `totalizer`.
+    assert len(unbound) <= 15, \
+        f"{len(unbound)} unbound indicator slots, was 15 — a bind was dropped: {unbound}"
 
 
 def test_packet_exposes_both_clocks_for_the_trend_axis():

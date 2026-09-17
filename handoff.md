@@ -64,12 +64,6 @@ pre-Phase-1 anchors; do not act on them without the ledger. A byte-identical cop
   (HEAD: 92 %). With a physical chest, 324E003's 90 % design stroke has almost no headroom. Check
   against the DCS before tuning around it. A dynamic chest inventory is blocked: the four exchanger
   datasheets are image-only scans with no legible shell volume.
-* **`_sm_flowsheet` is built twice** (`main.py` two identical blocks), and only `_valve_unit.solve()`
-  is ever stepped. `core/mp.py` (never imported) still calls the retired two-argument
-  `steam_chest_pressure`.
-* **Dead code the ledger found:** `T_conv_c` (`react_322r001` never reads `T_overflow_c`),
-  `SYN_P_DEFICIT_GAIN` / `SYN_P_VENT_GAIN`, `R323_F010_P_KP` / `R328_C002_P_KP` / `R328_C004_P_KP`.
-  All have no reader.
 * **Closed 2026-09-16 (details in the As-Built under *Phase 5b*).** A-6 (324F001 on its drawing's
   70.5 m3), A-7 (323F004 rides the 323E011 envelope -- there is no valve in that line), A-11 (323C003
   and 323F004 off pure-water T_sat onto `thermo_service`), A-17 (323F010's barometric leg on
@@ -313,27 +307,12 @@ ratio applied to the whole VOLATILE sub-vector before renormalisation, rather th
 would preserve the NH3/CO2 split of the flash while still anchoring the total. Worth measuring
 before assuming the per-species form is wrong.
 
-## 1c. Phase 1 remainder — vacuum-condenser static enthalpy (report B-9)
-
-`vacuum_condenser_node` still converts duty to condensate through one design `h_eff_kjkg` per
-exchanger, so an NH3-rich vent and a water-rich vent condense at the same kJ/kg. Unlike the items
-above this is **not** envelope-blocked: `gap_g6_h0_enthalpy` already covers all nine species in both
-phases, so `Q = Σ ṅ_cond,i ΔH_cond,i(T,P) + ṁ c_p ΔT` is buildable now. Deferred from Phase 1 only
-to keep the 324 mass balance out of a change already touching the 323 species layer.
-
-## 1e. Phase 2 — hydraulic network, CLOSED except ONE vessel blocked on data
+## 1e. Phase 2 — hydraulic network, CLOSED except the flashing letdowns
 
 `backend/hydraulics.py` carries the IEC 60534 / ISA-75.01 laws and the vapour-space pressure
 derivative. **A-6, D-1, D-2, D-8 and D-19/D-20/D-21 are closed.** Design seed bit-exact on every
 anchor after the change (xi_urea 1302.270000000, xi_biu 2.414000000, T_ovf 183.000017, all nine
 vessel pressures, p_syn 140.699999913). Full write-up in the As-Built under *Phase 2 remainder*.
-
-**Still open, and both are one missing number rather than a deferral:**
-
-| finding | site | what is missing |
-|---|---|---|
-| A-6 | `R324_F001_P_KP` | 324F001's CYLINDRICAL HEIGHT. The datasheet gives 4600 OD / 4570 ID, the melt density and the whole nozzle schedule but not the height, and a 4570 mm bore admits 33 to 164 m3 depending on it — a factor of five on the only term A-6 needs. Two closures were tried and rejected: backing the shell mass out of the 21 500 kg delivery weight needs the internals/skirt share (the same guess in a different hat), and 324F003's 0.62 H/D ratio is a similarity argument, not a measurement |
-| A-7 | `R323_F004_P_BARA` | a real line dP. Unchanged and still blocked: `R323_F004_P_BARA` and `R3232_E011_P_BARA` are both 1.13 bar a, so the model's design dP across that line is identically zero, and the PFD's 0.1 bar rounding is the same order as the dP itself |
 
 **328D001 IS NOW CLOSED** (Phase 4b) and the closure went the opposite way to the deferral: the
 vessel could always be sized, and what could not be trusted was the design HOLDUP. Full argument in
@@ -346,11 +325,8 @@ failed to fit its own vessel** (322C001 was out by 69 % the other way) — the s
 check any `_M_TAU_S`-style holdup against the shell before using it as an A-6 basis has now paid
 twice.
 
-**Also still open (not blocked, just not in this pass):**
+**Still open:**
 
-* **323F010's barometric leg** is `M317_DES*sqrt(M/M_DES)` — head-driven in form but with no vessel
-  pressure term, so a vacuum break would not change the drain rate. Needs the leg height, which no
-  source gives.
 * **The three 328 bottoms valves are FLASHING services on a single-phase law.** All three carry
   liquor at its own bubble point, so the physically correct Pv is the vessel pressure — and feeding
   that to the single-phase choked limit collapses dP_eff to about 4 % of p1 and makes every one of
@@ -1043,21 +1019,12 @@ Still open:
   328-1 and 323-2 both show in m3/h) and `DESORB_328.C004.FFIC_329401.pv` (displayed as the
   SP/MV readout pair on 328-1).
 
-- **Sixteen slots are white frames** -- drawn on a slide, nothing bound behind them. Fifteen
-  are the unmodelled Unit-335 finishing side: `FT`/`FY`/`FQ-335401`, `FT`/`FY`/`FQ-335405`,
+- **Fifteen slots are white frames** -- drawn on a slide, nothing bound behind them. All are the
+  unmodelled Unit-335 finishing side: `FT`/`FY`/`FQ-335401`, `FT`/`FY`/`FQ-335405`,
   `HIC`/`HV-335602`, `HIC-335609`, `HIC-335610`, `FIC-335405B`, `LT-335507` and its bargraph and
-  `FFY-335406` on 324-1b, plus `FIC-335407` / `FV-335407` on 323-1. The sixteenth, `FQT-321401`
-  on 321-1 (retagged from `FQI-321401`), is not unmodelled at all: the packet already publishes
-  the running NH3 total as top-level `totalizer` (`s.totalizer_t`, t). The overlay was simply
-  never given `bind: 'totalizer'`.
-
-- **`FFIC-329401`'s own faceplate is no longer reachable.** The 2026-09 slide replaced the ratio
-  controller box with a two-field `SP` / `MV` readout inside the DESORBER STEAM / FEED RATIO
-  panel, and a tag of `FFIC-329401 SP` would reach `handle_cmd` as an unknown controller and be
-  silently discarded, so both fields are read-only. The ratio setpoint therefore cannot be
-  changed from the HMI. `FIC-329401`'s faceplate still names FFIC-329401 as its master, which is
-  guidance, not a control path. Either the deck should keep a controller box, or the SP field
-  needs a bespoke faceplate route.
+  `FFY-335406` on 324-1b, plus `FIC-335407` / `FV-335407` on 323-1. (`FQT-321401` now binds the
+  packet's `totalizer`; `FFIC-329401 SP` / `MV` open FFIC-329401's own faceplate through the new
+  overlay `ctl` route -- both 2026-09-17.)
 
 - **324-1b lost its four external-override pushbuttons** (`EXT-OVR LV-324501A`, `EXT-OVR
   LV-324501B`, `TRIP_35_3`, `EXT-OVR HV-335602`): the 2026-09 slide draws no squares for them, so
@@ -1072,10 +1039,10 @@ Still open:
   deck also never annotated the two 328-2 pumps (shape ids 119/120); they are recognised from
   the identical picture and the labels beside them, via the generator's `ADD_PUMP` table.
 
-- **`img/pump-off.png` is dark green, not grey.** `ui_guidelines.md` §11 says OFF is grey; the
-  asset measures RGB 38/90/2 against ON's 83/192/2. At the 26 x 24 px the drawings use, a running
-  and a stopped pump are nearly indistinguishable. Replacing the asset would fix every screen at
-  once — nothing in the code needs to change.
+- **`img/pump-off.png` was re-coloured grey on this machine only (2026-09-17).** It was dark green
+  (mean RGB 36/86/2 against ON's green); it is now the luminance of the same picture, alpha untouched.
+  `*.png` is gitignored and neither pump icon has ever been committed, so a fresh clone has no pump
+  icons at all. Decide whether the icons belong in the repository (`git add -f`) before relying on it.
 
 - **Three overlays on 323-2 are nudged off their slide centres**, because an `.ov.ind` is sized
   by its value rather than by the label it replaces: `PIC-323203` (1189 -> 1183, it clipped the
@@ -1165,14 +1132,6 @@ Still open, and worth a decision:
   which tick it means. Worth a pass over the harness before more design-point residuals are chased
   at section 3.
 
-- **HV-322604 is modelled sub-critical, and the field description says it is choked.** Its pressure
-  ratio is ~4/140 = 0.028 against a critical ~0.5, so "mass flow becomes independent of downstream
-  pressure fluctuations... strictly a function of upstream pressure, valve opening area, and fluid
-  density" (`References/HV-322604 description.md`). The model uses the sub-critical `sqrt(dP)` form
-  and the new hydraulic ceiling carries the "cannot pass more than its capacity" half of that
-  physics. The ISA 75.01.01 choked model already exists in `consequence.py` and is on the §7
-  enhancement list; wiring it here is the proper close.
-
 - **The As-Built section *322E003 LP/MP Recycle-Carbamate Wash Cascade* describes a scrubber that is
   not the one in `main.py`.** Its `capacity_ratio` component-wise absorption model, the `q_wash`
   cold-wash energy sink and the `LP_absorber_load` diagnostic have no counterpart in
@@ -1182,7 +1141,6 @@ Still open, and worth a decision:
 ## 7. Enhancement opportunities (optional)
 
 - Integrate the Extended UNIQUAC electrolyte model for rigorous HP synthesis VLE.
-- Wire the choked-flow model (`consequence.py`, ISA 75.01.01) into `main.py`.
 - Experimental validation of the Unit 324 vacuum VLE (0.02–1.0 bar, far below the published
   35 bar floor).
 - Extend stream coverage beyond the 55 of 163 PFD streams currently published.

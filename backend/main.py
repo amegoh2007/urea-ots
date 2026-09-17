@@ -5697,10 +5697,11 @@ def _eq_pct(theta_pct: float, theta_des_pct: float, R: float = SCRUB_HV604_RANGE
 def hv_322604(offgas: dict, T_in: float, hic_pct: float, p_up: float,
               vent_cap_kgh: float = None) -> dict:
     """HV-322604 HP-scrubber off-gas valve — dynamic isenthalpic letdown 322E003 -> 322C001.
-    Inert purge to the LP absorber.  Flow follows the valve hydraulic characteristic, driven by
-    the live controller opening θ (HIC-322604) and √ΔP across the seat.  Datasheet trim is
-    EQUAL PERCENTAGE (DN-24, Kvs 2.1, carbamate gas), so the opening term is R^((θ−θ_des)/100):
-        m_og = m_og_des·s · R^((θ−θ_des)/100) · √(max(P_up−P_down,0)/ΔP_des)   (θ_des = 50%, R = 50)
+    Inert purge to the LP absorber.  Flow follows the ISA-75.01 compressible law (report D-2,
+    `hydraulics.valve_gas_anchored`), driven by the live opening θ (HIC-322604) on the datasheet's
+    EQUAL PERCENTAGE trim (DN-24, Kvs 2.1, carbamate gas).  At ~4/140 bar the seat is CHOKED
+    (x ≥ F_γ.x_T), so the flow follows the upstream pressure, temperature and MW only:
+        m_og = m_og_des·s · Cv(θ)/Cv(θ_des) · Y.√(x.p1.M/T) / (same at design)   (θ_des = 50 %)
     The incoming `offgas` vector is already the design purge × s, so the valve factor scales it
     1:1 (composition held; θ=θ_des & P_up=design -> factor=1 -> bit-exact design HMB).  The outlet
     temperature is the SRK isenthalpic letdown of the live composition from the live upstream state
@@ -7105,72 +7106,6 @@ _sm_flowsheet.add_unit(_valve_unit)
 _sm_flowsheet.add_unit(_vac_unit)
 # ------------------------------
 
-# ----- SM Flowsheet Setup -----
-from core.flowsheet import Flowsheet
-from core.stream import Stream
-from core.ejector import Ejector322F001
-from core.stripper import Stripper322E001
-from core.hpcc import Hpcc322E002
-from core.scrubber import Scrubber322E003
-from core.reactor import Reactor322R001
-from core.valve import Valve322604
-from core.vacuum import VacuumTrain324
-
-_sm_flowsheet = Flowsheet("Urea HP Loop")
-_ej_motive = Stream("Ejector_Motive_In")
-_ej_disch = Stream("Ejector_Disch_Out")
-_ej_unit = Ejector322F001("322F001_Ejector", _ej_motive, _ej_disch)
-
-_strip_co2_in = Stream("Stripper_CO2_In")
-_strip_overflow_in = Stream("Stripper_Overflow_In")
-_strip_steam_in = Stream("Stripper_Steam_In")
-_strip_top_gas_out = Stream("Stripper_Top_Gas_Out")
-_strip_bottom_liq_out = Stream("Stripper_Bottom_Liq_Out")
-_strip_unit = Stripper322E001("322E001_Stripper", _strip_co2_in, _strip_overflow_in, _strip_steam_in, _strip_top_gas_out, _strip_bottom_liq_out)
-
-_hpcc_gas_in = Stream("HPCC_Gas_In")
-_hpcc_liq_in = Stream("HPCC_Liq_In")
-_hpcc_gas_out = Stream("HPCC_Gas_Out")
-_hpcc_liq_out = Stream("HPCC_Liq_Out")
-_hpcc_unit = Hpcc322E002("322E002_HPCC", _hpcc_gas_in, _hpcc_liq_in, _hpcc_gas_out, _hpcc_liq_out)
-
-_scrub_offgas_in = Stream("Scrub_Offgas_In")
-_scrub_wash_in = Stream("Scrub_Wash_In")
-_scrub_ccw_in = Stream("Scrub_CCW_In")
-_scrub_vent_out = Stream("Scrub_Vent_Out")
-_scrub_carbamate_out = Stream("Scrub_Carbamate_Out")
-_scrub_ccw_out = Stream("Scrub_CCW_Out")
-_scrub_unit = Scrubber322E003("322E003_Scrubber", _scrub_offgas_in, _scrub_wash_in, _scrub_ccw_in, _scrub_vent_out, _scrub_carbamate_out, _scrub_ccw_out)
-
-_react_feed_in = Stream("React_Feed_In")
-_react_overflow_out = Stream("React_Overflow_Out")
-_react_offgas_out = Stream("React_Offgas_Out")
-_react_unit = Reactor322R001("322R001_Reactor", _react_feed_in, _react_overflow_out, _react_offgas_out)
-
-_valve_og_in = Stream("Valve_Offgas_In")
-_valve_purge_out = Stream("Valve_Purge_Out")
-_valve_unit = Valve322604("HV_322604", _valve_og_in, _valve_purge_out)
-
-_vac_evap_in = Stream("Vac_Evap_In")
-_vac_v1_in = Stream("Vac_V1_In")
-_vac_v2_in = Stream("Vac_V2_In")
-_vac_fa1_in = Stream("Vac_FA1_In")
-_vac_fa2_in = Stream("Vac_FA2_In")
-_vac_mot924_in = Stream("Vac_Mot924_In")
-_vac_mot927_in = Stream("Vac_Mot927_In")
-_vac_mot929_in = Stream("Vac_Mot929_In")
-_vac_cond_out = Stream("Vac_Cond_Out")
-_vac_vent_out = Stream("Vac_Vent_Out")
-_vac_unit = VacuumTrain324("324_VacuumTrain", _vac_evap_in, _vac_v1_in, _vac_v2_in, _vac_fa1_in, _vac_fa2_in, _vac_mot924_in, _vac_mot927_in, _vac_mot929_in, _vac_cond_out, _vac_vent_out)
-
-_sm_flowsheet.add_unit(_ej_unit)
-_sm_flowsheet.add_unit(_strip_unit)
-_sm_flowsheet.add_unit(_hpcc_unit)
-_sm_flowsheet.add_unit(_scrub_unit)
-_sm_flowsheet.add_unit(_react_unit)
-_sm_flowsheet.add_unit(_valve_unit)
-_sm_flowsheet.add_unit(_vac_unit)
-# ------------------------------
 
 def step_sim(dt: float) -> dict:
     s = state

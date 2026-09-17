@@ -62,7 +62,7 @@
       { k: 'ft',   t: 'ind', x: 211,  y: 353, tag: 'FT-321401', bind: 'FI_321401',   u: 'T/H',   dec: 2 },
       { k: 'pt1',  t: 'ind', x: 582,  y: 373, tag: 'PT-321201', bind: 'PI_321201',   u: 'BAR G', dec: 1 },
       { k: 'pt2',  t: 'ind', x: 794,  y: 396, tag: 'PT-321202', bind: 'PI_321202',   u: 'BAR G', dec: 1 },
-      { k: 'fqi',  t: 'ind', x: 210,  y: 424, tag: 'FQT-321401' },   // Totalizer - backend binding TBD
+      { k: 'fqi',  t: 'ind', x: 210,  y: 424, tag: 'FQT-321401', bind: 'totalizer', u: 'T', dec: 1 },   // s.totalizer_t, NH3 delivered this run
       // Feed-ratio panel rows A/B: the per-pump NH3/CO2 molar ratio.  Left-click opens that
       // pump's speed faceplate, which is where the N/C bias is editable (CAS only).
       { k: 'ffa',  t: 'ind', x: 159,  y: 547, tag: 'FFIC-321404A', bind: 'ratio.PV', u: 'N/C', dec: 3, fp: 'SIC_321950' },
@@ -374,10 +374,10 @@
       { k: 'pic328202', t: 'ind', x: 856, y: 168, tag: 'PIC-328202', bind: 'DESORB_328.D001.PIC_328202.pv', u: 'BAR A', dec: 2, mode: 'DESORB_328.D001.PIC_328202.mode', note: '323F004/328D001 reflux drum pressure via PV-328202' },
       { k: 'tt328010', t: 'ind', x: 768, y: 196, tag: 'TT-328010', bind: 'DESORB_328.C002.TT_328010', u: 'C', dec: 1 },
       { k: 'pic328203', t: 'ind', x: 196, y: 235, tag: 'PIC-328203', bind: 'DESORB_328.C003.PIC_328203.pv', u: 'BAR A', dec: 2, mode: 'DESORB_328.C003.PIC_328203.mode', note: '328C003 overhead pressure via PV-328203' },
-      { k: 'ffic329401sp', t: 'ind', x: 1017, y: 252, tag: 'FFIC-329401 SP', bind: 'DESORB_328.C004.FFIC_329401.sp', u: 'T/M3', dec: 3 },
+      { k: 'ffic329401sp', t: 'ind', x: 1017, y: 252, tag: 'FFIC-329401 SP', bind: 'DESORB_328.C004.FFIC_329401.sp', u: 'T/M3', dec: 3, ctl: 'FFIC-329401', ctlBind: 'DESORB_328.C004.FFIC_329401.pv' },
       { k: 'lic328503', t: 'ind', x: 591, y: 264, tag: 'LIC-328503', bind: 'DESORB_328.C002.LIC_328503.pv', u: '%', dec: 1, mode: 'DESORB_328.C002.LIC_328503.mode', note: 'holds 328C002 level via LV-328503' },
       { k: 'tt328012', t: 'ind', x: 280, y: 281, tag: 'TT-328012', bind: 'DESORB_328.C003.TT_328012', u: 'C', dec: 1 },
-      { k: 'ffic329401mv', t: 'ind', x: 1018, y: 284, tag: 'FFIC-329401 MV', bind: 'DESORB_328.C004.FFIC_329401.op', u: 'KG/H', dec: 1, note: 'controller output of FFIC-329401 (read-only here)' },
+      { k: 'ffic329401mv', t: 'ind', x: 1018, y: 284, tag: 'FFIC-329401 MV', bind: 'DESORB_328.C004.FFIC_329401.op', u: 'KG/H', dec: 1, ctl: 'FFIC-329401', ctlBind: 'DESORB_328.C004.FFIC_329401.pv', ctlU: 'T/M3', note: 'controller output of FFIC-329401 (the 931 steam demand to FIC-329401, kg/h)' },
       { k: 'lic328504', t: 'ind', x: 447, y: 293, tag: 'LIC-328504', bind: 'DESORB_328.C003.LIC_328504.pv', u: '%', dec: 1, mode: 'DESORB_328.C003.LIC_328504.mode', note: 'the slide prints LIC-328503 at this position; it labels the leg whose bargraph is commented LIC-328504 (slide typo)' },
       { k: 'tic328012', t: 'ind', x: 278, y: 334, tag: 'TIC-328012', bind: 'DESORB_328.C003.TIC_328012.pv', u: 'C', dec: 1, mode: 'DESORB_328.C003.TIC_328012.mode', note: '328C003 bottom temp cascades FIC-329402 MP steam' },
       { k: 'tt328004', t: 'ind', x: 782, y: 363, tag: 'TT-328004', bind: 'DESORB_328.C004.TT_328004', u: 'C', dec: 1 },
@@ -766,6 +766,13 @@
       if (o.fp === 'SIC_321950' && window.openF50) { window.openF50(); return; }   // SIC_321950 REST faceplate
       if (o.fp === 'SIC_321951' && window.openF51) { window.openF51(); return; }   // SIC_321951 REST faceplate
       if (o.fp === 'MASTER_SP_329207' && window.OTS_FACE && window.OTS_FACE.msp) { window.OTS_FACE.msp(o); return; }   // 4-bar header MASTER SP cascade
+      // A readout of ONE field of a loop (the 2026-09 `FFIC-329401 SP` / `MV` pair) opens THAT loop's
+      // faceplate under its real tag and PV, so the write reaches the backend controller instead of
+      // an unknown id `handle_cmd` discards.
+      if (o.ctl && window.OTS_FACE && window.OTS_FACE.ctl) {
+        window.OTS_FACE.ctl(Object.assign({}, o, { tag: o.ctl, bind: o.ctlBind, u: o.ctlU || o.u, dec: o.dec }));
+        return;
+      }
       if (CTRL_RE.test(o.tag) && window.OTS_FACE && window.OTS_FACE.ctl) { window.OTS_FACE.ctl(o); return; }   // any *IC-3* -> generic faceplate
       if (window.OTS_FACE && window.OTS_FACE.indicator) { window.OTS_FACE.indicator(o); }   // every other indicator -> read-only faceplate
       return;
