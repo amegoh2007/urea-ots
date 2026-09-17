@@ -41,7 +41,7 @@ packet = main.step_sim(0.1)
 streams = packet["STREAMS"]
 required_stream_fields = {
     "T_C", "P_bara", "mass_kgh", "mol_kmolh", "component_kmolh",
-    "component_kgh", "enthalpy_kJkg", "enthalpy_flow_kW",
+    "component_kgh", "enthalpy_kJkg", "enthalpy_flow_kW", "enthalpy_basis",
 }
 check("stream schema carries required state fields",
       all(required_stream_fields <= set(stream) for stream in streams.values()),
@@ -52,10 +52,12 @@ check("all in-scope PFD streams have canonical records",
       len(streams) >= reference_streams,
       {"registry_records": len(streams), "unique_reference_stream_numbers": reference_streams})
 
+from collections import Counter
+basis_tiers = Counter(s["enthalpy_basis"] for s in streams.values())
 known_h = sum(stream["enthalpy_kJkg"] is not None for stream in streams.values())
 check("all canonical streams carry calculated enthalpy",
       known_h == len(streams),
-      {"with_enthalpy": known_h, "registry_records": len(streams)})
+      {"with_enthalpy": known_h, "registry_records": len(streams), "basis_tiers": dict(basis_tiers)})
 
 clip = packet["SPECIES_323_324"]["clip_resid_kgh"]
 check("downstream component balances close",

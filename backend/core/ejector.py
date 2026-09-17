@@ -20,7 +20,7 @@ class Ejector322F001(UnitOperation):
             MW_COMP, EJ_T_SUCTION_C, EJ_SPINDLE_R, EJ_OPEN_DES, EJ_STALL_PHI,
             EJ_STALL_REC, EJ_STALL_EXP, EJ_SUC_TOT_DES, EJ_HYD_FRAC_MAX,
             EJ_CARB_FRAC, EJ_CP_N, EJ_CP_C, EJ_CP_D, EJ_P_DISCH_BARA, EJ_RHO_DISCH,
-            EJ_MOTIVE_NH3_DES, clamp
+            EJ_MOTIVE_NH3_DES, EJ_MOTIVE_W, clamp
         )
         motive_in = self.inputs[0]
         discharge_out = self.outputs[0]
@@ -56,7 +56,7 @@ class Ejector322F001(UnitOperation):
         m_suc = capacity * frac_eff
         
         suction = {k: m_suc * EJ_CARB_FRAC.get(k, 0.0) for k in MW_COMP}
-        disch = {k: (motive_nh3_kgh if k == "NH3" else 0.0) + suction[k] for k in MW_COMP}
+        disch = {k: motive_nh3_kgh * EJ_MOTIVE_W[k] + suction[k] for k in MW_COMP}   # PFD 116 motive
         
         m_d = sum(disch.values())
         n_d = sum(disch[k] / MW_COMP[k] for k in MW_COMP)

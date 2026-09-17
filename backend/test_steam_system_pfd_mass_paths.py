@@ -2,7 +2,9 @@
 
 import pytest
 
+import hydraulics
 import steam_system
+from iapws_if97 import rho_liquid_sat_kgm3, tsat_c
 
 
 def _isolated_lp_state(pressure_bara: float) -> steam_system.SteamState:
@@ -140,7 +142,17 @@ def test_lp_drum_liquid_balance_includes_lv329503_inflow():
     )
 
     accumulated_kg = (state.lic504_lvl - initial_level) / 100.0 * steam_system.MSPAN_504
+    #  Report D-16: LV-329503 passes liquid on the LIVE 329D009 -> 322D001 differential, and with every
+    #  steam source and user zeroed both drums move inside this 1 s step, so the inflow is the valve
+    #  law at the post-step pressures -- M_503_DES only where they sit on design.
+    expected_kg = hydraulics.valve_liquid_anchored(
+        steam_system.M_503_DES, 0.5, state.P_9, state.P_LP,
+        rho_liquid_sat_kgm3(tsat_c(state.P_9)),
+        steam_system.LV_OPEN_DES / 100.0, steam_system.P_MP_BARA, steam_system.P_LP_BARA,
+        rho_liquid_sat_kgm3(tsat_c(steam_system.P_MP_BARA)),
+        characteristic=steam_system.LV_CHAR, pv_bara=0.0)
+    assert expected_kg != steam_system.M_503_DES                  # the drums did move
     assert getattr(state, "mass_residual_lp_liquid", None) == pytest.approx(
-        steam_system.M_503_DES, abs=1e-10
+        expected_kg, abs=1e-10
     )
-    assert accumulated_kg == pytest.approx(steam_system.M_503_DES, abs=1e-10)
+    assert accumulated_kg == pytest.approx(expected_kg, abs=1e-10)

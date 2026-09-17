@@ -29,17 +29,24 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import main  # noqa: E402
 
-DT = 1.0
-
-
 def _fresh():
     main.state = main.State()
 
 
 def _run(seconds):
+    """Advance `seconds` of plant time in STEP_CAP-bounded sub-steps, the way `sim_task` does.
+
+    This used to call step_sim(1.0) directly, four times the engine's maximum physical sub-step.
+    At 1 s the 328 reflux cascade (TIC-328008 -> FIC-328404) misbehaves on BOTH 726e098 and later
+    trees and walks 323D002 by 0.1-0.16 pt of urea in 3 600 s, while at STEP_CAP both hold it
+    within 0.03 pt -- so the test was grading the harness tick, not the tank.  Same fix and the
+    same reasoning as test_ejector_spindle's `_settle`."""
     out = None
-    for _ in range(int(seconds / DT)):
-        out = main.step_sim(DT)
+    remaining = float(seconds)
+    while remaining > 1e-12:
+        h = min(main.STEP_CAP, remaining)
+        out = main.step_sim(h)
+        remaining -= h
     return out
 
 

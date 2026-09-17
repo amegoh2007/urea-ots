@@ -1,4 +1,4 @@
-"""FQI-321401 must start at zero on every program initialisation.
+"""FQT-321401 must start at zero on every program initialisation.
 
 Plain-assert, run directly: python test_totalizer_init.py
 """
@@ -10,7 +10,7 @@ import main
 def test_fresh_state_totalizer_is_zero():
     """State.__init__ is the only initialisation path; handle_cmd exposes no reset."""
     s = main.State()
-    assert s.totalizer_t == 0.0, f"FQI-321401 seeded at {s.totalizer_t}, want 0.0"
+    assert s.totalizer_t == 0.0, f"FQT-321401 seeded at {s.totalizer_t}, want 0.0"
 
 
 def test_fresh_state_sim_clock_is_zero():
@@ -19,7 +19,7 @@ def test_fresh_state_sim_clock_is_zero():
 
 
 def test_totalizer_tracks_the_flow_integral():
-    """FQI-321401 is the running integral of delivered NH3, so it must only rise."""
+    """FQT-321401 is the running integral of delivered NH3, so it must only rise."""
     main.state = main.State()
     main.state.totalizer_t = 0.0
     prev = 0.0

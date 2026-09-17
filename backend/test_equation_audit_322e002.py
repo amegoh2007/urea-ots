@@ -20,6 +20,7 @@ equilibrium limited (References/HPCC description.md Sections 5.2-5.3).  These te
 
 Run from backend/:  python -m pytest test_equation_audit_322e002.py -q
 """
+import math
 import os
 import sys
 
@@ -63,11 +64,23 @@ def test_design_split_is_bit_exact_and_does_not_drift():
     assert b["HPCC_322E002"]["liq_th"] == a["HPCC_322E002"]["liq_th"]
 
 
-def test_flash_short_circuits_at_the_calibration_point():
-    """Called exactly at (T_des, P_des) the flash must return the calibration itself, with no
-    Rachford-Rice sweep at all -- this is what keeps the module-load and boot-pin passes bit-exact."""
+def test_flash_converges_onto_the_calibration_point():
+    """Called exactly at (T_des, P_des) the flash must LAND on the calibration -- by solving for it.
+
+    PHASE 1 (finding A-15).  This test used to assert `got == HPCC_FRAC_GAS_DES` and was named
+    `..._short_circuits_at_...`: it existed to pin an `if p_rat == 1.0 and T_k == T_0: return the
+    design vector` branch, i.e. it asserted that the maths was BYPASSED at the design point.  That
+    branch is deleted, so the Rachford-Rice sweep now actually runs here.
+
+    Tolerance, not equality, is the correct contract for a converged solve.  The measured residual
+    is pure double-precision noise from the bisection -- 0.2036000000000002 against 0.2036,
+    0.2977000000000003 against 0.2977 -- so 1e-12 is ~1000x tighter than anything physical and still
+    orders of magnitude looser than the float dust.  If the K-value model ever stops reproducing its
+    own calibration this fails on the physics rather than being hidden by a lookup."""
     got = main._hpcc_flash_split(_des_feed(), main.HPCC_T_PROD_DES_C, main.SYN_P_DES_BARA)
-    assert got == main.HPCC_FRAC_GAS_DES
+    assert set(got) == set(main.HPCC_FRAC_GAS_DES)
+    for k, want in main.HPCC_FRAC_GAS_DES.items():
+        assert math.isclose(got[k], want, rel_tol=1e-12, abs_tol=1e-12), (k, got[k], want)
 
 
 # ------------------------------------------------------------------------- the physics has signs

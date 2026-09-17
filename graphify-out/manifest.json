@@ -1,0 +1,140 @@
+{
+  "app.js": {
+    "mtime": 1786691894.3771589,
+    "seen": 1786692627.1182597,
+    "ast_hash": "b208bd97d63327c233e6b8d5fbe2926d",
+    "semantic_hash": ""
+  },
+  "builder.js": {
+    "mtime": 1786687379.0787082,
+    "seen": 1786692627.1182835,
+    "ast_hash": "9dc904dfe2b8a3e166dc7ccbf664e42b",
+    "semantic_hash": ""
+  },
+  "co2_compressor.js": {
+    "mtime": 1786216000.3972528,
+    "seen": 1786692627.1182952,
+    "ast_hash": "4add4860447d93a6dd017d9f7ab56c89",
+    "semantic_hash": ""
+  },
+  "editor.js": {
+    "mtime": 1786500290.2537694,
+    "seen": 1786692627.1183035,
+    "ast_hash": "f78e285181bd33125ef02b3a390d1957",
+    "semantic_hash": ""
+  },
+  "indicator_dynamics.js": {
+    "mtime": 1786655009.8540235,
+    "seen": 1786692627.1183114,
+    "ast_hash": "41a0460988ff60531874dc81eb267cdf",
+    "semantic_hash": ""
+  },
+  "indicator_faceplate.js": {
+    "mtime": 1786691686.605058,
+    "seen": 1786692627.1183183,
+    "ast_hash": "edafe9839d54ca7faf01fdbc90ab4afa",
+    "semantic_hash": ""
+  },
+  "lv324501_route.js": {
+    "mtime": 1786015235.4139419,
+    "seen": 1786692627.118327,
+    "ast_hash": "f0d670513bed9084684766ae349cb499",
+    "semantic_hash": ""
+  },
+  "overlays.js": {
+    "mtime": 1786691861.1589074,
+    "seen": 1786692627.118334,
+    "ast_hash": "211e2e1954831b4b1e1348b3bea8ec67",
+    "semantic_hash": ""
+  },
+  "test_indicator_dynamics.js": {
+    "mtime": 1786691657.618201,
+    "seen": 1786692627.118348,
+    "ast_hash": "7a507d49462bda03acd18ae7aac95168",
+    "semantic_hash": ""
+  },
+  "test_indicator_faceplate.js": {
+    "mtime": 1786691657.6162064,
+    "seen": 1786692627.118355,
+    "ast_hash": "a5b2aacb9ee6e672fae1c1fb4a0cc701",
+    "semantic_hash": ""
+  },
+  "trend.js": {
+    "mtime": 1786275304.1665466,
+    "seen": 1786692627.118362,
+    "ast_hash": "ba12c82579282335487e46a4a3cbc8e5",
+    "semantic_hash": ""
+  },
+  "index.html": {
+    "mtime": 1786691686.605058,
+    "seen": 1786692627.1183703,
+    "ast_hash": "f2613332a6ccb958ffdde8b9816f1748",
+    "semantic_hash": ""
+  },
+  "trend.html": {
+    "mtime": 1786124363.1542096,
+    "seen": 1786692627.1183834,
+    "ast_hash": "d5de9390909c0088d3ddc05f3f9ef505",
+    "semantic_hash": ""
+  },
+  "img/screen-321-1.png": {
+    "mtime": 1784088351.2088366,
+    "seen": 1786692627.1183915,
+    "ast_hash": "05b50d59e0265e4f3cd623080ae9ffb3",
+    "semantic_hash": ""
+  },
+  "img/screen-322-1.png": {
+    "mtime": 1784088351.2088366,
+    "seen": 1786692627.1183987,
+    "ast_hash": "459dcce633cc1109f41b14106d670ace",
+    "semantic_hash": ""
+  },
+  "img/screen-322-2.png": {
+    "mtime": 1784088351.2244823,
+    "seen": 1786692627.1184058,
+    "ast_hash": "e3b67a23715d116f5a31e592d5496399",
+    "semantic_hash": ""
+  },
+  "img/screen-323-1.png": {
+    "mtime": 1784088351.2244823,
+    "seen": 1786692627.1184132,
+    "ast_hash": "e8f0fbfc4c8a0c6bab0dc2705926ee76",
+    "semantic_hash": ""
+  },
+  "img/screen-323-2.png": {
+    "mtime": 1784088351.2244823,
+    "seen": 1786692627.11842,
+    "ast_hash": "688c25dc9936f28532fa18dce67e35b2",
+    "semantic_hash": ""
+  },
+  "img/screen-324-1.png": {
+    "mtime": 1784088351.2401073,
+    "seen": 1786692627.1184268,
+    "ast_hash": "8fa4b40996913a5cf9f8896e14c8e5a9",
+    "semantic_hash": ""
+  },
+  "img/screen-324-1b.png": {
+    "mtime": 1784088351.2401073,
+    "seen": 1786692627.1184335,
+    "ast_hash": "f5c8bb8321ac2aeb84c366e5fcbf33fa",
+    "semantic_hash": ""
+  },
+  "img/screen-328-1.png": {
+    "mtime": 1784088351.2401073,
+    "seen": 1786692627.1184402,
+    "ast_hash": "dacd65fd225b949a7c5a3b074c14f39f",
+    "semantic_hash": ""
+  },
+  "img/screen-328-2.png": {
+    "mtime": 1784088351.2401073,
+    "seen": 1786692627.1184466,
+    "ast_hash": "72914ba7e70278f67c33776eb79da048",
+    "semantic_hash": ""
+  },
+  "img/screen-329-1.png": {
+    "mtime": 1784088351.255711,
+    "seen": 1786692627.118456,
+    "ast_hash": "df7f41c25171a19a083840b5638bf669",
+    "semantic_hash": ""
+  }
+}

@@ -1,0 +1,27 @@
+Model confirmed healthy at design (PT-329201 = 140.7, LT-329501 = 50.0, FIC-329409 = 306.0) with the new gate inert. Now I have accurate state for every item.
+
+**Gap register:** https://claude.ai/code/artifact/128f6f19-e3e5-4df5-9269-674e4145d6ef
+
+**17 open gaps + 4 optional enhancements**, consolidated from `handoff.md` §§1–8, the 2026-09-02 test sweep, and the uncommitted tree:
+
+| | count | |
+|---|---|---|
+| **In flight** | 2 | CCW consequence chain half-built; trip setpoint unsourced |
+| **Model physics** | 5 | Sump free integrator, LV-322501 field gain, PT-323201 0.26 % offset, 323E002 collapse question, 4 aliased thermocouple pairs |
+| **Test suite** | 3 | 59 red tests in 4 causes, one-process teardown abort, missing `pytest` dep |
+| **HMI** | 4 | 6 dropped stream hotspots, widget marker, `BOUND_TAG_FLOOR`, stale 329-1 box |
+| **Docs & cleanup** | 3 | `project.md` §5.1, dead `bubble_p`, wrong audit assertion |
+| **Optional** | 4 | UNIQUAC, choked flow, 324 vacuum VLE, stream coverage |
+
+Two diagrams, both earning their place:
+
+- **The CCW-loss chain** — shows the two links that carry the disturbance correctly, the one that doesn't exist (absorption never reads ṁ_ccw), and the two that are unwritten. It makes visible why PT-329201 sits flat through the entire excursion: with nothing failing to condense, the last two links have nothing to act on.
+- **The design-point residual class** — one picture for ~40 of the 59 red tests. An anchor pinned on one basis, the live path it normalises computed on another, ratio missing 1.0 by a fraction of a percent. The 323 flash ratio (cp 2.5064 vs 2.5 → 1.0026) is the worked example.
+
+Two things worth flagging on accuracy:
+
+**The 59-test count is from the 2026-09-02 sweep, before this session's changes.** I ran targeted subsets since (66 passing, one known floor failure), not a full 64-file sweep — that's ~5 minutes per group and I didn't want to hold up the register. The four causes are still right; the exact number may have moved by a few.
+
+**IF-1 supersedes what I told you two messages ago.** I'd blamed the `nh3_slip` formula. That was wrong — it's upstream of that, in `scrub_322e003` never reading CCW flow at all. The register carries the corrected diagnosis.
+
+The tree is safe to leave as-is: `main.py` imports clean and holds design bit-exact (PT-329201 = 140.7, LT-329501 = 50.0, FIC-329409 = 306.0). The new gate is inert because `cool_frac` is never passed — verified by `cool_frac` being absent from telemetry.

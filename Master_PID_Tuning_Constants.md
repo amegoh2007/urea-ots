@@ -1,6 +1,6 @@
 # Master PID Tuning Constants Report
 
-> **Single source of truth.** This is the sole authoritative copy (the former `Urea Simulation Docs/Audit/Master_PID_Tuning_Constants.md` duplicate has been removed). The as-designed plant DCS table (below) is authoritative for plant tuning; **Appendix A** (units 323-2 / 328-1 / 328-2) and **Appendix B** (the unit-324 evaporator temperature masters) are authoritative for the OTS sim (`backend/main.py`) velocity I-PD constants, which are deliberately re-derived for discrete stability and are **not** a copy of the plant table.
+> **Single source of truth.** This is the sole authoritative copy (the former `Urea Simulation Docs/Audit/Master_PID_Tuning_Constants.md` duplicate has been removed). The as-designed plant DCS table (below) is authoritative for plant tuning; **Appendix A** (units 323-2 / 328-1 / 328-2), **Appendix B** (the unit-324 evaporator temperature masters) and **Appendix C** (the 323F010 pre-evaporator temperature master) are authoritative for the OTS sim (`backend/main.py`) velocity I-PD constants, which are deliberately re-derived for discrete stability and are **not** a copy of the plant table.
 >
 > **Read the appendices before quoting the plant table at the simulator.** 33 of the 46 controllers seeded in `State.__init__` differ from their plant row, and every one of those differences is intentional. The two largest are in Appendix B: **TIC-324001 and TIC-324002 run at Kc = 0.02 in the engine against 1.50 and 2.00 in the plant table** — a factor of 75 and 100 — because the simulated stage is not the plant's stage. Setting either loop to its plant gain drives the simulator into a multi-hour limit cycle; the derivation is in Appendix B.
 
@@ -791,3 +791,80 @@ cannot move the design pin — and does not: `leaves 25 / keys 15 / diffs 0`.
 Gates: `backend/test_equation_audit_td014.py::test_the_unit_324_stages_carry_the_same_closure`
 (asserts Kc = 0.02 and Ti = 360.0 directly, so drifting these constants fails the suite) and
 `::test_the_324_evaporator_temperatures_stay_bounded`.
+
+---
+
+## Appendix C — OTS Sim: 323F010 Pre-evaporator Temperature Master TIC-323012 (retuned 2026-09-04, Phase 1 / G-VLE-4)
+
+Authoritative for `backend/main.py` on this loop. TIC-323012 has **no row in the plant DCS table
+above** — it is one of the loops the OTS carries that the as-designed table does not list — so this
+appendix is its only source.
+
+### Constants as seeded in `State.__init__`
+
+| Tag | Role | Mode | act | Kc | Ti (s) | Td | op range | seed op |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **TIC-323012** | 323F010 melt temp (99 °C) → PIC-329208 cas_sp | AUTO | +1 | 3.6 | **1200.0** *(was 306.0)* | 0.0 | 0 – `R323_P_STEAM_SUP` | `R323_E010_PCHEST_DES` |
+| PIC-329208 | 323E010 steam-chest pressure (slave) | CAS | +1 | 0.20 | 60.0 | 0.0 | 0 – 100 % | — |
+
+`Kc` is **unchanged at 3.6**. Only the integral time moves.
+
+### Why the old integral time no longer fits the plant
+
+Same root cause as Appendix B, and it is worth stating plainly: **Ti = 306 s was tuned against a
+plant leg that did not exist.**
+
+323F010 is a bubble-point stage. Its temperature ODE reduces exactly to
+
+$$\frac{dT}{dt}=\frac{T_{bub}(w)-T}{\tau},\qquad \tau = \texttt{R323\_F010\_M\_TAU\_S}$$
+
+because `R323_QEVAP_DES_KW` is by construction `R323_MEVAP_DES·λ/3600`, so the heater duty
+$Q_{E010}$ **cancels term for term** on the energy branch. TIC-323012 therefore has no direct gain
+on temperature at all. Its only path is the composition loop:
+
+```text
+steam -> m_evap -> w_f010 -> T_bub -> T
+```
+
+Under the frozen `sol_vapour_y` alpha vector that loop was **open**: alpha had
+$\partial y/\partial T \equiv 0$, so more steam changed the water removed but never fed back through
+the vapour composition. The loop is now closed by the rigorous flash, with a measured gain of
+$dy_{H_2O}/dT$ = +0.0096 /K at 99 °C and +0.0159 /K at 101 °C. Positive feedback — hotter, more
+water off, more urea-rich, higher bubble point, hotter — which is physically real and is precisely
+what this controller exists to arrest.
+
+An integral tuned against zero gain is too fast for a loop that now has gain, and it is the
+**integral** and not the proportional term: cutting Kc makes the residual cycle *worse*
+(span 0.93 → 1.73 °C as Kc goes 3.6 → 0.45), while slowing the integral shrinks it monotonically.
+
+### The measurement
+
+Both legs of the F010 loop on one thermodynamic surface (Phase 1 complete), 20 000 s from the design
+seed, envelope taken over the settled band 8 000–20 000 s so the startup transient is excluded
+(measured settling time ≈ 7 200 s):
+
+| Ti (s) | T span, 8 000–20 000 s | T at 20 000 s | stream-317 urea | stream-317 rate |
+| :---: | :---: | :---: | :---: | :---: |
+| 306 *(old)* | 0.0585 °C | 99.0001 | 80.0801 % | 92.6206 t/h |
+| **1200** *(new)* | **0.0259 °C** | 99.0000 | 80.0849 % | 92.6148 t/h |
+| — design — | — | 99.0 | 80.0016 % | 92.7489 t/h |
+
+Ti = 1200 s **halves the residual envelope** at no cost to the product: both tunings land on the same
+composition to within 0.005 points, and both hold the 99 °C boundary. 0.026 °C is roughly an order
+of magnitude below the resolution of any temperature transmitter in this service, so what remains is
+numerical, not operational.
+
+### Why the residual is not zero, and should not be expected to be
+
+It is a genuine limit cycle around a genuine positive-feedback loop, not a walk. The pre-Phase-1
+model reached a bit-stationary fixed point only because the feedback leg had been deleted; asserting
+a *stationary* value is asserting the defect. The regression gates in
+`test_equation_audit_td014.py` were changed to match — bounded envelope over a settled window, plus
+a non-growing check — rather than the old point-value equality, for the same reason
+`test_split_does_not_self_excite_on_an_nc_disturbance` in `test_equation_audit_322e002.py` is
+written that way.
+
+### Seed invariance
+
+The velocity I-PD form gives $pv = sp = pv_1 \Rightarrow \Delta u = 0$ for **any** Kc/Ti, so this
+retune cannot move the design pin — the same argument as Appendix A footnote 4 and Appendix B.

@@ -43,17 +43,21 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import main  # noqa: E402
 
-DT = 1.0
-
-
 def _fresh():
     main.state = main.State()
 
 
 def _run(seconds):
+    """Advance `seconds` of plant time in STEP_CAP-bounded sub-steps, the way `sim_task` does.
+
+    This called step_sim(1.0), four times the engine's maximum physical sub-step, so it graded the
+    harness's truncation error alongside the plant (the same fix test_equation_audit_td013_d002 took)."""
     out = None
-    for _ in range(int(seconds / DT)):
-        out = main.step_sim(DT)
+    remaining = float(seconds)
+    while remaining > 1e-9:
+        h = min(main.STEP_CAP, remaining)
+        out = main.step_sim(h)
+        remaining -= h
     return out
 
 
@@ -116,6 +120,28 @@ def test_bubble_point_anchors_are_bit_exact():
     assert main.bubble_T_raoult(main.R323_F010_P_BARA, main.W_S317) == main.R323_F010_TBUB_DES
     assert main.evap_w_eq(130.0, 0.33, main.R324_W_EV1, 130.0, 0.33) == main.R324_W_EV1
     assert main.evap_w_eq(140.0, 0.131, main.R324_W_EV2, 140.0, 0.131) == main.R324_W_EV2
+
+
+def test_the_f010_bubble_point_is_on_the_same_surface_as_its_flash():
+    """PHASE 1, finding A-11.  323F010's temperature leg and its vapour-composition leg are the two
+    halves of one feedback loop, so they must stand on ONE thermodynamic surface.  They did not:
+    T_bub came from ideal Raoult-over-water while y_evap came from the Extended UNIQUAC + SRK flash,
+    2.02 C apart at the design composition, and the loop settled where the two surfaces cross.
+
+    Asserted here: (a) the rigorous anchor exists -- 323F010 is INSIDE the envelope, so a silent
+    fall back to Raoult would be a regression, not a refusal; (b) the departure is bit-exact at the
+    design composition, which is what keeps the boot pin and the PFD boundary untouched."""
+    assert main.SOL_TBUB_DES.get("F010") is not None, "F010 fell back off-envelope"
+    assert main.SOL_TBUB_DES["F010"] == main.thermo_service.bubble_t(
+        main.W_S317, main.R323_F010_P_BARA)
+    at_des = main.sol_bubble_t_dep("F010", main.W_S317, main.R323_F010_P_BARA,
+                                   main.R323_F010_T_SP_C, main.R323_F010_TBUB_DES)
+    assert at_des == main.R323_F010_T_SP_C, at_des
+    # ... and it still has the right SIGN with composition: concentrating raises the boiling point.
+    w_dry = main._w_norm({**main.W_S317, "Urea": main.W_S317["Urea"] + 0.02,
+                          "H2O": main.W_S317["H2O"] - 0.02})
+    assert main.sol_bubble_t_dep("F010", w_dry, main.R323_F010_P_BARA,
+                                 main.R323_F010_T_SP_C, main.R323_F010_TBUB_DES) > at_des
 
 
 def test_raoult_is_retained_only_for_the_subrange_f010_closure():

@@ -37,7 +37,7 @@ PROVENANCE. Every constant below is transcribed from a named open source; nothin
   * CROSS-CHECK against this plant's licensor manual (`References/Sources/02 FUNDAMENTALS.pdf`,
     Uhde UD-VT-G00-DC-0003): the elements datum reproduces the manual's reaction enthalpies --
     carbamate step ~ -159 kJ/mol (gas reactants) / plant's -117 (condensed reactants), and the urea
-    step +16.7 kJ/mol vs the plant's +15.5 -- and the plant's urea remelt heat 15.1 kJ/mol brackets
+    step +18.8 kJ/mol vs the plant's +15.5 -- and the plant's urea remelt heat 15.1 kJ/mol brackets
     the Tischer fusion 13.9 used here (all within the H0 declared band).
 
 Gas-phase sensible heat uses constant Cp near mid-window; over 25-200 C this is a few-percent
@@ -51,6 +51,7 @@ from __future__ import annotations
 
 import math
 from enum import Enum
+from functools import lru_cache
 
 import props_nh3co2h2o as props     # reuse the validated aqueous formation enthalpies + Helgeson Cp
 
@@ -83,8 +84,14 @@ def _cp_const(value):
 
 
 def _cp_berman(a, e):
-    """Berman-Brown truncated heat capacity  Cp(T) = a + e * T^-0.5  [J/mol/K] (Voskov 2016 Table 1)."""
-    return lambda T: a + e * T ** (-0.5)
+    """Berman-Brown truncated heat capacity  Cp(T) = a + e * T^-0.5  [J/mol/K] (Voskov 2016 Table 1).
+
+    Carries its own exact antiderivative on `.integral`, so `h_species` never has to
+    quadrature this form:  int (a + e T^-0.5) dT = a T + 2 e sqrt(T).
+    """
+    cp = lambda T: a + e * T ** (-0.5)
+    cp.integral = lambda T1, T2: a * (T2 - T1) + 2.0 * e * (math.sqrt(T2) - math.sqrt(T1))
+    return cp
 
 
 _cp_urea_solid = _cp_berman(253.64, -2763.3)     # Voskov & Voronin 2016 (a, e) for urea solid
@@ -140,6 +147,34 @@ _VAPOUR_PHASE = {
 }
 
 
+def _phase_map(phase: str) -> dict:
+    """Select the per-species reference-phase column for a caller's stream phase label.
+
+    main.py tags vapour streams 'vapor' and non-condensable ones 'gas'; this module's own
+    docstrings use 'vapour'. All three must reach the vapour column -- a 'gas' stream falling
+    through to the liquid column would price NH3/CO2 as aqueous, shifting the stream by ~35-44
+    kJ/mol with no error raised.
+    """
+    return _VAPOUR_PHASE if phase.strip().lower().startswith(("vap", "gas")) else _LIQUID_PHASE
+
+
+def unsupported_species(species) -> set:
+    """Species the H0 datum cannot evaluate in BOTH reference phases.
+
+    Lets a caller assert its own component set is covered once at import, instead of raising
+    KeyError from `h0_stream` on a live tick.
+    """
+    missing = set()
+    for sp in species:
+        if sp not in MOLAR_MASS or sp not in _LIQUID_PHASE or sp not in _VAPOUR_PHASE:
+            missing.add(sp)
+            continue
+        if any((sp, column[sp]) not in PURE_COMPONENT for column in (_LIQUID_PHASE, _VAPOUR_PHASE)):
+            missing.add(sp)
+    return missing
+
+
+@lru_cache(maxsize=512)
 def h_species(species: str, phase: str, T_K: float) -> float:
     """Pure-component molar enthalpy h_i(T) [J/mol] on the elements-at-298.15 K datum.
 
@@ -157,6 +192,9 @@ def h_species(species: str, phase: str, T_K: float) -> float:
     if T_K == T0:
         return dHf
     if callable(cp):
+        exact = getattr(cp, "integral", None)
+        if exact is not None:
+            return dHf + exact(T0, T_K)
         # numerical integral of a callable Cp (Simpson, plenty for a smooth Cp over <=200 K)
         n = 20
         h = (T_K - T0) / n
@@ -172,13 +210,14 @@ def h0_stream(comp_kmolh: dict, T_C: float, phase: str = "liquid") -> dict:
 
     comp_kmolh : {species: kmol/h}   using the MOLAR_MASS keys (Urea, NH3, CO2, H2O, ...).
     T_C        : stream temperature [C].
-    phase      : 'liquid' or 'vapour' -- selects the per-species reference phase (H0 does no flash).
+    phase      : 'liquid', 'vapour'/'vapor' or 'gas' -- selects the per-species reference phase
+                 (H0 does no flash); see `_phase_map`.
 
     Returns {'enthalpy_flow_kW', 'enthalpy_kJkg', 'enthalpy_basis', 'mass_kgh'}.  The datum is
     elements at 298.15 K / 1 bar, so the value is reaction-consistent and may be summed across nodes.
     """
     T_K = T_C + 273.15
-    phase_map = _VAPOUR_PHASE if phase.startswith("vap") else _LIQUID_PHASE
+    phase_map = _phase_map(phase)
     H_Jh = 0.0            # J/h
     mass_kgh = 0.0
     for sp, nk in comp_kmolh.items():
@@ -235,7 +274,7 @@ if __name__ == "__main__":
     #         carbamate(l) -> urea(l) + H2O(l)    should be ~ +16 kJ/mol
     dh_urea_liq = (h_species("Urea", "liquid", T0) + h_species("H2O", "liquid", T0)
                    - h_species("Carbamate", "liquid", T0))
-    assert 12000.0 < dh_urea_liq < 20000.0, dh_urea_liq          # ~ +16.7 kJ/mol vs plant +15.5
+    assert 12000.0 < dh_urea_liq < 20000.0, dh_urea_liq          # ~ +18.8 kJ/mol vs plant +15.5
 
     # 5. a real melt stream (PFD 402, the final 97.71 wt% urea melt at 140 C) gets a finite,
     #    negative (exothermic-of-formation) specific enthalpy on the elements datum.

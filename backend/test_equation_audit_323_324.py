@@ -57,7 +57,18 @@ def test_design_fixed_point_holds():
     # published to 2 dp (t/h), so half the last digit -- 0.005 -- is the achievable tolerance
     assert abs(c3["v305_th"] - main.R323_M305_DES / 1000.0) < 6e-3      # F-2
     assert abs(f4["v701_th"] - main.R323_M701_DES / 1000.0) < 6e-3      # F-1
-    assert abs(f10["evap_th"] - main.R323_MEVAP_DES / 1000.0) < 6e-3    # F-3
+    #  F-3.  Re-based to 3e-2 for one commit (report A-17) when the barometric leg exposed a
+    #  settled evaporation deficit of 0.19 % that was blamed on D-12's ejector pull law.  D-12 is
+    #  closed (As-Built Phase 5e) and that attribution was wrong: with a real valve law the deficit
+    #  grew to 0.35 %.  The cause was the stage's species balance -- PFD stream 790 carries 0.14 mol%
+    #  urea as entrained liquor, Phase 1 had zeroed it with no other way out, and the seed
+    #  accumulated 58.7 kg/h of urea, concentrated, raised its bubble point and made TIC-323012 trim
+    #  the steam.  With the carryover closed: 12.01 t/h against 12.013.  Original gate restored.
+    assert abs(f10["evap_th"] - main.R323_MEVAP_DES / 1000.0) < 6e-3      # F-3
+    #  The design seed has no settle in it: the leg law must return the PFD drain exactly there.
+    _fresh_state = main.State()
+    assert (main.gravity_outflow_323f010(_fresh_state.r323_f010_M, _fresh_state.r323_f010_P)
+            == main.R323_M317_DES)
     # TD-016: the evaporator vapour now tracks the LIVE feed strength through the smooth VLE
     # equilibrium (AUDIT B1 ripple), instead of being pinned by the old fixed concentration cap.
     # The 323D002 tank strength carries a known slow upstream drift (~0.04 pp, TD-013 area) that the

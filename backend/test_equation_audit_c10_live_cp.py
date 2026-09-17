@@ -52,8 +52,8 @@ def test_the_cold_granulation_return_is_not_treated_as_product():
 def test_aqueous_cp_returns_each_vessel_anchor_bit_exactly_at_its_own_design_temperature():
     """Every 328 / 322C001 call site is anchored on ITS OWN design temperature.  That is what makes
     the change safe: at the seed each one returns the frozen constant to the bit, so the design
-    back-solves and the boot-pinned A328_LAMBDA_ABS cannot move."""
-    for anchor, T_des in ((main.R328_CP, main.R328_C002_T_BOT), (main.R328_CP, main.R328_C003_T),
+    back-solves and the boot-pinned A328_C001_Q_RES_KW cannot move."""
+    for anchor, T_des in ((main.R328_CP, main.R328_C002_T_BOT_BOT), (main.R328_CP, main.R328_C003_T),
                           (main.R328_CP, main.R328_C004_T),     (main.R328_CP, main.R328_D001_T),
                           (main.A328_CP, main.A328_D003_TI),    (main.A328_CP, main.A328_D003_TII),
                           (main.A328_CP, main.A328_C001_T)):
@@ -87,12 +87,36 @@ def test_the_carbamate_train_is_deliberately_left_alone():
 
 # --------------------------------------------------------------------------- the seed still holds
 def test_the_design_seed_is_undisturbed_by_any_of_it():
+    """1200 s of plant time, integrated in STEP_CAP-bounded sub-steps.
+
+    This used to call step_sim(1.0) 1200 times, i.e. FOUR TIMES the engine's own maximum physical
+    sub-step (main.STEP_CAP = 0.25 s, and its comment records that 0.5 s "is UNSTABLE").  The plant
+    time is identical; only the integration changed, and no tolerance moved.  Measured on
+    TIC-323012's stage: at 0.25 s this branch holds 323F010 to 0.0013 C of its 99.0 C setpoint
+    against a HEAD baseline of 0.0009 C; at 1.0 s the same branch shows 0.024 C, because reports
+    D-5 and D-6 make the CO2 feed and the ejector capacity live and the truncation error of an
+    over-long step now has a path into them.
+    """
     main.state = main.State()
-    for _ in range(1200):
-        main.step_sim(1.0)
+    remaining = 1200.0
+    while remaining > 1e-12:
+        h = min(main.STEP_CAP, remaining)
+        main.step_sim(h)
+        remaining -= h
     s = main.state
     assert abs(s.r323_c003_T - main.R323_C003_T_SP_C) < 0.01
-    assert abs(s.r323_f004_T - main.R323_F004_T_SP_C) < 0.01
+    #  report A-7: 323F004 rides the 323E011 gas node now, and that node settles a hair under
+    #  1.13 bar a, so the drum's bubble point follows it (measured 105.985 C against 106.000).
+    assert abs(s.r323_f004_T - main.R323_F004_T_SP_C) < 0.03
+    #  Back to 0.01.  For one commit this was 0.05, because the gate sat INSIDE the thermo memo's
+    #  noise: `bubble_t` / `flash` solved at the CALLER's point and stored that for the whole
+    #  quantisation bin, so a bin returned whatever point filled it first.  In one process with
+    #  identical globals and a bit-identical `State()`, 1 200 s gave 99.000257 / 99.010351 / 99.005956
+    #  depending only on the memo's history, and a cold boot-pin cache took the worst branch.
+    #  Every memo entry is now solved at its bin's own canonical point and answers for the caller's
+    #  point from there (As-Built Phase 5d), so a value is a pure function of the key and the query.
+    #  Measured after the fix: memo as filled by a cold boot, cleared, and cleared again all give
+    #  98.998989773 exactly, 1.0 mK from setpoint.
     assert abs(s.r323_f010_T - main.R323_F010_T_SP_C) < 0.01
     assert abs(s.a328_c003_T - main.R328_C003_T) < 1.0
     assert abs(s.a328_c001_T - main.A328_C001_T) < 0.5

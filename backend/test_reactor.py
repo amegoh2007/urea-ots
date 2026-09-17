@@ -191,10 +191,38 @@ def test_scale_s080():
     r = main.react_322r001(_design_hpcc(0.8), 0.8 * main.CO2_DES_KGH / 1000.0,
                            main.REACT_HIC605_DES_PCT, **_design_drive())
     assert abs(r["co2_scale"] - 0.8) < 1e-9
-    assert abs(r["overflow_kmolh"]["NH3"] - main.REACT_OVERFLOW_DES["NH3"] * 0.8) < 1e-6
-    assert abs(r["offgas_kmolh"]["NH3"] - main.REACT_OFFGAS_DES["NH3"] * 0.8) < 1e-6
-    assert abs(r["xi_urea"] - r1["xi_urea"] * 0.8) < 1e-6
-    assert abs(r["xi_biu"] - r1["xi_biu"] * 0.8) < 1e-6
+    # The SPLIT (theta) is still uniform, but out_total is not: the extent no longer scales with
+    # load, so the products it makes and the reagents it consumes do not either.  The off-gas is
+    # nearly linear because it is mostly inerts and unreacted NH3 vapour; the liquid overflow is
+    # where the extra conversion shows.
+    # Both NH3 streams fall BELOW linear at turndown, and for one reason: the longer residence
+    # time raises the per-pass conversion, so more ammonia is consumed and less is left to
+    # partition either way.  Measured at 80 % load, overflow -6.0 % and off-gas -7.5 % against
+    # their linear values.  Asserting the direction rather than a fitted band -- the magnitude is
+    # an output of the rate law, not a contract.
+    for stream, des in (("overflow_kmolh", main.REACT_OVERFLOW_DES),
+                        ("offgas_kmolh", main.REACT_OFFGAS_DES)):
+        assert r[stream]["NH3"] < des["NH3"] * 0.8, stream
+        assert r[stream]["NH3"] > des["NH3"] * 0.6, stream      # ... a turndown, not a collapse
+    # PHASE 3 (report C-1).  These two assertions used to read
+    #     assert abs(r["xi_urea"] - r1["xi_urea"] * 0.8) < 1e-6
+    #     assert abs(r["xi_biu"]  - r1["xi_biu"]  * 0.8) < 1e-6
+    # i.e. the extent scales EXACTLY linearly with load -- which is the load-multiplier defect
+    # itself, `xi = XI_DES * s`, asserted as a contract.  A real rate law cannot do that: at 80 %
+    # throughput the same vessel gives the liquid 25 % longer to react, so the per-pass conversion
+    # RISES and the extent falls by less than the load does.  Measured 0.556 -> 0.630 conversion
+    # between 100 % and 80 % load.
+    # The split fractions above are unchanged and still scale linearly -- that part was never the
+    # defect.  What is asserted here now is the physics the multiplier could not represent.
+    assert r["xi_urea"] < r1["xi_urea"], "extent must still fall with load"
+    assert r["xi_urea"] > r1["xi_urea"] * 0.8, "...but SUBLINEARLY: longer residence, more conversion"
+    assert r["X_conv"] > r1["X_conv"], "per-pass conversion rises at turndown"
+    # Biuret goes the OTHER way at turndown, and that is the physically important result: the melt
+    # is more urea-rich (higher conversion) AND sits in the column longer, and r_biu ~ C_urea^2 over
+    # the residence time.  Measured 2.414 -> 3.12 kmol/h between 100 % and 80 % load.  A load
+    # multiplier said biuret simply falls with throughput; the plant's product-quality specification
+    # actually gets WORSE on a deep turndown, which is a scenario this model can now teach.
+    assert r["xi_biu"] > r1["xi_biu"], (r["xi_biu"], r1["xi_biu"])
 
 
 def test_valve_phi_decoupled_phase1():
@@ -230,9 +258,23 @@ def test_packet_tags_and_streams():
                 "P_offgas", "closure_resid"):
         assert tag in blk, tag
     assert abs(blk["AT_322701"] - 3.000) < 0.01           # N/C atom ratio of overflow
-    # residence-time axial T profile: rises with elevation toward 183 C overflow
-    assert abs(blk["TT_322005"] - 182.9) < 0.1     # N6 A top  (EL +21700)
-    assert abs(blk["TT_322008"] - 172.6) < 0.1     # N6 D bot  (EL +1000, near feed inlet)
+    # Axial T profile: rises with elevation toward the 183 C overflow.
+    #
+    # PHASE 3 (report A-8).  These used to assert 182.9 and 172.6 to +/-0.1 C.  Those numbers were
+    # not measurements -- they were the output of the fitted Damkohler heat-release shape the energy
+    # balance replaced, i.e. the test was asserting the fit against itself.  The plant's own DCS
+    # trend (References/Urea_NormalOp_29-06-2025_Trends.md, 1921 samples) reads
+    #
+    #     TT-322008 171.134   TT-322007 174.303   TT-322006 179.697   TT-322005 183.084
+    #
+    # and the retired shape was 6.5 C out at TT-322007: it put nearly the whole column rise below
+    # the second thermowell, where the real profile is very nearly linear.  The assertions now point
+    # at the MEASURED values, with a 1.0 C tolerance that reflects the model's actual accuracy
+    # (RMS 0.43 C against those four readings, against 3.66 C for the shape it replaced).
+    assert abs(blk["TT_322005"] - 183.084) < 1.0   # N6 A top  (EL +21700)
+    assert abs(blk["TT_322006"] - 179.697) < 1.0   # N6 B      (EL +14800)
+    assert abs(blk["TT_322007"] - 174.303) < 1.0   # N6 C      (EL  +7900)
+    assert abs(blk["TT_322008"] - 171.134) < 1.0   # N6 D bot  (EL  +1000, near feed inlet)
     assert blk["TT_322005"] > blk["TT_322006"] > blk["TT_322007"] > blk["TT_322008"]
     assert abs(blk["HIC_322605"] - 60.0) < 0.1
     assert abs(blk["HV_322605"] - 60.0) < 0.1
@@ -268,10 +310,17 @@ def test_at322701_nc_ratio():
                            main.REACT_HIC605_DES_PCT, **_design_drive())
     nc = main.react_nc_ratio(r["overflow_kmolh"])
     assert abs(nc - 3.000) < 0.01, nc
-    # invariant to uniform throughput scaling (overflow scales uniformly -> N/C unchanged)
+    # PHASE 3 (report C-1).  This used to assert the overflow N/C was INVARIANT to throughput
+    # scaling to 1e-6, which holds only while the extent is a load multiplier and the whole vector
+    # scales uniformly.  With a real rate law a turndown lengthens the residence time, raises the
+    # per-pass conversion, and so consumes more ammonia per unit carbon: the overflow N/C FALLS.
+    # Measured 3.000 -> 2.968 between 100 % and 70 % load.  That is a real, operator-visible
+    # behaviour on AT-322701 that the multiplier could not produce at all.
     r2 = main.react_322r001(_design_hpcc(0.7), 0.7 * main.CO2_DES_KGH / 1000.0,
                             main.REACT_HIC605_DES_PCT, **_design_drive())
-    assert abs(main.react_nc_ratio(r2["overflow_kmolh"]) - nc) < 1e-6
+    nc2 = main.react_nc_ratio(r2["overflow_kmolh"])
+    assert nc2 < nc, (nc2, nc)
+    assert abs(nc2 - nc) < 0.10, (nc2, nc)      # ... but a turndown, not a collapse
 
 
 def test_dynamic_level_responds_to_hv605():
@@ -282,8 +331,8 @@ def test_dynamic_level_responds_to_hv605():
         main.step_sim(1.0)
     assert abs(s.react_level_pct - 80.0) < 0.5, s.react_level_pct
     # OPEN HV-322605 (φ=90 % > φ_des) -> Q_out>Q_in -> level FALLS (user-reported requirement).
-    # The drain near the 80 % design holdup is hydrostatically self-limiting (Q_out falls as head
-    # drops), so the approach to the new equilibrium is asymptotic -> allow an adequate horizon.
+    # It falls to the overflow-funnel lip (77.2 % of the 25 m frame), where the weir takes over from
+    # the valve and passes production (As-Built Phase 5r).
     s.HIC_322605 = 90.0; s.react_level_pct = 80.0
     for _ in range(240):
         main.step_sim(1.0)
@@ -295,6 +344,45 @@ def test_dynamic_level_responds_to_hv605():
     assert s.react_level_pct > 51.0, s.react_level_pct
     s.HIC_322605 = main.REACT_HIC605_DES_PCT             # restore design defaults
     s.react_level_pct = main.REACT_LEVEL_NLL_PCT
+
+
+def test_hv322605_kv_follows_the_vendor_sizing_table():
+    # CONVAL sizing UD-MR-G00-DZ-0042-021 p.3: linear trim, Kvs 600, the mean-flow point at 58.961 %
+    # stroke is Kv 358.69 and the max-flow point at 65.516 % is Kv 397.24.
+    kv = main.reactor.hv322605_kv
+    assert kv(0.0) == 0.0 and kv(100.0) == 600.0
+    for s_pct, k in ((5.0, 41.4), (25.0, 159.0), (50.0, 306.0), (75.0, 453.0)):
+        assert abs(kv(s_pct) - k) < 1e-9, (s_pct, kv(s_pct))
+    assert abs(kv(58.961) - 358.69) < 0.05, kv(58.961)
+    assert abs(kv(65.516) - 397.24) < 0.05, kv(65.516)
+    assert all(kv(a) < kv(a + 1.0) for a in range(0, 100))
+
+
+def test_the_reactor_discharges_over_its_overflow_funnel():
+    # A-12: min(valve at design dP, Francis weir over the 1044 mm funnel lip).  The lip sits 0.7 m
+    # under NLL from LT-322504's geometry (top tap 1.0 m above it, 1.5 m span, NLL 80 %).
+    r, m_des = main.reactor, main._react_mdot_kgh
+    lip, cw, t_b = main.REACT_WEIR_CREST_M, main.REACT_WEIR_CW, main.REACT_T_BULK_DES
+    assert abs(main.REACT_LEVEL_DES_M - lip - 0.7) < 1e-9, lip
+    th = main.REACT_HIC605_DES_PCT
+    out = lambda lvl, theta: r.outlet_line_outflow_kgph(lvl, m_des, theta, th, lip, cw, t_b)
+    assert out(main.REACT_LEVEL_DES_M, th) == m_des                        # bit-exact at design
+    assert out(main.REACT_LEVEL_DES_M, 90.0) == m_des * r.hv322605_kv(90.0) / r.hv322605_kv(th)
+    assert out(main.REACT_LEVEL_DES_M, 0.0) == 0.0                         # shut valve
+    assert out(lip, 100.0) == 0.0 and out(lip - 1.0, 100.0) == 0.0          # no drain below the lip
+    # the free-overflow head at the design flow is a few cm (Francis: 0.048 m at 228 m3/h)
+    h = (m_des / (r.liquid_density(t_b) * cw)) ** (2.0 / 3.0)
+    assert 0.03 < h < 0.07, h
+    assert abs(out(lip + h, 100.0) - m_des) < 1e-6 * m_des
+    # the level is state, the valve does not see it while the funnel is flooded
+    assert out(main.REACT_LEVEL_DES_M + 1.0, 75.0) == out(main.REACT_LEVEL_DES_M - 0.5, 75.0)
+
+
+def test_the_empty_reactor_guard_is_gone():
+    import inspect
+    src = inspect.getsource(main.step_sim)
+    assert "react_level_pct <= 0.0 and m_out_kgh > m_in_kgh" not in src
+    assert "REACT_WEIR_CREST_M" in src and "REACT_PHI_FWD_FLOOR" not in dir(main)
 
 
 if __name__ == "__main__":

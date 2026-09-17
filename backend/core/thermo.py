@@ -12,8 +12,16 @@ class ThermoModel:
 
 class EmpiricalThermo(ThermoModel):
     def bubble_p(self, T_c: float, nc_ratio: float, hc_ratio: float) -> float:
-        # Placeholder empirical logic to return a positive pressure
-        return 140.0 + (T_c - 170.0) * 0.5
+        """Bubble-point pressure calculation.
+
+        NOT IMPLEMENTED — this method has no callers in the live engine.
+        All ionic-section VLE uses IAPWS-IF97 pure-water saturation plus design offset.
+        Raise NotImplementedError to prevent silent fallback to placeholder logic.
+        """
+        raise NotImplementedError(
+            "EmpiricalThermo.bubble_p is not implemented. "
+            "Live engine uses IAPWS-IF97 + design offset for all VLE calculations."
+        )
 
     def viscosity_liq_pas(self, T_c: float) -> float:
         """

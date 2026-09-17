@@ -66,6 +66,8 @@ enthalpy. Nothing is fabricated: every number is transcribed from the cited open
 
 import math
 
+import iapws_if97
+
 R = 8.314462618           # J/mol/K
 T0 = 298.15               # K, reference temperature
 LN10 = math.log(10.0)
@@ -254,6 +256,63 @@ def henry_co2_MPa(T):
     Darde eq 2.13: ln(K_H/(MPa*kg/mol)) = 192.876 - 9624.4/T - 28.749*ln(T) + 0.01441*T ; H*=K_H/M_w."""
     kH = math.exp(192.876 - 9624.4 / T - 28.749 * math.log(T) + 0.01441 * T)
     return kH / M_W
+
+
+# ---------------------------------------------------------------------------
+# G-VLE-3: Henry's-law constants for the PERMANENT GASES (N2, O2, CH4, H2) in water.
+#
+# The two correlations above are Rumpf & Maurer (1993) fits for NH3 and CO2 -- the two volatiles the
+# Extended UNIQUAC parameter set actually speciates.  The synthesis loop additionally carries four
+# inerts that this repository held no solubility data for at all, which is half of why gap G-VLE-3
+# was open (`SRK_CRIT` below is the other half).
+#
+# SOURCE: IAPWS Guideline G7-04, "Guideline on the Henry's Constant and Vapor-Liquid Distribution
+# Constant for Gases in H2O and D2O at High Temperatures" (2004), eq 1:
+#
+#       ln(k_H / p_1*) = A/T_R + B (1 - T_R)^0.355 / T_R + C exp(1 - T_R) T_R^(-0.41)
+#
+# with T_R = T/647.096 and p_1* the vapour pressure of water on its own saturation line.  k_H is on
+# the MOLE-FRACTION scale (k_H = lim f_2/x_2), the same scale as `henry_nh3_MPa` and
+# `henry_co2_MPa`, so the four rows below drop into the same partial-pressure sum with no basis
+# conversion.  Declared valid from 273.15 K to within ~15 K of the water critical point, which
+# covers the whole 80-210 C envelope of the rebuilt activity grid.
+#
+# WHY THIS SOURCE RATHER THAN A VAN'T HOFF FIT.  Permanent-gas solubility in water passes through a
+# MINIMUM near 80-100 C and rises again above it.  A two-parameter van't Hoff extrapolated from
+# 25 C data has the solubility falling monotonically and is badly wrong by 183 C -- the loop's own
+# operating temperature.  G7-04's three-term form reproduces the turning point, which is the whole
+# reason it exists.
+#
+# VALIDATION (test_thermo_service.py).  Two independent checks, neither circular:
+#   * at 25 C it returns 85 598 / 43 640 / 39 479 / 70 960 bar for N2 / O2 / CH4 / H2 against the
+#     textbook mole-fraction values 86 500 / 44 000 / 41 300 / 71 200 -- 1.0 %, 0.8 %, 4.4 %, 0.3 %;
+#   * run for CO2, whose constants are in the SAME published table, it agrees with this module's own
+#     independent Rumpf & Maurer correlation to 0.2 % at 25 C, 2.3 % at 140 C and 5.0 % at 183 C.
+#     Two unrelated fits agreeing to 5 % at the synthesis temperature is what licenses the four
+#     inert rows AT that temperature, where no direct validation datum exists in this repository.
+# CO2 is carried for exactly that cross-check and is NOT used for the CO2 partial pressure: the
+# electrolyte model's own Rumpf & Maurer constant is the one consistent with the UNIQUAC activity
+# coefficients it multiplies.
+# ---------------------------------------------------------------------------
+HENRY_G704 = {                    # species -> (A, B, C), IAPWS G7-04
+    "N2":  (-9.67578, 4.72162, 11.70585),
+    "O2":  (-9.44833, 4.43822, 11.42005),
+    "CH4": (-10.44708, 4.66491, 12.12986),
+    "H2":  (-4.73284, 6.08954, 6.06066),
+    "CO2": (-8.55445, 4.01195, 9.52345),      # cross-check row only -- see the note above
+}
+G704_VALID_T_K = (273.15, 633.0)
+
+
+def henry_inert_MPa(species, T):
+    """Henry's constant [MPa, mole-fraction scale] of a permanent gas in water, IAPWS G7-04.
+
+    Raises KeyError for a species with no published row rather than substituting a neighbour."""
+    A, B, C = HENRY_G704[species]
+    t_r = T / 647.096
+    p1_MPa = iapws_if97.psat_bara(T - 273.15) / 10.0
+    return p1_MPa * math.exp(A / t_r + B * (1.0 - t_r) ** 0.355 / t_r
+                             + C * math.exp(1.0 - t_r) * t_r ** -0.41)
 
 
 # ---------------------------------------------------------------------------
@@ -460,6 +519,15 @@ SRK_CRIT = {
     "H2O": (647.096, 22.064e6, 0.3443),
     "NH3": (405.40,  11.353e6, 0.2560),
     "CO2": (304.13,   7.377e6, 0.2239),
+    #  G-VLE-3: the four synthesis-loop inerts.  Same class of public NIST/DIPPR critical constants
+    #  as the three rows above, and the same k_ij = 0 mixing rule -- no binary interaction data is
+    #  invented for them, which is exactly the stated reason k_ij = 0 was chosen for the first three.
+    #  H2's acentric factor is NEGATIVE: that is the accepted value, not a sign error, and it is
+    #  what makes the SRK alpha function behave correctly for a quantum gas.
+    "N2":  (126.20,   3.3958e6,  0.0372),
+    "O2":  (154.581,  5.043e6,   0.0222),
+    "CH4": (190.564,  4.5992e6,  0.01142),
+    "H2":  (33.145,   1.2964e6, -0.216),
 }
 
 
@@ -625,7 +693,7 @@ def _speciation_residuals(m, N_tot, C_tot, T):
     return res
 
 
-def speciate(N_tot, C_tot, T=T0, tol=1e-11, maxiter=200):
+def speciate(N_tot, C_tot, T=T0, tol=1e-11, maxiter=200, m_guess=None):
     """Solve the liquid-phase speciation of an aqueous NH3-CO2 solution containing N_tot mol total
     ammonia and C_tot mol total CO2 per kg water, at temperature T [K] (298.15 K unless the two Cp rows
     are supplied). Returns a dict of molalities m_i [mol/kg water] for the species in _SOLUTES, plus
@@ -641,6 +709,20 @@ def speciate(N_tot, C_tot, T=T0, tol=1e-11, maxiter=200):
                 raise ValueError("speciate() off 298.15 K needs the NH3(aq)/CO2(aq) Cp rows "
                                  "(Thomsen&Rasmussen 1999, paywalled); not fabricated.")
     # physically-motivated initial guess (Newton enforces the balances)
+    #
+    # G-VLE-3 -- WHY `m_guess` EXISTS.  The stock guess below is a dilute-solution ansatz, and it was
+    # the ONLY thing limiting this solver's reach.  Measured at 183 C on the N/C = 4.46 ray, the
+    # damped log-Newton converges to a residual of ~1e-13 up to N = 40 mol/kg water and then stops
+    # converging at all: at N = 50 it lands on a residual of 9.9 and STAYS there -- 200, 2 000 and
+    # 20 000 iterations return the identical non-solution, so it is a basin failure, not a tolerance
+    # or an iteration budget.  That ceiling is what put the whole 322 synthesis loop (N = 100 at the
+    # reactor overflow, N = 869 at the 322E003 feed) outside this module.
+    #
+    # Seeded from a converged NEIGHBOUR instead, the same solver reaches N = 869 / C = 195 at 183 C
+    # in FIVE Newton steps at a residual of 8.5e-14.  So the caller passes a neighbour and the grid
+    # builder marches; nothing about the equations, the damping or the tolerance changes, and an
+    # unseeded call behaves exactly as it did before.  What IS extrapolated at those loadings is the
+    # PARAMETER SET, not the solve -- see the envelope note in `vle_nh3co2h2o`.
     carb = 0.1 * min(N_tot, C_tot)
     m = {
         "H+": 1e-7, "OH-": 1e-7,
@@ -650,6 +732,8 @@ def speciate(N_tot, C_tot, T=T0, tol=1e-11, maxiter=200):
         "CO3--": max(1e-9, 0.05 * (C_tot - carb)),
         "CO2(aq)": max(1e-9, 0.25 * (C_tot - carb)),
     }
+    if m_guess is not None:
+        m = {s: max(float(m_guess.get(s, m[s])), 1e-300) for s in _SOLUTES}
     v = [math.log(m[s]) for s in _SOLUTES]              # log-molality variables (positivity)
     for _ in range(maxiter):
         mv = [math.exp(vi) for vi in v]
@@ -668,6 +752,11 @@ def speciate(N_tot, C_tot, T=T0, tol=1e-11, maxiter=200):
         v = [v[i] + dv[i] / step for i in range(8)]
     mv = [math.exp(vi) for vi in v]
     md = dict(zip(_SOLUTES, mv))
+    #  The caller cannot otherwise tell convergence from the return value -- the loop exits on
+    #  `maxiter` exactly as it exits on `tol` -- so the achieved residual is reported.  This is the
+    #  same infinity norm the loop tests, on the same mixed scaling (absolute molality balances in
+    #  rows 0-2, log-K residuals in rows 3-7).
+    md["resid"] = max(abs(ri) for ri in _speciation_residuals(mv, N_tot, C_tot, T))
     ntot = _N_W_PER_KG + sum(mv)
     x = {"H2O": _N_W_PER_KG / ntot}
     for s in _SOLUTES:
